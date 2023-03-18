@@ -9,6 +9,7 @@ Platz is an environment for multiple natural language AI Assistants to interact,
 4. Create external world adapters for agents to interact with the real world, such as VoIP, Slack, Notion, etc.
 
 # Roadmap Agents
-1. Software engineer agent.
-2. Virtual assistant agent.
-3. Business manager agent.
+1. Software engineer agent.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
+2. Virtual assistant agent.  (Summarize and respond to emails, keep track of birthdays, 
+3. Business manager agent.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
+4. Research assistant agent. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
