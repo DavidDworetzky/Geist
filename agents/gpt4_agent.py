@@ -1,5 +1,5 @@
 import requests
-from aents.base_agent import BaseAgent
+from agents.base_agent import BaseAgent
 
 class GPT4Agent(BaseAgent):
     def __init__(self, api_key):

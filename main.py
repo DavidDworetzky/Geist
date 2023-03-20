@@ -5,6 +5,11 @@ import logging
 from app.models.completion import CompleteTextParams
 from agents.gpt4_agent import GPT4Agent
 from fastapi import FastAPI, Depends, HTTPException
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+openai_key = os.getenv("OPENAI_TOKEN")
 
 #constants
 api_version = 0.1
@@ -25,7 +30,7 @@ def version():
     return {"Version" : f"{api_version}"}
 
 def get_gpt4_client():
-    api_key = "your_openai_api_key_here"
+    api_key = openai_key
     return GPT4Agent(api_key)
 
 #basic text completion endpoint for our agent.
