@@ -55,3 +55,5 @@ async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = 
         return completions
     else:
         raise HTTPException(status_code=500, detail="Failed to generate completions.")
+
+
