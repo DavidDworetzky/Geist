@@ -4,7 +4,8 @@ from typing import Optional
 import logging
 from app.models.completion import CompleteTextParams
 from agents.gpt4_agent import GPT4Agent
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from adapters.mms_adapter import MMSAdapter
 from dotenv import load_dotenv
 import os
 
@@ -33,6 +34,10 @@ def get_gpt4_client():
     api_key = openai_key
     return GPT4Agent(api_key)
 
+def get_speech_to_text_client():
+    return MMSAdapter()
+
+
 #basic text completion endpoint for our agent.
 @app.post("/complete_text")
 async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
@@ -56,4 +61,7 @@ async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = 
     else:
         raise HTTPException(status_code=500, detail="Failed to generate completions.")
 
-
+@app.post("/speech_to_text")
+async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
+    return adapter.transcribe(file)
+    
