@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+outputs/*.png
+outputs/*.json
+*.pyc
+.DS_Store
+/.env
+
 # C extensions
 *.so
 
