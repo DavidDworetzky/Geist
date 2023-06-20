@@ -1,6 +1,6 @@
 # Platz
 FOSS Project for natural language AI Assistants - using GPT, LlaMA, FLAN etc. architectures.
-Platz is an environment for multiple natural language AI Assistants to interact, train, and do work.
+Platz is a "town square" for multiple natural language AI Assistants to interact, train, and do work.
 
 # Roadmap
 1. Create core OODA architecture for AI Assistants using various LLM transformer architectures.
