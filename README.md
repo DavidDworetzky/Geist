@@ -1,6 +1,6 @@
-# Platz
+# Geist
 FOSS Project for natural language AI Assistants - using GPT, LlaMA, FLAN etc. architectures.
-Platz is a "town square" for multiple natural language AI Assistants to interact, train, and do work.
+Geist is a framework for multiple natural language AI Assistants to interact, train, and do work.
 
 # Roadmap
 1. Create core OODA architecture for AI Assistants using various LLM transformer architectures.
@@ -9,7 +9,7 @@ Platz is a "town square" for multiple natural language AI Assistants to interact
 4. Create external world adapters for agents to interact with the real world, such as VoIP, Slack, Notion, etc.
 
 # Roadmap Agents
-1. Software engineer agent.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
-2. Virtual assistant agent.  (Summarize and respond to emails, keep track of birthdays, 
-3. Business manager agent.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
-4. Research assistant agent. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
+1. Software engineer spirit.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
+2. Virtual assistant spirit.  (Summarize and respond to emails, keep track of birthdays, 
+3. Business manager spirit.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
+4. Research assistant spirit. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
