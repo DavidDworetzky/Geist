@@ -64,4 +64,9 @@ async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = 
 @app.post("/speech_to_text")
 async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
     return adapter.transcribe(file)
+
+@app.post("/initialize_task_and_tick")
+async def initialize_and_tick_agent(task_prompt: str, agent: GPT4Agent = Depends(get_gpt4_client)):
+    agent.initialize(task_prompt)
+    agent.tick()
     

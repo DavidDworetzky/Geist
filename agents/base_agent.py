@@ -6,9 +6,32 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def initialize(self):
+    def initialize(self, task_prompt):
+        pass
+
+    @abstractmethod
+    def freeze(self):
+        '''
+        Freeze the agent's state and save it to context.
+        '''
         pass
 
     @abstractmethod
     def tick(self):
+        pass
+
+    @abstractmethod
+    def tick_world(self):
+        pass
+
+    @abstractmethod
+    def tick_tasks(self):
+        pass
+    
+    @abstractmethod
+    def tick_execution(self):
+        pass
+
+    @abstractmethod
+    def push_task(self, task_prompt):
         pass
