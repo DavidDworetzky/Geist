@@ -1,8 +1,9 @@
 import requests
 from agents.base_agent import BaseAgent
+from agents.agent_context import AgentContext
 
 class GPT4Agent(BaseAgent):
-    def __init__(self, api_key):
+    def __init__(self, api_key, agent_context):
         self.api_key = api_key
         self.base_url = "https://api.openai.com/v1/chat/completions"
         self.headers = {

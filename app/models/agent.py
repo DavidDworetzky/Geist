@@ -22,3 +22,8 @@ class Agent:
     #prompt presets
     prompt : str
     restrictions : List[Restriction]
+
+    #context vars
+    world_context: str
+    task_context: str
+    execution_context: str
