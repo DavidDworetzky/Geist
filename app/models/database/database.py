@@ -10,7 +10,7 @@ pwd = os.getenv("POSTGRES_PWD")
 db = os.getenv("POSTGRES_DB")
 
 if db is None:
-    db = "platz"
+    db = "geist"
 
 # We take a default connection to start. 
 # We should pull this from env / secrets when securing our server.
