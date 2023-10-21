@@ -1,9 +1,9 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
-ENV FASTCASSO_HOME /opt/fastcasso
+ENV GEIST_HOME /opt/geist
 ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
-WORKDIR $FASTCASSO_HOME
+WORKDIR $GEIST_HOME
 
 RUN apt update && apt install -y \
     gcc \
