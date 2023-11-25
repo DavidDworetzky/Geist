@@ -25,6 +25,17 @@ class GPT4Agent(BaseAgent):
         # call super constructor
         super().__init__(agent_context)
 
+    def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
+        #get aggregated context for world, task and execution context if requested
+        context_string = ""
+        if world_context:
+            context_string += "WORLD_CONTEXT:" + self.agent_context.world_context.join("\n")
+        if task_context:
+            context_string += "TASK_CONTEXT:" + self.agent_context.task_context.join("\n")
+        if execution_context:
+            context_string += "EXECUTION_CONTEXT:" + self.agent_context.execution_context.join("\n")
+
+
     def complete_text(self, prompt, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text"):
         payload = {
             "messages": [{"role": "user", "content": prompt}],
@@ -93,7 +104,7 @@ class GPT4Agent(BaseAgent):
         Advances the state of the world context, reasoning about the world state.
         '''
         #aggregate list of strings from world_context
-        context_string = self.agent_context.world_context.join("\n")
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
         result = self.complete_text(prompt=WORLD_TICK_PROMPT + context_string)
         #split result and replace world context
         split_result = result.split("\n")
@@ -104,12 +115,23 @@ class GPT4Agent(BaseAgent):
         '''
         Advances the state of the task context, reasoning about how to complete the primary task.
         '''
-        pass
+        #aggregate list of strings from task_context
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+        result = self.complete_text(prompt=TASK_TICK_PROMPT + context_string)
+        #split result and replace task context
+        split_result = result.split("\n")
+        self.agent_context.task_context = split_result
+        return split_result
     
-    @abstractmethod
+    
     def tick_execution(self):
-        pass
-
-    @abstractmethod
-    def push_task(self, task_prompt):
-        pass
+        '''
+        Advances the state of the execution context, reasoning about how to execute the primary task.
+        '''
+        #aggregate list of strings from execution_context
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string)
+        #split result and replace execution context
+        split_result = result.split("\n")
+        self.agent_context.execution_context = split_result
+        return split_result

@@ -1,8 +1,9 @@
 from app.models.database import database
-from typing import List
+from typing import List, Any
+
 
 class AgentContext():
-    def __init__(self, world_context: List[str], task_context: List[str], execution_context: List[str], subprocess_id: int = None):
+    def __init__(self, world_context: List[str], task_context: List[str], execution_context: List[str], execution_classes: List[Any], subprocess_id: int = None):
         self.world_context = world_context
         self.task_context = task_context
         self.execution_context = execution_context
