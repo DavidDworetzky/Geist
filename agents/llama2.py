@@ -30,6 +30,50 @@ class llama2agent(BaseAgent):
         if execution_context:
             context_string += "EXECUTION_CONTEXT:" + self.agent_context.execution_context.join("\n")
 
+    def initialize(self, task_prompt):
+        '''
+        Initialize the agent with a given task prompt.
+        '''
+        self.agent_context.task_context.append(task_prompt)
+
+    def tick(self):
+        '''
+        Perform a tick operation, advancing the agent's understanding and actions.
+        '''
+        self.tick_world()
+        self.tick_tasks()
+        self.tick_execution()
+
+    def tick_world(self):
+        '''
+        Advances the state of the world context.
+        '''
+        context_string = self._aggregated_context(world_context=True, task_context=False, execution_context=False)
+        result = self.complete_text(WORLD_TICK_PROMPT + context_string)
+        self.agent_context.world_context = result.split("\n")
+
+    def tick_tasks(self):
+        '''
+        Advances the state of the task context.
+        '''
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
+        result = self.complete_text(TASK_TICK_PROMPT + context_string)
+        self.agent_context.task_context = result.split("\n")
+
+    def tick_execution(self):
+        '''
+        Advances the state of the execution context.
+        '''
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+        result = self.complete_text(EXECUTION_TICK_PROMPT + context_string)
+        self.agent_context.execution_context = result.split("\n")
+
+    def push_task(self, task_prompt):
+        '''
+        Add a new task to the agent's task context.
+        '''
+        self.agent_context.task_context.append(task_prompt)
+
 
     def complete_text(self, prompt, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text"):
         response = self.llm.prompt(prompt, max_tokens = max_tokens)
