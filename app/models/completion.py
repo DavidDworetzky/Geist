@@ -14,3 +14,4 @@ class CompleteTextParams(BaseModel):
     best_of: Optional[int] = None
     prompt_tokens: Optional[List[int]] = None
     response_format: str = "text"
+    #more completion params for LLMs 

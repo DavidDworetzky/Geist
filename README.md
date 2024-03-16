@@ -13,3 +13,21 @@ Geist is a framework for multiple natural language AI Assistants to interact, tr
 2. Virtual assistant spirit.  (Summarize and respond to emails, keep track of birthdays, 
 3. Business manager spirit.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
 4. Research assistant spirit. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
+
+# Core Architecture
+
+The Platz Architecture consists of three main components: a world model, a task creation model, and an execution-based  model. The diagram below illustrates the architecture and relationships between these components.
+
+```mermaid
+flowchart LR
+    A[World Model] -->|Updates| B[Task Creation Model]
+    B -->|Generates Tasks| C[Execution-based LLM Model]
+    C -->|Execution Results| A
+    D[Plugin System] -->|Provides Capabilities| C
+    E[Long-term Memory] -->|Base Knowledge| A
+    F[Short-term Memory] -->|Context-specific Info| C
+```
+
+
+
+
