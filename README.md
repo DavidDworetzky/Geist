@@ -1,5 +1,5 @@
 # Geist
-FOSS Project for natural language AI Assistants - using GPT, LlaMA, FLAN etc. architectures.
+FOSS Project for natural language AI Assistants - using GPT, LlaMA, Mistral etc. architectures.
 Geist is a framework for multiple natural language AI Assistants to interact, train, and do work.
 
 # Roadmap
