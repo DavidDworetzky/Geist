@@ -6,9 +6,9 @@ import os
 import signal
 import psutil
 
-WORLD_TICK_PROMPT = f"You are a deep and thorough thinker. 
+WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths."
+Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths."""
 
 TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main task that you wish to complete, and current working subtasks, add any additional tasks that will help you complete your main task."
 
