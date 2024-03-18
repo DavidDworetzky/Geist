@@ -7,7 +7,12 @@ from agents.gpt4_agent import GPT4Agent
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from adapters.mms_adapter import MMSAdapter
 from dotenv import load_dotenv
+from agents import agent_context
+from agents import agent_settings
 import os
+from app.model.database import Session
+from app.models import AgentPreset  
+from agents import AgentContext  
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -24,15 +29,32 @@ if enhanced_logging:
 #initialization
 app = FastAPI()
 
-	
 #routes
 @app.get('/')
 def version():
     return {"Version" : f"{api_version}"}
 
 def get_gpt4_client():
+    agent_context = get_default_agent_context()
     api_key = openai_key
-    return GPT4Agent(api_key)
+    return GPT4Agent(api_key = api_key, agent_context = agent_context)
+
+def get_default_agent_context():
+    '''
+    Gets an agent context matching "Default Context" from the database
+    '''
+    session = Session
+    try:
+        # Query for the agent preset with name "Default Context"
+        default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Context").first()
+        if default_preset:
+            # Create an agent context with the found preset
+            context = AgentContext(preset=default_preset)
+            return context
+        else:
+            raise ValueError("Default Context preset not found in the database.")
+    finally:
+        session.close()
 
 def get_speech_to_text_client():
     return MMSAdapter()
