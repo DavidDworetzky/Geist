@@ -12,7 +12,7 @@ from agents import agent_settings
 import os
 from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset  
-from agents import AgentContext  
+from agents.agent_context import AgentContext  
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")

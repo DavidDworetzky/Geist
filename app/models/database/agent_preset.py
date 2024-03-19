@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, bool
+from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean
 from sqlalchemy.orm import relationship, Session
 from app.models.database.database import Base, Session
 from sqlalchemy.dialects.postgresql import insert
@@ -28,7 +28,7 @@ class AgentPreset(Base):
     #prompt presets
     prompt = Column(String)
     #interactive_only - is not an independent agent.
-    interactive_only = Column(bool)
+    interactive_only = Column(Boolean)
     #restriction relationships
     restrictions = relationship("Restriction", back_populates="agent_preset")
 
