@@ -16,7 +16,7 @@ Geist is a framework for multiple natural language AI Assistants to interact, tr
 
 # Core Architecture
 
-The Platz Architecture consists of three main components: a world model, a task creation model, and an execution-based  model. The diagram below illustrates the architecture and relationships between these components.
+The Geist Architecture consists of three main components: a world model, a task creation model, and an execution-based  model. The diagram below illustrates the architecture and relationships between these components.
 
 ```mermaid
 flowchart LR
@@ -27,6 +27,19 @@ flowchart LR
     E[Long-term Memory] -->|Base Knowledge| A
     F[Short-term Memory] -->|Context-specific Info| C
 ```
+
+# Versioning and Setup
+## Install Postgresql
+1. Version 16.2 on Mac or Windows
+
+## Install Miniconda
+1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
+
+## Starting the solution
+1. Start the postgresql server
+2. 
+
+
 
 
 
