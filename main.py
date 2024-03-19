@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 from agents import agent_context
 from agents import agent_settings
 import os
-from app.model.database import Session
-from app.models import AgentPreset  
+from app.models.database.database import Session
+from app.models.database.agent_preset import AgentPreset  
 from agents import AgentContext  
 
 load_dotenv()
