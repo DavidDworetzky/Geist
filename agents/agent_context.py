@@ -4,13 +4,7 @@ from typing import List, Any
 
 
 class AgentContext():
-    def __init__(self, settings: agent_settings, world_context: List[str], task_context: List[str], execution_context: List[str], execution_classes: List[Any], subprocess_id: int = None):
-        if world_context is None:
-            world_context = ""
-        if task_context is None:
-            task_context = ""
-        if execution_context is None:
-            execution_context = ""
+    def __init__(self, settings: agent_settings, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None):
         self.world_context = world_context
         self.task_context = task_context
         self.execution_context = execution_context
