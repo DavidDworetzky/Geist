@@ -36,8 +36,12 @@ flowchart LR
 1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
 
 ## Starting the solution
-1. Start the postgresql server
-2. 
+1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` 
+2. Make sure that your .env file is initialized with the following values:
+    - OPENAI_TOKEN = TOKEN
+    - POSTGRES_PWD = PASSWORD
+    - POSTGRES_DB = geist
+
 
 
 
