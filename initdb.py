@@ -4,7 +4,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from psycopg2.errors import DuplicateDatabase
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-from app.presets.main import insert_presets
+from scripts.insert_presets import main as insert_presets
 import os
 
 load_dotenv()
@@ -42,4 +42,4 @@ from app.models.database.database import Engine
 Base.metadata.create_all(bind=Engine)
 
 #now, run all other idempotent insertion scripts
-insert_presets()
+insert_presets(to_commit=True)
