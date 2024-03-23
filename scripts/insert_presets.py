@@ -3,29 +3,31 @@ from app.models.database.database import Session
 import argparse
 from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset
+import datetime
 
 def main(to_commit: bool):
 
     default_preset_exists = Session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first() is not None
 
     if not default_preset_exists:
-        # Create a dummy AgentPreset object
         default_preset = AgentPreset(
-            max_tokens=16,
+            name="Default Preset",
+            version="1.0",
+            description="This is the default preset for new agents.",
+            max_tokens=1024,
             n=1,
-            temperature=1.0,
+            temperature=0.7,
             top_p=1.0,
             frequency_penalty=0.0,
             presence_penalty=0.0,
-            agent_preset_id=1,
-            creation_date="2022-01-01",
-            last_modified="2022-01-01",
-            version=1,
-            status="active",
-            configuration={"key": "value"},  # Assuming configuration is a dictionary
-            name="Default Preset",
-            description="This is a dummy preset for demonstration purposes.",
-            restrictions=[]
+            tags="default,general",
+            working_context_length=1024,
+            long_term_context_length=4096,
+            agent_type="general",
+            prompt="Hello, how can I assist you today?",
+            interactive_only=False,
+            create_date=datetime.datetime.now(),
+            update_date=datetime.datetime.now()
         )
     
         # Add the dummy preset to the session
@@ -34,7 +36,7 @@ def main(to_commit: bool):
         # Commit the transaction if the --commit flag is provided
         if to_commit:
             Session.commit()
-            print("Dummy data inserted and committed to the database.")
+            print("Preset added to the database.")
         else:
             # Rollback the transaction to avoid inserting dummy data
             Session.rollback()

@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
 from sqlalchemy.orm import relationship, Session
 from app.models.database.database import Base, Session
 from sqlalchemy.dialects.postgresql import insert
@@ -31,6 +31,8 @@ class AgentPreset(Base):
     interactive_only = Column(Boolean)
     #restriction relationships
     restrictions = relationship("Restriction", back_populates="agent_preset")
+    create_date = Column(DateTime)
+    update_date = Column(DateTime)
 
     @classmethod
     def upsert_agent_preset(cls, name, version, description, max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty, tags, working_context_length, long_term_context_length, agent_type, prompt, interactive_only):
@@ -83,3 +85,24 @@ class AgentPreset(Base):
             raise e
         finally:
             session.close()
+
+class Restriction(Base):
+    """
+    Class used to represent a restriction for an agent.
+    """
+    __tablename__ = 'restriction'
+    restriction_id = Column(Integer, primary_key=True)
+    agent_preset_id = Column(Integer, ForeignKey('agent_preset.agent_preset_id'))
+    agent_preset = relationship("AgentPreset", back_populates="restrictions")
+    #restriction fields
+    name = Column(String)
+    rate = Column(Integer)
+    period_hours = Column(Integer)
+    spending_limit = Column(Integer)
+    restriction_type = Column(String)
+    #allowed plugins and methods that an agent can use
+    allowed_plugins = Column(ARRAY(String))
+    allowed_methods = Column(ARRAY(String))
+    create_date = Column(DateTime)
+    update_date = Column(DateTime)
+
