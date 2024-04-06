@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from main import app, get_gpt4_client
+import app, get_gpt4_client
 from unittest.mock import patch
 
 client = TestClient(app)
@@ -17,7 +17,7 @@ def test_complete_text_endpoint(mock_get_gpt4_client):
 
     # Prepare the request payload
     payload = {
-        "prompt": "Test prompt",
+        "prompt": "Test Prompt",
         "max_tokens": 50,
         "n": 2,
         "stop": None,
