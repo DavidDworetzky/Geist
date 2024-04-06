@@ -39,7 +39,3 @@ class BaseAgent(ABC):
     @abstractmethod
     def tick_execution(self):
         pass
-
-    @abstractmethod
-    def push_task(self, task_prompt):
-        pass
