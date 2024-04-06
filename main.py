@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from adapters.mms_adapter import MMSAdapter
 from dotenv import load_dotenv
 from agents import agent_context
-from agents import agent_settings
+from agents.agent_settings import AgentSettings
 import os
 from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset  
@@ -46,10 +46,22 @@ def get_default_agent_context():
     session = Session
     try:
         # Query for the agent preset with name "Default Context"
-        default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Context").first()
+        default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
+        agent_settings = AgentSettings(
+            name=default_preset.name,
+            version=default_preset.version,
+            description=default_preset.description,
+            max_tokens=default_preset.max_tokens,
+            n=default_preset.n,
+            temperature=default_preset.temperature,
+            top_p=default_preset.top_p,
+            frequency_penalty=default_preset.frequency_penalty,
+            presence_penalty=default_preset.presence_penalty,
+            interactive_only=default_preset.interactive_only
+        )
         if default_preset:
             # Create an agent context with the found preset
-            context = AgentContext(preset=default_preset)
+            context = AgentContext(settings=agent_settings)
             return context
         else:
             raise ValueError("Default Context preset not found in the database.")

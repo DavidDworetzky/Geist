@@ -14,4 +14,4 @@ class AgentSettings:
     frequency_penalty: float = 0
     presence_penalty: float = 0
     echo: bool = False
-    interactive_only = False
+    interactive_only: bool = False

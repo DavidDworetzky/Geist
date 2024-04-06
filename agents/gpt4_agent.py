@@ -25,6 +25,9 @@ class GPT4Agent(BaseAgent):
         # call super constructor
         super().__init__(agent_context)
 
+    def freeze():
+        pass
+
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
         context_string = ""
