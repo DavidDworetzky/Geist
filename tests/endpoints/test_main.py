@@ -1,5 +1,8 @@
+import sys
+import os
+sys.path.append(os.path.abspath('../../'))
+from main import app, get_gpt4_client
 from fastapi.testclient import TestClient
-import app, get_gpt4_client
 from unittest.mock import patch
 
 client = TestClient(app)

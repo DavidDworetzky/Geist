@@ -13,6 +13,7 @@ import os
 from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset  
 from agents.agent_context import AgentContext  
+import uvicorn
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -25,19 +26,52 @@ if enhanced_logging:
     logging.basicConfig()
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
+# App factory function
+def create_app():
+    app = FastAPI()
 
-#initialization
-app = FastAPI()
+    @app.get('/')
+    def version():
+        return {"Version": f"{api_version}"}
 
-#routes
-@app.get('/')
-def version():
-    return {"Version" : f"{api_version}"}
+    @app.post("/complete_text")
+    async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
+        completions = agent.complete_text(
+            prompt=params.prompt,
+            max_tokens=params.max_tokens,
+            n=params.n,
+            stop=params.stop,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            echo=params.echo,
+            best_of=params.best_of,
+            prompt_tokens=params.prompt_tokens,
+            response_format=params.response_format
+        )
 
+        if completions:
+            return completions
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+
+    @app.post("/speech_to_text")
+    async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
+        return adapter.transcribe(file)
+
+    @app.post("/initialize_task_and_tick")
+    async def initialize_and_tick_agent(task_prompt: str, agent: GPT4Agent = Depends(get_gpt4_client)):
+        agent.initialize(task_prompt)
+        agent.tick()
+
+    return app
+
+# Dependency functions remain unchanged
 def get_gpt4_client():
     agent_context = get_default_agent_context()
     api_key = openai_key
-    return GPT4Agent(api_key = api_key, agent_context = agent_context)
+    return GPT4Agent(api_key=api_key, agent_context=agent_context)
 
 def get_default_agent_context():
     '''
@@ -71,36 +105,7 @@ def get_default_agent_context():
 def get_speech_to_text_client():
     return MMSAdapter()
 
-
-#basic text completion endpoint for our agent.
-@app.post("/complete_text")
-async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
-    completions = agent.complete_text(
-        prompt=params.prompt,
-        max_tokens=params.max_tokens,
-        n=params.n,
-        stop=params.stop,
-        temperature=params.temperature,
-        top_p=params.top_p,
-        frequency_penalty=params.frequency_penalty,
-        presence_penalty=params.presence_penalty,
-        echo=params.echo,
-        best_of=params.best_of,
-        prompt_tokens=params.prompt_tokens,
-        response_format=params.response_format
-    )
-
-    if completions:
-        return completions
-    else:
-        raise HTTPException(status_code=500, detail="Failed to generate completions.")
-
-@app.post("/speech_to_text")
-async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
-    return adapter.transcribe(file)
-
-@app.post("/initialize_task_and_tick")
-async def initialize_and_tick_agent(task_prompt: str, agent: GPT4Agent = Depends(get_gpt4_client)):
-    agent.initialize(task_prompt)
-    agent.tick()
-    
+# Initialize and run the app
+app = create_app()
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
