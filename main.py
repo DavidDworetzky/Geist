@@ -67,7 +67,6 @@ def create_app():
 
     return app
 
-# Dependency functions remain unchanged
 def get_gpt4_client():
     agent_context = get_default_agent_context()
     api_key = openai_key
