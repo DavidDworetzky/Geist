@@ -1,14 +1,11 @@
 import sys
 import os
-sys.path.append(os.path.abspath('../../'))
-from main import app, get_gpt4_client
+from app.main import app, get_gpt4_client
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 
-client = TestClient(app)
-
-@patch('main.get_gpt4_client')
-def test_complete_text_endpoint(mock_get_gpt4_client):
+@patch('app.main.get_gpt4_client')
+def test_complete_text_endpoint(mock_get_gpt4_client, client):
     # Create a mock GPT4Agent instance
     mock_agent = mock_get_gpt4_client.return_value
     mock_agent.complete_text.return_value = {
@@ -20,7 +17,7 @@ def test_complete_text_endpoint(mock_get_gpt4_client):
 
     # Prepare the request payload
     payload = {
-        "prompt": "Test Prompt",
+        "prompt": "Write a haiku",
         "max_tokens": 50,
         "n": 2,
         "stop": None,
@@ -39,7 +36,9 @@ def test_complete_text_endpoint(mock_get_gpt4_client):
 
     # Assert the response status code and content
     assert response.status_code == 200
-    assert response.json() == {
+    response_payload = response.json()
+    print(response_payload)
+    assert response_payload == {
         "completions": [
             {"text": "Sample completion 1"},
             {"text": "Sample completion 2"}
