@@ -1,6 +1,8 @@
 from app.models.database import database
 from agents.agent_settings import AgentSettings
 from typing import List, Any
+from app.models.database import agent
+from app.models.database.database import Base, Session
 import uuid  # Added import for uuid library
 
 class AgentContext():
@@ -16,5 +18,14 @@ class AgentContext():
         self.subprocess_id = subprocess_id
         self.settings = settings
         self.agent_id = agent_id
+
+    def _save(self):
+        #get existing agent in database.
+        session = Session
+        session.query(agent).filter_by(id = self.agent_id).first()
+        agent.world_context = self.world_context
+        agent.task_context = self.task_context
+        agent.execution_context = self.task_context
+
 
     
