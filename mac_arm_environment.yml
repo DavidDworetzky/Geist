@@ -34,7 +34,7 @@ dependencies:
   - brotli-python=1.0.9=py310hc377ac9_7
   - bzip2=1.0.8=h80987f9_5
   - c-ares=1.19.1=h80987f9_0
-  - ca-certificates=2023.12.12=hca03da5_0
+  - ca-certificates=2024.3.11=hca03da5_0
   - certifi=2024.2.2=py310hca03da5_0
   - charset-normalizer=2.0.4=pyhd3eb1b0_0
   - click=8.1.7=py310hca03da5_0
@@ -54,6 +54,7 @@ dependencies:
   - huggingface_hub=0.20.3=py310hca03da5_0
   - icu=73.1=h313beb8_0
   - idna=3.4=py310hca03da5_0
+  - iniconfig=1.1.1=pyhd3eb1b0_0
   - krb5=1.20.1=hf3e1bf2_1
   - libblas=3.9.0=21_osxarm64_openblas
   - libboost=1.82.0=h0bc93f9_2
@@ -94,6 +95,7 @@ dependencies:
   - packaging=23.1=py310hca03da5_0
   - pandas=2.1.4=py310h46d7db6_0
   - pip=23.3.1=py310hca03da5_0
+  - pluggy=1.0.0=py310hca03da5_1
   - psutil=5.9.8=py310hd125d64_0
   - psycopg2=2.9.3=py310h80987f9_1
   - pyarrow=14.0.2=py310h68338f1_0
@@ -101,6 +103,7 @@ dependencies:
   - pydantic=2.5.3=py310hca03da5_0
   - pydantic-core=2.14.6=py310hf0e4da2_0
   - pysocks=1.7.1=py310hca03da5_0
+  - pytest=7.4.0=py310hca03da5_0
   - python=3.10.13=h2469fbe_1_cpython
   - python-dateutil=2.8.2=pyhd3eb1b0_0
   - python-dotenv=1.0.1=pyhd8ed1ab_0
@@ -123,6 +126,7 @@ dependencies:
   - starlette=0.36.3=pyhd8ed1ab_0
   - tk=8.6.13=h5083fa2_1
   - tokenizers=0.15.1=py310h3dd52b7_0
+  - tomli=2.0.1=py310hca03da5_0
   - tqdm=4.65.0=py310h33ce5c2_0
   - transformers=4.38.2=pyhd8ed1ab_0
   - typing-extensions=4.9.0=py310hca03da5_1
@@ -149,3 +153,4 @@ dependencies:
       - torch==2.2.1
       - torchaudio==2.2.1
       - torchvision==0.17.1
+prefix: /Users/daviddworetzky/miniconda3/envs/geist-mac

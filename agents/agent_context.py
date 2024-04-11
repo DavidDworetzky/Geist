@@ -1,10 +1,10 @@
 from app.models.database import database
-from agents import agent_settings
+from agents.agent_settings import AgentSettings
 from typing import List, Any
 import uuid  # Added import for uuid library
 
 class AgentContext():
-    def __init__(self, settings: agent_settings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None):
+    def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None):
         if agent_id is None:
             self.agent_id = str(uuid.uuid4())
         else:
