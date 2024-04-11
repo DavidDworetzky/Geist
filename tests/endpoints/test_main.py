@@ -1,19 +1,18 @@
-import sys
-import os
-from app.main import app, get_gpt4_client
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from app.main import app
 
-@patch('app.main.get_gpt4_client')
-def test_complete_text_endpoint(mock_get_gpt4_client, client):
+@patch('app.main.GPT4Agent')
+def test_complete_text_endpoint(mock_gpt4_agent_class, client):
     # Create a mock GPT4Agent instance
-    mock_agent = mock_get_gpt4_client.return_value
+    mock_agent = MagicMock()
     mock_agent.complete_text.return_value = {
         "completions": [
             {"text": "Sample completion 1"},
             {"text": "Sample completion 2"}
         ]
     }
+    mock_gpt4_agent_class.return_value = mock_agent
 
     # Prepare the request payload
     payload = {
@@ -47,7 +46,7 @@ def test_complete_text_endpoint(mock_get_gpt4_client, client):
 
     # Verify that the GPT4Agent's complete_text method was called with the correct arguments
     mock_agent.complete_text.assert_called_once_with(
-        prompt="Test prompt",
+        prompt="Write a haiku",
         max_tokens=50,
         n=2,
         stop=None,
