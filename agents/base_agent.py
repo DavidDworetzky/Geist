@@ -15,11 +15,16 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def save(self):
+    def phase_out(self):
         '''
-        Freeze the agent's state and save it to context.
+        Phase out an agent's state and stop it (aka, stop subprocess, save state)
         '''
         pass
+
+    def phase_in(self):
+        '''
+        Restart an agent's subprocess and rehydrate it (phase in, heh)
+        '''
 
     @abstractmethod
     def tick(self):

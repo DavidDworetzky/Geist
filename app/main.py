@@ -13,6 +13,7 @@ import os
 from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset  
 from agents.agent_context import AgentContext  
+from app.models.agent import Agent
 import uvicorn
 
 load_dotenv()
@@ -65,7 +66,19 @@ def create_app():
         agent.initialize(task_prompt)
         agent.tick()
 
+
+    @app.post("/phase_out")
+    async def phase_out_agent(agent_id: int):
+        agent_to_phase = Agent.get_agent_by_id(agent_id)
+        agent_to_phase.phase_out()
+
+    @app.post("/phase_in")
+    async def phase_in_agent(agent_id: int):
+        agent_to_phase = Agent.get_agent_by_id(agent_id)
+        agent_to_phase.phase_in()
+
     return app
+
 
 def get_gpt4_client():
     agent_context = get_default_agent_context()
@@ -100,6 +113,7 @@ def get_default_agent_context():
             raise ValueError("Default Context preset not found in the database.")
     finally:
         session.close()
+
 
 def get_speech_to_text_client():
     return MMSAdapter()

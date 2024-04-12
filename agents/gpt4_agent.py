@@ -25,8 +25,12 @@ class GPT4Agent(BaseAgent):
         # call super constructor
         super().__init__(agent_context)
 
-    def save(self):
+    def phase_out(self):
         self._agent_context._save()
+        self.terminate_subprocess()
+
+    def phase_in(self):
+        self.initialize()
 
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
