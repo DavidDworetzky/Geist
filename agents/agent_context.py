@@ -26,6 +26,7 @@ class AgentContext():
         agent.world_context = self.world_context
         agent.task_context = self.task_context
         agent.execution_context = self.task_context
+        session.commit()
 
 
     
