@@ -21,6 +21,7 @@ class BaseAgent(ABC):
         '''
         pass
 
+    @abstractmethod
     def phase_in(self):
         '''
         Restart an agent's subprocess and rehydrate it (phase in, heh)
@@ -31,6 +32,13 @@ class BaseAgent(ABC):
         self.tick_world()
         self.tick_tasks()
         self.tick_execution()
+
+    def state(self):
+        return {
+            "world_context" : self._agent_context.world_context,
+            "task_context" : self._agent_context.task_context,
+            "execution_context" : self._agent_context.execution_context
+        }
 
 
     @abstractmethod

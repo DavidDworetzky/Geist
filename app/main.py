@@ -2,7 +2,7 @@
 import sys
 from typing import Optional
 import logging
-from app.models.completion import CompleteTextParams
+from app.models.completion import CompleteTextParams, InitializeAgentParams
 from agents.gpt4_agent import GPT4Agent
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from adapters.mms_adapter import MMSAdapter
@@ -62,9 +62,10 @@ def create_app():
         return adapter.transcribe(file)
 
     @app.post("/initialize_task_and_tick")
-    async def initialize_and_tick_agent(task_prompt: str, agent: GPT4Agent = Depends(get_gpt4_client)):
+    async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         agent.initialize(task_prompt)
         agent.tick()
+        return agent.state()
 
 
     @app.post("/phase_out")
