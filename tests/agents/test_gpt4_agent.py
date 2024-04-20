@@ -2,6 +2,39 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 
+def completions_generator(input: str) -> str:
+    '''
+    Trivial mock completions function that outputs a modified version of the prompt for the output. 
+    '''
+    base_completion = {
+        "completions": 
+        [
+            {"text": f"{input}:completion1"},
+            {"text": f"{input}:completion2"}
+        ]
+    }
+    return base_completion
+
+def get_mock_context() -> dict[str, str]:
+    context = MagicMock()
+    state = {
+        'world_context' : '',
+        'task_context' : '',
+        'execution_context' : '',
+        'ticks' : 0
+    }
+    context.world_context.return_value = state['world_context']
+    context.task_context.return_value = state['task_context']
+    context.execution_context.return_value = state['execution_context']
+    return context
+
+def get_mock_gpt4_agent() -> MagicMock:
+    mock_agent = MagicMock()
+    mock_agent.complete_text.side_effect = completions_generator
+    mock_agent._agent_context = get_mock_context()
+    mock_agent.tick.side_effect = tick_world
+    return mock_agent
+
 def tick_world(context, agent, world_prompt, task_prompt, execution_prompt):
     context.world_context += agent.complete_text(context.world_context, world_prompt)
     context.task_context += agent.complete_text(context.task_context, task_prompt)
@@ -10,7 +43,7 @@ def tick_world(context, agent, world_prompt, task_prompt, execution_prompt):
     return context
 
 @patch('app.main.GPT4Agent')
-def test_tick(mock_gpt4_agent_class, client):
+def test_tick(client):
 
     mock_context = {
         'world_context': '',
@@ -20,15 +53,8 @@ def test_tick(mock_gpt4_agent_class, client):
     }
     # Create a mock GPT4Agent instance
     mock_agent = MagicMock()
-    mock_agent.complete_text.return_value = {
-        "completions": [
-            {"text": "Sample completion 1"},
-            {"text": "Sample completion 2"}
-        ]
-    }
-
-    mock_gpt4_agent_class.return_value = mock_agent
-    mock_gpt4_agent_class.tick.side_effect = tick_world
+    mock_agent.complete_text.side_effect = completions_generator
+    mock_agent.tick.side_effect = tick_world
 
     # Prepare the request payload
     payload = {
