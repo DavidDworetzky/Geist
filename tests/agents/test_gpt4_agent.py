@@ -44,18 +44,7 @@ def tick_world(context, agent, world_prompt, task_prompt, execution_prompt):
 
 @patch('app.main.GPT4Agent')
 def test_tick(client):
-
-    mock_context = {
-        'world_context': '',
-        'task_context': '',
-        'execution_context' : '',
-        'ticks' : 0
-    }
-    # Create a mock GPT4Agent instance
-    mock_agent = MagicMock()
-    mock_agent.complete_text.side_effect = completions_generator
-    mock_agent.tick.side_effect = tick_world
-
+    mock_agent = get_mock_gpt4_agent()
     # Prepare the request payload
     payload = {
         "prompt": "Write a haiku"
