@@ -43,8 +43,9 @@ def tick_world(context, agent, world_prompt, task_prompt, execution_prompt):
     return context
 
 @patch('app.main.GPT4Agent')
-def test_tick(client):
+def test_tick(mock_gpt4_agent_class, client):
     mock_agent = get_mock_gpt4_agent()
+    mock_gpt4_agent_class.return_value = mock_agent
     # Prepare the request payload
     payload = {
         "prompt": "Write a haiku"
@@ -52,6 +53,7 @@ def test_tick(client):
 
     # Send a POST request to the /complete_text endpoint
     response = client.post("/initialize_task_and_tick", json=payload)
+    print(response)
 
     # Assert the response status code and content
     assert response.status_code == 200
