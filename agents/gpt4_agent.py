@@ -10,7 +10,7 @@ WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker.
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths."""
 
-TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main task that you wish to complete, and current working subtasks, add any additional tasks that will help you complete your main task."
+TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character"
 
 EXECUTION_TICK_PROMPT = "You are given a list of tasks and list of function calls that you can make. Given the state of the world, formulate a function call that will help you complete your task."
 
@@ -84,14 +84,37 @@ class GPT4Agent(BaseAgent):
             self.agent_context.subprocess_id = None
         else:
             raise Exception("No subprocess ID set in agent context.")
+        
+    def _pop_and_add_execution_tasks(self):
+            if self._agent_context.task_context:
+                task_to_execute = self._agent_context.task_context.pop(0)
+                prompt = f"executing task: {task_to_execute}" + self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+                execution_result = self.complete_text(prompt=TASK_TICK_PROMPT + prompt)
+                tasks_to_execute = execution_result.split('|')
+                self._agent_context.execution_context.append(tasks_to_execute)
+            else:
+                raise Exception("No tasks available in task context for execution.")
+            
+    def _clear_execution_tasks(self):
+        results = []
+        for task in self._agent_context.execution_context:
+            context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+            result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
+            results.append(result)
+
+        self._agent_context.execution_context = []
+        return results
+        
 
     def tick(self):
         # Check if the subprocess is still running
         if self.is_subprocess_running():
             # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
+            # reason about the world, then.
+            # pop elements of agent context tasks for execution
             self.tick_world()
-            self.tick_tasks()
-            self.tick_execution()
+            self._pop_and_add_execution_tasks()
+            self._clear_execution_tasks()
         else:
             raise Exception("Subprocess not running.")
 
