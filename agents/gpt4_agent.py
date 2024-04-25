@@ -71,8 +71,9 @@ class GPT4Agent(BaseAgent):
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
 
             # Set the subprocess ID in our agent context
-            self.agent_context.subprocess_id
+            self.agent_context.subprocess_id = process.pid
         else:
+            self.agent_context.subprocess_id = None
             return None
 
     def terminate_subprocess(self):
