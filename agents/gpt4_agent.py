@@ -15,7 +15,7 @@ TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main tas
 EXECUTION_TICK_PROMPT = "You are given a list of tasks and list of function calls that you can make. Given the state of the world, formulate a function call that will help you complete your task."
 
 class GPT4Agent(BaseAgent):
-    def __init__(self, api_key, agent_context):
+    def __init__(self, api_key, agent_context, as_subprocess=False):
         self.api_key = api_key
         self.base_url = "https://api.openai.com/v1/chat/completions"
         self.headers = {
@@ -23,7 +23,7 @@ class GPT4Agent(BaseAgent):
             "Authorization": f"Bearer {api_key}"
         }
         # call super constructor
-        super().__init__(agent_context)
+        super().__init__(agent_context, as_subprocess)
 
     def phase_out(self):
         self._agent_context._save()
@@ -71,7 +71,7 @@ class GPT4Agent(BaseAgent):
 
         # Set the subprocess ID in our agent context
         self.agent_context.subprocess_id = process.pid
-        return None
+        return process.pid
 
     def terminate_subprocess(self):
         # Retrieve subprocess ID from agent context
@@ -107,16 +107,12 @@ class GPT4Agent(BaseAgent):
         
 
     def tick(self):
-        # Check if the subprocess is still running
-        if self.is_subprocess_running():
-            # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
-            # reason about the world, then.
-            # pop elements of agent context tasks for execution
-            self.tick_world()
-            self._pop_and_add_execution_tasks()
-            self._clear_execution_tasks()
-        else:
-            raise Exception("Subprocess not running.")
+        # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
+        # reason about the world, then.
+        # pop elements of agent context tasks for execution
+        self.tick_world()
+        self._pop_and_add_execution_tasks()
+        self._clear_execution_tasks()
 
     def is_subprocess_running(self):
         # Retrieve subprocess ID from agent context
