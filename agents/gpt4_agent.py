@@ -66,12 +66,14 @@ class GPT4Agent(BaseAgent):
             raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
         
     def initialize(self):
-        # Create a subprocess that runs one tick every second
-        process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
+        if self.as_subprocess:
+            # Create a subprocess that runs one tick every second
+            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
 
-        # Set the subprocess ID in our agent context
-        self.agent_context.subprocess_id = process.pid
-        return process.pid
+            # Set the subprocess ID in our agent context
+            self.agent_context.subprocess_id
+        else:
+            return None
 
     def terminate_subprocess(self):
         # Retrieve subprocess ID from agent context
