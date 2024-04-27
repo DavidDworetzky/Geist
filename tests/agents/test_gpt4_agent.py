@@ -35,9 +35,10 @@ def get_mock_gpt4_agent() -> MagicMock:
     return mock_agent
 
 @patch('app.main.GPT4Agent')
-def test_tick(mock_gpt4_agent_class, client):
-    mock_agent = get_mock_gpt4_agent()
-    mock_gpt4_agent_class.return_value = mock_agent
+@patch('agents.gpt4_agent.GPT4Agent.complete_text')
+def test_tick(complete_text, mock_gpt4_agent, gpt4agent, client):
+    complete_text.return_value = completions_generator
+    mock_gpt4_agent.return_value = gpt4agent
     # Prepare the request payload
     payload = {
         "prompt": "Write a haiku"
