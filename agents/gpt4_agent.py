@@ -36,12 +36,12 @@ class GPT4Agent(BaseAgent):
         #get aggregated context for world, task and execution context if requested
         context_string = ""
         if world_context:
-            context_string += "WORLD_CONTEXT:" + self.agent_context.world_context.join("\n")
+            context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
         if task_context:
-            context_string += "TASK_CONTEXT:" + self.agent_context.task_context.join("\n")
+            context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
         if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + self.agent_context.execution_context.join("\n")
-
+            context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
+        return context_string
 
     def complete_text(self, prompt, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text"):
         payload = {
@@ -71,20 +71,20 @@ class GPT4Agent(BaseAgent):
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
 
             # Set the subprocess ID in our agent context
-            self.agent_context.subprocess_id = process.pid
+            self._agent_context.subprocess_id = process.pid
         else:
-            self.agent_context.subprocess_id = None
+            self._agent_context.subprocess_id = None
             return None
 
     def terminate_subprocess(self):
         # Retrieve subprocess ID from agent context
-        subprocess_id = self.agent_context.subprocess_id
+        subprocess_id = self._agent_context.subprocess_id
 
         # Check if the subprocess ID is set
         if subprocess_id:
             # Send a terminate signal to the subprocess
             os.kill(subprocess_id, signal.SIGTERM)
-            self.agent_context.subprocess_id = None
+            self._agent_context.subprocess_id = None
         else:
             raise Exception("No subprocess ID set in agent context.")
         
@@ -137,7 +137,7 @@ class GPT4Agent(BaseAgent):
         result = self.complete_text(prompt=WORLD_TICK_PROMPT + context_string)
         #split result and replace world context
         split_result = result.split("\n")
-        self.agent_context.world_context = split_result
+        self._agent_context.world_context = split_result
         return split_result
 
     def tick_tasks(self):
@@ -162,5 +162,5 @@ class GPT4Agent(BaseAgent):
         result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string)
         #split result and replace execution context
         split_result = result.split("\n")
-        self.agent_context.execution_context = split_result
+        self._agent_context.execution_context = split_result
         return split_result
