@@ -127,6 +127,8 @@ class GPT4Agent(BaseAgent):
         except psutil.NoSuchProcess:
             return False
 
+    def _transform_completions(self, completion):
+        return list(map(lambda x: x['text'], completion['completions']))
 
     def tick_world(self):
         '''
@@ -134,9 +136,10 @@ class GPT4Agent(BaseAgent):
         '''
         #aggregate list of strings from world_context
         context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
-        result = self.complete_text(prompt=WORLD_TICK_PROMPT + context_string)
+        input = WORLD_TICK_PROMPT + context_string
+        result = self.complete_text(prompt=input)
         #split result and replace world context
-        split_result = result.split("\n")
+        split_result = self._transform_completions(result)
         self._agent_context.world_context = split_result
         return split_result
 

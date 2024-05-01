@@ -2,18 +2,25 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 
-def completions_generator(input: str) -> str:
+def completions_generator(prompt: str) -> str:
     '''
     Trivial mock completions function that outputs a modified version of the prompt for the output. 
     '''
+    is_pipe_delimited_function_prompt = '|' in prompt
     base_completion = {
         "completions": 
         [
-            {"text": f"{input}:completion1"},
-            {"text": f"{input}:completion2"}
+            {"text": f"{prompt}:completion1"},
+            {"text": f"{prompt}:completion2"}
         ]
     }
-    return base_completion
+    pipe_delimited_completion = {
+        "completions":
+        [
+            {"text": f"fn(1)|fn(2)"}
+        ]
+    }
+    return base_completion if not is_pipe_delimited_function_prompt else pipe_delimited_completion
 
 def get_mock_context() -> dict[str, str]:
     context = MagicMock()
@@ -30,14 +37,14 @@ def get_mock_context() -> dict[str, str]:
 
 def get_mock_gpt4_agent() -> MagicMock:
     mock_agent = MagicMock()
-    mock_agent.complete_text.side_effect = completions_generator
+    mock_agent.complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_agent._agent_context = get_mock_context()
     return mock_agent
 
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
 def test_tick(complete_text, mock_gpt4_agent, gpt4agent, client):
-    complete_text.return_value = completions_generator
+    complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_gpt4_agent.return_value = gpt4agent
     # Prepare the request payload
     payload = {
