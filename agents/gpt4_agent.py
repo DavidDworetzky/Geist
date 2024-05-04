@@ -65,7 +65,10 @@ class GPT4Agent(BaseAgent):
         else:
             raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
         
-    def initialize(self):
+    def initialize(self, task:str = None):
+        #push task onto our stack for this agent.
+        if task:
+            self._agent_context.task_context.push(task)
         if self.as_subprocess:
             # Create a subprocess that runs one tick every second
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
