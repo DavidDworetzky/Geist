@@ -15,9 +15,12 @@ class LogAdapter(BaseAdapter):
             
 
     def enumerate_actions(self) -> List[str]:
-        return ["log"]
+        return ["log", "read_log"]
     
     def log(self, output: str):
         with open(self.filename, "a") as file:
             file.write(output + "\n")
 
+    def read_log(self) -> str:
+        with open(self.filename, "r") as file:
+            return file.readlines()
