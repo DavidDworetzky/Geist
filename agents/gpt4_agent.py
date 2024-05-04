@@ -68,7 +68,7 @@ class GPT4Agent(BaseAgent):
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.
         if task:
-            self._agent_context.task_context.push(task)
+            self._agent_context.task_context.append(task)
         if self.as_subprocess:
             # Create a subprocess that runs one tick every second
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
@@ -96,8 +96,9 @@ class GPT4Agent(BaseAgent):
                 task_to_execute = self._agent_context.task_context.pop(0)
                 prompt = f"executing task: {task_to_execute}" + self._aggregated_context(world_context=True, task_context=True, execution_context=True)
                 execution_result = self.complete_text(prompt=TASK_TICK_PROMPT + prompt)
-                tasks_to_execute = execution_result.split('|')
-                self._agent_context.execution_context.append(tasks_to_execute)
+                execution_result = self._transform_completions(execution_result)
+                tasks_to_execute = [task.strip() for result in execution_result for task in result.split('|')]
+                self._agent_context.execution_context = tasks_to_execute
             else:
                 raise Exception("No tasks available in task context for execution.")
             
@@ -153,6 +154,7 @@ class GPT4Agent(BaseAgent):
         #aggregate list of strings from task_context
         context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
         result = self.complete_text(prompt=TASK_TICK_PROMPT + context_string)
+        result = self._transform_completions(result)
         #split result and replace task context
         split_result = result.split("\n")
         self.agent_context.task_context = split_result
@@ -166,6 +168,7 @@ class GPT4Agent(BaseAgent):
         #aggregate list of strings from execution_context
         context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
         result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string)
+        result = self._transform_completions(result)
         #split result and replace execution context
         split_result = result.split("\n")
         self._agent_context.execution_context = split_result

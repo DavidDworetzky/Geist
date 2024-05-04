@@ -6,7 +6,7 @@ from app.models.database.database import Base, Session
 import uuid  # Added import for uuid library
 
 class AgentContext():
-    def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None):
+    def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], function_log: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None):
         if agent_id is None:
             self.agent_id = str(uuid.uuid4())
         else:
@@ -14,6 +14,7 @@ class AgentContext():
         self.world_context = world_context
         self.task_context = task_context
         self.execution_context = execution_context
+        self.function_log = function_log
         # for keeping track of our subprocess id for later termination
         self.subprocess_id = subprocess_id
         self.settings = settings
