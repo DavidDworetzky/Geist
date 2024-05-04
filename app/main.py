@@ -63,7 +63,7 @@ def create_app():
 
     @app.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
-        agent.initialize()
+        agent.initialize(task_prompt)
         agent.tick()
         return agent.state()
 
