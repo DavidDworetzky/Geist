@@ -68,7 +68,7 @@ class GPT4Agent(BaseAgent):
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.
         if task:
-            self._agent_context.task_context.push(task)
+            self._agent_context.task_context.append(task)
         if self.as_subprocess:
             # Create a subprocess that runs one tick every second
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
