@@ -3,7 +3,6 @@ from adapters.base_adapter import BaseAdapter
 from typing import List
 import requests
 import json
-import openai
 import tempfile
 import os
 
