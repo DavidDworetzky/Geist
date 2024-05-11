@@ -1,3 +1,0 @@
-'''
-nous hermes agent implementation. 
-'''
