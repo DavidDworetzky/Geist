@@ -7,11 +7,19 @@ def completions_generator(prompt: str) -> str:
     Trivial mock completions function that outputs a modified version of the prompt for the output. 
     '''
     is_function_prompt = 'function' in prompt
+    is_task_prompt = 'actionable tasks' in prompt
     base_completion = {
         "completions": 
         [
             {"text": f"{prompt}:completion1"},
             {"text": f"{prompt}:completion2"}
+        ]
+    }
+    task_completion = {
+        "completions":
+        [
+            {"text" : "log the beginning of a haiku"},
+            {"text" : "log the end of a haiku"}
         ]
     }
     function_completion = {
@@ -26,7 +34,13 @@ def completions_generator(prompt: str) -> str:
 }}"""}
         ]
     }
-    return base_completion if not is_function_prompt else function_completion
+    if is_function_prompt:
+        return function_completion
+    
+    if is_task_prompt:
+        return task_completion
+    
+    return base_completion
 
 def get_mock_context() -> dict[str, str]:
     context = MagicMock()
