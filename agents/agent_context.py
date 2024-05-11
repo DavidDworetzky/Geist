@@ -7,7 +7,7 @@ import uuid  # Added import for uuid library
 from adapters.adapter_registry import find_adapter_classes, init_adapter_class
 
 class AgentContext():
-    def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], function_log: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None, envs = Dict[str, str]):
+    def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], function_log: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None, envs : Dict[str, str] = {}):
         if agent_id is None:
             self.agent_id = str(uuid.uuid4())
         else:
@@ -27,8 +27,8 @@ class AgentContext():
         self.agent_id = agent_id
         self.envs = envs
 
-        if self.envs:
-            self.initialized_classes = [init_adapter_class(cls[0], self.envs) for cls in self.execution_classes]
+        if self.envs and len(self.envs.keys()) > 0:
+            self.initialized_classes = [init_adapter_class(cls[0], **self.envs) for cls in self.execution_classes]
                 
 
     def _save(self):
