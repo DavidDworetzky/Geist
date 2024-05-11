@@ -6,7 +6,7 @@ def completions_generator(prompt: str) -> str:
     '''
     Trivial mock completions function that outputs a modified version of the prompt for the output. 
     '''
-    is_pipe_delimited_function_prompt = '|' in prompt
+    is_function_prompt = 'function' in prompt
     base_completion = {
         "completions": 
         [
@@ -14,13 +14,19 @@ def completions_generator(prompt: str) -> str:
             {"text": f"{prompt}:completion2"}
         ]
     }
-    pipe_delimited_completion = {
+    function_completion = {
         "completions":
         [
-            {"text": f"fn(1)|fn(2)"}
+            {"text": f"""{{
+    \\"class\\" : \\"log_adapter\\",
+    \\"function\\": \\"log\\",
+    \\"parameters\\": {{
+        \\"output\\": \\"logging a haiku!\\",
+    }}
+}}"""}
         ]
     }
-    return base_completion if not is_pipe_delimited_function_prompt else pipe_delimited_completion
+    return base_completion if not is_function_prompt else function_completion
 
 def get_mock_context() -> dict[str, str]:
     context = MagicMock()
