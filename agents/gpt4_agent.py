@@ -47,6 +47,7 @@ class GPT4Agent(BaseAgent):
 
     def _is_valid_function_json(self, function_json:str):
         try:
+            function_json = function_json.replace('\n', '')
             # Attempt to parse the JSON string
             parsed_json = json.loads(function_json)
             # Check if the required keys are present
@@ -159,11 +160,14 @@ class GPT4Agent(BaseAgent):
             context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
             result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
             result = self._transform_completions(result)
+            #get first result as function call
+            result = result[0]
             retries = 0
 
             while not self._is_valid_function_json(result) or retries > 3:
                 retries += 1
-                result = self.complete_txt(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
+                result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
+                result = self._transform_completions(result)
 
             if not self._is_valid_function_json(result):
                 raise Exception("Exceeded retries for valid function call JSON")
