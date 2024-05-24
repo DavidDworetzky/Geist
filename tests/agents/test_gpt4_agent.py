@@ -29,7 +29,7 @@ def completions_generator(prompt: str) -> str:
     \"class\" : \"log_adapter\",
     \"function\": \"log\",
     \"parameters\": {{
-        \"output\": \"logging a haiku!\",
+        \"output\": \"logging a haiku!\"
     }}
 }}"""}
         ]

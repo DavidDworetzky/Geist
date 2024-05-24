@@ -168,6 +168,7 @@ class GPT4Agent(BaseAgent):
                 retries += 1
                 result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
                 result = self._transform_completions(result)
+                result = result[0]
 
             if not self._is_valid_function_json(result):
                 raise Exception("Exceeded retries for valid function call JSON")
