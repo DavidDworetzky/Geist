@@ -8,7 +8,7 @@ class MMSAdapter(BaseAdapter):
     '''
     MMSAdapter is an adapter for Meta's MMS Speech to Text API.
     '''
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.model_id = "facebook/mms-1b-all"
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = Wav2Vec2ForCTC.from_pretrained(self.model_id)
