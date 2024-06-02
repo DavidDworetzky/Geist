@@ -27,6 +27,11 @@ if enhanced_logging:
     logging.basicConfig()
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
+def get_envs() -> dict[str,str]:
+    return {
+        "openai_key" : openai_key,
+    }
+
 # App factory function
 def create_app():
     app = FastAPI()
@@ -108,7 +113,7 @@ def get_default_agent_context():
         )
         if default_preset:
             # Create an agent context with the found preset
-            context = AgentContext(settings=agent_settings)
+            context = AgentContext(settings=agent_settings, envs=get_envs())
             return context
         else:
             raise ValueError("Default Context preset not found in the database.")

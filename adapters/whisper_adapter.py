@@ -3,7 +3,6 @@ from adapters.base_adapter import BaseAdapter
 from typing import List
 import requests
 import json
-import openai
 import tempfile
 import os
 
@@ -12,7 +11,7 @@ class WhisperAdapter(BaseAdapter):
     Whisper Adapter is an adapter for Open AI's speech to text model. 
     '''
 
-    def __init__(self, api_key):
+    def __init__(self, api_key, **kwargs):
         self.api_key = api_key
 
     def enumerate_actions(self) -> List[str]:

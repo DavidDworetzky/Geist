@@ -6,7 +6,8 @@ def completions_generator(prompt: str) -> str:
     '''
     Trivial mock completions function that outputs a modified version of the prompt for the output. 
     '''
-    is_pipe_delimited_function_prompt = '|' in prompt
+    is_function_prompt = 'function' in prompt
+    is_task_prompt = 'actionable tasks' in prompt
     base_completion = {
         "completions": 
         [
@@ -14,13 +15,32 @@ def completions_generator(prompt: str) -> str:
             {"text": f"{prompt}:completion2"}
         ]
     }
-    pipe_delimited_completion = {
+    task_completion = {
         "completions":
         [
-            {"text": f"fn(1)|fn(2)"}
+            {"text" : "log the beginning of a haiku"},
+            {"text" : "log the end of a haiku"}
         ]
     }
-    return base_completion if not is_pipe_delimited_function_prompt else pipe_delimited_completion
+    function_completion = {
+        "completions":
+        [
+            {"text": f"""{{
+    \"class\" : \"log_adapter\",
+    \"function\": \"log\",
+    \"parameters\": {{
+        \"output\": \"logging a haiku!\"
+    }}
+}}"""}
+        ]
+    }
+    if is_function_prompt:
+        return function_completion
+    
+    if is_task_prompt:
+        return task_completion
+    
+    return base_completion
 
 def get_mock_context() -> dict[str, str]:
     context = MagicMock()
@@ -58,4 +78,5 @@ def test_tick(complete_text, mock_gpt4_agent, gpt4agent, client):
     assert response.status_code == 200
     response_payload = response.json()
     print(response_payload)
-    assert response_payload == {'world_context': ["You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1", "You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2"], 'task_context': [], 'execution_context': []}
+    assert response_payload == {'world_context': ["You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler facts.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1", "You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler facts.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2"], 'task_context': [], 'execution_context': []}
+

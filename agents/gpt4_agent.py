@@ -5,14 +5,27 @@ import subprocess
 import os
 import signal
 import psutil
+import json
 
 WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths."""
+Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler facts."""
 
 TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character"
 
-EXECUTION_TICK_PROMPT = "You are given a list of tasks and list of function calls that you can make. Given the state of the world, formulate a function call that will help you complete your task."
+FUNCTION_CALL_JSON = """
+{
+    "class" : "class_name",
+    "function": "function_name",
+    "parameters": {
+        "param1": "value1",
+        "param2": "value2"
+    }
+}
+"""
+
+EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}"
+
 
 class GPT4Agent(BaseAgent):
     def __init__(self, api_key, agent_context, as_subprocess=False):
@@ -31,6 +44,45 @@ class GPT4Agent(BaseAgent):
 
     def phase_in(self):
         self.initialize()
+
+    def _is_valid_function_json(self, function_json:str):
+        try:
+            function_json = function_json.replace('\n', '')
+            # Attempt to parse the JSON string
+            parsed_json = json.loads(function_json)
+            # Check if the required keys are present
+            required_keys = ["function", "parameters", "class"]
+            if all(key in parsed_json for key in required_keys):
+                # Check if parameters have the correct structure
+                if isinstance(parsed_json["parameters"], dict) :
+                    return True
+            return False
+        except json.JSONDecodeError:
+            # Return False if JSON is invalid
+            return False        
+        
+
+    def _take_json_and_call_function(self, function_json:str):
+        '''
+        takes a json definition of a function call and uses it to call one of our function adapters.
+        '''
+        if not self._is_valid_function_json(function_json):
+            raise Exception(f"invalid function call json: {function_json}")
+    
+        json_data = json.loads(function_json)
+    
+        # now, find our adapter class and call the relevant function on it.
+        adapter_class = self._agent_context.initialized_classes[json_data["class"]]
+    
+        # now, call the relevant function on the adapter_class through reflection
+        function_to_call = getattr(adapter_class, json_data["function"])
+        parameters = json_data["parameters"]
+    
+        # Execute the function with the provided parameters
+        result = function_to_call(**parameters)
+    
+        return result
+        
 
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
@@ -107,7 +159,22 @@ class GPT4Agent(BaseAgent):
         for task in self._agent_context.execution_context:
             context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
             result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
-            results.append(result)
+            result = self._transform_completions(result)
+            #get first result as function call
+            result = result[0]
+            retries = 0
+
+            while not self._is_valid_function_json(result) or retries > 3:
+                retries += 1
+                result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
+                result = self._transform_completions(result)
+                result = result[0]
+
+            if not self._is_valid_function_json(result):
+                raise Exception("Exceeded retries for valid function call JSON")
+            
+            output = self._take_json_and_call_function(result)
+            results.append(output)
 
         self._agent_context.execution_context = []
         return results
