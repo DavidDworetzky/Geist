@@ -28,7 +28,7 @@ class AgentContext():
         self.envs = envs
 
         if self.envs and len(self.envs.keys()) > 0:
-            self.initialized_classes = [init_adapter_class(cls[0], **self.envs) for cls in self.execution_classes]
+            self.initialized_classes = [init_adapter_class(cls[0], self.envs) for cls in self.execution_classes]
                 
 
     def _save(self):
