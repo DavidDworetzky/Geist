@@ -3,6 +3,8 @@ import inspect
 import importlib
 from typing import List
 from adapters.base_adapter import BaseAdapter
+import inspect
+
 
 def _get_adapter_files() -> List[str]:
     directory = os.path.dirname(__file__)
@@ -29,19 +31,24 @@ def find_adapter_classes():
                 adapter_classes.append((name, class_methods))
     return adapter_classes
 
-def init_adapter_class(classname: str, **kwargs):
+
+def init_adapter_class(classname: str, args: dict):
     '''
-    Dynamically initializes an adapter class by name with the provided kwargs.
+    Dynamically initializes an adapter class by name with the provided kwargs,
+    only using the kwargs that are valid for the class's constructor.
     '''
     filenames = _get_adapter_files()
     for filename in filenames:
         module_name = filename[:-3]  # Remove .py extension
         absolute_module_path = _get_class_module(module_name)
         module = importlib.import_module(absolute_module_path)
-        # Check if the class exists in the module
         if hasattr(module, classname):
             adapter_class = getattr(module, classname)
             if issubclass(adapter_class, BaseAdapter):
-                # Instantiate the class with kwargs
-                return adapter_class(**kwargs)
+                # Get the signature of the constructor
+                constructor_signature = inspect.signature(adapter_class.__init__)
+                # Filter args to only include valid parameters, excluding 'self'
+                valid_args = {k: v for k, v in args.items() if k in constructor_signature.parameters and k != 'self'}
+                # Instantiate the class with filtered kwargs
+                return adapter_class(**valid_args)
     raise ValueError(f"Adapter class {classname} not found in adapters directory.")
