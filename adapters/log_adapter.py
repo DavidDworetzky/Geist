@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from adapters.base_adapter import BaseAdapter
 from typing import List
-import datetime
+from datetime import datetime
 
 class LogAdapter(BaseAdapter):
     '''
