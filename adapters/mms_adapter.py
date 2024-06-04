@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from adapters.base_adapter import BaseAdapter
+from adapters.inert_adapter import InertAdapter
 from typing import List
 from transformers import Wav2Vec2ForCTC, AutoProcessor
 import torch
 
-class MMSAdapter(BaseAdapter):
+class MMSAdapter(InertAdapter):
     '''
     MMSAdapter is an adapter for Meta's MMS Speech to Text API.
     '''
