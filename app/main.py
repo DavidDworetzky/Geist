@@ -70,7 +70,8 @@ def create_app():
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         agent.initialize(task_prompt.prompt)
         agent.tick()
-        return agent.state()
+        state_snapshot = agent.state()
+        return state_snapshot
 
 
     @app.post("/phase_out")
