@@ -151,6 +151,7 @@ class GPT4Agent(BaseAgent):
                 execution_result = self._transform_completions(execution_result)
                 tasks_to_execute = [task.strip() for result in execution_result for task in result.split('|')]
                 self._agent_context.execution_context = tasks_to_execute
+                return True
             else:
                 raise Exception("No tasks available in task context for execution.")
             
