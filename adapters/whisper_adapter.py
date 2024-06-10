@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
-from adapters.base_adapter import BaseAdapter
+from adapters.inert_adapter import InertAdapter
 from typing import List
 import requests
 import json
 import tempfile
 import os
 
-class WhisperAdapter(BaseAdapter):
+class WhisperAdapter(InertAdapter):
     '''
     Whisper Adapter is an adapter for Open AI's speech to text model. 
     '''
