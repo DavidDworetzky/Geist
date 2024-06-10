@@ -63,9 +63,12 @@ def get_mock_gpt4_agent() -> MagicMock:
 
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
-def test_tick(complete_text, mock_gpt4_agent, gpt4agent, client):
+@patch('adapters.log_adapter.LogAdapter.log')
+def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_gpt4_agent.return_value = gpt4agent
+    log.side_effect = lambda output: print(output)
+    
     # Prepare the request payload
     payload = {
         "prompt": "Write a haiku"
@@ -79,4 +82,6 @@ def test_tick(complete_text, mock_gpt4_agent, gpt4agent, client):
     response_payload = response.json()
     print(response_payload)
     assert response_payload == {'world_context': ["You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler facts.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1", "You are a deep and thorough thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler facts.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2"], 'task_context': [], 'execution_context': []}
+
+    assert log.call_count == 2
 
