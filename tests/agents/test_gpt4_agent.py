@@ -26,7 +26,7 @@ def completions_generator(prompt: str) -> str:
         "completions":
         [
             {"text": f"""{{
-    \"class\" : \"log_adapter\",
+    \"class\" : \"LogAdapter\",
     \"function\": \"log\",
     \"parameters\": {{
         \"output\": \"logging a haiku!\"
