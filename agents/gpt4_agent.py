@@ -72,7 +72,8 @@ class GPT4Agent(BaseAgent):
         json_data = json.loads(function_json)
     
         # now, find our adapter class and call the relevant function on it.
-        adapter_class = self._agent_context.initialized_classes[json_data["class"]]
+        class_name = json_data["class"]
+        adapter_class = next(cls for cls_name, cls in self._agent_context.initialized_classes.items() if cls_name == class_name)
     
         # now, call the relevant function on the adapter_class through reflection
         function_to_call = getattr(adapter_class, json_data["function"])
