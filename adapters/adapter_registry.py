@@ -1,10 +1,15 @@
 import os
 import inspect
 import importlib
-from typing import List
+from typing import List, Any
 from adapters.base_adapter import BaseAdapter
 import inspect
+from dataclasses import dataclass
 
+@dataclass
+class AdapterWrapper:
+    name: str
+    instance: Any
 
 def _get_adapter_files() -> List[str]:
     directory = os.path.dirname(__file__)
@@ -32,7 +37,7 @@ def find_adapter_classes():
     return adapter_classes
 
 
-def init_adapter_class(classname: str, args: dict):
+def init_adapter_class(classname: str, args: dict) -> AdapterWrapper:
     '''
     Dynamically initializes an adapter class by name with the provided kwargs,
     only using the kwargs that are valid for the class's constructor.
@@ -51,5 +56,6 @@ def init_adapter_class(classname: str, args: dict):
                 valid_args = {k: v for k, v in args.items() if k in constructor_signature.parameters and k != 'self'}
                 # Instantiate the class with filtered kwargs
                 instance = adapter_class(**valid_args)
-                return instance
+                wrapper = AdapterWrapper(name = classname, instance = instance)
+                return wrapper
     raise ValueError(f"Adapter class {classname} not found in adapters directory.")
