@@ -8,12 +8,12 @@ from agents.gpt4_agent import GPT4Agent
 from agents.agent_context import AgentContext
 from dotenv import load_dotenv
 import os
+from app.environment import LoadEnvironmentDictionary
 
 openai_key = os.getenv("OPENAI_TOKEN")
 def get_envs() -> dict[str,str]:
-    return {
-        "openai_key" : openai_key,
-    }
+    return LoadEnvironmentDictionary()
+
 @pytest.fixture(scope="module")
 def app():
     # Create a version of our fastapi instance for testing

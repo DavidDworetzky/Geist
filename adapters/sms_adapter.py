@@ -8,11 +8,12 @@ class SMSAdapter(BaseAdapter):
     '''
     SMS Adapter sends a text via twilio to a target
     '''
-    def __init__(self, api_key:str, account_sid:str, source_number:str, **kwargs):
-        self.api_key = api_key
-        self.account_sid = account_sid
-        self.source_number = source_number
-        self.client = Client(account_sid, api_key)
+    def __init__(self, twilio_key:str, twilio_sid:str, twilio_source:str, **kwargs):
+        self.api_key = twilio_key
+        self.account_sid = twilio_sid
+        self.source_number = twilio_source
+        self.client = Client(twilio_sid, twilio_key)
+        
 
     def enumerate_actions(self) -> List[str]:
         return ["send_text"]
