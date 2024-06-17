@@ -55,7 +55,11 @@ def init_adapter_class(classname: str, args: dict) -> AdapterWrapper:
                 # Filter args to only include valid parameters, excluding 'self'
                 valid_args = {k: v for k, v in args.items() if k in constructor_signature.parameters and k != 'self'}
                 # Instantiate the class with filtered kwargs
-                instance = adapter_class(**valid_args)
-                wrapper = AdapterWrapper(name = classname, instance = instance)
-                return wrapper
+                try:
+                    instance = adapter_class(**valid_args)
+                    wrapper = AdapterWrapper(name = classname, instance = instance)
+                    return wrapper
+                except:
+                    return None
+
     raise ValueError(f"Adapter class {classname} not found in adapters directory.")

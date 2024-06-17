@@ -14,6 +14,7 @@ from app.models.database.database import Session
 from app.models.database.agent_preset import AgentPreset  
 from agents.agent_context import AgentContext  
 from app.models.agent import Agent
+from app.environment import LoadEnvironmentDictionary
 import uvicorn
 
 load_dotenv()
@@ -28,9 +29,7 @@ if enhanced_logging:
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 def get_envs() -> dict[str,str]:
-    return {
-        "openai_key" : openai_key,
-    }
+    return LoadEnvironmentDictionary()
 
 # App factory function
 def create_app():
