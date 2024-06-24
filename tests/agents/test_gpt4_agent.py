@@ -75,7 +75,7 @@ def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     }
 
     # Send a POST request to the /complete_text endpoint
-    response = client.post("/initialize_task_and_tick", json=payload)
+    response = client.post("agent/initialize_task_and_tick", json=payload)
 
     # Assert the response status code and content
     assert response.status_code == 200

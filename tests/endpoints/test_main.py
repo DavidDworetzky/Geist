@@ -31,7 +31,7 @@ def test_complete_text_endpoint(mock_gpt4_agent_class, client):
     }
 
     # Send a POST request to the /complete_text endpoint
-    response = client.post("/complete_text", json=payload)
+    response = client.post("agent/complete_text", json=payload)
 
     # Assert the response status code and content
     assert response.status_code == 200
