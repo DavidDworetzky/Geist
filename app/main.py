@@ -38,14 +38,10 @@ def create_app():
     #agent routes, for agentic flows.
     agent_router = APIRouter()
     #adapter routes, includes routes that address direct adapter calls.
+    adapter_router = APIRouter()
 
-
-
-    @app.get('/')
-    def version():
-        return {"Version": f"{api_version}"}
-
-    @app.post("/agent/complete_text")
+    # Agent routes using agent_router
+    @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         completions = agent.complete_text(
             prompt=params.prompt,
@@ -67,27 +63,35 @@ def create_app():
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
 
-    @app.post("/adapter/speech_to_text")
-    async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
-        return adapter.transcribe(file)
-
-    @app.post("/agent/initialize_task_and_tick")
+    @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         agent.initialize(task_prompt.prompt)
         agent.tick()
         state_snapshot = agent.state()
         return state_snapshot
 
-
-    @app.post("/agent/phase_out")
+    @agent_router.post("/phase_out")
     async def phase_out_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
         agent_to_phase.phase_out()
 
-    @app.post("/agent/phase_in")
+    @agent_router.post("/phase_in")
     async def phase_in_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
         agent_to_phase.phase_in()
+
+    # Adapter routes using adapter_router
+    @adapter_router.post("/speech_to_text")
+    async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
+        return adapter.transcribe(file)
+
+    # Register routers
+    app.include_router(agent_router, prefix="/agent")
+    app.include_router(adapter_router, prefix="/adapter")
+
+    @app.get('/')
+    def version():
+        return {"Version": f"{api_version}"}
 
     return app
 
