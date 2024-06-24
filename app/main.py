@@ -4,7 +4,7 @@ from typing import Optional
 import logging
 from app.models.completion import CompleteTextParams, InitializeAgentParams
 from agents.gpt4_agent import GPT4Agent
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, APIRouter
 from adapters.mms_adapter import MMSAdapter
 from dotenv import load_dotenv
 from agents import agent_context
@@ -35,11 +35,17 @@ def get_envs() -> dict[str,str]:
 def create_app():
     app = FastAPI()
 
+    #agent routes, for agentic flows.
+    agent_router = APIRouter()
+    #adapter routes, includes routes that address direct adapter calls.
+
+
+
     @app.get('/')
     def version():
         return {"Version": f"{api_version}"}
 
-    @app.post("/complete_text")
+    @app.post("/agent/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         completions = agent.complete_text(
             prompt=params.prompt,
@@ -61,11 +67,11 @@ def create_app():
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
 
-    @app.post("/speech_to_text")
+    @app.post("/adapter/speech_to_text")
     async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
         return adapter.transcribe(file)
 
-    @app.post("/initialize_task_and_tick")
+    @app.post("/agent/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
         agent.initialize(task_prompt.prompt)
         agent.tick()
@@ -73,12 +79,12 @@ def create_app():
         return state_snapshot
 
 
-    @app.post("/phase_out")
+    @app.post("/agent/phase_out")
     async def phase_out_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
         agent_to_phase.phase_out()
 
-    @app.post("/phase_in")
+    @app.post("/agent/phase_in")
     async def phase_in_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
         agent_to_phase.phase_in()
