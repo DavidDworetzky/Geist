@@ -128,12 +128,14 @@ class GPT4Agent(BaseAgent):
         if task:
             self._agent_context.task_context.append(task)
         if self.as_subprocess:
+            logging.log("Initializing agent with subprocess.")
             # Create a subprocess that runs one tick every second
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
 
             # Set the subprocess ID in our agent context
             self._agent_context.subprocess_id = process.pid
         else:
+            logging.log("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
             return None
 
