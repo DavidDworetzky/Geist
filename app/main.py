@@ -16,16 +16,19 @@ from agents.agent_context import AgentContext
 from app.models.agent import Agent
 from app.environment import LoadEnvironmentDictionary
 import uvicorn
+import json
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
+enhanced_logging = os.getenv("ENHANCED_LOGGING")
+enhanced_logging = json.loads(enhanced_logging.lower())
 
 #constants
 api_version = 0.1
 enhanced_logging = False
 
 if enhanced_logging:
-    logging.basicConfig()
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 def get_envs() -> dict[str,str]:
