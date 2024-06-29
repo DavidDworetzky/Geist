@@ -9,29 +9,29 @@ def completions_generator(prompt: str) -> str:
     is_function_prompt = 'function' in prompt
     is_task_prompt = 'actionable tasks' in prompt
     base_completion = {
-        "completions": 
+        "choices": 
         [
-            {"text": f"{prompt}:completion1"},
-            {"text": f"{prompt}:completion2"}
+            {"message": {'content': f"{prompt}:completion1"}},
+            {"message": {'content': f"{prompt}:completion2"}}
         ]
     }
     task_completion = {
-        "completions":
+        "choices":
         [
-            {"text" : "log the beginning of a haiku"},
-            {"text" : "log the end of a haiku"}
+            {"message" : {'content': "log the beginning of a haiku"}},
+            {"message" : {'content': "log the end of a haiku"}}
         ]
     }
     function_completion = {
-        "completions":
+        "choices":
         [
-            {"text": f"""{{
+            {"message": {'content': f"""{{
     \"class\" : \"LogAdapter\",
     \"function\": \"log\",
     \"parameters\": {{
         \"output\": \"logging a haiku!\"
     }}
-}}"""}
+}}"""}}
         ]
     }
     if is_function_prompt:

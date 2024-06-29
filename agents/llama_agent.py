@@ -1,11 +1,11 @@
 from agents.base_agent import BaseAgent
 from llama_cpp import Llama
 
-'''
-llama 2 class model agents.
-'''
 
 
+'''
+llama class model agents.
+'''
 WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler truths."""
@@ -14,7 +14,7 @@ TASK_TICK_PROMPT = f"You are a driven and focused individual. Given the main tas
 
 EXECUTION_TICK_PROMPT = "You are given a list of tasks and list of function calls that you can make. Given the state of the world, formulate a function call that will help you complete your task."
 
-class llama2agent(BaseAgent):
+class LlamaAgent(BaseAgent):
     def __init__(self, model_path, agent_context):
         self.model_path = model_path
         self.llm = Llama(model_path)

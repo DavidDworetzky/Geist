@@ -207,9 +207,12 @@ class GPT4Agent(BaseAgent):
 
     def _transform_completions(self, completion):
         try:
-            return list(map(lambda x: x['text'], completion['completions']))
+            choices_list = completion['choices']
+            transformed_content = list(map(lambda x: x['message']['content'], choices_list))
+            return transformed_content
         except Exception as e:
             logging.error(f"contents of completion, failed to destructure: {completion}, exception {e}")
+            raise Exception(f"completion failed to destructure: {completion}. Format interop failure. Is your LLM protocol returning the correct format?")
 
     def tick_world(self):
         '''
