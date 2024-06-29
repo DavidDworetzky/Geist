@@ -6,6 +6,7 @@ import os
 import signal
 import psutil
 import json
+import logging
 
 WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
@@ -205,7 +206,10 @@ class GPT4Agent(BaseAgent):
             return False
 
     def _transform_completions(self, completion):
-        return list(map(lambda x: x['text'], completion['completions']))
+        try:
+            return list(map(lambda x: x['text'], completion['completions']))
+        except Exception as e:
+            logging.error(f"contents of completion, failed to destructure: {completion}, exception {e}")
 
     def tick_world(self):
         '''
