@@ -25,7 +25,6 @@ enhanced_logging = json.loads(enhanced_logging.lower())
 
 #constants
 api_version = 0.1
-enhanced_logging = False
 
 if enhanced_logging:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
