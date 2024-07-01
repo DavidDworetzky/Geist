@@ -6,6 +6,8 @@ import os
 import signal
 import psutil
 import json
+import logging
+from utils.logging import log_function_call
 
 WORLD_TICK_PROMPT = f"""You are a deep and thorough thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional important facts that you should add to the list of your knowledge. 
@@ -127,12 +129,14 @@ class GPT4Agent(BaseAgent):
         if task:
             self._agent_context.task_context.append(task)
         if self.as_subprocess:
+            logging.info("Initializing agent with subprocess.")
             # Create a subprocess that runs one tick every second
             process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
 
             # Set the subprocess ID in our agent context
             self._agent_context.subprocess_id = process.pid
         else:
+            logging.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
             return None
 
@@ -147,7 +151,8 @@ class GPT4Agent(BaseAgent):
             self._agent_context.subprocess_id = None
         else:
             raise Exception("No subprocess ID set in agent context.")
-        
+    
+    @log_function_call
     def _pop_and_add_execution_tasks(self):
             if self._agent_context.task_context:
                 task_to_execute = self._agent_context.task_context.pop(0)
@@ -160,6 +165,7 @@ class GPT4Agent(BaseAgent):
             else:
                 raise Exception("No tasks available in task context for execution.")
             
+    @log_function_call
     def _clear_execution_tasks(self):
         results = []
         for task in self._agent_context.execution_context:
@@ -170,7 +176,7 @@ class GPT4Agent(BaseAgent):
             result = result[0]
             retries = 0
 
-            while not self._is_valid_function_json(result) or retries > 3:
+            while not self._is_valid_function_json(result) and retries < 3:
                 retries += 1
                 result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
                 result = self._transform_completions(result)
@@ -186,7 +192,9 @@ class GPT4Agent(BaseAgent):
         return results
         
 
+    @log_function_call
     def tick(self):
+        logging.info("Agent Tick.")
         # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
         # reason about the world, then.
         # pop elements of agent context tasks for execution
@@ -205,8 +213,15 @@ class GPT4Agent(BaseAgent):
             return False
 
     def _transform_completions(self, completion):
-        return list(map(lambda x: x['text'], completion['completions']))
+        try:
+            choices_list = completion['choices']
+            transformed_content = list(map(lambda x: x['message']['content'], choices_list))
+            return transformed_content
+        except Exception as e:
+            logging.error(f"contents of completion, failed to destructure: {completion}, exception {e}")
+            raise Exception(f"completion failed to destructure: {completion}. Format interop failure. Is your LLM protocol returning the correct format?")
 
+    @log_function_call
     def tick_world(self):
         '''
         Advances the state of the world context, reasoning about the world state.

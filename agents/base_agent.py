@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from agents.agent_context import AgentContext
+import logging
 
 class BaseAgent(ABC):
 
@@ -35,6 +36,7 @@ class BaseAgent(ABC):
         self.tick_execution()
 
     def state(self):
+        logging.info("getting agent state.")
         return {
             "world_context" : self._agent_context.world_context,
             "task_context" : self._agent_context.task_context,
