@@ -176,7 +176,7 @@ class GPT4Agent(BaseAgent):
             result = result[0]
             retries = 0
 
-            while not self._is_valid_function_json(result) or retries > 3:
+            while not self._is_valid_function_json(result) and retries < 3:
                 retries += 1
                 result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
                 result = self._transform_completions(result)
