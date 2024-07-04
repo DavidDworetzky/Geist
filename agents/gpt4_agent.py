@@ -183,7 +183,8 @@ class GPT4Agent(BaseAgent):
                 result = result[0]
 
             if not self._is_valid_function_json(result):
-                raise Exception("Exceeded retries for valid function call JSON")
+                logging.error(f'Invaild result for function call is: {result}')
+                raise Exception("Exceeded retries for valid function call JSON.")
             
             output = self._take_json_and_call_function(result)
             results.append(output)
