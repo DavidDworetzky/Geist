@@ -111,6 +111,7 @@ def get_default_agent_context():
     try:
         # Query for the agent preset with name "Default Context"
         default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
+        logging.info(f"Default agent preset: {default_preset}")
         agent_settings = AgentSettings(
             name=default_preset.name,
             version=default_preset.version,
