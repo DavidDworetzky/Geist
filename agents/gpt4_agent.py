@@ -13,7 +13,7 @@ WORLD_TICK_PROMPT = f"""You are a meticulous thinker.
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 
-TASK_TICK_PROMPT = f"You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character"
+TASK_TICK_PROMPT = f"You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
 
 FUNCTION_CALL_JSON = """
 {
