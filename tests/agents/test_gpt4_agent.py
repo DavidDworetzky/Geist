@@ -89,5 +89,5 @@ def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     'task_context': [],
     'execution_context': []
     }
-    assert log.call_count == 2
+    assert log.call_count == 1
 
