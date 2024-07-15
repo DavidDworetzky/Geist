@@ -15,3 +15,5 @@ class AgentSettings:
     presence_penalty: float = 0
     echo: bool = False
     interactive_only: bool = False
+    #optional processiung for agents
+    include_world_processing = False

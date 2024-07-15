@@ -29,13 +29,15 @@ class AgentPreset(Base):
     prompt = Column(String)
     #interactive_only - is not an independent agent.
     interactive_only = Column(Boolean)
+    # optional processing settings
+    process_world = Column(Boolean)
     #restriction relationships
     restrictions = relationship("Restriction", back_populates="agent_preset")
     create_date = Column(DateTime)
     update_date = Column(DateTime)
 
     @classmethod
-    def upsert_agent_preset(cls, name, version, description, max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty, tags, working_context_length, long_term_context_length, agent_type, prompt, interactive_only):
+    def upsert_agent_preset(cls, name, version, description, max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty, tags, working_context_length, long_term_context_length, agent_type, prompt, interactive_only, process_world):
         """
         Upserts an AgentPreset entity into the database.
         """
@@ -59,6 +61,7 @@ class AgentPreset(Base):
                 existing_preset.agent_type = agent_type
                 existing_preset.prompt = prompt
                 existing_preset.interactive_only = interactive_only
+                existing_preset.process_world = process_world
             else:
                 # If doesn't exist, create new
                 new_preset = cls(
@@ -77,6 +80,7 @@ class AgentPreset(Base):
                     agent_type=agent_type,
                     prompt=prompt,
                     interactive_only=interactive_only
+                    process_world=process_world
                 )
                 session.add(new_preset)
             session.commit()
