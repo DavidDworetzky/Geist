@@ -35,6 +35,7 @@ def main(to_commit: bool, overwrite: bool):
             agent_type="general",
             prompt="Hello, how can I assist you today?",
             interactive_only=False,
+            process_world=False,
             create_date=datetime.datetime.now(),
             update_date=datetime.datetime.now()
         )

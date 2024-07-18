@@ -79,7 +79,7 @@ class AgentPreset(Base):
                     long_term_context_length=long_term_context_length,
                     agent_type=agent_type,
                     prompt=prompt,
-                    interactive_only=interactive_only
+                    interactive_only=interactive_only,
                     process_world=process_world
                 )
                 session.add(new_preset)
