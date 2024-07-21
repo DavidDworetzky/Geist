@@ -9,7 +9,7 @@ import json
 import logging
 from utils.logging import log_function_call
 
-WORLD_TICK_PROMPT = f"""You are a meticulous thinker. 
+WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 

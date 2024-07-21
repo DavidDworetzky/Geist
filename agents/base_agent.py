@@ -31,7 +31,8 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def tick(self):
-        self.tick_world()
+        if self._agent_context.settings.include_world_processing:
+            self.tick_world()
         self.tick_tasks()
         self.tick_execution()
 
