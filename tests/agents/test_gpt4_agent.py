@@ -102,7 +102,6 @@ def test_tick_with_world_processing(log, complete_text, mock_gpt4_agent, gpt4age
     assert response.status_code == 200
     response_payload = response.json()
 
-
     print(response_payload)
     assert response_payload == {
     'world_context': [
