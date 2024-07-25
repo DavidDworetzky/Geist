@@ -1,13 +1,20 @@
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
+from agents.gpt4_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
 from app.main import app
+
+def is_function_prompt(prompt: str) -> bool:
+    return 'Only call functions that are listed in our adapter list.' in prompt
+
+def is_task_prompt(prompt: str) -> bool:
+    return 'actionable tasks' in prompt
 
 def completions_generator(prompt: str) -> str:
     '''
     Trivial mock completions function that outputs a modified version of the prompt for the output. 
     '''
-    is_function_prompt = 'function' in prompt
-    is_task_prompt = 'actionable tasks' in prompt
+    is_function_prompt_flag = is_function_prompt(prompt)
+    is_task_prompt_flag = is_task_prompt(prompt)
     base_completion = {
         "choices": 
         [
@@ -34,10 +41,10 @@ def completions_generator(prompt: str) -> str:
 }}"""}}
         ]
     }
-    if is_function_prompt:
+    if is_function_prompt_flag:
         return function_completion
     
-    if is_task_prompt:
+    if is_task_prompt_flag:
         return task_completion
     
     return base_completion
@@ -61,6 +68,11 @@ def get_mock_gpt4_agent() -> MagicMock:
     mock_agent.complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_agent._agent_context = get_mock_context()
     return mock_agent
+
+def test_assert_prompt_invariants():
+    assert not is_function_prompt(WORLD_TICK_PROMPT) and not is_task_prompt(WORLD_TICK_PROMPT)
+    assert is_task_prompt(TASK_TICK_PROMPT) and not is_function_prompt(TASK_TICK_PROMPT)
+    assert not is_task_prompt(EXECUTION_TICK_PROMPT) and is_function_prompt(EXECUTION_TICK_PROMPT)
 
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
