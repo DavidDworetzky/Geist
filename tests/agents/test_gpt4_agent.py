@@ -2,6 +2,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from agents.gpt4_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
 from app.main import app
+import pytest
 
 def is_function_prompt(prompt: str) -> bool:
     return 'Only call functions that are listed in our adapter list.' in prompt
@@ -49,35 +50,42 @@ def completions_generator(prompt: str) -> str:
     
     return base_completion
 
-def get_mock_context() -> dict[str, str]:
+def get_mock_context(include_world_processing: bool = False) -> dict[str, str]:
     context = MagicMock()
     state = {
         'world_context' : '',
         'task_context' : '',
         'execution_context' : '',
         'ticks' : 0,
-        'include_world_processing': False
+        'include_world_processing': include_world_processing
     }
     context.world_context.return_value = state['world_context']
     context.task_context.return_value = state['task_context']
     context.execution_context.return_value = state['execution_context']
     return context
 
-def get_mock_gpt4_agent() -> MagicMock:
+mock_context_variations = [
+    get_mock_context(include_world_processing=False), get_mock_context(include_world_processing=True)
+]
+
+def get_mock_gpt4_agent(mock_context: any) -> MagicMock:
     mock_agent = MagicMock()
     mock_agent.complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
-    mock_agent._agent_context = get_mock_context()
+    mock_agent._agent_context = mock_context
     return mock_agent
+
+mock_gpt4_agent_variations = [get_mock_gpt4_agent(context) for context in mock_context_variations]
 
 def test_assert_prompt_invariants():
     assert not is_function_prompt(WORLD_TICK_PROMPT) and not is_task_prompt(WORLD_TICK_PROMPT)
     assert is_task_prompt(TASK_TICK_PROMPT) and not is_function_prompt(TASK_TICK_PROMPT)
     assert not is_task_prompt(EXECUTION_TICK_PROMPT) and is_function_prompt(EXECUTION_TICK_PROMPT)
 
+@pytest.mark.parametrize("mock_gpt4_agent", mock_gpt4_agent_variations)
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
 @patch('adapters.log_adapter.LogAdapter.log')
-def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
+def test_tick_with_world_processing(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_gpt4_agent.return_value = gpt4agent
     log.side_effect = lambda output: print(output)
@@ -93,6 +101,8 @@ def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     # Assert the response status code and content
     assert response.status_code == 200
     response_payload = response.json()
+
+
     print(response_payload)
     assert response_payload == {
     'world_context': [
@@ -103,4 +113,7 @@ def test_tick(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     'execution_context': []
     }
     assert log.call_count == 1
+
+
+
 
