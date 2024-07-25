@@ -29,6 +29,7 @@ def upgrade() -> None:
     sa.Column('execution_context', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('agent_id')
     )
+    # add process world column
     op.add_column('agent_preset', sa.Column('process_world', sa.Boolean(), nullable=True))
     # ### end Alembic commands ###
 

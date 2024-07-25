@@ -16,4 +16,4 @@ class AgentSettings:
     echo: bool = False
     interactive_only: bool = False
     #optional processiung for agents
-    include_world_processing = False
+    include_world_processing: bool = False

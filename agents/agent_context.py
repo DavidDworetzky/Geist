@@ -26,6 +26,7 @@ class AgentContext():
         self.settings = settings
         self.agent_id = agent_id
         self.envs = envs
+        self.include_world_processing = include_world_processing
 
         if self.envs and len(self.envs.keys()) > 0:
             self.initialized_classes = [init_adapter_class(cls[0], self.envs) for cls in self.execution_classes if init_adapter_class(cls[0], self.envs) is not None]

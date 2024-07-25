@@ -48,7 +48,8 @@ def get_mock_context() -> dict[str, str]:
         'world_context' : '',
         'task_context' : '',
         'execution_context' : '',
-        'ticks' : 0
+        'ticks' : 0,
+        'include_world_processing': False
     }
     context.world_context.return_value = state['world_context']
     context.task_context.return_value = state['task_context']

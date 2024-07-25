@@ -94,7 +94,7 @@ class GPT4Agent(BaseAgent):
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
         context_string = ""
-        if world_context:
+        if world_context and self._agent_context.include_world_processing:
             context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
         if task_context:
             context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
