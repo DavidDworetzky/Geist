@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 import os
 from app.environment import LoadEnvironmentDictionary
 
+def CreateAgentSettings(include_world_processing: bool = True):
+    return AgentSettings(name="default agent", version="1.0", description="default", include_world_processing=include_world_processing)
+
 openai_key = os.getenv("OPENAI_TOKEN")
 def get_envs() -> dict[str,str]:
     return LoadEnvironmentDictionary()
@@ -28,8 +31,17 @@ def client(app):
 
 @pytest.fixture(scope="module")
 def gpt4agent():
-    settings = AgentSettings(name="default agent", version="1.0", description="default")
+    settings = CreateAgentSettings(include_world_processing=True)
     env = get_envs()
     context = AgentContext(settings=settings, envs=env)
     api_key = None
     return GPT4Agent(api_key=api_key, agent_context=context)
+
+@pytest.fixture(scope="module")
+def process_world_variation_gpt4agents():
+    variant_settings = [CreateAgentSettings(include_world_processing=True), CreateAgentSettings(include_world_processing=False)] 
+    env = get_envs()
+    contexts = [AgentContext(settings=setting, envs=env) for setting in variant_settings]
+    api_key = None
+    return [GPT4Agent(api_key=api_key, agent_context=context) for context in contexts]
+

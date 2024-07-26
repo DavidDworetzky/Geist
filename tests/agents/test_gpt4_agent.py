@@ -81,11 +81,10 @@ def test_assert_prompt_invariants():
     assert is_task_prompt(TASK_TICK_PROMPT) and not is_function_prompt(TASK_TICK_PROMPT)
     assert not is_task_prompt(EXECUTION_TICK_PROMPT) and is_function_prompt(EXECUTION_TICK_PROMPT)
 
-@pytest.mark.parametrize("mock_gpt4_agent", mock_gpt4_agent_variations)
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
 @patch('adapters.log_adapter.LogAdapter.log')
-def test_tick_with_world_processing(log, complete_text, mock_gpt4_agent, gpt4agent, client):
+def test_tick_with_world_processing_parameters(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
     mock_gpt4_agent.return_value = gpt4agent
     log.side_effect = lambda output: print(output)
