@@ -122,7 +122,8 @@ def get_default_agent_context():
             top_p=default_preset.top_p,
             frequency_penalty=default_preset.frequency_penalty,
             presence_penalty=default_preset.presence_penalty,
-            interactive_only=default_preset.interactive_only
+            interactive_only=default_preset.interactive_only,
+            include_world_processing= default_preset.process_world,
         )
         if default_preset:
             # Create an agent context with the found preset

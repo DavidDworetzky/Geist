@@ -9,7 +9,7 @@ import json
 import logging
 from utils.logging import log_function_call
 
-WORLD_TICK_PROMPT = f"""You are a meticulous thinker. 
+WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 
@@ -94,7 +94,7 @@ class GPT4Agent(BaseAgent):
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
         context_string = ""
-        if world_context:
+        if world_context and self._agent_context.include_world_processing:
             context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
         if task_context:
             context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
@@ -207,7 +207,8 @@ class GPT4Agent(BaseAgent):
         # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
         # reason about the world, then.
         # pop elements of agent context tasks for execution
-        self.tick_world()
+        if self._agent_context.include_world_processing:
+            self.tick_world()
         self._pop_and_add_execution_tasks()
         self._clear_execution_tasks()
 
