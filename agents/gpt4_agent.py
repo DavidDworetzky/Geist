@@ -94,7 +94,7 @@ class GPT4Agent(BaseAgent):
     def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
         #get aggregated context for world, task and execution context if requested
         context_string = ""
-        if world_context:
+        if world_context and self._agent_context.include_world_processing:
             context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
         if task_context:
             context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
@@ -207,7 +207,8 @@ class GPT4Agent(BaseAgent):
         # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
         # reason about the world, then.
         # pop elements of agent context tasks for execution
-        self.tick_world()
+        if self._agent_context.include_world_processing:
+            self.tick_world()
         self._pop_and_add_execution_tasks()
         self._clear_execution_tasks()
 
