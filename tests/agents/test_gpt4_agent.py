@@ -119,7 +119,6 @@ def test_tick_with_prompt_and_world_processing_parameters(log, complete_text, mo
     mock_gpt4_agent.return_value = gpt4agent
     mock_gpt4_agent2.return_value = gpt4agent
     log.side_effect = lambda output: print(output)
-    print(process_world_variation_gpt4agents)
     
     # Prepare the request payload
     payload = {
