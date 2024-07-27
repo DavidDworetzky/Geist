@@ -101,8 +101,6 @@ def create_app():
 def get_gpt4_client():
     agent_context = get_default_agent_context()
     api_key = openai_key
-    print(f"Loading GPT4Agent from: {GPT4Agent.__module__}")
-    logging.info(f"Loading GPT4Agent from: {GPT4Agent.__module__}")
     return GPT4Agent(api_key=api_key, agent_context=agent_context)
 
 def get_default_agent_context():
