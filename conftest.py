@@ -31,7 +31,7 @@ def client(app):
 
 @pytest.fixture(scope="module")
 def gpt4agent():
-    settings = CreateAgentSettings(include_world_processing=False)
+    settings = CreateAgentSettings(include_world_processing=True)
     env = get_envs()
     context = AgentContext(settings=settings, envs=env)
     api_key = None
