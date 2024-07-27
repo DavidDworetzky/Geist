@@ -103,14 +103,11 @@ def test_tick_with_world_processing_parameters(log, complete_text, mock_gpt4_age
 
     print(response_payload)
     assert response_payload == {
-    'world_context': [
-        "You are a meticulous thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1",
-        "You are a meticulous thinker. \nGiven what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. \nDo not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2"
-    ],
+    'world_context': [],
     'task_context': [],
     'execution_context': []
     }
-    assert log.call_count == 1
+    assert log.call_count == 2
 
 
 
