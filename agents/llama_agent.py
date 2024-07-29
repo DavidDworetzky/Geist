@@ -8,7 +8,7 @@ import psutil
 import json
 import logging
 from utils.logging import log_function_call
-from agents.architectures.llama.generation import Llama
+from agents.architectures.llama.llama_transformers import LlamaTransformer
 
 WORLD_TICK_PROMPT = f"""You are a meticulous thinker. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -26,6 +26,8 @@ FUNCTION_CALL_JSON = """
     }
 }
 """
+
+SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You will be given context about the world, the task and functions you can call. Take the most direct and thorough way of satisfying these constraints."
 
 EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
 MAX_BATCH_SIZE = 1000
@@ -49,18 +51,11 @@ class LlamaAgent(BaseAgent):
         self.initialize()
     
     def _complete_llama_sequence(self, prompt:str):
-        generator = Llama.build(
-            ckpt_dir=self.ckpt_dir,
-            tokenizer_path=self.tokenizer_path,
-            max_seq_len=self._agent_context.settings.max_tokens,
-            max_batch_size=MAX_BATCH_SIZE,
-        )
+        llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
             
-        return generator.text_completion(
-            prompt,
-            max_gen_len=self._agent_context.settings.max_tokens,
-            temperature=self._agent_context.settings.temperature,
-            top_p=self._agent_context.settings.top_p,
+        return llama.complete(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=prompt
         )
 
 
