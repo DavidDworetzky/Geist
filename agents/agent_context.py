@@ -24,7 +24,6 @@ class AgentContext():
         # for keeping track of our subprocess id for later termination
         self.subprocess_id = subprocess_id
         self.settings = settings
-        self.agent_id = agent_id
         self.envs = envs
         self.include_world_processing = include_world_processing
 
