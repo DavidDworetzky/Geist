@@ -1,5 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
+from agents.agent_type import AgentType
 
 class CompleteTextParams(BaseModel):
     prompt: str
@@ -18,3 +19,4 @@ class CompleteTextParams(BaseModel):
 
 class InitializeAgentParams(BaseModel):
     prompt: str
+    agent_type: AgentType

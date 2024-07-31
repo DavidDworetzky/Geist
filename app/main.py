@@ -17,6 +17,8 @@ from app.models.agent import Agent
 from app.environment import LoadEnvironmentDictionary
 import uvicorn
 import json
+from agents.llama_agent import LlamaAgent
+from agents.agent_type import AgentType
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -97,11 +99,22 @@ def create_app():
 
     return app
 
-
 def get_gpt4_client():
     agent_context = get_default_agent_context()
     api_key = openai_key
     return GPT4Agent(api_key=api_key, agent_context=agent_context)
+
+def get_llama_agent():
+    agent_context = get_default_agent_context()
+    return LlamaAgent(agent_context = agent_context)
+
+agent_mappings = { 
+    AgentType.GPT : get_gpt4_client,
+    AgentType.LLAMA : get_llama_agent
+}
+
+def get_active_agent(type: AgentType):
+    return agent_mappings[type]()
 
 def get_default_agent_context():
     '''

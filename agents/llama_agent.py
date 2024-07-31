@@ -33,13 +33,7 @@ EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function cal
 MAX_BATCH_SIZE = 1000
 
 class LlamaAgent(BaseAgent):
-    def __init__(self, api_key, agent_context, ckpt_dir, as_subprocess=False):
-        self.api_key = api_key
-        self.base_url = "https://api.openai.com/v1/chat/completions"
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
+    def __init__(self, agent_context, ckpt_dir, as_subprocess=False):
         # call super constructor
         super().__init__(agent_context, as_subprocess)
 
