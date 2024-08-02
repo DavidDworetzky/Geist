@@ -17,6 +17,8 @@ from app.models.agent import Agent
 from app.environment import LoadEnvironmentDictionary
 import uvicorn
 import json
+from agents.llama_agent import LlamaAgent
+from agents.agent_type import AgentType
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -44,7 +46,12 @@ def create_app():
 
     # Agent routes using agent_router
     @agent_router.post("/complete_text")
-    async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
+    async def complete_text_endpoint(params: CompleteTextParams):
+        agent_type = AgentType[params.agent_type.upper()]
+        #parse agent_type from str to AgentType
+
+        agent = get_active_agent(agent_type)
+
         completions = agent.complete_text(
             prompt=params.prompt,
             max_tokens=params.max_tokens,
@@ -66,7 +73,10 @@ def create_app():
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
 
     @agent_router.post("/initialize_task_and_tick")
-    async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
+    async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
+        agent_type = AgentType[task_prompt.agent_type.upper()]
+        agent = get_active_agent(agent_type)
+
         agent.initialize(task_prompt.prompt)
         agent.tick()
         state_snapshot = agent.state()
@@ -97,11 +107,22 @@ def create_app():
 
     return app
 
-
 def get_gpt4_client():
     agent_context = get_default_agent_context()
     api_key = openai_key
     return GPT4Agent(api_key=api_key, agent_context=agent_context)
+
+def get_llama_agent():
+    agent_context = get_default_agent_context()
+    return LlamaAgent(agent_context = agent_context)
+
+agent_mappings = { 
+    AgentType.GPT4AGENT : get_gpt4_client,
+    AgentType.LLAMA : get_llama_agent
+}
+
+def get_active_agent(type: AgentType):
+    return agent_mappings[type]()
 
 def get_default_agent_context():
     '''
