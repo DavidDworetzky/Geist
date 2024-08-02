@@ -91,7 +91,8 @@ def test_tick_with_prompt(log, complete_text, mock_gpt4_agent, gpt4agent, client
     
     # Prepare the request payload
     payload = {
-        "prompt": "Write a haiku"
+        "prompt": "Write a haiku",
+        "agent_type" : "GPT4AGENT"
     }
 
     # Send a POST request to the /complete_text endpoint
@@ -122,7 +123,8 @@ def test_tick_with_prompt_and_world_processing_parameters(log, complete_text, mo
     
     # Prepare the request payload
     payload = {
-        "prompt": "Write a haiku"
+        "prompt": "Write a haiku",
+        "agent_type": "GPT4AGENT"
     }
 
     # Send a POST request to the /complete_text endpoint

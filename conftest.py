@@ -8,6 +8,7 @@ from agents.gpt4_agent import GPT4Agent
 from agents.agent_context import AgentContext
 from dotenv import load_dotenv
 import os
+from agents.llama_agent import LlamaAgent
 from app.environment import LoadEnvironmentDictionary
 
 def CreateAgentSettings(include_world_processing: bool = True):
@@ -44,4 +45,12 @@ def process_world_variation_gpt4agents():
     contexts = [AgentContext(settings=setting, envs=env) for setting in variant_settings]
     api_key = None
     return [GPT4Agent(api_key=api_key, agent_context=context) for context in contexts]
+
+@pytest.fixture(scope="module")
+def llama_agent():
+    settings = CreateAgentSettings(include_world_processing=True)
+    env = get_envs()
+    context = AgentContext(settings=settings, envs=env)
+    api_key = None
+    return LlamaAgent(ckpt_dir=None)
 
