@@ -10,7 +10,7 @@ import logging
 from utils.logging import log_function_call
 from agents.architectures.llama.llama_transformers import LlamaTransformer
 
-WORLD_TICK_PROMPT = f"""You are a meticulous thinker. 
+WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
 Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 
@@ -27,9 +27,11 @@ FUNCTION_CALL_JSON = """
 }
 """
 
+EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
+
+
 SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You will be given context about the world, the task and functions you can call. Take the most direct and thorough way of satisfying these constraints."
 
-EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
 MAX_BATCH_SIZE = 1000
 
 class LlamaAgent(BaseAgent):
