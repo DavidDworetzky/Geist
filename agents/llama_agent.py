@@ -46,7 +46,7 @@ class LlamaAgent(BaseAgent):
     def phase_in(self):
         self.initialize()
     
-    def _complete_llama_sequence(self, prompt:str):
+    def _complete_llama_sequence(self, prompt:str, max_tokens:int = None):
         llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
             
         return llama.complete(
@@ -119,26 +119,8 @@ class LlamaAgent(BaseAgent):
         frequency_penalty = self._agent_context.settings.frequency_penalty if self._agent_context.settings.frequency_penalty and not frequency_penalty else 0
         presence_penalty = self._agent_context.settings.presence_penalty if self._agent_context.settings.presence_penalty and not presence_penalty else 0
         
-        payload = {
-            "messages": [{"role": "user", "content": prompt}],
-            "model": "gpt-4",
-            "max_tokens": max_tokens,
-            "n": n,
-            "temperature": temperature,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
-        }
 
-        if stop is not None:
-            payload["stop"] = stop
-
-        response = requests.post(self.base_url, json=payload, headers=self.headers)
-
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
+        return self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None)
         
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.

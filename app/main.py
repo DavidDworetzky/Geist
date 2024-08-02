@@ -114,7 +114,7 @@ def get_gpt4_client():
 
 def get_llama_agent():
     agent_context = get_default_agent_context()
-    return LlamaAgent(agent_context = agent_context)
+    return LlamaAgent(agent_context = agent_context, ckpt_dir=None)
 
 agent_mappings = { 
     AgentType.GPT4AGENT : get_gpt4_client,
