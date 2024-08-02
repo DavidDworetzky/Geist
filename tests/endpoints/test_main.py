@@ -27,7 +27,8 @@ def test_complete_text_endpoint(mock_gpt4_agent_class, client):
         "echo": False,
         "best_of": 1,
         "prompt_tokens": None,
-        "response_format": "json"
+        "response_format": "json",
+        "agent_type": "GPT4Agent"
     }
 
     # Send a POST request to the /complete_text endpoint

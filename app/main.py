@@ -46,7 +46,12 @@ def create_app():
 
     # Agent routes using agent_router
     @agent_router.post("/complete_text")
-    async def complete_text_endpoint(params: CompleteTextParams, agent: GPT4Agent = Depends(get_gpt4_client)):
+    async def complete_text_endpoint(params: CompleteTextParams):
+        agent_type = AgentType[params.agent_type.upper()]
+        #parse agent_type from str to AgentType
+
+        agent = get_active_agent(agent_type)
+
         completions = agent.complete_text(
             prompt=params.prompt,
             max_tokens=params.max_tokens,
@@ -68,7 +73,10 @@ def create_app():
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
 
     @agent_router.post("/initialize_task_and_tick")
-    async def initialize_and_tick_agent(task_prompt: InitializeAgentParams, agent: GPT4Agent = Depends(get_gpt4_client)):
+    async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
+        agent_type = AgentType[task_prompt.agent_type.upper()]
+        agent = get_active_agent(agent_type)
+
         agent.initialize(task_prompt.prompt)
         agent.tick()
         state_snapshot = agent.state()
@@ -109,7 +117,7 @@ def get_llama_agent():
     return LlamaAgent(agent_context = agent_context)
 
 agent_mappings = { 
-    AgentType.GPT : get_gpt4_client,
+    AgentType.GPT4AGENT : get_gpt4_client,
     AgentType.LLAMA : get_llama_agent
 }
 
