@@ -27,6 +27,7 @@ enhanced_logging = json.loads(enhanced_logging.lower())
 
 #constants
 api_version = 0.1
+default_agent_type = AgentType.LLAMA
 
 if enhanced_logging:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -47,7 +48,7 @@ def create_app():
     # Agent routes using agent_router
     @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams):
-        agent_type = AgentType[params.agent_type.upper()]
+        agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
         #parse agent_type from str to AgentType
 
         agent = get_active_agent(agent_type)
@@ -74,7 +75,7 @@ def create_app():
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
-        agent_type = AgentType[task_prompt.agent_type.upper()]
+        agent_type = agent_type = AgentType[task_prompt.agent_type.upper()] if task_prompt.agent_type else default_agent_type
         agent = get_active_agent(agent_type)
 
         agent.initialize(task_prompt.prompt)

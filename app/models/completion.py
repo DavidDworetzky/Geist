@@ -16,8 +16,8 @@ class CompleteTextParams(BaseModel):
     prompt_tokens: Optional[List[int]] = None
     response_format: str = "text"
     #more completion params for LLMs 
-    agent_type: str
+    agent_type: Optional[str] = None
 
 class InitializeAgentParams(BaseModel):
     prompt: str
-    agent_type: str
+    agent_type: Optional[str] = None
