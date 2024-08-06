@@ -26,7 +26,7 @@ enhanced_logging = os.getenv("ENHANCED_LOGGING")
 enhanced_logging = json.loads(enhanced_logging.lower())
 
 #constants
-api_version = 0.1
+api_version = 1.0
 default_agent_type = AgentType.LLAMA
 
 if enhanced_logging:
