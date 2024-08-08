@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 ENV GEIST_HOME /opt/geist
 ENV PATH="/root/miniconda3/bin:${PATH}"
@@ -22,7 +22,7 @@ COPY environment.yml .
 
 COPY . .
 
-VOLUME /graphql
+VOLUME /rest
 
 EXPOSE 5000
 EXPOSE 5678
