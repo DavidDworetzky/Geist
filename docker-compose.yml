@@ -1,4 +1,4 @@
-version: 2.0
+version: "3"
 
 services:
   backend:
@@ -6,8 +6,8 @@ services:
       context: .
       dockerfile: dockerfile
     environment:
-    - DATABASE_URI=postgresql://geist:geist@db:5432/db
-    - DEBUG=$(DEBUG:-}
+      - DATABASE_URI=postgresql://geist:geist@db:5432/db
+      - DEBUG=${DEBUG:-}
     depends_on:
       - db
     env_file:
@@ -21,16 +21,23 @@ services:
       test_net:
         aliases:
           - geistlocal.com
-db:
-  image: postgres:14.9
-  restart: always
-  ports:
-    - "5432:5432"
-  volumes:
-    - postgres_data:/var/lib/postgresql/data
-  environment:
-    - POSTGRES_USER=geist
-    - POSTGRES_PASSWORD=geist
-    - POSTGRES_DB=db
 
+  db:
+    image: postgres:14.9
+    restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=geist
+      - POSTGRES_PASSWORD=geist
+      - POSTGRES_DB=db
+    networks:
+      - test_net
 
+networks:
+  test_net:
+
+volumes:
+  postgres_data:
