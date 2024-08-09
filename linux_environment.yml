@@ -1,4 +1,4 @@
-name: geist-mac
+name: geist-linux
 channels:
   - anaconda
   - conda-forge
@@ -153,5 +153,4 @@ dependencies:
       - torch==2.2.1
       - torchaudio==2.2.1
       - torchvision==0.17.1
-prefix: /Users/daviddworetzky/miniconda3/envs/geist-mac
 
