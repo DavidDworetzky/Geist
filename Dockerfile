@@ -18,7 +18,8 @@ RUN wget \
     && bash Miniconda3-latest-Linux-x86_64.sh -b \
     && rm -f Miniconda3-latest-Linux-x86_64.sh 
 RUN conda --version
-COPY environment.yml .
+COPY linux_environment.yml .
+RUN conda env create -f linux_environment.yml
 
 COPY . .
 
