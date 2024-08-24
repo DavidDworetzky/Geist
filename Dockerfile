@@ -1,18 +1,19 @@
-FROM python:3.10
+FROM --platform=linux/amd64 python:3.10
 
 ENV GEIST_HOME /opt/geist
 ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
 WORKDIR $GEIST_HOME
 
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     make \
     curl \
     wget \
     bzip2 \
-    libc6-compat
+    qemu-user-static
+
 RUN wget \
     https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
     && mkdir /root/.conda \
