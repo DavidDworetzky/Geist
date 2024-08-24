@@ -1,8 +1,7 @@
-FROM --platform=linux/amd64 python:3.10
+FROM --platform=linux/arm64 python:3.10
 
 ENV GEIST_HOME /opt/geist
 ENV PATH="/root/miniconda3/bin:${PATH}"
-ARG PATH="/root/miniconda3/bin:${PATH}"
 WORKDIR $GEIST_HOME
 
 RUN apt-get update && apt-get install -y \
@@ -11,14 +10,13 @@ RUN apt-get update && apt-get install -y \
     make \
     curl \
     wget \
-    bzip2 \
-    qemu-user-static
+    bzip2
 
-RUN wget \
-    https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-    && mkdir /root/.conda \
-    && bash Miniconda3-latest-Linux-x86_64.sh -b \
-    && rm -f Miniconda3-latest-Linux-x86_64.sh 
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh && \
+    mkdir /root/.conda && \
+    bash miniconda.sh -b && \
+    rm -f miniconda.sh
+
 RUN conda --version
 COPY linux_environment.yml .
 
