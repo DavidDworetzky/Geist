@@ -22,11 +22,12 @@ COPY linux_environment.yml .
 
 COPY . .
 
-RUN chmod +x entrypoint.sh
+RUN chmod +x *.sh
 
 VOLUME /rest
 
 EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
+RUN ./conda-install.sh
 ENTRYPOINT ["./entrypoint.sh"]

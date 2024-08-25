@@ -54,6 +54,10 @@ flowchart LR
 1. Run `docker compose up`
 
 
+## Supported Environments
+1. Mac OS - ARM (m series) with linux container.
+
+
 
 
 
