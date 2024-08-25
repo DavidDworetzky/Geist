@@ -1,10 +1,10 @@
 #!/bin/sh
 set -e
 conda clean --all --yes
-conda env remove --name geist-linux
-conda env create -f environment.yml
+conda env remove --name geist-mac-docker
+conda env create -f mac_arm_environment.yml
 
-conda activate geist-linux
+conda activate geist-mac-docker
 mkdir -p output
 
 python bootstrap.py
