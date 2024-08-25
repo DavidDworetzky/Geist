@@ -13,7 +13,7 @@ services:
     env_file:
       - ".env"
     volumes:
-      - ~/docker_mounts/geist:/opt/geist
+      - ./:/opt/geist
     ports:
       - "5001:5000"
       - "5678:5678"
