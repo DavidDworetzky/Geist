@@ -22,6 +22,8 @@ COPY linux_environment.yml .
 
 COPY . .
 
+RUN chmod +x entrypoint.sh
+
 VOLUME /rest
 
 EXPOSE 5000

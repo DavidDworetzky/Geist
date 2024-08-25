@@ -1,5 +1,8 @@
 #!/bin/sh
 set -e
+
+cd /opt/geist
+
 conda clean --all --yes
 conda env remove --name geist-mac-docker
 conda env create -f mac_arm_environment.yml
