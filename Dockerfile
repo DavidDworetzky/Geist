@@ -30,4 +30,5 @@ EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
 RUN ./conda-install.sh
-ENTRYPOINT ["./entrypoint.sh"]
+RUN conda init bash
+ENTRYPOINT ["/bin/bash", "--login", "-c", "./entrypoint.sh"]
