@@ -26,9 +26,13 @@ RUN chmod +x *.sh
 
 VOLUME /rest
 
+# Make RUN commands use the new environment
+RUN echo "conda activate myenv" >> ~/.bashrc
+SHELL ["/bin/bash", "--login", "-c"]
+
 EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
 RUN ./conda-install.sh
 RUN conda init bash
-ENTRYPOINT ["/bin/bash", "--login", "-c", "./entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]
