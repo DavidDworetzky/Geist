@@ -26,10 +26,12 @@ RUN chmod +x *.sh
 
 VOLUME /rest
 
+# Make RUN commands use the new environment
+SHELL ["conda", "run", "-n", "geist-linux-docker", "/bin/bash", "-c"]
+
 EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
 RUN ./conda-install.sh
-RUN ENV PATH /opt/conda/envs/env/bin:$PATH
 RUN conda init bash
 ENTRYPOINT ["/bin/bash", "--login", "-c", "./entrypoint.sh"]
