@@ -4,7 +4,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: dockerfile
+      dockerfile: Dockerfile
     environment:
       - DATABASE_URI=postgresql://geist:geist@db:5432/db
       - DEBUG=${DEBUG:-}
@@ -38,15 +38,15 @@ services:
 
   frontend:
     build:
-      context: ./client  # Adjust this path to where your frontend code is located
-      dockerfile: Dockerfile  # Create a Dockerfile for your frontend if you haven't already
+      context: .
+      dockerfile: client/geist/Dockerfile
     ports:
-      - "3000:3000"  # Assuming your React app runs on port 3000
+      - "3000:3000"
     volumes:
-      - ./frontend:/app  # For hot-reloading during development
-      - /app/node_modules  # To prevent overwriting node_modules with the host's
+      - ./client/geist:/app
+      - /app/node_modules
     environment:
-      - NODE_ENV=development  # Set to production for production builds
+      - NODE_ENV=development
     depends_on:
       - backend
     networks:
