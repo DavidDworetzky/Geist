@@ -2,8 +2,9 @@ import React from 'react';
 import logo from './logo.svg';
 import './App.css';
 import Navigation from './Navigation';
-import platz from './platz.png';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Home from './Home';
+
 
 function App() {
   const links = [{
@@ -26,9 +27,9 @@ function App() {
     <div id="Container" className="Wrapper">
       <aside className="App-header">
       <Navigation navigationElements={links}/>
-        <img src={platz} className="App-logo" alt="logo" />
+        <img src={logo} className="App-logo" alt="logo" />
         <p>
-          Welcome to Platz, an open source LLM Workbench!
+          Welcome to Geist!, an open source LLM Workbench!
         </p>
         <a
           className="App-link"
@@ -43,9 +44,6 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Home/>}/>
-            <Route path="/search" element={<Search/>}/>
-            <Route path="/generate" element={<Generate/>}/>
-            <Route path="/transform" element={<Transform/>}/>
           </Routes>
         </BrowserRouter>
 
