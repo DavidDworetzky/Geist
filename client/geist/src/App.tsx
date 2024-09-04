@@ -3,6 +3,8 @@ import logo from './logo.svg';
 import './App.css';
 import Navigation from './Navigation';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Home from './Home';
+
 
 function App() {
   const links = [{
@@ -42,9 +44,6 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Home/>}/>
-            <Route path="/search" element={<Search/>}/>
-            <Route path="/generate" element={<Generate/>}/>
-            <Route path="/transform" element={<Transform/>}/>
           </Routes>
         </BrowserRouter>
 
