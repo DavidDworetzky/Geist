@@ -27,7 +27,7 @@ RUN chmod +x *.sh
 VOLUME /rest
 
 # Make RUN commands use the new environment
-RUN echo "conda activate myenv" >> ~/.bashrc
+RUN echo "conda activate geist-linux-docker" >> ~/.bashrc
 SHELL ["/bin/bash", "--login", "-c"]
 
 EXPOSE 5000
