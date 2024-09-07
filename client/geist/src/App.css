@@ -36,3 +36,44 @@
     transform: rotate(360deg);
   }
 }
+
+.Wrapper {
+  display: flex;
+  height: 100vh;
+}
+
+.App-header {
+  width: 25vw;
+  min-height: 100vh;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.Content {
+  flex-grow: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+nav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  list-style-type: none;  /* Add this line to remove bullets */
+}
+
+nav a {
+  margin-bottom: 10px;
+  text-decoration: none;
+  color: white;
+  display: flex;
+  align-items: center;
+}
+
+nav svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  fill: currentColor;
+}
