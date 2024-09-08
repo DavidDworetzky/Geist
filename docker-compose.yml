@@ -8,6 +8,7 @@ services:
     environment:
       - DATABASE_URI=postgresql://geist:geist@db:5432/db
       - DEBUG=${DEBUG:-}
+      - DB_HOST=db
     depends_on:
       - db
     env_file:
@@ -32,7 +33,7 @@ services:
     environment:
       - POSTGRES_USER=geist
       - POSTGRES_PASSWORD=geist
-      - POSTGRES_DB=geist
+      - POSTGRES_DB=db
     networks:
       - test_net
 

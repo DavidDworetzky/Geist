@@ -15,7 +15,7 @@ db_host = os.getenv("DB_HOST")
 DB_NAME = "geist"
 DB_USER = "postgres"
 DEFAULT_DB_NAME = "postgres"
-DB_HOST = "geist" if not db_host else db_host
+DB_HOST = "db" if not db_host else db_host
 #Create database if it doesn't exist with psycopg2
 
 conn = connect(
