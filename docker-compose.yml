@@ -32,7 +32,7 @@ services:
     environment:
       - POSTGRES_USER=geist
       - POSTGRES_PASSWORD=geist
-      - POSTGRES_DB=db
+      - POSTGRES_DB=geist
     networks:
       - test_net
 

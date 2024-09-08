@@ -10,11 +10,12 @@ import os
 load_dotenv()
 
 pwd = os.getenv("POSTGRES_PWD")
+db_host = os.getenv("DB_HOST")
 
 DB_NAME = "geist"
 DB_USER = "postgres"
 DEFAULT_DB_NAME = "postgres"
-DB_HOST = "localhost"
+DB_HOST = "geist" if not db_host else db_host
 #Create database if it doesn't exist with psycopg2
 
 conn = connect(

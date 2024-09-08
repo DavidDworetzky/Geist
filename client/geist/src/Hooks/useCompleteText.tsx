@@ -19,7 +19,7 @@ const params = {
   best_of: 0,
   prompt_tokens: [0],
   response_format: "text",
-  agent_type: "string"
+  agent_type: "LLAMA"
 };
 
 const useCompleteText = () => {

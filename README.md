@@ -44,6 +44,7 @@ flowchart LR
     - TWILIO_SOURCE = SOURCE_NUMBER
     - TWILIO_TOKEN = API_TOKEN
     - ENHANCED_LOGGING = FALSE
+    - DB_HOST = localhost
 
 
 client/geist/.env settings:
