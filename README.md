@@ -36,7 +36,7 @@ flowchart LR
 1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
 
 ## Setting up your environment
-1. Make sure that your .env file is initialized with the following values:
+1. Make sure that your .env file is initialized - the following values are included but you may not need to set all of these depending on agent utilization and DEV/PROD settings:
     - OPENAI_TOKEN = TOKEN
     - POSTGRES_PWD = PASSWORD
     - POSTGRES_DB = geist
@@ -44,6 +44,10 @@ flowchart LR
     - TWILIO_SOURCE = SOURCE_NUMBER
     - TWILIO_TOKEN = API_TOKEN
     - ENHANCED_LOGGING = FALSE
+
+
+client/geist/.env settings:
+    - REACT_APP_API_BASE_URL = http://localhost:3000
 
 ## Starting the solution
 1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` 

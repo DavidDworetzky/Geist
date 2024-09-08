@@ -4,7 +4,7 @@ import useCompleteText from './Hooks/useCompleteText';
 const Chat = () => {
     const [chatHistory, setChatHistory] = useState('');
     const [userInput, setUserInput] = useState('');
-    const { completeText, isLoading, error } = useCompleteText();
+    const { completeText, loading: isLoading, error } = useCompleteText();
 
     const chatWithServer = async (input: string) => {
         try {
