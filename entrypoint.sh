@@ -13,5 +13,7 @@ mkdir -p output
 # Re-enable strict mode:
 set -euo pipefail
 
+#initialize our database
+python initdb.py
 #start our geist server
 python bootstrap.py

@@ -9,7 +9,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .App-logo {
-    animation: App-logo-spin infinite 20s linear;
+    animation: App-logo-fade-in 1s ease-in-out 3s alternate;
   }
 }
 
@@ -28,11 +28,52 @@
   color: #61dafb;
 }
 
-@keyframes App-logo-spin {
+@keyframes App-logo-fade-in {
   from {
-    transform: rotate(0deg);
+    opacity: 0;
   }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
   }
+}
+
+.Wrapper {
+  display: flex;
+  height: 100vh;
+}
+
+.App-header {
+  width: 25vw;
+  min-height: 100vh;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.Content {
+  flex-grow: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+nav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  list-style-type: none;  /* Add this line to remove bullets */
+}
+
+nav a {
+  margin-bottom: 10px;
+  text-decoration: none;
+  color: white;
+  display: flex;
+  align-items: center;
+}
+
+nav svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  fill: currentColor;
 }
