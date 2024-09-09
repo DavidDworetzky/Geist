@@ -6,20 +6,18 @@ import os
 
 load_dotenv()
 
-pwd = os.getenv("POSTGRES_PWD")
-db = os.getenv("POSTGRES_DB")
+# Use environment variables set in docker-compose.yml
+DB_NAME = os.getenv("POSTGRES_DB", "geist")
+DB_USER = os.getenv("POSTGRES_USER", "geist")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "geist")
+DB_HOST = os.getenv("DB_HOST", "db")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
-if db is None:
-    db = "geist"
+# Construct the database URL
+SQLALCHEMY_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# We take a default connection to start. 
-# We should pull this from env / secrets when securing our server.
-SQLALCHEMY_DATABASE_URL = f"postgresql://postgres:{pwd}@localhost/{db}"
-
-#instantiate database engine and session
-Engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-)
+# Instantiate database engine and session
+Engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=Engine)
 Session = SessionLocal()
 

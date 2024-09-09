@@ -9,6 +9,10 @@ services:
       - DATABASE_URI=postgresql://geist:geist@db:5432/db
       - DEBUG=${DEBUG:-}
       - DB_HOST=db
+      - DB_PORT=5432
+      - POSTGRES_DB=geist
+      - POSTGRES_USER=geist
+      - POSTGRES_PASSWORD=geist
     depends_on:
       - db
     env_file:
@@ -31,9 +35,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
+      - POSTGRES_DB=geist
       - POSTGRES_USER=geist
       - POSTGRES_PASSWORD=geist
-      - POSTGRES_DB=db
     networks:
       - test_net
 
