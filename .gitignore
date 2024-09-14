@@ -136,3 +136,6 @@ dmypy.json
 
 # vscode files.
 .vscode/
+
+#model weights
+app/model_weights/*

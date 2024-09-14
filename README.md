@@ -47,6 +47,9 @@ flowchart LR
     - DB_HOST = localhost
     - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
 
+2. Copy any model weights into app/models/weights/MODEL_NAME.
+    - Currently supported Models: llama_3_1
+
 
 client/geist/.env settings:
     - REACT_APP_API_BASE_URL = http://localhost:3000
