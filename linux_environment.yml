@@ -61,6 +61,7 @@ dependencies:
   - xz=5.4.6=h998d150_1
   - zlib=1.2.13=h998d150_1
   - pip:
+      - accelerate==0.34.2
       - aiohappyeyeballs==2.4.0
       - aiohttp==3.10.5
       - aiohttp-retry==2.8.3

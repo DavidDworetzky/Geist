@@ -45,6 +45,7 @@ flowchart LR
     - TWILIO_TOKEN = API_TOKEN
     - ENHANCED_LOGGING = FALSE
     - DB_HOST = localhost
+    - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
 
 
 client/geist/.env settings:
