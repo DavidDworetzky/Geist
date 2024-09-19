@@ -2,6 +2,10 @@ version: "3"
 
 services:
   backend:
+    deploy:
+      resources:
+        limits:
+          memory: 32G
     build:
       context: .
       dockerfile: Dockerfile
