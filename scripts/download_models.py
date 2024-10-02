@@ -12,7 +12,16 @@ def download_llama_weights(model_id, weights_dir):
 
     # Download model and tokenizer
     print(f"Downloading model to {weights_dir}")
-    AutoModelForCausalLM.from_pretrained(model_id, cache_dir=weights_dir)
+    
+    # Add custom configuration to handle rope_scaling mismatch
+    config_kwargs = {
+        "rope_scaling": {
+            "type": "linear",
+            "factor": 8.0
+        }
+    }
+    
+    AutoModelForCausalLM.from_pretrained(model_id, cache_dir=weights_dir, **config_kwargs)
     AutoTokenizer.from_pretrained(model_id, cache_dir=weights_dir)
     print("Download complete!")
 
