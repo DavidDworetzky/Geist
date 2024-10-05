@@ -40,19 +40,32 @@ class LlamaTransformer:
             raise ValueError(f"Model weights do not exist at {self.weights_dir}")
             
         logger.info("Loading model and tokenizer")
-        model = AutoModelForCausalLM.from_pretrained(self.weights_dir)
+        model = AutoModelForCausalLM.from_pretrained(self.weights_dir, torch_dtype=torch.float16)
         tokenizer = AutoTokenizer.from_pretrained(self.weights_dir)
 
         logger.info(f"Model loaded. Model size: {model.num_parameters()} parameters")
-        logger.info(f"Available GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+
+        # Check for CUDA, MPS, or CPU
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logger.info("Using CUDA")
+            logger.info(f"Available GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+            logger.info("Using MPS (Metal) backend")
+        else:
+            device = torch.device("cpu")
+            logger.info("CUDA and MPS not available, using CPU")
+
+        model = model.to(device)
 
         logger.info("Creating pipeline")
         pipeline = transformers.pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            device_map="auto",
+            device=device,
         )
 
         messages = [
