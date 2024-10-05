@@ -49,6 +49,8 @@ flowchart LR
 
 2. Copy any model weights into app/models/weights/MODEL_NAME.
     - Currently supported Models: llama_3_1
+    - This can be run from python scripts/download_models.py 
+    - If the download script doesn't work, direct download links can be found at : https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/tree/main
 
 
 client/geist/.env settings:
