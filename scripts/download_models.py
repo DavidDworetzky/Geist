@@ -18,11 +18,12 @@ def download_llama_weights(model_id, weights_dir):
         "rope_scaling": {
             "type": "linear",
             "factor": 8.0
-        }
+        },
+        "token": token  # Add the token here
     }
     
     AutoModelForCausalLM.from_pretrained(model_id, cache_dir=weights_dir, **config_kwargs)
-    AutoTokenizer.from_pretrained(model_id, cache_dir=weights_dir)
+    AutoTokenizer.from_pretrained(model_id, cache_dir=weights_dir, token=token)
     print("Download complete!")
 
 if __name__ == "__main__":
