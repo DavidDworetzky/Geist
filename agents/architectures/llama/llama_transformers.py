@@ -82,7 +82,9 @@ class LlamaTransformer:
                                top_p=self.top_p,
                                )
             logger.info("Text generation completed successfully")
-            return outputs[0]["generated_text"]
+            output = outputs[0]["generated_text"]
+            logger.info(f"Output: {output}")
+            return output
         except Exception as e:
             logger.error(f"Error during text generation: {str(e)}")
             raise
