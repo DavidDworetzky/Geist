@@ -65,7 +65,8 @@ def create_app():
             echo=params.echo,
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format
+            response_format=params.response_format,
+            system_prompt= "Complete the request as best as you can."
         )
 
         if completions:

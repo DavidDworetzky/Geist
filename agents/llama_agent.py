@@ -46,11 +46,11 @@ class LlamaAgent(BaseAgent):
     def phase_in(self):
         self.initialize()
     
-    def _complete_llama_sequence(self, prompt:str, max_tokens:int = None):
+    def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
         llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
             
         return llama.complete(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=prompt
         )
 
@@ -110,7 +110,7 @@ class LlamaAgent(BaseAgent):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
-    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text"):
+    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None):
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
         n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
@@ -119,8 +119,10 @@ class LlamaAgent(BaseAgent):
         frequency_penalty = self._agent_context.settings.frequency_penalty if self._agent_context.settings.frequency_penalty and not frequency_penalty else 0
         presence_penalty = self._agent_context.settings.presence_penalty if self._agent_context.settings.presence_penalty and not presence_penalty else 0
         
+        if not system_prompt:
+            system_prompt = SYSTEM_PROMPT
 
-        return self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None)
+        return self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt)
         
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.
