@@ -8,6 +8,9 @@ import psutil
 import json
 import logging
 from utils.logging import log_function_call
+from agents.models.gpt4_completion import Gpt4Completion
+
+
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -102,7 +105,7 @@ class GPT4Agent(BaseAgent):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
-    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None):
+    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None) -> Gpt4Completion:
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
         n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
@@ -126,9 +129,10 @@ class GPT4Agent(BaseAgent):
             payload["stop"] = stop
 
         response = requests.post(self.base_url, json=payload, headers=self.headers)
+        response_content:Gpt4Completion = response.json() if response.status_code == 200 else None
 
         if response.status_code == 200:
-            return response.json()
+            return response_content
         else:
             raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
         

@@ -4,6 +4,38 @@ from agents.gpt4_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TIC
 from app.main import app
 import pytest
 
+
+HAIKU_COMPLETION = {
+  "id": "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH",
+  "object": "chat.completion",
+  "created": 1728753308,
+  "model": "gpt-4-0613",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Silent orb of night,\nGlowing in soft silver light,\nGuiding",
+        "refusal": None
+      },
+      "logprobs": None,
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 16,
+    "total_tokens": 30,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "system_fingerprint": None
+}
+
 def is_function_prompt(prompt: str) -> bool:
     return 'Only call functions that are listed in our adapter list.' in prompt
 
@@ -80,6 +112,12 @@ def test_assert_prompt_invariants():
     assert not is_function_prompt(WORLD_TICK_PROMPT) and not is_task_prompt(WORLD_TICK_PROMPT)
     assert is_task_prompt(TASK_TICK_PROMPT) and not is_function_prompt(TASK_TICK_PROMPT)
     assert not is_task_prompt(EXECUTION_TICK_PROMPT) and is_function_prompt(EXECUTION_TICK_PROMPT)
+
+@patch('app.main.GPT4Agent')
+@patch('agents.gpt4_agent.GPT4Agent.complete_text')
+@patch('adapters.log_adapter.LogAdapter.log')
+def test_completion(log, complete_text, mock_gpt4_agent, gpt4agent, client):
+
 
 @patch('app.main.GPT4Agent')
 @patch('agents.gpt4_agent.GPT4Agent.complete_text')
