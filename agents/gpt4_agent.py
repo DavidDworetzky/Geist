@@ -102,7 +102,7 @@ class GPT4Agent(BaseAgent):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
-    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text"):
+    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None):
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
         n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
