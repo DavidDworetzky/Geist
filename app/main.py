@@ -19,6 +19,7 @@ import uvicorn
 import json
 from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
+from agents.models.agent_completion import AgentCompletion
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -70,7 +71,8 @@ def create_app():
         )
 
         if completions:
-            return completions
+            completion_object = AgentCompletion.from_completion(completions)
+            return completion_object
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
 

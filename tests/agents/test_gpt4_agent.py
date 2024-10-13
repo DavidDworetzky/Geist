@@ -114,9 +114,43 @@ def test_assert_prompt_invariants():
     assert not is_task_prompt(EXECUTION_TICK_PROMPT) and is_function_prompt(EXECUTION_TICK_PROMPT)
 
 @patch('app.main.GPT4Agent')
-@patch('agents.gpt4_agent.GPT4Agent.complete_text')
+@patch('agents.gpt4_agent.GPT4Agent._complete_text')
 @patch('adapters.log_adapter.LogAdapter.log')
 def test_completion(log, complete_text, mock_gpt4_agent, gpt4agent, client):
+    complete_text.return_value = HAIKU_COMPLETION
+    mock_gpt4_agent.return_value = gpt4agent
+    log.side_effect = lambda output: print(output)
+
+    # prepare the request payload for the completion
+    payload = {
+        "prompt": "write a haiku about the moon",
+        "max_tokens": 1024,
+        "n": 1,
+        "stop": [
+            "string"
+        ],
+        "temperature": 1,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "echo": False,
+        "best_of": 0,
+        "prompt_tokens": [
+            0
+        ],
+        "response_format": "text",
+        "agent_type": "GPT4AGENT"
+    }
+
+    # send the request
+    response = client.post("agent/complete_text", json=payload)
+
+    # assert the response
+    assert response.status_code == 200
+    response_payload = response.json()
+    assert response_payload.message == "Silent orb of night,\nGlowing in soft silver light,\nGuiding"
+
+
 
 
 @patch('app.main.GPT4Agent')
