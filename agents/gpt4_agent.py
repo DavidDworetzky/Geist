@@ -105,6 +105,13 @@ class GPT4Agent(BaseAgent):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
+    def _complete_text(self, url:str, payload:any, headers:any) -> Gpt4Completion:
+        response = requests.post(url, json=payload, headers=headers)
+        response_content:Gpt4Completion = response.json() if response.status_code == 200 else None
+        if not response_content:
+            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
+        return response_content
+
     def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None) -> Gpt4Completion:
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
@@ -128,13 +135,7 @@ class GPT4Agent(BaseAgent):
         if stop is not None:
             payload["stop"] = stop
 
-        response = requests.post(self.base_url, json=payload, headers=self.headers)
-        response_content:Gpt4Completion = response.json() if response.status_code == 200 else None
-
-        if response.status_code == 200:
-            return response_content
-        else:
-            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
+        return self._complete_text(self.base_url, payload, self.headers)
         
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.
