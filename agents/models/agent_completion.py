@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 from dataclasses import dataclass
 from agents.models.gpt4_completion import Gpt4Completion
 from agents.models.llama_completion import LlamaCompletion
+import uuid
 
 @dataclass
 class AgentCompletion:
@@ -16,9 +17,12 @@ class AgentCompletion:
                 id=completion.id
             )
         elif isinstance(completion, LlamaCompletion):
+            assistant_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
+            if assistant_message is None:
+                raise ValueError("No assistant message found in LlamaCompletion")
             return cls(
-                message=[completion.generations[0][0].text],
-                id=completion.llm_output.get('token_usage', {}).get('completion_id', '')
+                message=[assistant_message],
+                id=str(uuid.uuid4())
             )
         else:
             raise ValueError(f"Unsupported completion type: {type(completion).__name__}")
