@@ -134,8 +134,8 @@ class GPT4Agent(BaseAgent):
 
         if stop is not None:
             payload["stop"] = stop
-
-        return self._complete_text(self.base_url, payload, self.headers)
+        completion = self._complete_text(self.base_url, payload, self.headers)
+        return Gpt4Completion.from_dict(completion)
         
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.
