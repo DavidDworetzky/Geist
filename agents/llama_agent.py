@@ -9,6 +9,7 @@ import json
 import logging
 from utils.logging import log_function_call
 from agents.architectures.llama.llama_transformers import LlamaTransformer
+from agents.models.agent_completion import LlamaCompletion
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -39,6 +40,8 @@ class LlamaAgent(BaseAgent):
         # call super constructor
         super().__init__(agent_context, as_subprocess)
 
+        self.logger = logging.getLogger(__name__)
+
     def phase_out(self):
         self._agent_context._save()
         self.terminate_subprocess()
@@ -48,11 +51,13 @@ class LlamaAgent(BaseAgent):
     
     def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
         llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
-            
-        return llama.complete(
+        
+        llama_completion = llama.complete(
             system_prompt=system_prompt,
             user_prompt=prompt
         )
+        self.logger.info(f"Llama completion: {llama_completion}")
+        return LlamaCompletion.from_dict(llama_completion)
 
 
     def _is_valid_function_json(self, function_json:str):
