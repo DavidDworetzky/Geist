@@ -166,4 +166,8 @@ def get_speech_to_text_client():
 # Initialize and run the app
 app = create_app()
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000, # 1MB (1024 * 1024 bytes)
+    )

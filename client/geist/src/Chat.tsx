@@ -1,21 +1,25 @@
-import { useState, FormEvent } from 'react';
+import React, { useState, useEffect, FormEvent } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
 
 const Chat = () => {
     const [chatHistory, setChatHistory] = useState('');
     const [userInput, setUserInput] = useState('');
-    const { completeText, loading: isLoading, error } = useCompleteText();
+    const { completeText, loading: isLoading, error, completedText } = useCompleteText();
 
     const chatWithServer = async (input: string) => {
         try {
-            const response = await completeText(input);
-            setChatHistory(prevHistory => prevHistory + '\nUser: ' + input + '\nAI: ' + response);
-            return response;
-        } catch (err) {
+            await completeText(input);
+        }
+        catch (err) {
             console.error('Error chatting with server:', err);
-            return '';
         }
     };
+
+    useEffect(() => {
+        if (completedText) {
+            setChatHistory(prev => prev + '\nAI: ' + completedText);
+        }
+    }, [completedText]);
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();

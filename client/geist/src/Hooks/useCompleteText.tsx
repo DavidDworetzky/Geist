@@ -46,7 +46,11 @@ const useCompleteText = () => {
       }
 
       const data: CompleteTextResponse = await response.json();
-      setCompletedText(data.message);
+      if (Array.isArray(data.message) && data.message.length > 0) {
+        setCompletedText(data.message[0]);
+      } else {
+        setCompletedText(data.message as string);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
     } finally {
