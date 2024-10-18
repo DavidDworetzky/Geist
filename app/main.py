@@ -48,7 +48,7 @@ def create_app():
 
     # Agent routes using agent_router
     @agent_router.post("/complete_text")
-    async def complete_text_endpoint(params: CompleteTextParams):
+    async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
         agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
         #parse agent_type from str to AgentType
 
@@ -166,4 +166,8 @@ def get_speech_to_text_client():
 # Initialize and run the app
 app = create_app()
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000, # 1MB (1024 * 1024 bytes)
+    )

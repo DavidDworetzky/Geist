@@ -28,6 +28,7 @@ services:
       test_net:
         aliases:
           - geistlocal.com
+          - backend
 
   db:
     image: postgres:14.9

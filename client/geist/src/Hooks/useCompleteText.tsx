@@ -4,7 +4,7 @@ import { useState } from 'react';
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
 interface CompleteTextResponse {
-  completedText: string;
+  message: string;
 }
 
 const params = {
@@ -46,7 +46,11 @@ const useCompleteText = () => {
       }
 
       const data: CompleteTextResponse = await response.json();
-      setCompletedText(data.completedText);
+      if (Array.isArray(data.message) && data.message.length > 0) {
+        setCompletedText(data.message[0]);
+      } else {
+        setCompletedText(data.message as string);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
     } finally {
