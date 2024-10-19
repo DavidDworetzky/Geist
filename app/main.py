@@ -39,6 +39,7 @@ default_agent_type = AgentType.LLAMA
 if enhanced_logging:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_envs() -> dict[str,str]:
     return LoadEnvironmentDictionary()
@@ -46,6 +47,7 @@ def get_envs() -> dict[str,str]:
 def get_or_create_agent(agent_type: AgentType):
     if agent_cache[agent_type] is None:
         agent_cache[agent_type] = agent_mappings[agent_type]()
+        logger.info(f"Created new {agent_type} agent")
     return agent_cache[agent_type]
 
 # App factory function
