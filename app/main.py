@@ -26,6 +26,12 @@ openai_key = os.getenv("OPENAI_TOKEN")
 enhanced_logging = os.getenv("ENHANCED_LOGGING")
 enhanced_logging = json.loads(enhanced_logging.lower())
 
+#in memory agent cache
+agent_cache = {
+    AgentType.LLAMA : None,
+    AgentType.GPT4AGENT : None
+}
+
 #constants
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
@@ -33,9 +39,16 @@ default_agent_type = AgentType.LLAMA
 if enhanced_logging:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_envs() -> dict[str,str]:
     return LoadEnvironmentDictionary()
+
+def get_or_create_agent(agent_type: AgentType):
+    if agent_cache[agent_type] is None:
+        agent_cache[agent_type] = agent_mappings[agent_type]()
+        logger.info(f"Created new {agent_type} agent")
+    return agent_cache[agent_type]
 
 # App factory function
 def create_app():
@@ -126,7 +139,7 @@ agent_mappings = {
 }
 
 def get_active_agent(type: AgentType):
-    return agent_mappings[type]()
+    return get_or_create_agent(type)
 
 def get_default_agent_context():
     '''

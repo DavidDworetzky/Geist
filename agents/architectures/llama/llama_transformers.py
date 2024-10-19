@@ -18,6 +18,10 @@ class LlamaTransformer:
         self.weights_dir = "app/model_weights/llama_3_1"
         self.temperature = temperature
         self.top_p = top_p
+        logger.info("Loading model and tokenizer")
+        self.model = AutoModelForCausalLM.from_pretrained(self.weights_dir, torch_dtype=torch.float16)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.weights_dir)
+        logger.info(f"Model loaded. Model size: {self.model.num_parameters()} parameters")
 
     def download_model(self):
         # Login to Hugging Face
@@ -38,12 +42,6 @@ class LlamaTransformer:
 
         if not os.path.exists(os.path.join(self.weights_dir, "config.json")):
             raise ValueError(f"Model weights do not exist at {self.weights_dir}")
-            
-        logger.info("Loading model and tokenizer")
-        model = AutoModelForCausalLM.from_pretrained(self.weights_dir, torch_dtype=torch.float16)
-        tokenizer = AutoTokenizer.from_pretrained(self.weights_dir)
-
-        logger.info(f"Model loaded. Model size: {model.num_parameters()} parameters")
 
         # Check for CUDA, MPS, or CPU
         if torch.cuda.is_available():
@@ -58,13 +56,13 @@ class LlamaTransformer:
             device = torch.device("cpu")
             logger.info("CUDA and MPS not available, using CPU")
 
-        model = model.to(device)
+        model = self.model.to(device)
 
         logger.info("Creating pipeline")
         pipeline = transformers.pipeline(
             "text-generation",
             model=model,
-            tokenizer=tokenizer,
+            tokenizer=self.tokenizer,
             device=device,
         )
 
