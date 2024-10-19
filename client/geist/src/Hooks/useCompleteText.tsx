@@ -26,6 +26,7 @@ const useCompleteText = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completedText, setCompletedText] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string | null>(null);
 
   const completeText = async (inputText: string) => {
     setLoading(true);
@@ -51,6 +52,7 @@ const useCompleteText = () => {
       } else {
         setCompletedText(data.message as string);
       }
+      setPrompt(prompt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
     } finally {
@@ -58,7 +60,7 @@ const useCompleteText = () => {
     }
   };
 
-  return { completeText, loading, error, completedText };
+  return { prompt, completeText, loading, error, completedText };
 };
 
 export default useCompleteText;

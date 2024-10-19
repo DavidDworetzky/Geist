@@ -4,7 +4,7 @@ import useCompleteText from './Hooks/useCompleteText';
 const Chat = () => {
     const [chatHistory, setChatHistory] = useState('');
     const [userInput, setUserInput] = useState('');
-    const { completeText, loading: isLoading, error, completedText } = useCompleteText();
+    const { prompt, completeText, loading: isLoading, error, completedText } = useCompleteText();
 
     const chatWithServer = async (input: string) => {
         try {
@@ -17,7 +17,8 @@ const Chat = () => {
 
     useEffect(() => {
         if (completedText) {
-            setChatHistory(prev => prev + '\nAI: ' + completedText);
+            const previousHistory = '\nUser: ' + prompt + '\nAI: ' + completedText;
+            setChatHistory(prev => prev + previousHistory);
         }
     }, [completedText]);
 

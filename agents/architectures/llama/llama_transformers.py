@@ -71,11 +71,11 @@ class LlamaTransformer:
             {"role": "user", "content": user_prompt},
         ]
 
-        logger.info("Starting text generation")
+        logger.info(f"Starting text generation with parameters - temperature {self.temperature}, top_p {self.top_p}, max_new_tokens {self.max_new_tokens}")
         try:
             outputs = pipeline(messages,
                                max_new_tokens=self.max_new_tokens,
-                               do_sample=True,
+                               do_sample=False,
                                temperature=self.temperature,
                                top_p=self.top_p,
                                )
