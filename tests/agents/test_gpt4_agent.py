@@ -36,6 +36,11 @@ HAIKU_COMPLETION = {
   "system_fingerprint": None
 }
 
+agent_completion = {
+    "message" : ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
+    "id" : "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
+}
+
 def is_function_prompt(prompt: str) -> bool:
     return 'Only call functions that are listed in our adapter list.' in prompt
 
@@ -148,7 +153,7 @@ def test_completion(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload.message == "Silent orb of night,\nGlowing in soft silver light,\nGuiding"
+    assert response_payload == agent_completion
 
 
 
