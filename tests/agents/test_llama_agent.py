@@ -5,6 +5,13 @@ from app.main import app
 from agents.llama_agent import LlamaAgent
 import pytest
 
+HAIKU_COMPLETION = "Silent orb of night,\nGlowing in soft silver light,\nGuiding"
+
+agent_completion = {
+    "message" : ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
+    "id" : "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
+}
+
 def is_function_prompt(prompt: str) -> bool:
     return 'Only call functions that are listed in our adapter list.' in prompt
 
@@ -91,3 +98,40 @@ def test_llama_tick_with_prompt(log, complete_text, mock_llama_agent, llama_agen
         'execution_context': []
     }
     assert log.call_count == 2
+
+@patch('app.main.LlamaAgent')
+@patch('agents.gpt4_agent.LlamaAgent._complete_text')
+@patch('adapters.log_adapter.LogAdapter.log')
+def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
+    complete_text.return_value = HAIKU_COMPLETION
+    mock_llama_agent.return_value = llama_agent
+    log.side_effect = lambda output: print(output)
+
+    # prepare the request payload for the completion
+    payload = {
+        "prompt": "write a haiku about the moon",
+        "max_tokens": 1024,
+        "n": 1,
+        "stop": [
+            "string"
+        ],
+        "temperature": 1,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "echo": False,
+        "best_of": 0,
+        "prompt_tokens": [
+            0
+        ],
+        "response_format": "text",
+        "agent_type": "GPT4AGENT"
+    }
+
+    # send the request
+    response = client.post("agent/complete_text", json=payload)
+
+    # assert the response
+    assert response.status_code == 200
+    response_payload = response.json()
+    assert response_payload == agent_completion
