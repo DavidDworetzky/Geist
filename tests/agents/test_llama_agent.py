@@ -3,14 +3,15 @@ from fastapi.testclient import TestClient
 from agents.llama_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
 from app.main import app
 from agents.llama_agent import LlamaAgent
+from agents.models.llama_completion import LlamaCompletion, Message
 import pytest
 
 HAIKU_COMPLETION = "Silent orb of night,\nGlowing in soft silver light,\nGuiding"
 
 agent_completion = {
-    "message" : ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
-    "id" : "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
-}
+    "message": ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
+    "id": "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
+}       
 
 def is_function_prompt(prompt: str) -> bool:
     return 'Only call functions that are listed in our adapter list.' in prompt
@@ -100,10 +101,13 @@ def test_llama_tick_with_prompt(log, complete_text, mock_llama_agent, llama_agen
     assert log.call_count == 2
 
 @patch('app.main.LlamaAgent')
-@patch('agents.gpt4_agent.LlamaAgent._complete_text')
+@patch('agents.llama_agent.LlamaAgent._complete_llama_sequence')
 @patch('adapters.log_adapter.LogAdapter.log')
 def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
-    complete_text.return_value = HAIKU_COMPLETION
+    llama_completion = LlamaCompletion(
+        messages=[Message(role="assistant", content=HAIKU_COMPLETION)]
+    )
+    complete_text.return_value = llama_completion
     mock_llama_agent.return_value = llama_agent
     log.side_effect = lambda output: print(output)
 
@@ -125,7 +129,7 @@ def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
             0
         ],
         "response_format": "text",
-        "agent_type": "GPT4AGENT"
+        "agent_type": "LLAMA"
     }
 
     # send the request
@@ -134,4 +138,4 @@ def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload == agent_completion
+    assert response_payload["message"] == agent_completion["message"]

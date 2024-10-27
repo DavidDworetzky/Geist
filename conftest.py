@@ -52,5 +52,5 @@ def llama_agent():
     env = get_envs()
     context = AgentContext(settings=settings, envs=env)
     api_key = None
-    return LlamaAgent(agent_context=context, ckpt_dir=None)
+    return LlamaAgent(agent_context=context, ckpt_dir=None, pre_initialize_model=False)
 
