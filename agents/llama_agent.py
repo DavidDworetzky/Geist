@@ -36,12 +36,13 @@ SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You
 MAX_BATCH_SIZE = 1000
 
 class LlamaAgent(BaseAgent):
-    def __init__(self, agent_context, ckpt_dir, as_subprocess=False):
+    def __init__(self, agent_context, ckpt_dir, as_subprocess=False, pre_initialize_model=True):
         # call super constructor
         super().__init__(agent_context, as_subprocess)
 
         self.logger = logging.getLogger(__name__)
-        self.llama = LlamaTransformer(max_new_tokens=agent_context.settings.max_tokens)
+        if pre_initialize_model:
+            self.llama = LlamaTransformer(max_new_tokens=agent_context.settings.max_tokens)
 
     def phase_out(self):
         self._agent_context._save()
@@ -51,6 +52,8 @@ class LlamaAgent(BaseAgent):
         self.initialize()
     
     def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
+        if not self.llama:
+            self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
             user_prompt=prompt
