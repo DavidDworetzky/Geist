@@ -25,7 +25,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        conda env create -f environment.yml
+        conda env create -f linux_environment.yml
         conda activate geist  # assuming your environment name is 'geist'
 
     - name: Run tests
