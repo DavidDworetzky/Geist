@@ -77,3 +77,22 @@ nav svg {
   margin-right: 10px;
   fill: currentColor;
 }
+
+@keyframes dots {
+  0%, 20% {
+    content: ".";
+  }
+  40%, 60% {
+    content: "..";
+  }
+  80%, 100% {
+    content: "...";
+  }
+}
+
+.loading-dots::after {
+  content: "...";
+  display: inline-block;
+  animation: dots 1.5s steps(1, end) infinite;
+  color: #61dafb;  /* Same blue as App-link */
+}
