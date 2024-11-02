@@ -47,8 +47,8 @@ const Chat = () => {
                     cols={50}
                     style={{ marginBottom: '10px', width: '100%' }}
                 />
-                <button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Sending...' : 'Send'}
+                <button type="submit" disabled={isLoading} className={isLoading ? 'loading-dots' : ''}>
+                    {isLoading ? '' : 'Send'}
                 </button>
             </form>
             {error && <p style={{ color: 'red' }}>Error: {error}</p>}

@@ -95,4 +95,21 @@ nav svg {
   display: inline-block;
   animation: dots 1.5s steps(1, end) infinite;
   color: #61dafb;  /* Same blue as App-link */
+  font-size: 200px;  /* Added this line to make dots bigger */
+}
+
+.loading-dots {
+  background: none;  /* Remove background */
+  border: none;      /* Remove border */
+  padding: 0;        /* Remove padding */
+  cursor: default;   /* Change cursor to default instead of pointer */
+  outline: none;     /* Remove outline */
+}
+
+.loading-dots:hover {
+  background: none;  /* Prevent hover effects */
+}
+
+.loading-dots:focus {
+  outline: none;     /* Remove focus outline */
 }
