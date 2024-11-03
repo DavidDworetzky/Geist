@@ -1,6 +1,6 @@
 import React, { useState, useEffect, FormEvent } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
-
+import ChatTextArea from './Components/TextArea';
 const Chat = () => {
     const [chatHistory, setChatHistory] = useState('');
     const [userInput, setUserInput] = useState('');
@@ -17,7 +17,7 @@ const Chat = () => {
 
     useEffect(() => {
         if (completedText) {
-            const previousHistory = '\nUser: ' + prompt + '\nAI: ' + completedText;
+            const previousHistory = '\nUser: ' + prompt + '\n\nAI: ' + completedText;
             setChatHistory(prev => prev + previousHistory);
         }
     }, [completedText]);
