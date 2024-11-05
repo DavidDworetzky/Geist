@@ -1,8 +1,10 @@
 import React, { useState, useEffect, FormEvent } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
+import ChatTextArea from './Components/ChatTextArea';
+import { ChatPair, ChatHistory } from './Components/ChatTextArea';
 
 const Chat = () => {
-    const [chatHistory, setChatHistory] = useState('');
+    const [chatHistory, setChatHistory] = useState<ChatHistory>();
     const [userInput, setUserInput] = useState('');
     const { prompt, completeText, loading: isLoading, error, completedText } = useCompleteText();
 
@@ -17,8 +19,12 @@ const Chat = () => {
 
     useEffect(() => {
         if (completedText) {
-            const previousHistory = '\nUser: ' + prompt + '\nAI: ' + completedText;
-            setChatHistory(prev => prev + previousHistory);
+            const newHistory: ChatPair = {
+                user: prompt ?? '',
+                ai: completedText
+            };
+            const amendedHistory: ChatHistory = {chatHistory: [...chatHistory?.chatHistory ?? [], newHistory]};
+            setChatHistory(amendedHistory);
         }
     }, [completedText]);
 
@@ -32,13 +38,8 @@ const Chat = () => {
 
     return (
         <div>
-            <textarea
-                value={chatHistory}
-                readOnly
-                rows={10}
-                cols={50}
-                style={{ marginBottom: '10px', width: '100%' }}
-            />
+            <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
+            
             <form onSubmit={handleSubmit}>
                 <textarea
                     value={userInput}
