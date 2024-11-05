@@ -1,12 +1,15 @@
 import React, { useState, useEffect, FormEvent } from 'react';
 
-type ChatPair = {
+export interface ChatPair {
     user: string;
     ai: string;
 };
 
-const ChatTextArea = () => {
-    const [chatPairs, setChatPairs] = useState<ChatPair[]>([]);
+export interface ChatHistory {
+    chatHistory: ChatPair[];
+}
+
+const ChatTextArea = (props: ChatHistory) => {
     return (
         <div style={{
             border: '1px solid #ccc',
@@ -19,10 +22,10 @@ const ChatTextArea = () => {
             fontFamily: 'inherit',
             boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.1)'
         }}>
-            {chatPairs.map((pair, index) => (
+            {props.chatHistory.map((element, index) => (
                 <div key={index}>
-                    <p style={{color: 'blue'}}>{pair.user}</p>
-                    <p style={{color: 'purple'}}>{pair.ai}</p>
+                    <p style={{color: 'blue'}}>User: {element.user}</p>
+                    <p style={{color: 'purple'}}>AI: {element.ai}</p>
                 </div>
             ))}
         </div>
