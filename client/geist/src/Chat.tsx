@@ -46,7 +46,7 @@ const Chat = () => {
                     onChange={(e) => setUserInput(e.target.value)}
                     rows={3}
                     cols={50}
-                    style={{ marginBottom: '10px', width: '100%' }}
+                    style={{ marginBottom: '10px', marginTop: '20px', width: '100%' }}
                 />
                 <button type="submit" disabled={isLoading} className={isLoading ? 'loading-dots' : ''}>
                     {isLoading ? '' : 'Send'}
