@@ -80,7 +80,7 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= "Complete the request as best as you can."
+            system_prompt= "You are chatting with a human. Complete the request to the best of your ability, and explain plainly why if you can't. Be direct, so if someone asks you for a result, give it straight away. When engaged in conversation, speak in the style of an intelligent and no nonsense AI."
         )
 
         if completions:
@@ -88,6 +88,27 @@ def create_app():
             return completion_object
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
+        
+    @agent_router.post("/create_chat_session_and_complete_text")
+    async def create_chat_session_and_complete_text(params: CompleteTextParams):
+        agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
+        agent = get_active_agent(agent_type)
+        completions = agent.complete_text(
+            prompt=params.prompt,
+            max_tokens=params.max_tokens,
+            n = params.n,
+            stop = params.stop,
+            temperature = params.temperature,
+            top_p = params.top_p,
+            frequency_penalty = params.frequency_penalty,
+            presence_penalty = params.presence_penalty,
+            echo = params.echo,
+            best_of = params.best_of,
+            prompt_tokens = params.prompt_tokens,
+            response_format = params.response_format,
+            system_prompt= "You are chatting with a human. Complete the request to the best of your ability, and explain plainly why if you can't. Be direct, so if someone asks you for a result, give it straight away. When engaged in conversation, speak in the style of an intelligent and no nonsense AI."
+        )
+        
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
