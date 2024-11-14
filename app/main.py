@@ -19,6 +19,9 @@ import json
 from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
 from agents.models.agent_completion import AgentCompletion
+from agents.prompt.prompt import AGENT_PROMPTS
+
+DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -79,7 +82,7 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= "You are chatting with a human. Complete the request to the best of your ability, and explain plainly why if you can't. Be direct, so if someone asks you for a result, give it straight away. When engaged in conversation, speak in the style of an intelligent and no nonsense AI."
+            system_prompt= DEFAULT_PROMPT
         )
 
         if completions:
@@ -105,7 +108,7 @@ def create_app():
             best_of = params.best_of,
             prompt_tokens = params.prompt_tokens,
             response_format = params.response_format,
-            system_prompt= "You are chatting with a human. Complete the request to the best of your ability, and explain plainly why if you can't. Be direct, so if someone asks you for a result, give it straight away. When engaged in conversation, speak in the style of an intelligent and no nonsense AI."
+            system_prompt= DEFAULT_PROMPT
         )
         
 
