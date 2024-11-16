@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 @dataclass
 class Message:
     role: str
     content: str
+    chat_id: Optional[int] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> 'Message':

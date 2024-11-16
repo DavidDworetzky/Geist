@@ -56,6 +56,7 @@ class Gpt4Completion:
     choices: List[Choice]
     usage: Usage
     system_fingerprint: Optional[str] = None
+    chat_id: Optional[int] = None
 
     @classmethod
     def from_dict(cls, data: Dict):
