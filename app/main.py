@@ -110,6 +110,12 @@ def create_app():
             response_format = params.response_format,
             system_prompt= DEFAULT_PROMPT
         )
+
+        if completions:
+            completion_object = AgentCompletion.from_completion(completions)
+            return completion_object
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate completions.")
         
 
     @agent_router.post("/initialize_task_and_tick")
