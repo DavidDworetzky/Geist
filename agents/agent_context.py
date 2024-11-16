@@ -5,7 +5,7 @@ from app.models.database import agent
 from app.models.database.database import Base, Session
 import uuid  # Added import for uuid library
 from adapters.adapter_registry import find_adapter_classes, init_adapter_class
-
+from app.models.database.chat_session import get_chat_history, update_chat_history
 class AgentContext():
     def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], function_log: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None, envs : Dict[str, str] = {}, include_world_processing = False):
         if agent_id is None:
@@ -40,6 +40,11 @@ class AgentContext():
         agent.task_context = self.task_context
         agent.execution_context = self.task_context
         session.commit()
+
+    def _add_to_chat_history(self, user_message: str, ai_message: str, chat_id: int = None):
+        chat_history = get_chat_history(chat_id)
+        chat_history.append({"user": user_message, "ai": ai_message})
+        update_chat_history(self.chat_id, user_message, ai_message)
 
 
     

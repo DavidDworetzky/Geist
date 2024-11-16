@@ -2,6 +2,7 @@ from sqlalchemy import Integer, Column, String, DateTime, ForeignKey
 from app.models.database.database import Base, Session
 import json
 from typing import List, Dict
+from datetime import datetime
 
 class ChatSession(Base):
     __tablename__ = "chat_session"
@@ -18,6 +19,9 @@ def update_chat_history(session_id: int, new_user_message: str, new_ai_message: 
     '''
     session = Session()
     chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
+
+    if not chat_session:
+        chat_session = ChatSession(chat_session_id=session_id, chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
     
     # Load existing history or create new
     current_history = json.loads(chat_session.chat_history) if chat_session.chat_history else []
@@ -27,11 +31,9 @@ def update_chat_history(session_id: int, new_user_message: str, new_ai_message: 
         "user": new_user_message,
         "ai": new_ai_message
     })
+
+    chat_session.chat_history = json.dumps(current_history)
     
-    # Save updated history
-    session.query(ChatSession).filter_by(chat_session_id=session_id).update(
-        {"chat_history": json.dumps(current_history)}
-    )
     session.commit()
     session.close()
 
