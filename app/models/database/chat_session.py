@@ -11,6 +11,7 @@ class ChatSession(Base):
     chat_history = Column(String)
     create_date = Column(DateTime)
     update_date = Column(DateTime)
+    user_id = Column(Integer, ForeignKey('user.user_id'))
 
 def update_chat_history(session_id: int, new_user_message: str, new_ai_message: str):
     '''
@@ -33,7 +34,7 @@ def update_chat_history(session_id: int, new_user_message: str, new_ai_message: 
     })
 
     chat_session.chat_history = json.dumps(current_history)
-    
+
     session.commit()
     session.close()
 
