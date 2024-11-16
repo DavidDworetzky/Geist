@@ -129,7 +129,10 @@ class LlamaAgent(BaseAgent):
         if not system_prompt:
             system_prompt = SYSTEM_PROMPT
 
-        return self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt)
+        completion = self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt)
+        self._agent_context._add_to_chat_history(completion.choices[0].message.content, chat_id=chat_id)
+
+        return completion
         
     def initialize(self, task:str = None):
         #push task onto our stack for this agent.

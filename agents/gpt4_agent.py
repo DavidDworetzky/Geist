@@ -137,6 +137,9 @@ class GPT4Agent(BaseAgent):
         completion = self._complete_text(self.base_url, payload, self.headers)
         completion_object = Gpt4Completion.from_dict(completion)
 
+        #now, add to chat history
+        self._agent_context._add_to_chat_history(completion_object.choices[0].message.content, chat_id=chat_id)
+
         return completion_object
         
     def initialize(self, task:str = None):

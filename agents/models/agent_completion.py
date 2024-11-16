@@ -8,6 +8,7 @@ import uuid
 class AgentCompletion:
     message: List[str]
     id: str
+    chat_id: int
 
     @classmethod
     def from_completion(cls, completion: Union['Gpt4Completion', 'LlamaCompletion']):

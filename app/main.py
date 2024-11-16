@@ -111,7 +111,8 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= DEFAULT_PROMPT
+            system_prompt= DEFAULT_PROMPT,
+            chat_id=session_id
         )
 
         if completions:
