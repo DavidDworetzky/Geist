@@ -1,4 +1,3 @@
-#framework
 import sys
 from typing import Optional
 import logging
@@ -20,6 +19,9 @@ import json
 from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
 from agents.models.agent_completion import AgentCompletion
+from agents.prompt.prompt import AGENT_PROMPTS
+
+DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
@@ -80,7 +82,7 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= "Complete the request as best as you can."
+            system_prompt= DEFAULT_PROMPT
         )
 
         if completions:
@@ -88,6 +90,37 @@ def create_app():
             return completion_object
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
+        
+    @agent_router.post("/complete_text/{session_id}")
+    async def create_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
+        agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
+        #parse agent_type from str to AgentType
+
+        agent = get_active_agent(agent_type)
+
+        completions = agent.complete_text(
+            prompt=params.prompt,
+            max_tokens=params.max_tokens,
+            n=params.n,
+            stop=params.stop,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            echo=params.echo,
+            best_of=params.best_of,
+            prompt_tokens=params.prompt_tokens,
+            response_format=params.response_format,
+            system_prompt= DEFAULT_PROMPT,
+            chat_id=session_id
+        )
+
+        if completions:
+            completion_object = AgentCompletion.from_completion(completions)
+            return completion_object
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+        
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
