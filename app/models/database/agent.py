@@ -1,7 +1,7 @@
 import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
-from sqlalchemy.orm import relationship, Session, SessionLocal
-from app.models.database.database import Base, Session
+from sqlalchemy.orm import relationship, Session
+from app.models.database.database import Base, Session, SessionLocal
 from sqlalchemy.dialects.postgresql import insert
 import uuid
 

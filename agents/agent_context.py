@@ -44,7 +44,7 @@ class AgentContext():
     def _add_to_chat_history(self, user_message: str, ai_message: str, chat_id: int = None):
         chat_history = get_chat_history(chat_id)
         chat_history.append({"user": user_message, "ai": ai_message})
-        update_chat_history(self.chat_id, user_message, ai_message)
+        update_chat_history(chat_id, user_message, ai_message)
 
 
     
