@@ -130,7 +130,8 @@ class LlamaAgent(BaseAgent):
             system_prompt = SYSTEM_PROMPT
 
         completion = self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt)
-        self._agent_context._add_to_chat_history(completion.choices[0].message.content, chat_id=chat_id)
+        ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
+        self._agent_context._add_to_chat_history(user_message=prompt, ai_message=ai_message, chat_id=chat_id)
 
         completion.chat_id = chat_id
 
