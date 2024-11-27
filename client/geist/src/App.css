@@ -113,3 +113,7 @@ nav svg {
 .loading-dots:focus {
   outline: none;     /* Remove focus outline */
 }
+
+.nav-item {
+  margin: 1rem 0;  /* Adds vertical spacing between nav items */
+}

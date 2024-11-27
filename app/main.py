@@ -92,7 +92,7 @@ def create_app():
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
         
     @agent_router.post("/complete_text/{session_id}")
-    async def create_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
+    async def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
         agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
         #parse agent_type from str to AgentType
 
@@ -121,6 +121,15 @@ def create_app():
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
         
+    @agent_router.get("/chat_history/{session_id}")
+    async def get_chat_history(session_id: int):
+        chat_history = ChatSession.get_chat_history(session_id)
+        return chat_history
+    
+    @agent_router.get("/chat_sessions")
+    async def get_chat_sessions():
+        chat_sessions = ChatSession.get_all_chat_sessions()
+        return chat_sessions
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
