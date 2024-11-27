@@ -37,6 +37,7 @@ HAIKU_COMPLETION = {
 }
 
 agent_completion = {
+    "chat_id" : None,
     "message" : ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
     "id" : "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
 }
