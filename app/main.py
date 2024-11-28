@@ -20,6 +20,7 @@ from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
 from agents.models.agent_completion import AgentCompletion
 from agents.prompt.prompt import AGENT_PROMPTS
+from app.models.database.chat_session import get_chat_history, get_all_chat_history
 
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
@@ -123,12 +124,12 @@ def create_app():
         
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history(session_id: int):
-        chat_history = ChatSession.get_chat_history(session_id)
+        chat_history = get_chat_history(session_id)
         return chat_history
     
     @agent_router.get("/chat_sessions")
     async def get_chat_sessions():
-        chat_sessions = ChatSession.get_all_chat_sessions()
+        chat_sessions = get_all_chat_history()
         return chat_sessions
 
     @agent_router.post("/initialize_task_and_tick")
