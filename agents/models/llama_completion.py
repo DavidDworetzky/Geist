@@ -12,7 +12,8 @@ class Message:
         try: 
             return cls(
             role=data.get('role', ''),
-            content=data.get('content', '')
+            content=data.get('content', ''),
+            chat_id=data.get('chat_id', None)
         )
         except Exception as e:
             raise ValueError(f"Error creating Message from dict: {data}") from e

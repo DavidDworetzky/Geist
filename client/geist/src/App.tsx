@@ -40,7 +40,7 @@ function App() {
       <main className="Content">
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Home/>}/>
+            <Route path="/" element={<Chat/>}/>
             <Route path="/chat" element={<Chat/>}/>
           </Routes>
         </BrowserRouter>

@@ -113,3 +113,21 @@ nav svg {
 .loading-dots:focus {
   outline: none;     /* Remove focus outline */
 }
+
+.nav-item {
+  margin: 1rem 0;  /* Adds vertical spacing between nav items */
+}
+
+.chat-history-item {
+  font-weight: 500;  /* Medium bold */
+  color: #61dafb;    /* Primary color matching App-link */
+  font-size: 0.95rem;
+  line-height: 1.4;
+  text-align: left;
+  padding: 0.5rem 0;
+  transition: color 0.2s ease;
+}
+
+.chat-history-item:hover {
+  color: #8ce7ff;  /* Slightly lighter shade for hover state */
+}

@@ -9,7 +9,7 @@ class AgentPreset(Base):
     Class used to represent a preset for an agent.
     """
     __tablename__ = 'agent_preset'
-    agent_preset_id = Column(Integer, primary_key=True)
+    agent_preset_id = Column(Integer, primary_key=True, autoincrement=True)
     #language model presets
     name = Column(String)
     version = Column(String)
