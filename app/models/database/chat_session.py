@@ -13,13 +13,14 @@ class ChatSession(Base):
     update_date = Column(DateTime)
     user_id = Column(Integer, ForeignKey('user.user_id'))
 
-def update_chat_history(session_id: int, new_user_message: str, new_ai_message: str):
+def update_chat_history(new_user_message: str, new_ai_message: str, session_id: int = None):
     '''
     Method to update chat history by ID
     Adds a new user-AI message pair to the conversation
     '''
     with SessionLocal() as session:
-        chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
+        if session_id:
+            chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
 
         if not chat_session:
             chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
