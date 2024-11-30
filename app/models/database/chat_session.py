@@ -22,7 +22,7 @@ def update_chat_history(session_id: int, new_user_message: str, new_ai_message: 
         chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
 
         if not chat_session:
-            chat_session = ChatSession(chat_session_id=session_id, chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
+            chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
         
         # Load existing history or create new
         current_history = json.loads(chat_session.chat_history) if chat_session.chat_history else []
