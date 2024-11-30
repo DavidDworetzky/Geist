@@ -138,9 +138,9 @@ class GPT4Agent(BaseAgent):
         completion_object = Gpt4Completion.from_dict(completion)
 
         #now, add to chat history
-        self._agent_context._add_to_chat_history(user_message= prompt, ai_message=completion_object.choices[0].message.content, chat_id=chat_id)
+        chat_history = self._agent_context._add_to_chat_history(user_message= prompt, ai_message=completion_object.choices[0].message.content, chat_id=chat_id)
 
-        completion_object.chat_id = chat_id
+        completion_object.chat_id = chat_history.chat_session_id
 
         return completion_object
         

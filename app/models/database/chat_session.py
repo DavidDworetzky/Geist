@@ -6,14 +6,15 @@ from datetime import datetime
 
 class ChatSession(Base):
     __tablename__ = "chat_session"
-    chat_session_id = Column(Integer, primary_key=True)
+    chat_session_id = Column(Integer, primary_key=True, autoincrement=True)
+    
     # chat history stored as JSON string of message arrays
     chat_history = Column(String)
     create_date = Column(DateTime)
     update_date = Column(DateTime)
     user_id = Column(Integer, ForeignKey('user.user_id'))
 
-def update_chat_history(new_user_message: str, new_ai_message: str, session_id: int = None):
+def update_chat_history(new_user_message: str, new_ai_message: str, session_id: int = None) -> ChatSession:
     '''
     Method to update chat history by ID
     Adds a new user-AI message pair to the conversation
@@ -22,7 +23,7 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
         if session_id:
             chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
 
-        if not chat_session:
+        if not session_id or not chat_session:
             chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
         
         # Load existing history or create new
@@ -36,6 +37,7 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
 
         chat_session.chat_history = json.dumps(current_history)
         session.commit()
+        return chat_session 
 
 def get_chat_history(session_id: int, user_id: int = None) -> List[Dict[str, str]]:
     '''

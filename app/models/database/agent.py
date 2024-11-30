@@ -11,7 +11,7 @@ class Agent(Base):
     SqlAlchemy Class used to persist agent state.
     '''
     __tablename__ = "agent"
-    agent_id = Column(Integer, primary_key = True)
+    agent_id = Column(Integer, primary_key=True, autoincrement=True)
     agent_identifier = Column(String, default=lambda: str(uuid.uuid4()))
     process_id = Column(String)
     world_context = Column(String)

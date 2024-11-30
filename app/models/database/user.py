@@ -10,7 +10,7 @@ import uuid
 
 class User(Base):
     __tablename__ = "user"
-    user_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String)
     name = Column(String)
     email = Column(String)
