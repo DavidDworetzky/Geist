@@ -8,8 +8,8 @@ from dataclasses import dataclass
 
 import uuid
 
-class User(Base):
-    __tablename__ = "user"
+class GeistUser(Base):
+    __tablename__ = "geist_user"
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String)
     name = Column(String)
@@ -28,7 +28,7 @@ class UserModel:
 
 def get_user_by_id(user_id: int) -> UserModel:
     with SessionLocal() as session:
-        user = session.query(User).filter_by(user_id=user_id).first()
+        user = session.query(GeistUser).filter_by(user_id=user_id).first()
         return UserModel(user_id=user.user_id, username=user.username, name=user.name, email=user.email, password=user.password)
     
 def create_user(user: UserModel) -> UserModel:
@@ -42,5 +42,5 @@ def get_default_user() -> UserModel:
     Returns the default user context if auth isn't created yet. 
     '''
     with SessionLocal() as session:
-        user = session.query(User).filter_by(email='david@phantasmal.ai').first()
+        user = session.query(GeistUser).filter_by(email='david@phantasmal.ai').first()
         return UserModel(user_id=user.user_id, username=user.username, name=user.name, email=user.email, password=user.password)
