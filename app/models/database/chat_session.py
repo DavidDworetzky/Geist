@@ -3,6 +3,10 @@ from app.models.database.database import Base, Session, SessionLocal
 import json
 from typing import List, Dict
 from datetime import datetime
+import logging
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 class ChatSession(Base):
     __tablename__ = "chat_session"
@@ -12,7 +16,7 @@ class ChatSession(Base):
     chat_history = Column(String)
     create_date = Column(DateTime)
     update_date = Column(DateTime)
-    user_id = Column(Integer, ForeignKey('user.user_id'))
+    user_id = Column(Integer, ForeignKey('geist_user.user_id'))
 
 def update_chat_history(new_user_message: str, new_ai_message: str, session_id: int = None) -> ChatSession:
     '''
@@ -25,6 +29,7 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
 
         if not session_id or not chat_session:
             chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
+            session.add(chat_session)
         
         # Load existing history or create new
         current_history = json.loads(chat_session.chat_history) if chat_session.chat_history else []
@@ -37,6 +42,8 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
 
         chat_session.chat_history = json.dumps(current_history)
         session.commit()
+        logger.info(f"Updated chat history for session {session_id}, bound obhject session id is : {chat_session.chat_session_id}")
+        logger.info(f"Chat History: {chat_session.chat_history}")
         return chat_session 
 
 def get_chat_history(session_id: int, user_id: int = None) -> List[Dict[str, str]]:

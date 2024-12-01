@@ -7,3 +7,6 @@
 - When writing functions, make sure to include type hints for all parameters and return types.
 - When writing functions, make sure to include docstrings that describe what the function does, what parameters it takes, and what it returns.
 - When calling functions, make sure to prefer keyword arguments over positional arguments when possible.
+
+## Logging
+- When creating a logger, make sure to use the __name__ attribute of the module as the logger name.
