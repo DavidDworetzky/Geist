@@ -28,10 +28,12 @@ class Choice:
 class TokenDetails:
     cached_tokens: int = 0
     reasoning_tokens: int = 0
+    audio_tokens: int = 0
 
     @classmethod
     def from_dict(cls, data: Dict):
-        return cls(**data)
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(**valid_fields)
 
 @dataclass
 class Usage:

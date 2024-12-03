@@ -1,9 +1,13 @@
 from typing import List, Optional, Union
 from dataclasses import dataclass
 from typing import Any
+import logging
 from agents.models.gpt4_completion import Gpt4Completion
 from agents.models.llama_completion import LlamaCompletion
 import uuid
+
+# Create logger
+logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentCompletion:
@@ -21,14 +25,12 @@ class AgentCompletion:
             )
         elif isinstance(completion, LlamaCompletion):
             assistant_message = next((gen for gen in completion.messages if gen.role == 'assistant'), None)
-            assistant_content = assistant_message.content
-            assistant_chat_id = assistant_message.chat_id
             if assistant_message is None:
                 raise ValueError("No assistant message found in LlamaCompletion")
             return cls(
-                message=[assistant_content],
+                message=[assistant_message.content],
                 id=str(uuid.uuid4()),
-                chat_id=assistant_chat_id
+                chat_id=completion.chat_id
             )
         else:
             raise ValueError(f"Unsupported completion type: {type(completion).__name__}")

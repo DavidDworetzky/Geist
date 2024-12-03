@@ -13,7 +13,6 @@ class Message:
             return cls(
             role=data.get('role', ''),
             content=data.get('content', ''),
-            chat_id=data.get('chat_id', None)
         )
         except Exception as e:
             raise ValueError(f"Error creating Message from dict: {data}") from e
@@ -21,9 +20,12 @@ class Message:
 @dataclass
 class LlamaCompletion:
     messages: List[Message]
+    chat_id: Optional[int] = None
 
     @classmethod
     def from_dict(cls, data: List[Dict[str, str]]) -> 'LlamaCompletion':
         return cls(
-            messages=[Message.from_dict(message) for message in data]
+            messages=[Message.from_dict(message) for message in data],
+            #chat id is assigned after construction
+            chat_id=None
         )
