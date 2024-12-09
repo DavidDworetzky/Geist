@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 
-interface ChatMessage {
+export interface ChatMessage {
     user: string;
     ai: string;
 }
 
-interface ChatSession {
+export interface ChatSession {
     chat_history: ChatMessage[];
     chat_id: number;
 }
