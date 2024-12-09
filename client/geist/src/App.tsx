@@ -30,7 +30,7 @@ function App() {
         </p>
         <a
           className="App-link"
-          href="https://github.com/DavidDworetzky/Fastcasso"
+          href="https://github.com/DavidDworetzky/Geist"
           target="_blank"
           rel="noopener noreferrer"
         >
