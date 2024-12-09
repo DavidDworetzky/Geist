@@ -16,11 +16,11 @@ function LinkList(props: LinkListProps): JSX.Element {
         </div>)
 }
 
-interface LinkListProps {
+export interface LinkListProps {
     listItems: ListItem[];
 }
 
-interface ListItem {
+export interface ListItem {
     name: string;
     link: string;
 }

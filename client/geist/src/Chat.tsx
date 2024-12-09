@@ -5,12 +5,13 @@ import {ChatSession}from './Hooks/useGetChatSessions';
 import ChatTextArea from './Components/ChatTextArea';
 import LinkList from './Components/LinkList';
 import { ChatPair, ChatHistory } from './Components/ChatTextArea';
+import {ListItem} from './Components/LinkList';
 
 
 const Chat = () => {
     const [chatHistory, setChatHistory] = useState<ChatHistory>();
     const [chatSessionData, setChatSessions] = useState<ChatSession[]>([]);
-    const [chatSessionLinks, setChatSessionLinks] = useState<{name: number, link: string}[]>([]);
+    const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
     const { chatSessions, loading: isChatSessionLoading, error: chatSessionError } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
     const { prompt, completeText, loading: isLoading, error, completedText } = useCompleteText();
@@ -29,7 +30,7 @@ const Chat = () => {
         if (!isChatSessionLoading) {
             setChatSessions(chatSessions);
             const chatSessionListItems = chatSessions.map((session) => ({
-                name: session.chat_id,
+                name: session.chat_id.toString(),
                 link: `/chat/${session.chat_id}`
             }));
             setChatSessionLinks(chatSessionListItems);
