@@ -6,9 +6,11 @@ import ChatTextArea from './Components/ChatTextArea';
 import LinkList from './Components/LinkList';
 import { ChatPair, ChatHistory } from './Components/ChatTextArea';
 import {ListItem} from './Components/LinkList';
+import { useParams } from 'react-router-dom';
 
 
 const Chat = () => {
+    const { chatId } = useParams<{ chatId?: string }>();
     const [chatHistory, setChatHistory] = useState<ChatHistory>();
     const [chatSessionData, setChatSessions] = useState<ChatSession[]>([]);
     const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
@@ -27,15 +29,31 @@ const Chat = () => {
 
     // when chat sessions are done loading, set the chat history
     useEffect(() => {
-        if (!isChatSessionLoading) {
+        if (!isChatSessionLoading && chatSessions) {
             setChatSessions(chatSessions);
             const chatSessionListItems = chatSessions.map((session) => ({
                 name: session.chat_id.toString(),
                 link: `/chat/${session.chat_id}`
             }));
             setChatSessionLinks(chatSessionListItems);
+
+            // Load chat history for specific chat ID
+            if (chatId) {
+                const selectedSession = chatSessions.find(
+                    session => session.chat_id.toString() === chatId
+                );
+                if (selectedSession?.chat_history) {
+                    const initialHistory: ChatHistory = {
+                        chatHistory: selectedSession.chat_history.map(h => ({
+                            user: h.user,
+                            ai: h.ai
+                        }))
+                    };
+                    setChatHistory(initialHistory);
+                }
+            }
         }
-    }, [isChatSessionLoading]);
+    }, [isChatSessionLoading, chatId]);
 
 
     useEffect(() => {
