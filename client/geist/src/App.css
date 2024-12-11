@@ -131,3 +131,7 @@ nav svg {
 .chat-history-item:hover {
   color: #8ce7ff;  /* Slightly lighter shade for hover state */
 }
+
+.LinkList a {
+  text-decoration: none;
+}
