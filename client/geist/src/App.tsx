@@ -23,19 +23,14 @@ function App() {
 
     <div id="Container" className="Wrapper">
       <aside className="App-header">
-      <Navigation navigationElements={links}/>
-        <img src={geist_avatar} className="App-logo" alt="logo" />
-        <p>
+      <img src={geist_avatar} className="App-logo" alt="logo" /> 
+      <a className="App-link" 
+        href="https://github.com/DavidDworetzky/Geist"
+        target="_blank"
+        rel="noopener noreferrer">
           Welcome to Geist!, an open source LLM Workbench!
-        </p>
-        <a
-          className="App-link"
-          href="https://github.com/DavidDworetzky/Geist"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn more
-        </a>
+      </a>
+      <Navigation navigationElements={links}/>
       </aside>
       <main className="Content">
         <BrowserRouter>
