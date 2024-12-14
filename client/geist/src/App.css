@@ -62,7 +62,22 @@
 }
 
 .App-header li {
-  margin-right: 20px;  /* Adds spacing between list items */
+  margin-right: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.App-header li a {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.App-header li svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  flex-shrink: 0;
 }
 
 .Content {
