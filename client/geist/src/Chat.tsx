@@ -76,9 +76,9 @@ const Chat = () => {
     };
 
     return (
-        <>
+        <div className="Wrapper">
         <LinkList listItems={chatSessionLinks} />
-        <div>
+        <div className="LinkContent">
             <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
             
             <form onSubmit={handleSubmit}>
@@ -95,7 +95,7 @@ const Chat = () => {
             </form>
             {error && <p style={{ color: 'red' }}>Error: {error}</p>}
         </div>
-        </>
+        </div>
     );
 };
 
