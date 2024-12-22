@@ -202,10 +202,14 @@ nav svg {
   height: 100%;
   overflow-y: auto;
   padding: 1rem;
-  background-color: #000000;  /* Changed from #282c34 to black */
+  background-color: #282c34;  /* Changed from #282c34 to black */
   border-right: 1px solid #333333;  /* Slightly lighter border */
   flex-shrink: 0;
   color: #ffffff;  /* Adding explicit text color */
+  /*  link color */
+  a {
+    color: #61dafb;
+  }
 }
 
 .ChatContainer {
