@@ -76,25 +76,31 @@ const Chat = () => {
     };
 
     return (
-        <div className="Wrapper">
-        <LinkList listItems={chatSessionLinks} />
-        <div className="LinkContent">
-            <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
-            
-            <form onSubmit={handleSubmit}>
-                <textarea
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    rows={3}
-                    cols={50}
-                    style={{ marginBottom: '10px', marginTop: '20px', width: '100%' }}
-                />
-                <button type="submit" disabled={isLoading} className={isLoading ? 'loading-dots' : ''}>
-                    {isLoading ? '' : 'Send'}
-                </button>
-            </form>
-            {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-        </div>
+        <div className="ChatContainer">
+            <div className="ChatSidebar">
+                <LinkList listItems={chatSessionLinks} />
+            </div>
+            <div className="ChatContent">
+                <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
+                
+                <form onSubmit={handleSubmit} className="ChatInputForm">
+                    <textarea
+                        value={userInput}
+                        onChange={(e) => setUserInput(e.target.value)}
+                        rows={3}
+                        cols={50}
+                        className="ChatInput"
+                    />
+                    <button 
+                        type="submit" 
+                        disabled={isLoading} 
+                        className={`ChatSubmitButton ${isLoading ? 'loading-dots' : ''}`}
+                    >
+                        {isLoading ? '' : 'Send'}
+                    </button>
+                </form>
+                {error && <p className="ErrorMessage">Error: {error}</p>}
+            </div>
         </div>
     );
 };
