@@ -8,6 +8,7 @@ export interface ChatMessage {
 export interface ChatSession {
     chat_history: ChatMessage[];
     chat_id: number;
+    create_date: string;
 }
 
 const useGetChatSessions = () => {

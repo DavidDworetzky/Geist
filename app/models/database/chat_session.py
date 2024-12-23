@@ -30,6 +30,7 @@ class ChatHistory(list):
     """
     chat_history: List[Any]
     chat_id: int
+    create_date: datetime
 
     def __post_init__(self) -> None:
         """Initialize the list with chat_history contents"""
@@ -102,7 +103,8 @@ def get_chat_history(chat_session_id: int) -> ChatHistory:
         if chat_session:
             return ChatHistory(
                 chat_history=chat_session.chat_history,
-                chat_id=chat_session.chat_session_id
+                chat_id=chat_session.chat_session_id,
+                create_date= chat_session.create_date
             )
         return ChatHistory(chat_history=[], chat_id=chat_session_id)
 
@@ -118,7 +120,8 @@ def get_all_chat_history() -> List[ChatHistory]:
         return [
             ChatHistory(
                 chat_history=chat_session.chat_history,
-                chat_id=chat_session.chat_session_id
+                chat_id=chat_session.chat_session_id,
+                create_date=chat_session.create_date
             ) 
             for chat_session in chat_sessions
         ]
