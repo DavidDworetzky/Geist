@@ -31,10 +31,17 @@ const Chat = () => {
     useEffect(() => {
         if (!isChatSessionLoading && chatSessions) {
             setChatSessions(chatSessions);
-            const chatSessionListItems = chatSessions.map((session) => ({
-                name: session.chat_id.toString(),
-                link: `/chat/${session.chat_id}`
-            }));
+            const chatSessionListItems = chatSessions.map((session) => {
+                const date = new Date(session.create_date);
+                const formattedDate = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                const firstLine = session.chat_history[0].user.split('\n')[0];
+                const firstThreeWords = firstLine.split(' ').slice(0, 3).join(' ');
+                const summary = `${formattedDate} - ${firstThreeWords}`;
+                return {
+                    name: summary,
+                    link: `/chat/${session.chat_id}`
+                };
+            });
             setChatSessionLinks(chatSessionListItems);
 
             // Load chat history for specific chat ID
