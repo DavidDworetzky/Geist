@@ -138,4 +138,6 @@ def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload["message"] == agent_completion["message"]
+    for key in agent_completion:
+        assert response_payload[key] == agent_completion[key]
+    assert response_payload["chat_id"] != None
