@@ -154,7 +154,9 @@ def test_completion(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload == agent_completion
+    for key in agent_completion:
+        assert response_payload[key] == agent_completion[key]
+    assert response_payload["chat_id"] != None
 
 
 

@@ -5,6 +5,7 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
 interface CompleteTextResponse {
   message: string;
+  chat_id: number | null;
 }
 
 const params = {
@@ -26,15 +27,22 @@ const useCompleteText = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completedText, setCompletedText] = useState<string | null>(null);
+  const [state_chat_id, setStateChatId] = useState<number | null>(null);
   const [prompt, setPrompt] = useState<string | null>(null);
 
-  const completeText = async (inputText: string) => {
+  const completeText = async (inputText: string, chat_id: number | null = null) => {
     setLoading(true);
     setError(null);
     setCompletedText(null);
+    chat_id = chat_id ?? state_chat_id;
+    setStateChatId(null);
     const prompt = inputText;
     try {
-      const response = await fetch('/agent/complete_text', {
+      const endpoint = chat_id !== null 
+        ? `/agent/complete_text/${chat_id}`
+        : '/agent/complete_text';
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -52,6 +60,9 @@ const useCompleteText = () => {
       } else {
         setCompletedText(data.message as string);
       }
+      if (data.chat_id !== null) {
+        setStateChatId(data.chat_id);
+      }
       setPrompt(prompt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
@@ -60,7 +71,7 @@ const useCompleteText = () => {
     }
   };
 
-  return { prompt, completeText, loading, error, completedText };
+  return { prompt, completeText, loading, error, completedText, state_chat_id };
 };
 
 export default useCompleteText;

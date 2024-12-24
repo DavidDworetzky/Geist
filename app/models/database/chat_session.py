@@ -104,9 +104,14 @@ def get_chat_history(chat_session_id: int) -> ChatHistory:
             return ChatHistory(
                 chat_history=chat_session.chat_history,
                 chat_id=chat_session.chat_session_id,
-                create_date= chat_session.create_date
+                create_date=chat_session.create_date
             )
-        return ChatHistory(chat_history=[], chat_id=chat_session_id)
+        # When no chat session exists, create with current timestamp
+        return ChatHistory(
+            chat_history=[],
+            chat_id=chat_session_id,
+            create_date=datetime.now()  # Add current timestamp for new empty histories
+        )
 
 def get_all_chat_history() -> List[ChatHistory]:
     """
