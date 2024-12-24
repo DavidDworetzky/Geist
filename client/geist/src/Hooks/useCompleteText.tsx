@@ -28,13 +28,17 @@ const useCompleteText = () => {
   const [completedText, setCompletedText] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string | null>(null);
 
-  const completeText = async (inputText: string) => {
+  const completeText = async (inputText: string, chat_id: number | null = null) => {
     setLoading(true);
     setError(null);
     setCompletedText(null);
     const prompt = inputText;
     try {
-      const response = await fetch('/agent/complete_text', {
+      const endpoint = chat_id !== null 
+        ? `/agent/complete_text/${chat_id}`
+        : '/agent/complete_text';
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
