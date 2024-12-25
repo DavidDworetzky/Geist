@@ -22,17 +22,16 @@ jobs:
       with:
         auto-activate-base: true
         python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        conda env create -f linux_environment.yml
-        conda activate geist  # assuming your environment name is 'geist'
+        activate-environment: geist-linux-docker
+        environment-file: linux_environment.yml
 
     - name: Run tests
+      shell: bash -l {0}
       env:
         HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
       run: |
-        conda activate geist-linux-docker
+        conda info
+        conda list
         pytest tests/
 
   build:
