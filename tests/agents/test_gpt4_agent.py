@@ -37,9 +37,9 @@ HAIKU_COMPLETION = {
 }
 
 agent_completion = {
-    "chat_id" : None,
+    "chat_id" : "EXISTS",
     "message" : ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
-    "id" : "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
+    "id" : "EXISTS",
 }
 
 def is_function_prompt(prompt: str) -> bool:
@@ -154,7 +154,11 @@ def test_completion(log, complete_text, mock_gpt4_agent, gpt4agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload == agent_completion
+    for key in agent_completion:
+        if agent_completion[key] == "EXISTS":
+            assert response_payload[key] != None
+        else:
+            assert response_payload[key] == agent_completion[key]
 
 
 

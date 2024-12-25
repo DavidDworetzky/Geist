@@ -8,9 +8,11 @@ import pytest
 
 HAIKU_COMPLETION = "Silent orb of night,\nGlowing in soft silver light,\nGuiding"
 
+#by convention, if EXISTS is set for a key, existence is checked but not equivalence
 agent_completion = {
     "message": ["Silent orb of night,\nGlowing in soft silver light,\nGuiding"],
-    "id": "chatcmpl-AHZzoFcxDG62aTvWx1jS0a2VGkitH"
+    "id": "EXISTS",
+    "chat_id": "EXISTS"
 }       
 
 def is_function_prompt(prompt: str) -> bool:
@@ -138,4 +140,8 @@ def test_completion(log, complete_text, mock_llama_agent, llama_agent, client):
     # assert the response
     assert response.status_code == 200
     response_payload = response.json()
-    assert response_payload["message"] == agent_completion["message"]
+    for key in agent_completion:
+        if agent_completion[key] == "EXISTS":
+            assert response_payload[key] != None
+        else: 
+            assert response_payload[key] == agent_completion[key]

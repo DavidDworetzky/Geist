@@ -16,11 +16,12 @@ const Chat = () => {
     const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
     const { chatSessions, loading: isChatSessionLoading, error: chatSessionError } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
-    const { prompt, completeText, loading: isLoading, error, completedText } = useCompleteText();
+    const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText();
 
     const chatWithServer = async (input: string) => {
+        let parsedChatId = chatId ? parseInt(chatId) : state_chat_id;
         try {
-            await completeText(input);
+            await completeText(input, parsedChatId);
         }
         catch (err) {
             console.error('Error chatting with server:', err);
@@ -61,7 +62,6 @@ const Chat = () => {
             }
         }
     }, [isChatSessionLoading, chatId]);
-
 
     useEffect(() => {
         if (completedText) {
