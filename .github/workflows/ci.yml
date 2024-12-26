@@ -29,6 +29,7 @@ jobs:
       shell: bash -l {0}
       env:
         HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         conda info
         conda list
