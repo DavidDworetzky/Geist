@@ -23,7 +23,7 @@ jobs:
         auto-activate-base: true
         python-version: '3.10'
         activate-environment: geist-linux-docker
-        environment-file: linux_environment.yml
+        environment-file: linux_environment_x86_x64.yml
 
     - name: Run tests
       shell: bash -l {0}
