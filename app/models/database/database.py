@@ -10,7 +10,7 @@ load_dotenv()
 DB_NAME = os.getenv("POSTGRES_DB", "geist")
 DB_USER = os.getenv("POSTGRES_USER", "geist")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "geist")
-DB_HOST = os.getenv("DB_HOST", "db")
+DB_HOST = os.getenv("DB_HOST", "geist")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 # Construct the database URL
