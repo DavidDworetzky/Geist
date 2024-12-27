@@ -23,6 +23,7 @@ export interface LinkListProps {
 export interface ListItem {
     name: string;
     link: string;
+    date: Date;
 }
 
 export default LinkList

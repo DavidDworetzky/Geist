@@ -40,10 +40,12 @@ const Chat = () => {
                 const summary = `${formattedDate} - ${firstThreeWords}`;
                 return {
                     name: summary,
-                    link: `/chat/${session.chat_id}`
+                    link: `/chat/${session.chat_id}`,
+                    date: date,
                 };
             });
-            setChatSessionLinks(chatSessionListItems);
+            const sortedItems = chatSessionListItems.sort((a, b) => b.date.getTime() - a.date.getTime());
+            setChatSessionLinks(sortedItems);
 
             // Load chat history for specific chat ID
             if (chatId) {
