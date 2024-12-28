@@ -27,7 +27,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 load_dotenv()
 openai_key = os.getenv("OPENAI_TOKEN")
 enhanced_logging = os.getenv("ENHANCED_LOGGING")
-enhanced_logging = json.loads(enhanced_logging.lower())
+enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else False
 
 #in memory agent cache
 agent_cache = {
