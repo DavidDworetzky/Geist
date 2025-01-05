@@ -8,7 +8,7 @@ import psutil
 import json
 import logging
 from utils.logging import log_function_call
-from agents.architectures.llama.llama_transformers import LlamaTransformer
+from agents.architectures.llama.llama_mlx import LlamaMLX
 from agents.models.agent_completion import LlamaCompletion
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
@@ -42,7 +42,7 @@ class LlamaAgent(BaseAgent):
 
         self.logger = logging.getLogger(__name__)
         if pre_initialize_model:
-            self.llama = LlamaTransformer(max_new_tokens=agent_context.settings.max_tokens)
+            self.llama = LlamaMLX(max_new_tokens=agent_context.settings.max_tokens)
 
     def phase_out(self):
         self._agent_context._save()
@@ -53,7 +53,7 @@ class LlamaAgent(BaseAgent):
     
     def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
         if not self.llama:
-            self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
+            self.llama = LlamaMLX(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
             user_prompt=prompt
