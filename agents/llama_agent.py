@@ -8,8 +8,10 @@ import psutil
 import json
 import logging
 from utils.logging import log_function_call
-from agents.architectures.llama.llama_transformers import LlamaTransformer
+from agents.architectures.llama.llama_mlx import LlamaMLX
+from agents.architectures.llama.llama_transformer import LlamaTransformer
 from agents.models.agent_completion import LlamaCompletion
+import torch
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -42,7 +44,12 @@ class LlamaAgent(BaseAgent):
 
         self.logger = logging.getLogger(__name__)
         if pre_initialize_model:
-            self.llama = LlamaTransformer(max_new_tokens=agent_context.settings.max_tokens)
+            if torch.backends.mps.is_available():
+                self.logger.info("Using MPS (Apple Silicon) device - initializing LlamaMLX")
+                self.llama = LlamaMLX(max_new_tokens=agent_context.settings.max_tokens)
+            else:
+                self.logger.info("Using CPU/CUDA device - initializing LlamaTransformer")
+                self.llama = LlamaTransformer(max_new_tokens=agent_context.settings.max_tokens)
 
     def phase_out(self):
         self._agent_context._save()
@@ -53,7 +60,10 @@ class LlamaAgent(BaseAgent):
     
     def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
         if not self.llama:
-            self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
+            if torch.backends.mps.is_available():
+                self.llama = LlamaMLX(max_new_tokens=self._agent_context.settings.max_tokens)
+            else:
+                self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
             user_prompt=prompt
