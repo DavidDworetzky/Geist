@@ -9,7 +9,7 @@ import json
 import logging
 from utils.logging import log_function_call
 from agents.architectures.llama.llama_mlx import LlamaMLX
-from agents.architectures.llama.llama_transformer import LlamaTransformer
+from agents.architectures.llama.llama_transformers import LlamaTransformer
 from agents.models.agent_completion import LlamaCompletion
 import torch
 
