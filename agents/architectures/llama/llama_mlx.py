@@ -106,10 +106,10 @@ class LlamaMLX:
 
         # Format prompt
         prompt = f"""<s>[INST] <<SYS>>
-{system_prompt}
-<</SYS>>
+        {system_prompt}
+        <</SYS>>
 
-{user_prompt} [/INST]"""
+        {user_prompt} [/INST]"""
 
         logger.info(f"Starting text generation with parameters - temperature {self.temperature}, top_p {self.top_p}, max_new_tokens {self.max_new_tokens}")
         
