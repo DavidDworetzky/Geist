@@ -14,6 +14,7 @@ mkdir -p output
 set -euo pipefail
 
 #initialize our database
-python initdb.py
+#python initdb.py
 #start our geist server
-python bootstrap.py
+#python bootstrap.py
+tail -f /dev/null
