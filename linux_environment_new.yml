@@ -1,0 +1,9 @@
+name: geist-linux-docker
+channels:
+  - conda-forge
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - uvicorn=0.20.0
+prefix: /root/miniconda3/envs/geist-linux-docker
