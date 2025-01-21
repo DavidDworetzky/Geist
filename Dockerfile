@@ -21,7 +21,7 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh 
 RUN which conda && conda --version
 RUN conda init bash
 
-COPY linux_environment_new.yml .
+COPY linux_environment.yml .
 COPY . .
 
 RUN chmod +x *.sh

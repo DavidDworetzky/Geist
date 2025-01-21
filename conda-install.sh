@@ -8,7 +8,7 @@ set +euo pipefail
 #clean up all existing environments
 conda clean --all --yes
 conda env remove --name geist-linux-docker
-conda env create -f linux_environment_new.yml
+conda env create -f linux_environment.yml
 
 # Re-enable strict mode:
 set -euo pipefail
