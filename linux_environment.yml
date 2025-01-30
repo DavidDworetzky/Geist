@@ -60,6 +60,7 @@ dependencies:
       - numpy==2.2.2
       - packaging==24.2
       - pillow==11.1.0
+      - psutil==6.1.1
       - psycopg2-binary==2.9.10
       - pydantic==2.10.5
       - pydantic-core==2.27.2
