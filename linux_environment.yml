@@ -43,12 +43,18 @@ dependencies:
   - uvicorn=0.20.0=py311hfecb2dc_1
   - wheel=0.45.1=pyhd8ed1ab_1
   - pip:
+      - aiohappyeyeballs==2.4.4
+      - aiohttp==3.11.11
+      - aiohttp-retry==2.9.1
+      - aiosignal==1.3.2
       - annotated-types==0.7.0
       - anyio==4.8.0
+      - attrs==25.1.0
       - certifi==2024.12.14
       - charset-normalizer==3.4.1
       - fastapi==0.115.6
       - filelock==3.16.1
+      - frozenlist==1.5.0
       - fsspec==2024.12.0
       - greenlet==3.1.1
       - huggingface-hub==0.27.1
@@ -56,14 +62,17 @@ dependencies:
       - jinja2==3.1.5
       - markupsafe==3.0.2
       - mpmath==1.3.0
+      - multidict==6.1.0
       - networkx==3.4.2
       - numpy==2.2.2
       - packaging==24.2
       - pillow==11.1.0
+      - propcache==0.2.1
       - psutil==6.1.1
       - psycopg2-binary==2.9.10
       - pydantic==2.10.5
       - pydantic-core==2.27.2
+      - pyjwt==2.10.1
       - python-dotenv==1.0.1
       - python-multipart==0.0.20
       - pyyaml==6.0.2
@@ -80,5 +89,7 @@ dependencies:
       - torchvision==0.20.1
       - tqdm==4.67.1
       - transformers==4.48.1
+      - twilio==9.4.4
       - urllib3==2.3.0
+      - yarl==1.18.3
 prefix: /root/miniconda3/envs/geist-linux-docker
