@@ -65,6 +65,7 @@ dependencies:
       - pydantic==2.10.5
       - pydantic-core==2.27.2
       - python-dotenv==1.0.1
+      - python-multipart==0.0.20
       - pyyaml==6.0.2
       - regex==2024.11.6
       - requests==2.32.3
