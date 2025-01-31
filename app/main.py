@@ -65,8 +65,11 @@ def create_app():
     # Agent routes using agent_router
     @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
-        agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
-        #parse agent_type from str to AgentType
+        #if params.agent_type is an AgentType, use it.
+        if not isinstance(params.agent_type, AgentType):
+            agent_type = AgentType[params.agent_type.upper()]
+        else:
+            agent_type = params.agent_type
 
         agent = get_active_agent(agent_type)
 
@@ -94,8 +97,11 @@ def create_app():
         
     @agent_router.post("/complete_text/{session_id}")
     async def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
-        agent_type = AgentType[params.agent_type.upper()] if params.agent_type else default_agent_type
-        #parse agent_type from str to AgentType
+        #if params.agent_type is an AgentType, use it.
+        if not isinstance(params.agent_type, AgentType):
+            agent_type = AgentType[params.agent_type.upper()]
+        else:
+            agent_type = params.agent_type
 
         agent = get_active_agent(agent_type)
 
