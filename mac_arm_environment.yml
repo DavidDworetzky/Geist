@@ -97,4 +97,4 @@ dependencies:
       - twilio==9.4.4
       - urllib3==2.3.0
       - yarl==1.18.3
-prefix: /root/miniconda3/envs/geist-linux-docker
+prefix: /root/miniconda3/envs/geist-mac
