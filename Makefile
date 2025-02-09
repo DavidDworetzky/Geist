@@ -1,7 +1,7 @@
 # Variables
 PYTHON=python
 DOCKER_COMPOSE=docker compose
-CONDA_ENV=mac_environment
+CONDA_ENV=geist-mac
 CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
 
 # Default target
