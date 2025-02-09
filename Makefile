@@ -1,6 +1,8 @@
 # Variables
 PYTHON=python
 DOCKER_COMPOSE=docker compose
+CONDA_ENV=mac_environment
+CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
 
 # Default target
 .PHONY: all
@@ -21,12 +23,12 @@ help:
 .PHONY: run
 run:
 	$(DOCKER_COMPOSE) up -d
-	$(PYTHON) bootstrap.py
+	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 
 # Run Python server only
 .PHONY: server
 server:
-	$(PYTHON) bootstrap.py
+	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 
 # Run Docker services only
 .PHONY: docker
@@ -49,4 +51,4 @@ clean:
 # Initialize database
 .PHONY: init-db
 init-db:
-	$(PYTHON) initdb.py 
+	$(CONDA_ACTIVATE) && $(PYTHON) initdb.py 
