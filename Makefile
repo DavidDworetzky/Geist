@@ -1,7 +1,7 @@
 # Variables
 PYTHON=python
 DOCKER_COMPOSE=docker compose
-CONDA_ENV=mac_environment
+CONDA_ENV=geist-mac
 CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
 
 # Default target
@@ -22,7 +22,11 @@ help:
 # Run both server and Docker services
 .PHONY: run
 run:
+ifeq ($(NO_BACKEND),1)
+	$(DOCKER_COMPOSE) up -d --scale backend=0
+else
 	$(DOCKER_COMPOSE) up -d
+endif
 	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 
 # Run Python server only
