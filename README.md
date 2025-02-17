@@ -61,8 +61,11 @@ client/geist/.env settings:
 2. Run `python bootstrap.py`
 
 
-## Starting the solution with docker compose
+## Starting the solution with docker compose (no mlx support)
 1. Run `docker compose up`
+
+## Starting the solution with docker compose but backend with mlx support
+1. Run `make run NO_BACKEND=1`
 
 
 ## Supported Environments
