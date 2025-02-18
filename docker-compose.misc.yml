@@ -27,8 +27,6 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
-    depends_on:
-      - backend
     networks:
       - test_net
 
