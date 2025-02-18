@@ -65,7 +65,7 @@ client/geist/.env settings:
 1. Run `docker compose up`
 
 ## Starting the solution with docker compose but backend with mlx support
-1. Run `make run NO_BACKEND=1`
+1. Run `make run MLX_BACKEND=1`
 
 
 ## Supported Environments
