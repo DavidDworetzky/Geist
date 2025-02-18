@@ -1,0 +1,37 @@
+version: "3"
+
+services:
+
+  db:
+    image: postgres:14.9
+    restart: always
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=geist
+      - POSTGRES_USER=geist
+      - POSTGRES_PASSWORD=geist
+    networks:
+      - test_net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: client/geist/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client/geist:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    networks:
+      - test_net
+
+networks:
+  test_net:
+
+volumes:
+  postgres_data:

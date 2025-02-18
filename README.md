@@ -61,8 +61,13 @@ client/geist/.env settings:
 2. Run `python bootstrap.py`
 
 
-## Starting the solution with docker compose
+## Starting the solution with docker compose (no mlx support)
 1. Run `docker compose up`
+
+## Starting the solution with docker compose but backend with mlx support
+1. Run `make run MLX_BACKEND=1`
+2. If you encounter port binding issues, make sure to disable airplay on mac. 
+3. You might need to switch local DB configs to DB_HOST = localhost, DB_PORT = 5433 based off of external mappings in docker compose.
 
 
 ## Supported Environments
