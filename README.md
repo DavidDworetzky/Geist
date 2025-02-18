@@ -66,6 +66,7 @@ client/geist/.env settings:
 
 ## Starting the solution with docker compose but backend with mlx support
 1. Run `make run MLX_BACKEND=1`
+2. If you encounter port binding issues, make sure to disable airplay on mac. 
 
 
 ## Supported Environments
