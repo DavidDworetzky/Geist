@@ -22,12 +22,11 @@ help:
 # Run both server and Docker services
 .PHONY: run
 run:
-ifeq ($(NO_BACKEND),1)
-	$(DOCKER_COMPOSE) up -d --scale backend=0
+ifeq ($(MLX_BACKEND),1)
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 else
 	$(DOCKER_COMPOSE) up -d
 endif
-	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 
 # Run Python server only
 .PHONY: server
