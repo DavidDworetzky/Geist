@@ -16,6 +16,7 @@ from mlx.utils import tree_unflatten
 # Tokenizer imports
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
+import safetensors.torch
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -323,11 +324,12 @@ class LlamaMLX:
                 setattr(self.config, field, config_json[field])
 
         # Step 4: Load the weights
-        weights_path = os.path.join(self.weights_dir, "weights.npz")
-        logger.info(f"Loading model weights from {weights_path} ...")
-        np_weights = np.load(weights_path)
-        # Convert to MLX arrays
-        weights_dict = {k: mx.array(v) for k, v in np_weights.items()}
+        logger.info(f"Loading model weights from {self.weights_dir} ...")
+        weights_dict = {}
+        for file_path in glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")):
+            with safetensors.numpy.load_file(file_path, device="cpu") as tensors:
+                for key, value in tensors.items():
+                    weights_dict[key] = mx.array(value.numpy())
 
         # Step 5: Instantiate the LLaMA model using our config
         logger.info("Instantiating LLaMA model.")
