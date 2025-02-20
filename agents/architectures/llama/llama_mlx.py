@@ -299,8 +299,10 @@ class LlamaMLX:
         """
         Load the tokenizer (Hugging Face) and the LLaMA model (MLX) from local disk.
         """
-        # Step 1: Possibly download if missing
-        self.download_model()
+
+        # Check if model exists, if not, download it
+        if not os.path.exists(os.path.join(self.weights_dir, "config.json")):
+            self.download_model()
 
         # Step 2: Load the tokenizer
         logger.info("Loading tokenizer from local weights...")
