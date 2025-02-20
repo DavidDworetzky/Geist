@@ -328,8 +328,8 @@ class LlamaMLX:
         weights_dict = {}
         for file_path in glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")):
             with safetensors.safe_open(file_path, framework="np", device="cpu") as tensors:
-                for key, value in tensors.items():
-                    weights_dict[key] = mx.array(value.numpy())
+                for key in tensors.keys():
+                    weights_dict[key] = mx.array(tensors.get_tensor(key))
 
         # Step 5: Instantiate the LLaMA model using our config
         logger.info("Instantiating LLaMA model.")
@@ -337,9 +337,6 @@ class LlamaMLX:
         # Unshard & load
         self.model.update(tree_unflatten(list(weights_dict.items())))
         logger.info("Model loaded into MLX successfully.")
-
-        # (Optional) In case you want to set a seed:
-        # mx.random.seed(0)
 
     def generate_text(self, prompt: str) -> mx.array:
         """
