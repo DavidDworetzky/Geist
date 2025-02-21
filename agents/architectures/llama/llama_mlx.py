@@ -333,19 +333,21 @@ class LlamaMLX:
             # Load the safetensors file using PyTorch
             tensors = safetensors.torch.load_file(file_path, device="cpu")
             for key, tensor in tensors.items():
-                # Convert to float32
+                # Convert to float32 PyTorch tensor
                 tensor = tensor.to(torch.float32)
-                weights_dict[key] = mx.array(tensor.numpy())
+                weights_dict[key] = tensor
 
         # Save the converted weights to a new safetensors file
         converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
+        metadata = {"format": "pt"}
         safetensors.torch.save(weights_dict, converted_weights_path)
 
         # Step 5: Instantiate the LLaMA model using our config and the converted weights
         logger.info("Instantiating LLaMA model.")
         self.model = Llama(self.config)
         # Load the converted weights
-        self.model.update(tree_unflatten(list(weights_dict.items())))
+        for key, tensor in weights_dict.items():
+            self.model.update({key: mx.array(tensor.numpy())})
         logger.info("Model loaded into MLX successfully.")
 
     def generate_text(self, prompt: str) -> mx.array:
