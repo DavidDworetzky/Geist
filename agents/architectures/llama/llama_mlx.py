@@ -16,6 +16,9 @@ from mlx.utils import tree_unflatten
 # Tokenizer imports
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
+import safetensors
+import torch
+import safetensors.torch
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -178,8 +181,8 @@ class Llama(nn.Module):
             if temp != 0.0:
                 logits = logits / temp
 
-            # Convert to a normal CPU array for sampling logic in python
-            np_logits = logits.asnumpy()
+            # Convert to a NumPy array for sampling logic in Python
+            np_logits = np.array(logits)  # Use mx.np.array() to convert to NumPy
 
             # If top_p < 1.0, we do nucleus (top-p) sampling:
             if top_p < 1.0:
@@ -246,7 +249,7 @@ class LlamaMLX:
     But uses the correct MLX LLaMA architecture and logic from the first script.
     """
 
-    def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 0.95):
+    def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 0.95, cache_converted_safetensors: bool = False):
         self.model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
@@ -254,6 +257,7 @@ class LlamaMLX:
 
         # Local directory to store model & tokenizer
         self.weights_dir = "app/model_weights/llama_3_1"
+        self.cache_converted_safetensors = cache_converted_safetensors
         
         # Our merged config
         self.config = ModelConfig()
@@ -323,21 +327,29 @@ class LlamaMLX:
                 setattr(self.config, field, config_json[field])
 
         # Step 4: Load the weights
-        weights_path = os.path.join(self.weights_dir, "weights.npz")
-        logger.info(f"Loading model weights from {weights_path} ...")
-        np_weights = np.load(weights_path)
-        # Convert to MLX arrays
-        weights_dict = {k: mx.array(v) for k, v in np_weights.items()}
+        logger.info(f"Loading model weights from {self.weights_dir} ...")
+        weights_dict = {}
+        for file_path in glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")):
+            # Load the safetensors file using PyTorch
+            tensors = safetensors.torch.load_file(file_path, device="cpu")
+            for key, tensor in tensors.items():
+                # Convert to float32 PyTorch tensor
+                tensor = tensor.to(torch.float32)
+                weights_dict[key] = tensor
 
-        # Step 5: Instantiate the LLaMA model using our config
+        # Step 5: Instantiate the LLaMA model using our config and the converted weights
         logger.info("Instantiating LLaMA model.")
         self.model = Llama(self.config)
-        # Unshard & load
-        self.model.update(tree_unflatten(list(weights_dict.items())))
+        # Load the converted weights
+        for key, tensor in weights_dict.items():
+            self.model.update({key: mx.array(tensor.numpy())})
         logger.info("Model loaded into MLX successfully.")
 
-        # (Optional) In case you want to set a seed:
-        # mx.random.seed(0)
+        if self.cache_converted_safetensors:
+            # Save the converted weights to a new safetensors file
+            converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
+            metadata = {"format": "pt"}  # Metadata should be a dictionary
+            safetensors.torch.save(weights_dict, converted_weights_path, metadata=metadata)
 
     def generate_text(self, prompt: str) -> mx.array:
         """
@@ -346,7 +358,7 @@ class LlamaMLX:
         """
         # Encode prompt
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        x = mx.array([prompt_ids], dtype="int64")  # shape (1, seq_length)
+        x = mx.array([prompt_ids], dtype=mx.int64)  # shape (1, seq_length)
 
         # We'll build up the sequence in a Python list as tokens come out
         generated_tokens = prompt_ids[:]  # start with the prompt
