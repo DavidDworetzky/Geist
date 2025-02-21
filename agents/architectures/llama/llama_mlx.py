@@ -181,8 +181,8 @@ class Llama(nn.Module):
             if temp != 0.0:
                 logits = logits / temp
 
-            # Convert to a normal CPU array for sampling logic in python
-            np_logits = logits.asnumpy()
+            # Convert to a NumPy array for sampling logic in Python
+            np_logits = np.array(logits)  # Use mx.np.array() to convert to NumPy
 
             # If top_p < 1.0, we do nucleus (top-p) sampling:
             if top_p < 1.0:
@@ -337,11 +337,6 @@ class LlamaMLX:
                 tensor = tensor.to(torch.float32)
                 weights_dict[key] = tensor
 
-        # Save the converted weights to a new safetensors file
-        converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
-        metadata = {"format": "pt"}
-        safetensors.torch.save(weights_dict, converted_weights_path)
-
         # Step 5: Instantiate the LLaMA model using our config and the converted weights
         logger.info("Instantiating LLaMA model.")
         self.model = Llama(self.config)
@@ -350,6 +345,12 @@ class LlamaMLX:
             self.model.update({key: mx.array(tensor.numpy())})
         logger.info("Model loaded into MLX successfully.")
 
+        if self.cache_converted_safetensors:
+            # Save the converted weights to a new safetensors file
+            converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
+            metadata = {"format": "pt"}  # Metadata should be a dictionary
+            safetensors.torch.save(weights_dict, converted_weights_path, metadata=metadata)
+
     def generate_text(self, prompt: str) -> mx.array:
         """
         Generate text using the LLaMA model's `generate` method (token-by-token).
@@ -357,7 +358,7 @@ class LlamaMLX:
         """
         # Encode prompt
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        x = mx.array([prompt_ids], dtype="int64")  # shape (1, seq_length)
+        x = mx.array([prompt_ids], dtype=mx.int64)  # shape (1, seq_length)
 
         # We'll build up the sequence in a Python list as tokens come out
         generated_tokens = prompt_ids[:]  # start with the prompt
