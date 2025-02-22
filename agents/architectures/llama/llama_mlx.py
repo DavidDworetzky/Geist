@@ -184,6 +184,16 @@ class Llama(nn.Module):
             # Convert to a NumPy array for sampling logic in Python
             np_logits = np.array(logits)  # Use mx.np.array() to convert to NumPy
 
+            # Check if the logits tensor has the expected shape
+            if np_logits.ndim != 1:
+                logger.error(f"Unexpected logits shape: {np_logits.shape}. Expected a 1D tensor.")
+                return 0  # Return a default value or raise an exception
+
+            # Check for invalid values in the logits tensor
+            if np.any(np.isnan(np_logits)) or np.any(np.isinf(np_logits)):
+                logger.error("Logits tensor contains NaN or Inf values.")
+                return 0  # Return a default value or raise an exception
+
             # If top_p < 1.0, we do nucleus (top-p) sampling:
             if top_p < 1.0:
                 # Sort in descending order
