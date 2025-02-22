@@ -176,31 +176,45 @@ class Llama(nn.Module):
         Token-by-token generator with optional temperature and top-p sampling.
         Yields one token at a time.
         """
-        def sample_logits(logits: mx.array):
+        def sample_logits(logits: mx.array) -> int:
+            """
+            Sample a token from the logits with temperature scaling and optional nucleus sampling.
+            
+            Parameters:
+                logits (mx.array): Logits from the model.
+            
+            Returns:
+                int: The sampled token.
+            """
             # Optionally apply temperature scaling:
             if temp != 0.0:
                 logits = logits / temp
 
             # Convert to a NumPy array for sampling logic in Python
-            np_logits = np.array(logits)  # Use mx.np.array() to convert to NumPy
+            np_logits = np.array(logits)
 
-            # If top_p < 1.0, we do nucleus (top-p) sampling:
+            # Ensure logits has a 1D shape
+            if np_logits.ndim != 1:
+                logger.error(f"Unexpected logits shape: {np_logits.shape}. Expected a 1D tensor.")
+                raise ValueError("Logits tensor has an unexpected shape.")
+
+            # Check for invalid values in the logits tensor
+            if np.any(np.isnan(np_logits)) or np.any(np.isinf(np_logits)):
+                logger.error("Logits tensor contains NaN or Inf values.")
+                raise ValueError("Logits tensor contains invalid values (NaN or Inf).")
+
+            # If top_p < 1.0, perform nucleus (top-p) sampling:
             if top_p < 1.0:
-                # Sort in descending order
                 sorted_indices = np.argsort(-np_logits)
                 sorted_logits = np_logits[sorted_indices]
-                # Softmax on the sorted logits
                 sorted_probs = np.exp(sorted_logits) / np.sum(np.exp(sorted_logits))
                 cumulative_probs = np.cumsum(sorted_probs)
                 cutoff_idx = np.searchsorted(cumulative_probs, top_p)
-                # Zero out everything after cutoff
                 sorted_probs[cutoff_idx + 1 :] = 0
-                # renormalize
                 sorted_probs /= np.sum(sorted_probs)
                 next_id = np.random.choice(sorted_indices, p=sorted_probs)
-                return next_id
+                return int(next_id)  
             else:
-                # Default to greedy if top_p=1.0
                 return int(np_logits.argmax())
 
         # Caches to store K/V from each layer
@@ -216,9 +230,12 @@ class Llama(nn.Module):
             cache_per_layer.append(c)
         h = self.norm(h)
 
-        # The logits for the last position:
+        # Get 2D logits with shape (1, vocab_size)
         logits = self.output(h[:, -1])
-        # Sample the first new token:
+        
+        # Squeeze the batch dimension to get a 1D tensor of shape (vocab_size,)
+        logits = logits[0]
+        
         new_token = sample_logits(logits)
         yield new_token
 
@@ -234,6 +251,7 @@ class Llama(nn.Module):
                 cache_per_layer[i] = updated_cache
             h = self.norm(h)
             logits = self.output(h[:, -1])
+            logits = logits[0]
             new_token = sample_logits(logits)
             yield new_token
 
