@@ -187,12 +187,12 @@ class Llama(nn.Module):
             # Check if the logits tensor has the expected shape
             if np_logits.ndim != 1:
                 logger.error(f"Unexpected logits shape: {np_logits.shape}. Expected a 1D tensor.")
-                return 0  # Return a default value or raise an exception
+                raise ValueError("Logits tensor has an unexpected shape.")
 
             # Check for invalid values in the logits tensor
             if np.any(np.isnan(np_logits)) or np.any(np.isinf(np_logits)):
                 logger.error("Logits tensor contains NaN or Inf values.")
-                return 0  # Return a default value or raise an exception
+                raise ValueError("Logits tensor contains invalid values (NaN or Inf).")
 
             # If top_p < 1.0, we do nucleus (top-p) sampling:
             if top_p < 1.0:
@@ -226,9 +226,12 @@ class Llama(nn.Module):
             cache_per_layer.append(c)
         h = self.norm(h)
 
-        # The logits for the last position:
+        # Get 2D logits with shape (1, vocab_size)
         logits = self.output(h[:, -1])
-        # Sample the first new token:
+        
+        # Squeeze the batch dimension to get a 1D tensor of shape (vocab_size,)
+        logits = logits[0]
+        
         new_token = sample_logits(logits)
         yield new_token
 
@@ -244,6 +247,7 @@ class Llama(nn.Module):
                 cache_per_layer[i] = updated_cache
             h = self.norm(h)
             logits = self.output(h[:, -1])
+            logits = logits[0]
             new_token = sample_logits(logits)
             yield new_token
 
