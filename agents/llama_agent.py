@@ -58,10 +58,10 @@ class LlamaAgent(BaseAgent):
     def phase_in(self):
         self.initialize()
     
-    def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None):
+    def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None, top_p:float = None, temperature:float = None):
         if not self.llama:
             if torch.backends.mps.is_available():
-                self.llama = LlamaMLX(max_new_tokens=self._agent_context.settings.max_tokens)
+                self.llama = LlamaMLX(max_new_tokens=self._agent_context.settings.max_tokens, top_p = top_p if top_p else 0.95, temperature = temperature if temperature else 0.7)
             else:
                 self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
@@ -139,7 +139,7 @@ class LlamaAgent(BaseAgent):
         if not system_prompt:
             system_prompt = SYSTEM_PROMPT
 
-        completion = self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt)
+        completion = self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt, top_p = top_p if top_p else None, temperature = temperature if temperature else None)
         ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
         chat_history = self._agent_context._add_to_chat_history(user_message=prompt, ai_message=ai_message, chat_id=chat_id)
 

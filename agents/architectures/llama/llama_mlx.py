@@ -374,6 +374,7 @@ class LlamaMLX:
         Generate text using the LLaMA model's `generate` method (token-by-token).
         Returns the final token array (including prompt + generation).
         """
+        logger.info(f"Generating text with prompt: {prompt}")
         # Encode prompt
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         x = mx.array([prompt_ids], dtype=mx.int64)  # shape (1, seq_length)
@@ -395,6 +396,7 @@ class LlamaMLX:
             if new_tok == self.tokenizer.eos_token_id:
                 break
 
+        logger.info(f"Generated tokens: {len(generated_tokens)}")
         return mx.array(generated_tokens)
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
