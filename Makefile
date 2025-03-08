@@ -14,6 +14,7 @@ help:
 	@echo "Available targets:"
 	@echo "  make run         - Run both backend server and Docker services"
 	@echo "  make server      - Run Python bootstrap server only"
+	@echo "  make debug       - Run Python bootstrap server with debugger (pdb)"
 	@echo "  make docker      - Run Docker services only"
 	@echo "  make stop        - Stop all running services"
 	@echo "  make clean       - Clean up Docker resources"
@@ -32,6 +33,15 @@ endif
 .PHONY: server
 server:
 	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
+
+# Run Python server with debugger (pdb)
+.PHONY: debug
+debug:
+ifeq ($(MLX_BACKEND),1)
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+else
+	$(DOCKER_COMPOSE) up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+endif
 
 # Run Docker services only
 .PHONY: docker
