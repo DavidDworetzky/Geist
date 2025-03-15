@@ -318,7 +318,7 @@ class LlamaMLX:
     - complete
     """
 
-    def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 0.95, cache_converted_safetensors: bool = False):
+    def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 1.0, cache_converted_safetensors: bool = False):
         self.model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
