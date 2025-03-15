@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelConfig:
     """
-    Merge of 'ModelArgs' from the first code and default fields from the second.
+    ModelConfig.
     """
     # Matches the naming of the first script for correctness, with some defaults:
     dim: int = 4096          # was "n_embd" in second script
