@@ -398,7 +398,13 @@ class LlamaMLX:
         # Step 4: Load the weights
         logger.info(f"Loading model weights from {self.weights_dir} ...")
         weights_dict = {}
-        for file_path in glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")):
+        safetensors_files = glob.glob(os.path.join(self.weights_dir, "model-*.safetensors"))
+        
+        if not safetensors_files:
+            raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
+        
+        for file_path in safetensors_files:
+            logger.info(f"Loading safetensors file: {file_path}")
             # Load the safetensors file using PyTorch
             tensors = safetensors.torch.load_file(file_path, device="cpu")
             for key, tensor in tensors.items():
@@ -431,7 +437,7 @@ class LlamaMLX:
         Returns:
             mx.array: Array of token IDs including prompt and generated tokens
         """
-        logger.info(f"Generating text with prompt: {prompt}")
+        logger.info(f"Generating text with prompt length: {len(prompt)}")
         # Encode prompt
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         x = mx.array([prompt_ids], dtype=mx.int64)  # shape (1, seq_length)
@@ -465,6 +471,10 @@ class LlamaMLX:
                 if new_tok == self.tokenizer.eos_token_id:
                     logger.info("Generation complete: EOS token generated")
                     break
+                
+                # Print progress every 10 tokens
+                if len(generated_tokens) % 10 == 0:
+                    logger.debug(f"Generated {len(generated_tokens) - len(prompt_ids)} tokens so far")
         except Exception as e:
             logger.error(f"Error during token generation: {str(e)}")
             # Return what we have so far rather than failing completely
