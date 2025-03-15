@@ -7,6 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
+from models.llama_completion import strings_to_message_dict
 
 # MLX imports
 import mlx.core as mx
@@ -524,7 +525,8 @@ class LlamaMLX:
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")
-            return output_text
+            messages = strings_to_message_dict(user_prompt, output_text)
+            return messages
 
         except Exception as e:
             logger.error(f"Error during text generation: {str(e)}")
