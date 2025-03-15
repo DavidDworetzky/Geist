@@ -29,6 +29,10 @@ else
 	$(DOCKER_COMPOSE) up
 endif
 
+# Alias for run
+.PHONY: up
+up: run
+
 # Run Python server only
 .PHONY: server
 server:
