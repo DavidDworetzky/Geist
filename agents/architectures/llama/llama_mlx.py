@@ -185,7 +185,17 @@ class Llama(nn.Module):
     def generate(self, x: mx.array, temp=1.0, top_p=1.0, max_new_tokens=100, eos_token_id=None):
         """
         Token-by-token generator with optional temperature and top-p sampling.
-        Yields one token at a time.
+        Yields one token at a time until EOS token or max_new_tokens is reached.
+        
+        Parameters:
+            x (mx.array): Input token ids with shape (batch_size, seq_len)
+            temp (float): Temperature for sampling (1.0 = no change, <1.0 = more deterministic)
+            top_p (float): Nucleus sampling probability threshold
+            max_new_tokens (int): Maximum number of new tokens to generate
+            eos_token_id (int, optional): Token ID that signals the end of sequence
+            
+        Yields:
+            int: Generated token IDs one at a time
         """
         def sample_logits(logits: mx.array) -> int:
             """
@@ -263,10 +273,24 @@ class Llama(nn.Module):
         
         new_token = sample_logits(logits)
         yield new_token
+        
+        # Check if we should stop after the first token
+        if eos_token_id is not None and new_token == eos_token_id:
+            logger.info("Generation stopped after first token (EOS token generated)")
+            return
 
         # Generate up to max_new_tokens:
         tokens_generated = 1
+        # Add a timeout mechanism to prevent infinite loops
+        start_time = time.time()
+        max_generation_time = 60  # 60 seconds timeout
+        
         while tokens_generated < max_new_tokens:
+            # Check for timeout
+            if time.time() - start_time > max_generation_time:
+                logger.warning(f"Generation timed out after {max_generation_time} seconds")
+                break
+            
             tokens_generated += 1
             x = mx.array([[new_token]])  # shape (batch=1, seq=1)
             # Use cached keys/values
@@ -279,17 +303,19 @@ class Llama(nn.Module):
             logits = logits[0]
             new_token = sample_logits(logits)
             yield new_token
+            
+            # Stop if we hit the EOS token
+            if eos_token_id is not None and new_token == eos_token_id:
+                logger.info(f"Generation stopped at token {tokens_generated}: EOS token generated")
+                break
 
 class LlamaMLX:
     """
-    Merged class that exposes the same 'entrypoints' as in the second script:
     - __init__ with max_new_tokens, temperature, top_p
     - load_model_and_tokenizer
     - download_model
     - generate_text
     - complete
-    
-    But uses the correct MLX LLaMA architecture and logic from the first script.
     """
 
     def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 0.95, cache_converted_safetensors: bool = False):
@@ -398,6 +424,12 @@ class LlamaMLX:
         """
         Generate text using the LLaMA model's `generate` method (token-by-token).
         Returns the final token array (including prompt + generation).
+        
+        Parameters:
+            prompt (str): The input prompt to generate from
+            
+        Returns:
+            mx.array: Array of token IDs including prompt and generated tokens
         """
         logger.info(f"Generating text with prompt: {prompt}")
         # Encode prompt
@@ -416,13 +448,29 @@ class LlamaMLX:
             eos_token_id=self.tokenizer.eos_token_id
         )
 
-        for new_tok in token_iter:
-            generated_tokens.append(new_tok)
-            # If we hit EOS, we can stop
-            if new_tok == self.tokenizer.eos_token_id:
-                break
-
-        logger.info(f"Generated tokens: {len(generated_tokens)}")
+        # Set a timeout for the entire generation process
+        start_time = time.time()
+        max_generation_time = 120  # 2 minutes timeout
+        
+        try:
+            for new_tok in token_iter:
+                generated_tokens.append(new_tok)
+                
+                # Check if we've been generating for too long
+                if time.time() - start_time > max_generation_time:
+                    logger.warning(f"Generation timed out after {max_generation_time} seconds")
+                    break
+                
+                # If we hit EOS, we can stop
+                if new_tok == self.tokenizer.eos_token_id:
+                    logger.info("Generation complete: EOS token generated")
+                    break
+        except Exception as e:
+            logger.error(f"Error during token generation: {str(e)}")
+            # Return what we have so far rather than failing completely
+            logger.info(f"Returning partial generation of {len(generated_tokens)} tokens")
+        
+        logger.info(f"Generated tokens: {len(generated_tokens) - len(prompt_ids)} new, {len(generated_tokens)} total")
         return mx.array(generated_tokens)
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
