@@ -82,13 +82,24 @@ class Attention(nn.Module):
         keys    = keys   .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
         values  = values .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
 
-        # Repeat the kv heads if needed
-        def repeat(a):
-            a = mx.concatenate([mx.expand_dims(a, 2)] * self.repeats, axis=2)
-            return a.reshape([B, self.n_heads, L, self.args.head_dim])
-
-        keys, values = map(repeat, (keys, values))
-
+        # More efficient implementation of key/value head repetition
+        if self.repeats > 1:
+            # Use reshape and repeat operations more efficiently
+            # This avoids creating multiple copies in memory
+            keys_expanded = mx.repeat(
+                mx.expand_dims(keys, axis=1),  # Shape: [B, 1, n_kv_heads, L, head_dim]
+                repeats=self.repeats,
+                axis=1
+            )  # Shape: [B, repeats, n_kv_heads, L, head_dim]
+            keys = keys_expanded.reshape(B, self.n_heads, L, self.args.head_dim)
+            
+            values_expanded = mx.repeat(
+                mx.expand_dims(values, axis=1),  # Shape: [B, 1, n_kv_heads, L, head_dim]
+                repeats=self.repeats,
+                axis=1
+            )  # Shape: [B, repeats, n_kv_heads, L, head_dim]
+            values = values_expanded.reshape(B, self.n_heads, L, self.args.head_dim)
+        
         # Handle caching
         if cache is not None:
             key_cache, value_cache = cache
@@ -171,7 +182,7 @@ class Llama(nn.Module):
         x = self.norm(x)
         return self.output(x)
 
-    def generate(self, x: mx.array, temp=1.0, top_p=1.0, max_new_tokens=100):
+    def generate(self, x: mx.array, temp=1.0, top_p=1.0, max_new_tokens=100, eos_token_id=None):
         """
         Token-by-token generator with optional temperature and top-p sampling.
         Yields one token at a time.
@@ -205,15 +216,29 @@ class Llama(nn.Module):
 
             # If top_p < 1.0, perform nucleus (top-p) sampling:
             if top_p < 1.0:
-                sorted_indices = np.argsort(-np_logits)
-                sorted_logits = np_logits[sorted_indices]
-                sorted_probs = np.exp(sorted_logits) / np.sum(np.exp(sorted_logits))
+                # Compute probabilities once
+                probs = np.exp(np_logits - np.max(np_logits))  # Subtract max for numerical stability
+                probs = probs / np.sum(probs)
+                
+                # Sort probabilities in descending order
+                sorted_indices = np.argsort(-probs)
+                sorted_probs = probs[sorted_indices]
                 cumulative_probs = np.cumsum(sorted_probs)
+                
+                # Find cutoff index for top-p
                 cutoff_idx = np.searchsorted(cumulative_probs, top_p)
-                sorted_probs[cutoff_idx + 1 :] = 0
-                sorted_probs /= np.sum(sorted_probs)
-                next_id = np.random.choice(sorted_indices, p=sorted_probs)
-                return int(next_id)  
+                
+                # Create a mask for the top-p tokens
+                top_p_mask = np.zeros_like(probs)
+                top_p_mask[sorted_indices[:cutoff_idx+1]] = 1
+                
+                # Apply the mask and renormalize
+                masked_probs = probs * top_p_mask
+                masked_probs = masked_probs / np.sum(masked_probs)
+                
+                # Sample from the masked distribution
+                next_id = np.random.choice(len(masked_probs), p=masked_probs)
+                return int(next_id)
             else:
                 return int(np_logits.argmax())
 
@@ -226,7 +251,7 @@ class Llama(nn.Module):
 
         h = self.tok_embeddings(x)
         for layer in self.layers:
-            h, c = layer(h, mask=mask)
+            h, c = layer(h, mask)
             cache_per_layer.append(c)
         h = self.norm(h)
 
@@ -387,7 +412,8 @@ class LlamaMLX:
             x,
             temp=self.temperature,
             top_p=self.top_p,
-            max_new_tokens=self.max_new_tokens
+            max_new_tokens=self.max_new_tokens,
+            eos_token_id=self.tokenizer.eos_token_id
         )
 
         for new_tok in token_iter:
@@ -403,15 +429,23 @@ class LlamaMLX:
         """
         Provide a standard "instruct" format completion. 
         Combines system_prompt and user_prompt into a single prompt, then calls `generate_text`.
+        
+        Parameters:
+            system_prompt (str): The system instructions for the model
+            user_prompt (str): The user's query or instruction
+            
+        Returns:
+            str: The generated completion text
         """
         logger.info("Beginning completion call...")
 
-        # Format a simple "instruct" style prompt:
+        # Format the prompt according to Llama 3.1 chat template
         prompt = f"""<s>[INST] <<SYS>>
 {system_prompt}
 <</SYS>>
 
-{user_prompt} [/INST]"""
+{user_prompt} [/INST]
+"""
 
         logger.info(
             f"Starting text generation with temperature={self.temperature}, "
@@ -424,6 +458,11 @@ class LlamaMLX:
             # Decode the output
             output_list = output_tokens.tolist()
             output_text = self.tokenizer.decode(output_list)
+            
+            # Extract just the assistant's response (remove the prompt)
+            response_start = output_text.find("[/INST]") + len("[/INST]")
+            if response_start >= 0:
+                output_text = output_text[response_start:].strip()
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")

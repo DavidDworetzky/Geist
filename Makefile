@@ -26,8 +26,12 @@ run:
 ifeq ($(MLX_BACKEND),1)
 	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
 else
-	$(DOCKER_COMPOSE) up -d
+	$(DOCKER_COMPOSE) up
 endif
+
+# Alias for run
+.PHONY: up
+up: run
 
 # Run Python server only
 .PHONY: server
