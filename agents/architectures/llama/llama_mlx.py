@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
-from models.llama_completion import strings_to_message_dict
+from agents.models.llama_completion import strings_to_message_dict
 
 # MLX imports
 import mlx.core as mx
