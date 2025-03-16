@@ -29,3 +29,11 @@ class LlamaCompletion:
             #chat id is assigned after construction
             chat_id=None
         )
+    
+
+def strings_to_message_dict(prompt: str, response: str):
+    '''
+    Converts autoregressive LLM output into a list of messages
+    '''
+    messages = [{"role": "user", "content": prompt}, {"role": "assistant", "content": response}]
+    return messages
