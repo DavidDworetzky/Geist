@@ -13,7 +13,7 @@ from agents.architectures.llama.llama_transformers import LlamaTransformer
 from agents.models.agent_completion import LlamaCompletion
 import torch
 from typing import Optional, List, Dict, Any
-from generator import load_csm_1b
+from agents.architectures.sesame.generator import load_csm_1b
 import torchaudio
 import os
 import time
