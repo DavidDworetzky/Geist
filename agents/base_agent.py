@@ -13,6 +13,14 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
+    def complete_audio(self, audio_file, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
+        pass
+
+    @abstractmethod
+    def connect_realtime_audio(self):
+        pass
+
+    @abstractmethod
     def initialize(self, task_prompt):
         pass
 

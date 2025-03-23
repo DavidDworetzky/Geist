@@ -19,6 +19,7 @@ help:
 	@echo "  make stop        - Stop all running services"
 	@echo "  make clean       - Clean up Docker resources"
 	@echo "  make init-db     - Initialize the database"
+	@echo "  make build       - Build Docker images"
 
 # Run both server and Docker services
 .PHONY: run
@@ -68,4 +69,9 @@ clean:
 # Initialize database
 .PHONY: init-db
 init-db:
-	$(CONDA_ACTIVATE) && $(PYTHON) initdb.py 
+	$(CONDA_ACTIVATE) && $(PYTHON) initdb.py
+
+# Build Docker images
+.PHONY: build
+build:
+	$(DOCKER_COMPOSE) build 
