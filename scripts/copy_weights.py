@@ -12,10 +12,18 @@ import shutil
 import logging
 from pathlib import Path
 from typing import Optional, List, Union, Tuple
+from dotenv import load_dotenv
 
 # Set up logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Load environment variables
+load_dotenv()
+
+models = {
+    "llama_3_1" : "llama_3_1"
+}
 
 def delete_weights(weights_dir: Union[str, Path] = None) -> Tuple[bool, str]:
     """
@@ -119,14 +127,30 @@ def copy_weights(source_dir: Union[str, Path],
 
 def copy_from_desktop() -> Tuple[bool, str]:
     """
-    Copy model weights from desktop llama_3_1 folder to app/model_weights/llama_3_1.
+    Copy model weights from the directory specified in LOCAL_WEIGHTS_DIR environment variable
+    to app/model_weights/llama_3_1.
+    
+    If LOCAL_WEIGHTS_DIR is not set, falls back to desktop llama_3_1 folder.
     
     Returns:
         Tuple containing:
             - Success status (bool)
             - Message describing the result
     """
-    # Determine desktop path based on OS
+    # Try to get the path from environment variable
+    local_weights_dir = os.getenv("LOCAL_WEIGHTS_DIR")
+    
+    if local_weights_dir:
+        local_weights_path = Path(local_weights_dir)
+        for model in models.keys(): 
+            model_path = local_weights_path / models[model]
+            if model_path.exists():
+                logger.info(f"Using weights from LOCAL_WEIGHTS_DIR: {model_path}")
+                return copy_weights(model_path)
+            else:
+                logger.warning(f"LOCAL_WEIGHTS_DIR path does not exist: {model_path}")
+    
+    # Fall back to desktop path if LOCAL_WEIGHTS_DIR is not set or doesn't exist
     home_dir = Path.home()
     desktop_dir = home_dir / "Desktop" / "llama_3_1"
     
@@ -138,6 +162,7 @@ def copy_from_desktop() -> Tuple[bool, str]:
             logger.error(f"Could not find llama_3_1 folder on desktop.")
             return False, f"Could not find llama_3_1 folder on desktop."
     
+    logger.info(f"Using weights from desktop: {desktop_dir}")
     return copy_weights(desktop_dir)
 
 if __name__ == "__main__":
