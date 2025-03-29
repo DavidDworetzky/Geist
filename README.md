@@ -46,6 +46,7 @@ flowchart LR
     - ENHANCED_LOGGING = FALSE
     - DB_HOST = localhost
     - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
+    - LOCAL_WEIGHTS_DIR = WHERE_YOUR_WEIGHTS_ARE (non docker mount)
 
 2. Copy any model weights into app/models/weights/MODEL_NAME.
     - Currently supported Models: llama_3_1
@@ -72,6 +73,11 @@ client/geist/.env settings:
 
 ## Supported Environments
 1. Mac OS - ARM (m series) with linux container.
+
+
+## Scripts 
+1. scripts/download_models.py - download models from huggingface.
+2. scripts/copy_weights.py - copy weights from desktop to /app/models/weights/. Used for weights that are not hosted on huggingface. 
 
 
 
