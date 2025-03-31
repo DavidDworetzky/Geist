@@ -114,11 +114,28 @@ class Attention(nn.Module):
             queries = self.rope(queries)
             keys    = self.rope(keys)
 
+        # Compute attention scores with better numerical stability
         scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
+
+        # Apply mask if provided
         if mask is not None:
-            scores += mask
-        scores = mx.softmax(scores.astype(mx.float32), axis=-1).astype(scores.dtype)
-        output = (scores @ values).transpose(0, 2, 1, 3).reshape(B, L, D)
+            scores = scores + mask
+
+        # Convert to float32 for better numerical stability in softmax
+        scores_f32 = scores.astype(mx.float32)
+
+        # Apply softmax with better numerical stability
+        # First subtract the max value for numerical stability
+        scores_max = mx.max(scores_f32, axis=-1, keepdims=True)
+        scores_exp = mx.exp(scores_f32 - scores_max)
+        scores_sum = mx.sum(scores_exp, axis=-1, keepdims=True)
+        attention_probs = scores_exp / scores_sum
+
+        # Convert back to original dtype
+        attention_probs = attention_probs.astype(scores.dtype)
+
+        # Apply attention to values
+        output = (attention_probs @ values).transpose(0, 2, 1, 3).reshape(B, L, D)
         return self.wo(output), (keys, values)
 
 
