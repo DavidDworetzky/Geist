@@ -1,4 +1,3 @@
-prefix: /Users/daviddworetzky/miniconda3/envs/geist-mac
 name: geist-mac
 channels:
   - defaults
