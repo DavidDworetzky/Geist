@@ -17,6 +17,7 @@ from agents.architectures.sesame.generator import load_csm_1b
 import torchaudio
 import os
 import time
+from transformers import pipeline
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -333,8 +334,13 @@ class LlamaAgent(BaseAgent):
                 orig_freq=sample_rate, 
                 new_freq=self.voice_generator.sample_rate
             )
-            #TODO, transcribe the text
-            transcribed_text = f"Transcribed text from {audio_file}"
+
+            transcribe_model_id = "facebook/mms-1b-all"
+            #assume english transcription until lparameterization
+            transcribe_target_lang = "en"
+
+            pipe = pipeline(model=transcribe_model_id, model_kwargs={"target_lang": transcribe_target_lang, "ignore_mismatched_sizes": True})
+            transcribed_text = pipe(audio_tensor)
             
             # Generate a text response using the LLM
             text_response = self.complete_text(
