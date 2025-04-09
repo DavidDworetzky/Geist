@@ -292,16 +292,16 @@ class LlamaAgent(BaseAgent):
         self._agent_context.execution_context = split_result
         return split_result
 
-    def complete_audio(self, audio_file: str, max_tokens: int = 16, n: int = 1, 
-                      stop: Optional[List[str]] = None, temperature: float = 1.0, 
-                      top_p: float = 1, frequency_penalty: float = 0, 
-                      presence_penalty: float = 0, echo: bool = False, 
-                      best_of: Optional[int] = None, prompt_tokens: Optional[int] = None, 
-                      response_format: str = "text", system_prompt: Optional[str] = None, 
+    def complete_audio(self, audio_file: str, max_tokens: int = 16, n: int = 1,
+                      stop: Optional[List[str]] = None, temperature: float = 1.0,
+                      top_p: float = 1, frequency_penalty: float = 0,
+                      presence_penalty: float = 0, echo: bool = False,
+                      best_of: Optional[int] = None, prompt_tokens: Optional[int] = None,
+                      response_format: str = "text", system_prompt: Optional[str] = None,
                       chat_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Process audio input and generate a response using the Sesame CSM voice model.
-        
+
         Args:
             audio_file: Path to the audio file to process
             max_tokens: Maximum number of tokens to generate
@@ -317,7 +317,7 @@ class LlamaAgent(BaseAgent):
             response_format: Format of the response ("text" or "audio")
             system_prompt: System prompt to use
             chat_id: ID of the chat
-            
+
         Returns:
             Dictionary containing the generated response and metadata
         """
@@ -327,7 +327,7 @@ class LlamaAgent(BaseAgent):
                 self.voice_generator = load_csm_1b(device="cuda" if torch.cuda.is_available() else "cpu")
                 logger = logging.getLogger(__name__)
                 logger.info("Initialized Sesame CSM voice generator")
-            
+
             audio_tensor, sample_rate = torchaudio.load(audio_file)
             audio_tensor = torchaudio.functional.resample(
                 audio_tensor.squeeze(0), 
@@ -359,7 +359,7 @@ class LlamaAgent(BaseAgent):
                 system_prompt=system_prompt,
                 chat_id=chat_id
             )
-            
+
             # Extract the text from the LLM response
             if isinstance(text_response, dict) and "choices" in text_response:
                 response_text = text_response["choices"][0]["text"]
@@ -373,21 +373,31 @@ class LlamaAgent(BaseAgent):
                 context=[],  # In a real implementation, you might want to include context
                 max_audio_length_ms=10000,  # Default max audio length
             )
-            
+
             # Save the audio response to a file
             output_dir = os.path.join(self._agent_context.settings.output_dir, "audio_responses")
             os.makedirs(output_dir, exist_ok=True)
             output_file = os.path.join(output_dir, f"response_{chat_id or 'unknown'}_{int(time.time())}.wav")
             torchaudio.save(output_file, audio_response.unsqueeze(0).cpu(), self.voice_generator.sample_rate)
-            
+
             return {
                 "text": response_text,
                 "audio_file": output_file,
                 "sample_rate": self.voice_generator.sample_rate,
                 "chat_id": chat_id
             }
-            
+
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error in complete_audio: {str(e)}")
             return {"error": str(e)}
+
+    def connect_realtime_audio(self):
+        """
+        Connects to a real-time audio stream (Not Implemented).
+
+        Raises:
+            NotImplementedError: This method is not yet implemented for LlamaAgent.
+        """
+        self.logger.warning("connect_realtime_audio is not implemented for LlamaAgent.")
+        raise NotImplementedError("Real-time audio connection is not supported by this agent yet.")
