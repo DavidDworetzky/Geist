@@ -11,12 +11,22 @@ RUN apt-get update && apt-get install -y \
     make \
     curl \
     wget \
-    bzip2
+    bzip2 \
+    pkg-config \
+    cmake \
+    libopus-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh && \
     mkdir /root/.conda && \
     bash miniconda.sh -b && \
     rm -f miniconda.sh
+
+# Install Rust using rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Add cargo to the PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN which conda && conda --version
 RUN conda init bash
