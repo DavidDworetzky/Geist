@@ -55,6 +55,7 @@ dependencies:
       - charset-normalizer==3.4.1
       - datasets==3.5.0
       - dill==0.3.8
+      - einops==0.8.1
       - fastapi==0.115.6
       - filelock==3.16.1
       - frozenlist==1.5.0
