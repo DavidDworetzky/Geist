@@ -299,3 +299,12 @@ class GPT4Agent(BaseAgent):
         split_result = result.split("\n")
         self._agent_context.execution_context = split_result
         return split_result
+
+    def connect_realtime_audio(self):
+        """
+        Connects to a real-time audio stream (Not Implemented for GPT4Agent).
+
+        Raises:
+            NotImplementedError: This method is not yet implemented for GPT4Agent.
+        """
+        raise NotImplementedError("Real-time audio connection is not supported by this agent yet.")
