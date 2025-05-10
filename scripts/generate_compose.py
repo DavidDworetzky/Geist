@@ -15,9 +15,9 @@ import argparse
 import copy # Added for deep copying service definitions
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
-import yaml  # Requires PyYAML installation: pip install PyYAML
-reserved_source_keys = ["backend", "db", "frontend"]
-template_name = "backend"
+import yaml 
+reserved_source_keys = ["backend", "db", "frontend", "adapter"]
+template_name = "adapter"
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -75,11 +75,15 @@ def load_base_compose(compose_path: Path) -> Tuple[Dict[str, Any], str]:
             - The loaded docker-compose data (dict). Returns a default structure if not found.
             - Message describing the result (str).
     """
+    # Update base_keys to include all possible top-level keys from docker-compose.yml
+    base_keys = ["version", "services", "networks", "volumes", "configs", "secrets", 
+                 "name", "include", "profiles", "extensions"]
+    
     if not compose_path.is_file():
         msg = f"Base docker-compose file not found: {compose_path}. Starting with empty config."
         logger.warning(msg)
         # Return a default structure if the file doesn't exist
-        return {"version": "3", "services": {}, "networks": {}, "volumes": {}}, msg
+        return {key: {} for key in base_keys if key != "version"} | {"version": "3"}, msg
     try:
         with open(compose_path, 'r') as f:
             data = yaml.safe_load(f)
@@ -87,22 +91,20 @@ def load_base_compose(compose_path: Path) -> Tuple[Dict[str, Any], str]:
             msg = f"Invalid format in {compose_path}: Expected a dictionary."
             logger.error(msg)
             # Return default structure on invalid format
-            return {"version": "3", "services": {}, "networks": {}, "volumes": {}}, msg
+            return {key: {} for key in base_keys if key != "version"} | {"version": "3"}, msg
         # Ensure top-level keys exist
-        data.setdefault("version", "3")
-        data.setdefault("services", {})
-        data.setdefault("networks", {})
-        data.setdefault("volumes", {})
+        for key in base_keys:
+            data.setdefault(key, {} if key != "version" else "3")
         logger.info(f"Successfully loaded base configuration from {compose_path}")
         return data, f"Successfully loaded base configuration from {compose_path}"
     except yaml.YAMLError as e:
         msg = f"Error decoding YAML from {compose_path}: {e}"
         logger.error(msg)
-        return {"version": "3", "services": {}, "networks": {}, "volumes": {}}, msg
+        return {key: {} for key in base_keys if key != "version"} | {"version": "3"}, msg
     except Exception as e:
         msg = f"An unexpected error occurred while reading {compose_path}: {e}"
         logger.error(msg, exc_info=True)
-        return {"version": "3", "services": {}, "networks": {}, "volumes": {}}, msg
+        return {key: {} for key in base_keys if key != "version"} | {"version": "3"}, msg
 
 
 def generate_compose_dict(
@@ -188,7 +190,7 @@ def generate_compose_dict(
                 current_service_definition = {}
             elif is_derived:
                 # Generate definition by copying template and overriding
-                target_service_name = f"backend-{service_name}"
+                target_service_name = f"adapter-{service_name}"
                 # Start with a deep copy of the template definition
                 current_service_definition = copy.deepcopy(template_service_definition)
                 logger.info(f"Generating service '{target_service_name}' based on template '{template_name}'.")
@@ -356,8 +358,6 @@ def main():
         logger.error(f"Failed to load container config: {msg}")
         return
 
-    # 2. Generate the compose dictionary (now takes base path)
-    # The function now loads the base file itself
     compose_data, msg = generate_compose_dict(container_configs, output_path)
     if compose_data is None:
         logger.error(f"Failed to generate compose dictionary: {msg}")

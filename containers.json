@@ -1,7 +1,19 @@
 [
     {
+       "name": "adapter",
+       "image": "geist-adapter",
+       "conda" : "linux_environment_x86_x64.yml",
+       "mem_limit": "32G",
+       "depends_on": [
+        "db"
+        ],
+        "env_file": [
+            ".env"
+        ]
+    },
+    {
         "name": "llm",
-        "image": "geist-backend",
+        "image": "geist-llm",
         "conda" : "linux_environment_x86_x64.yml",
         "ports": [
             "5001:5000"
