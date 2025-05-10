@@ -138,12 +138,7 @@ def generate_compose_dict(
 
     if not template_service_definition:
         msg = f"Template service '{template_name}' not found in base {base_compose_path}. Cannot generate derived services."
-        # If the template is defined in containers.json, we could potentially build it from there,
-        # but the requirement was to use the one from docker-compose.yml as the template source.
-        # For now, we'll log a warning and proceed without generating derived services if the template isn't in the base file.
-        logger.warning(msg)
-        # We might still want to process reserved_source_keys from containers.json
-        # return None, msg # Option: halt if template is missing
+        raise ValueError(msg)
 
     all_networks = set(compose_data.get("networks", {}).keys())
     all_volumes = set(compose_data.get("volumes", {}).keys()) # Track volumes defined in services
@@ -200,76 +195,12 @@ def generate_compose_dict(
                     logger.warning(f"Skipping generation for '{service_name}' as template '{template_name}' is missing in base compose file.")
                 continue # Skip to next config
 
-
-            # Apply overrides from config using valid_service_keys
-            for key in valid_service_keys:
-                if key in config:
-                    # Special handling for networks and volumes to collect names
-                    if key == "networks":
-                        networks_config = config[key]
-                        service_networks_def = {}
-                        current_service_networks = set()
-                        if isinstance(networks_config, dict):
-                            service_networks_def = networks_config
-                            current_service_networks.update(networks_config.keys())
-                        elif isinstance(networks_config, list):
-                            service_networks_def = {net_name: None for net_name in networks_config}
-                            current_service_networks.update(networks_config)
-                        else:
-                            logger.warning(f"Invalid 'networks' format for config '{service_name}'. Skipping networks override.")
-                            continue # Skip override for this key
-
-                        current_service_definition[key] = service_networks_def
-                        all_networks.update(current_service_networks)
-
-                    elif key == "volumes":
-                        volumes_config = config[key]
-                        current_service_definition[key] = volumes_config # Override/set volumes
-                        # Track named volumes defined in this service config
-                        if isinstance(volumes_config, list):
-                            for vol in volumes_config:
-                                if isinstance(vol, str) and ':' in vol:
-                                    vol_name = vol.split(':')[0]
-                                    # Basic check for named volume
-                                    if not vol_name.startswith(('.', '/')) and vol_name:
-                                        all_volumes.add(vol_name)
-                        elif isinstance(volumes_config, dict): # Short syntax volumes
-                             for vol_name in volumes_config.keys():
-                                 if not vol_name.startswith(('.', '/')) and vol_name:
-                                     all_volumes.add(vol_name)
-                    else:
-                        # Simple override for other keys
-                        current_service_definition[key] = config[key]
-
             # Add the processed/generated service definition to compose_data
             if not current_service_definition:
                  logger.warning(f"Configuration for '{service_name}' resulted in an empty service definition for '{target_service_name}'. Skipping.")
                  continue
 
             compose_data["services"][target_service_name] = current_service_definition
-
-            # If it was a reserved key, ensure its networks/volumes from the final definition are tracked
-            # (This might re-add networks/volumes already present, but sets handle duplicates)
-            if is_reserved:
-                 final_service_def = compose_data["services"][target_service_name]
-                 # Re-check networks in the final definition
-                 service_nets = final_service_def.get("networks")
-                 if isinstance(service_nets, dict):
-                     all_networks.update(service_nets.keys())
-                 elif isinstance(service_nets, list):
-                     all_networks.update(service_nets)
-                 # Re-check volumes in the final definition
-                 service_vols = final_service_def.get("volumes")
-                 if isinstance(service_vols, list):
-                     for vol in service_vols:
-                         if isinstance(vol, str) and ':' in vol:
-                             vol_name = vol.split(':')[0]
-                             if not vol_name.startswith(('.', '/')) and vol_name:
-                                 all_volumes.add(vol_name)
-                 elif isinstance(service_vols, dict):
-                     for vol_name in service_vols.keys():
-                         if not vol_name.startswith(('.', '/')) and vol_name:
-                             all_volumes.add(vol_name)
 
 
         # Add/Update top-level networks based on collected network names
