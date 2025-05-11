@@ -247,6 +247,8 @@ def generate_compose_dict(
 def write_compose_file(compose_data: Dict[str, Any], output_path: Path) -> Tuple[bool, str]:
     """
     Writes the docker-compose dictionary to a YAML file.
+    Ports and env_file entries are explicitly converted to strings to ensure
+    they are appropriately represented (and potentially quoted) in the output YAML.
 
     Args:
         compose_data: The dictionary representing the docker-compose configuration.
@@ -258,6 +260,22 @@ def write_compose_file(compose_data: Dict[str, Any], output_path: Path) -> Tuple
             - Message describing the result (str).
     """
     try:
+        # Preprocess compose_data to ensure specific fields are strings
+        if "services" in compose_data and isinstance(compose_data.get("services"), dict):
+            for service_config in compose_data["services"].values():
+                if isinstance(service_config, dict):
+                    # Ensure ports are strings
+                    if "ports" in service_config and isinstance(service_config.get("ports"), list):
+                        service_config["ports"] = [
+                            str(port) for port in service_config["ports"]
+                        ]
+                    
+                    # Ensure env_file entries are strings
+                    if "env_file" in service_config and isinstance(service_config.get("env_file"), list):
+                        service_config["env_file"] = [
+                            str(env_file_path) for env_file_path in service_config["env_file"]
+                        ]
+        
         # Ensure parent directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w') as f:
