@@ -1,0 +1,69 @@
+[
+    {
+       "name": "adapter",
+       "image": "geist-adapter",
+       "conda" : "linux_environment_x86_x64.yml",
+       "mem_limit": "32G",
+       "depends_on": [
+        "db"
+        ],
+        "env_file": [
+            ".env"
+        ]
+    },
+    {
+        "name": "llm",
+        "image": "geist-llm",
+        "conda" : "linux_environment_x86_x64.yml",
+        "ports": [
+            "5001:5000"
+        ]
+    },
+    {
+        "name": "voice",
+        "image": "geist-voice",
+        "conda": "linux_environment_x86_x64.yml",
+        "ports": [
+            "5002:5000"
+        ]
+    },
+    {
+        "name": "backend",
+        "mem_limit": "32G",
+        "build": {
+            "context": ".",
+            "dockerfile": "Dockerfile"
+        },
+        "environment": [
+            "DATABASE_URI=postgresql://geist:geist@db:5432/db",
+            "DEBUG=${DEBUG:-}",
+            "DB_HOST=db",
+            "DB_PORT=5432",
+            "POSTGRES_DB=geist",
+            "POSTGRES_USER=geist",
+            "POSTGRES_PASSWORD=geist",
+            "HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}"
+        ],
+        "depends_on": [
+            "db"
+        ],
+        "env_file": [
+            ".env"
+        ],
+        "volumes": [
+            "./:/opt/geist"
+        ],
+        "ports": [
+            "5001:5000",
+            "5678:5678"
+        ],
+        "networks": {
+            "test_net": {
+                "aliases": [
+                    "geistlocal.com",
+                    "backend"
+                ]
+            }
+        }
+    }
+]
