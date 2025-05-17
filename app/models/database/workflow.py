@@ -5,6 +5,7 @@ from app.models.database.database import Base, Session
 from sqlalchemy.dialects.postgresql import insert
 from app.models.database.database import SessionLocal
 from dataclasses import dataclass
+from enum import Enum
 
 import uuid
 
@@ -27,3 +28,13 @@ class WorkflowStep(Base):
     display_y = Column(Integer)
     #command string for workflow step
     commmmand_str = Column(String)
+
+class WorkflowStepType(Enum):
+    MAP = "map"
+    FILTER = "filter"
+    REDUCE = "reduce"
+    EXPAND = "expand"
+    #execute custom code
+    CUSTOM = "custom"
+    #transform from input to output with an LLM prompt
+    LLM = "llm"
