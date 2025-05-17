@@ -13,6 +13,7 @@ import uuid
 class Workflow(Base):
     __tablename__ = "worklfow"
     workflow_id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("geist_user.user_id"))
     name = Column(String)
     steps = relationship("WorkflowStep", back_populates="workflow")
 
@@ -36,12 +37,36 @@ class WorkflowStepType(Enum):
     FILTER = "filter"
     REDUCE = "reduce"
     EXPAND = "expand"
-    #execute custom code
+    #execute custom code, can call adapters
     CUSTOM = "custom"
     #transform from input to output with an LLM prompt
     LLM = "llm"
+    #agent flow, can call an agent flow step
+    AGENT = "agent"
 
 def get_workflow_by_id(workflow_id: int) ->  List[WorkflowStep]:
     with SessionLocal() as session:
         workflow = session.query(Workflow).filter_by(workflow_id=workflow_id).first()
         return workflow.steps
+    
+def get_workflows_for_user(user_id: int) -> List[Workflow]:
+    with SessionLocal() as session:
+        workflows = session.query(Workflow).filter_by(user_id=user_id).all()
+        return workflows
+    
+def create_workflow(workflow: Workflow) -> Workflow:
+    with SessionLocal() as session:
+        session.add(workflow)
+        session.commit()
+        return workflow
+    
+def update_workflow(workflow: Workflow) -> Workflow:
+    with SessionLocal() as session:
+        #find the workflow in the database
+        workflow_in_db = session.query(Workflow).filter_by(workflow_id=workflow.workflow_id).first()
+        if workflow_in_db is None:
+            raise ValueError("Workflow not found")
+        #update the workflow
+        workflow_in_db.name = workflow.name
+        workflow_in_db.steps = workflow.steps
+        session.commit()
