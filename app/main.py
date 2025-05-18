@@ -21,6 +21,7 @@ from agents.agent_type import AgentType
 from agents.models.agent_completion import AgentCompletion
 from agents.prompt.prompt import AGENT_PROMPTS
 from app.models.database.chat_session import get_chat_history, get_all_chat_history
+from app.api.v1.endpoints.workflows import router as workflow_router
 
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
@@ -166,6 +167,7 @@ def create_app():
     # Register routers
     app.include_router(agent_router, prefix="/agent")
     app.include_router(adapter_router, prefix="/adapter")
+    app.include_router(workflow_router, prefix="/api/v1/workflows", tags=["workflows"])
 
     @app.get('/')
     def version():
