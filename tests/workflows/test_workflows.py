@@ -61,7 +61,7 @@ def test_create_workflow(client, auth_headers, test_user):
                 "step_status": "pending",
                 "display_x": 100,
                 "display_y": 100,
-                "commmmand_str": "test_command",
+                "command_str": "test_command",
                 "step_type": "custom"
             }
         ]
@@ -117,7 +117,7 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
                 "step_status": "pending",
                 "display_x": 200,
                 "display_y": 200,
-                "commmmand_str": "new_command",
+                "command_str": "new_command",
                 "step_type": "custom"
             }
         ]
