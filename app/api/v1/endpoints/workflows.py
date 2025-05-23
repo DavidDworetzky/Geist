@@ -9,7 +9,7 @@ from app.schemas.workflow import (
 )
 from app.models.database.workflow import Workflow, WorkflowStep, get_workflow_by_id, get_workflows_for_user, create_workflow, update_workflow
 from app.models.database.database import SessionLocal
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 router = APIRouter()
 
@@ -53,7 +53,8 @@ async def get_workflow(
     db: Session = Depends(get_db)
 ) -> WorkflowResponse:
     """Get a specific workflow by ID."""
-    workflow = get_workflow_by_id(workflow_id)
+    workflow = db.query(Workflow).options(selectinload(Workflow.steps)).filter(Workflow.workflow_id == workflow_id).first()
+
     if not workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -68,13 +69,16 @@ async def update_existing_workflow(
     db: Session = Depends(get_db)
 ) -> WorkflowResponse:
     """Update an existing workflow."""
-    existing_workflow = get_workflow_by_id(workflow_id)
+    existing_workflow = db.query(Workflow).filter(Workflow.workflow_id == workflow_id).first()
+
     if not existing_workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found"
         )
     
+    existing_workflow = db.merge(existing_workflow)
+
     if workflow_update.name is not None:
         existing_workflow.name = workflow_update.name
     
