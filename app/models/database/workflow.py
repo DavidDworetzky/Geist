@@ -1,6 +1,6 @@
 import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import relationship, Session, selectinload
 from app.models.database.database import Base
 from sqlalchemy.dialects.postgresql import insert
 from app.models.database.database import SessionLocal
@@ -81,19 +81,19 @@ def get_workflow_by_id(workflow_id: int) -> Optional[Workflow]:
         Optional[Workflow]: The workflow if found, None otherwise
     """
     with SessionLocal() as session:
-        return session.query(Workflow).filter_by(workflow_id=workflow_id).first()
+        return session.query(Workflow).options(selectinload(Workflow.steps)).filter_by(workflow_id=workflow_id).first()
     
-def get_workflows_for_user(user_id: int) -> List[Workflow]:
+def get_workflows_for_user(user_id: int, db: Session) -> List[Workflow]:
     """Get all workflows for a specific user.
     
     Args:
         user_id (int): The ID of the user
+        db (Session): The database session.
         
     Returns:
         List[Workflow]: List of workflows belonging to the user
     """
-    with SessionLocal() as session:
-        return session.query(Workflow).filter_by(user_id=user_id).all()
+    return db.query(Workflow).options(selectinload(Workflow.steps)).filter_by(user_id=user_id).all()
     
 def create_workflow(workflow: Workflow) -> Workflow:
     """Create a new workflow.

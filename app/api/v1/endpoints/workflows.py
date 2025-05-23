@@ -45,7 +45,7 @@ async def list_workflows(
     db: Session = Depends(get_db)
 ) -> List[WorkflowResponse]:
     """List all workflows."""
-    return get_workflows_for_user(DEFAULT_USER_ID)  # Using default user_id for now
+    return get_workflows_for_user(user_id=DEFAULT_USER_ID, db=db)  # Using default user_id for now
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
