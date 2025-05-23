@@ -2,12 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from app.main import app
-from app.models.database.database import Base, SessionLocal, engine
+from app.models.database.database import SessionLocal
 from app.models.database.workflow import Workflow, WorkflowStep
 from app.schemas.workflow import WorkflowCreate, WorkflowStepCreate
-
-# Create test database tables
-Base.metadata.create_all(bind=engine)
 
 @pytest.fixture
 def client():
