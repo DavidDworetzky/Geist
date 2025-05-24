@@ -38,18 +38,12 @@ async def create_new_workflow(
             step_data_dict = step_create_schema.dict()
             # Ensure enum value is used if step_type in schema is an enum and model expects its value
             step_data_dict['step_type'] = step_create_schema.step_type.value
-            # If step_status is also an enum and model expects its value, handle similarly:
-            # if hasattr(step_create_schema.step_status, 'value'):
-            # step_data_dict['step_status'] = step_create_schema.step_status.value
             db_workflow.steps.append(WorkflowStep(**step_data_dict))
     
     # Add the workflow and its steps to the session
     db.add(db_workflow)
     db.commit()
     
-    # After commit, db_workflow.workflow_id is populated.
-    # To prevent DetachedInstanceError during response serialization,
-    # query the instance anew with its 'steps' relationship eagerly loaded.
     created_workflow_id = db_workflow.workflow_id
     
     fully_loaded_workflow = db.query(Workflow).options(
