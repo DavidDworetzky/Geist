@@ -1,14 +1,17 @@
 import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
-from sqlalchemy.orm import relationship, Session
-from app.models.database.database import Base, Session
+from sqlalchemy.orm import relationship, Session, selectinload
+from app.models.database.database import Base
 from sqlalchemy.dialects.postgresql import insert
 from app.models.database.database import SessionLocal
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 import uuid
+
+if TYPE_CHECKING:
+    from app.schemas.workflow import WorkflowUpdate
 
 class Workflow(Base):
     """Model representing a workflow in the system.
@@ -36,7 +39,7 @@ class WorkflowStep(Base):
         step_status (str): Current status of the step
         display_x (int): X coordinate for workflow editor
         display_y (int): Y coordinate for workflow editor
-        commmmand_str (str): Command string for workflow step
+        command_str (str): Command string for workflow step
         step_type (str): Type of the step
         workflow (Workflow): Relationship to parent workflow
     """
@@ -50,7 +53,7 @@ class WorkflowStep(Base):
     display_x = Column(Integer)
     display_y = Column(Integer)
     #command string for workflow step
-    commmmand_str = Column(String)
+    command_str = Column(String)
     #step type
     step_type = Column(String)
     workflow = relationship("Workflow", back_populates="steps")
@@ -78,19 +81,19 @@ def get_workflow_by_id(workflow_id: int) -> Optional[Workflow]:
         Optional[Workflow]: The workflow if found, None otherwise
     """
     with SessionLocal() as session:
-        return session.query(Workflow).filter_by(workflow_id=workflow_id).first()
+        return session.query(Workflow).options(selectinload(Workflow.steps)).filter_by(workflow_id=workflow_id).first()
     
-def get_workflows_for_user(user_id: int) -> List[Workflow]:
+def get_workflows_for_user(user_id: int, db: Session) -> List[Workflow]:
     """Get all workflows for a specific user.
     
     Args:
         user_id (int): The ID of the user
+        db (Session): The database session.
         
     Returns:
         List[Workflow]: List of workflows belonging to the user
     """
-    with SessionLocal() as session:
-        return session.query(Workflow).filter_by(user_id=user_id).all()
+    return db.query(Workflow).options(selectinload(Workflow.steps)).filter_by(user_id=user_id).all()
     
 def create_workflow(workflow: Workflow) -> Workflow:
     """Create a new workflow.
@@ -106,25 +109,52 @@ def create_workflow(workflow: Workflow) -> Workflow:
         session.commit()
         return workflow
     
-def update_workflow(workflow: Workflow) -> Workflow:
+def update_workflow(workflow_id: int, workflow_data: 'WorkflowUpdate') -> Optional[Workflow]:
     """Update an existing workflow.
     
     Args:
-        workflow (Workflow): The workflow with updated data
+        workflow_id (int): The ID of the workflow to update.
+        workflow_data (WorkflowUpdate): The Pydantic schema containing updated data for the workflow.
         
     Returns:
-        Workflow: The updated workflow
+        Optional[Workflow]: The updated workflow, or None if the workflow was not found.
         
     Raises:
-        ValueError: If the workflow is not found
+        ValueError: If the workflow is not found.
     """
     with SessionLocal() as session:
-        workflow_in_db = session.query(Workflow).filter_by(workflow_id=workflow.workflow_id).first()
-        if workflow_in_db is None:
-            raise ValueError("Workflow not found")
+        workflow_in_db = session.query(Workflow).filter_by(workflow_id=workflow_id).first()
         
-        workflow_in_db.name = workflow.name
-        workflow_in_db.steps = workflow.steps
+        if workflow_in_db is None:
+            raise ValueError(f"Workflow with ID {workflow_id} not found for update.")
+
+        # Update the workflow's name if provided
+        if workflow_data.name is not None:
+            workflow_in_db.name = workflow_data.name
+
+        # Update steps if provided in the payload
+        if workflow_data.steps is not None:
+            workflow_in_db.steps.clear() 
+            session.flush() 
+
+            new_orm_steps = []
+            # No need to check if workflow_data.steps is empty list, loop will handle it.
+            for step_payload in workflow_data.steps: 
+                new_step = WorkflowStep(
+                    step_name=step_payload.step_name,
+                    step_description=step_payload.step_description,
+                    step_status=step_payload.step_status,
+                    display_x=step_payload.display_x,
+                    display_y=step_payload.display_y,
+                    command_str=step_payload.command_str, 
+                    step_type=step_payload.step_type.value
+                )
+                new_orm_steps.append(new_step)
+            
+            workflow_in_db.steps = new_orm_steps
+        # If workflow_data.steps is None, existing steps are not modified.
+
+        session.add(workflow_in_db) 
         session.commit()
-        session.refresh(workflow_in_db)
+        session.refresh(workflow_in_db) 
         return workflow_in_db

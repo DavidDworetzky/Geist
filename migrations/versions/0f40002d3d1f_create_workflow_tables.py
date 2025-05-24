@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column('step_status', sa.String(), nullable=True),
         sa.Column('display_x', sa.Integer(), nullable=True),
         sa.Column('display_y', sa.Integer(), nullable=True),
-        sa.Column('commmmand_str', sa.String(), nullable=True),
+        sa.Column('command_str', sa.String(), nullable=True),
         sa.Column('step_type', sa.String(), nullable=True),
         sa.ForeignKeyConstraint(['workflow_id'], ['workflow.workflow_id'], ),
         sa.PrimaryKeyConstraint('step_id')

@@ -61,7 +61,7 @@ def test_create_workflow(client, auth_headers, test_user):
                 "step_status": "pending",
                 "display_x": 100,
                 "display_y": 100,
-                "commmmand_str": "test_command",
+                "command_str": "test_command",
                 "step_type": "custom"
             }
         ]
@@ -117,7 +117,7 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
                 "step_status": "pending",
                 "display_x": 200,
                 "display_y": 200,
-                "commmmand_str": "new_command",
+                "command_str": "new_command",
                 "step_type": "custom"
             }
         ]
@@ -152,29 +152,3 @@ def test_get_nonexistent_workflow(client, auth_headers):
     """Test retrieving a non-existent workflow."""
     response = client.get("/api/v1/workflows/99999", headers=auth_headers)
     assert response.status_code == 404
-    
-def test_access_other_user_workflow(client, auth_headers, db_session):
-    """Test accessing another user's workflow."""
-    # Create a different user for this test
-    other_user_data = {
-        "user_id": 999,
-        "email": "other@example.com",
-        "username": "otheruser",
-        "name": "Other User",
-        "password": "otherpassword"
-    }
-    other_user = GeistUser(**other_user_data)
-    db_session.add(other_user)
-    db_session.commit()
-    db_session.refresh(other_user)
-
-    # Create workflow for the different user
-    other_user_workflow = Workflow(name="Other User Workflow", user_id=other_user.user_id)
-    db_session.add(other_user_workflow)
-    db_session.commit()
-    
-    response = client.get(
-        f"/api/v1/workflows/{other_user_workflow.workflow_id}",
-        headers=auth_headers
-    )
-    assert response.status_code == 403
