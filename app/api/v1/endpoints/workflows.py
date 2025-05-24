@@ -34,12 +34,29 @@ async def create_new_workflow(
     
     if workflow.steps:
         db_workflow.steps = []
-        for step in workflow.steps:
-            step_data = step.dict()
-            step_data['step_type'] = step.step_type.value # Ensure enum value is used
-            db_workflow.steps.append(WorkflowStep(**step_data))
+        for step_create_schema in workflow.steps: # Renamed variable for clarity
+            step_data_dict = step_create_schema.dict()
+            # Ensure enum value is used if step_type in schema is an enum and model expects its value
+            step_data_dict['step_type'] = step_create_schema.step_type.value
+            # If step_status is also an enum and model expects its value, handle similarly:
+            # if hasattr(step_create_schema.step_status, 'value'):
+            # step_data_dict['step_status'] = step_create_schema.step_status.value
+            db_workflow.steps.append(WorkflowStep(**step_data_dict))
     
-    return create_workflow(db_workflow)
+    # Add the workflow and its steps to the session
+    db.add(db_workflow)
+    db.commit()
+    
+    # After commit, db_workflow.workflow_id is populated.
+    # To prevent DetachedInstanceError during response serialization,
+    # query the instance anew with its 'steps' relationship eagerly loaded.
+    created_workflow_id = db_workflow.workflow_id
+    
+    fully_loaded_workflow = db.query(Workflow).options(
+        selectinload(Workflow.steps)
+    ).filter(Workflow.workflow_id == created_workflow_id).one()
+    
+    return fully_loaded_workflow
 
 @router.get("/", response_model=List[WorkflowResponse])
 async def list_workflows(
