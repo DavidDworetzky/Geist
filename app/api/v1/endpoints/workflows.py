@@ -33,10 +33,11 @@ async def create_new_workflow(
     )
     
     if workflow.steps:
-        db_workflow.steps = [
-            WorkflowStep(**step.dict())
-            for step in workflow.steps
-        ]
+        db_workflow.steps = []
+        for step in workflow.steps:
+            step_data = step.dict()
+            step_data['step_type'] = step.step_type.value # Ensure enum value is used
+            db_workflow.steps.append(WorkflowStep(**step_data))
     
     return create_workflow(db_workflow)
 

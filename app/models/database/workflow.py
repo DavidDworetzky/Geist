@@ -147,7 +147,7 @@ def update_workflow(workflow_id: int, workflow_data: 'WorkflowUpdate') -> Option
                     display_x=step_payload.display_x,
                     display_y=step_payload.display_y,
                     command_str=step_payload.command_str, 
-                    step_type=step_payload.step_type
+                    step_type=step_payload.step_type.value
                 )
                 new_orm_steps.append(new_step)
             
