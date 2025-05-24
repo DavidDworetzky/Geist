@@ -4,8 +4,6 @@ from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowResponse,
     WorkflowUpdate,
-    WorkflowStepCreate,
-    WorkflowStepResponse
 )
 from app.models.database.workflow import Workflow, WorkflowStep, get_workflow_by_id, get_workflows_for_user, create_workflow, update_workflow
 from app.models.database.database import SessionLocal
@@ -29,12 +27,12 @@ async def create_new_workflow(
     """Create a new workflow."""
     db_workflow = Workflow(
         name=workflow.name,
-        user_id=DEFAULT_USER_ID  # Using default user_id for now
+        user_id=DEFAULT_USER_ID 
     )
     
     if workflow.steps:
         db_workflow.steps = []
-        for step_create_schema in workflow.steps: # Renamed variable for clarity
+        for step_create_schema in workflow.steps: 
             step_data_dict = step_create_schema.dict()
             # Ensure enum value is used if step_type in schema is an enum and model expects its value
             step_data_dict['step_type'] = step_create_schema.step_type.value
@@ -57,7 +55,7 @@ async def list_workflows(
     db: Session = Depends(get_db)
 ) -> List[WorkflowResponse]:
     """List all workflows."""
-    return get_workflows_for_user(user_id=DEFAULT_USER_ID, db=db)  # Using default user_id for now
+    return get_workflows_for_user(user_id=DEFAULT_USER_ID, db=db)  
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
