@@ -90,13 +90,20 @@ async def update_existing_workflow(
         )
 
     try:
-        updated_db_workflow = update_workflow(workflow_id=workflow_id, workflow_data=workflow_update)
-        if updated_db_workflow is None:
+        updated_db_workflow_from_crud = update_workflow(workflow_id=workflow_id, workflow_data=workflow_update)
+        
+        if updated_db_workflow_from_crud is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Workflow with ID {workflow_id} not found during update process."
+                detail=f"Workflow with ID {workflow_id} not found during update process or update failed."
             )
-        return updated_db_workflow
+
+        reloaded_workflow = db.query(Workflow).options(
+            selectinload(Workflow.steps)
+        ).filter(Workflow.workflow_id == workflow_id).one()
+
+        return reloaded_workflow
+        
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
