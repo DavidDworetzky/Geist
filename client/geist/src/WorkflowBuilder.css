@@ -1,0 +1,306 @@
+/* Workflow Builder Container */
+.WorkflowBuilderContainer {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+    background-color: #f5f5f5;
+}
+
+/* Sidebar Styles */
+.WorkflowSidebar {
+    width: 300px;
+    background-color: #2c3e50;
+    color: white;
+    overflow-y: auto;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid #34495e;
+}
+
+.sidebar-header h3 {
+    margin: 0 0 15px 0;
+    font-size: 1.5rem;
+}
+
+.new-workflow-btn {
+    width: 100%;
+    padding: 10px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.3s;
+}
+
+.new-workflow-btn:hover {
+    background-color: #2980b9;
+}
+
+/* Main Content Area */
+.WorkflowContent {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Workflow Header */
+.workflow-header {
+    background-color: white;
+    padding: 20px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.workflow-name-input {
+    font-size: 1.5rem;
+    padding: 10px;
+    border: 2px solid #e0e0e0;
+    border-radius: 5px;
+    width: 300px;
+    transition: border-color 0.3s;
+}
+
+.workflow-name-input:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.workflow-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.add-node-btn,
+.save-workflow-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s;
+}
+
+.add-node-btn {
+    background-color: #27ae60;
+    color: white;
+}
+
+.add-node-btn:hover {
+    background-color: #229954;
+}
+
+.save-workflow-btn {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.save-workflow-btn:hover {
+    background-color: #c0392b;
+}
+
+/* Workflow Canvas */
+.workflow-canvas {
+    flex: 1;
+    position: relative;
+}
+
+/* Custom Node Styles */
+.workflow-step-node {
+    padding: 15px;
+    border-radius: 10px;
+    border: 2px solid #333;
+    min-width: 180px;
+    background-color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s;
+}
+
+.workflow-step-node.selected {
+    border-color: #3498db;
+    box-shadow: 0 6px 12px rgba(52, 152, 219, 0.3);
+}
+
+.workflow-step-node:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.step-header {
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.step-type {
+    font-size: 0.75rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    opacity: 0.8;
+}
+
+.step-content h4 {
+    margin: 0 0 5px 0;
+    font-size: 1rem;
+    color: #2c3e50;
+}
+
+.step-content p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: #7f8c8d;
+}
+
+/* React Flow Handle Styles */
+.react-flow__handle {
+    width: 12px;
+    height: 12px;
+    background-color: #555;
+    border: 2px solid #fff;
+}
+
+.react-flow__handle-top {
+    top: -6px;
+}
+
+.react-flow__handle-bottom {
+    bottom: -6px;
+}
+
+/* Node Editor Overlay */
+.node-editor-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.node-editor {
+    background-color: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    width: 500px;
+    max-width: 90%;
+}
+
+.node-editor h3 {
+    margin: 0 0 20px 0;
+    color: #2c3e50;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #34495e;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 10px;
+    border: 2px solid #e0e0e0;
+    border-radius: 5px;
+    font-size: 1rem;
+    transition: border-color 0.3s;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.update-btn,
+.delete-btn,
+.cancel-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s;
+}
+
+.update-btn {
+    background-color: #27ae60;
+    color: white;
+}
+
+.update-btn:hover {
+    background-color: #229954;
+}
+
+.delete-btn {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.delete-btn:hover {
+    background-color: #c0392b;
+}
+
+.cancel-btn {
+    background-color: #95a5a6;
+    color: white;
+}
+
+.cancel-btn:hover {
+    background-color: #7f8c8d;
+}
+
+/* React Flow Controls Customization */
+.react-flow__controls {
+    bottom: 20px;
+    left: 20px;
+}
+
+.react-flow__minimap {
+    bottom: 20px;
+    right: 20px;
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+}
+
+/* Loading and Error States */
+.loading-message,
+.error-message {
+    text-align: center;
+    padding: 20px;
+    font-size: 1.2rem;
+}
+
+.error-message {
+    color: #e74c3c;
+} 
