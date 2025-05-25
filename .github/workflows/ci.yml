@@ -24,6 +24,14 @@ jobs:
         activate-environment: geist-linux-docker
         environment-file: linux_environment_x86_x64.yml
 
+    - name: Start services
+      run: docker-compose up -d
+
+    - name: Wait for database
+      run: |
+        echo "Waiting for database to be ready..."
+        timeout 30s bash -c 'until docker-compose exec -T db pg_isready -h localhost; do sleep 1; done'
+
     - name: Run tests
       shell: bash -l {0}
       env:
@@ -33,6 +41,10 @@ jobs:
         conda info
         conda list
         pytest tests/
+
+    - name: Stop services
+      if: always() # Always run this step to ensure services are stopped
+      run: docker-compose down
 
   build:
     runs-on: ubuntu-latest
