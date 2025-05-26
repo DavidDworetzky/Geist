@@ -10,7 +10,7 @@ class WorkflowStepBase(BaseModel):
     step_status: Optional[str] = Field(None, description="Current status of the step")
     display_x: Optional[int] = Field(None, description="X coordinate for workflow editor")
     display_y: Optional[int] = Field(None, description="Y coordinate for workflow editor")
-    commmmand_str: Optional[str] = Field(None, description="Command string for workflow step")
+    command_str: Optional[str] = Field(None, description="Command string for workflow step")
     step_type: WorkflowStepType = Field(..., description="Type of the workflow step")
 
 class WorkflowStepCreate(WorkflowStepBase):
