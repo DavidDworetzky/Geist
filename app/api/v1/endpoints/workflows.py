@@ -8,7 +8,8 @@ from app.schemas.workflow import (
 from app.models.database.workflow import Workflow, WorkflowStep, get_workflow_by_id, get_workflows_for_user, create_workflow, update_workflow
 from app.models.database.database import SessionLocal
 from sqlalchemy.orm import Session, selectinload
-DEFAULT_USER_ID = 1
+from app.models.database.geist_user import get_default_user
+
 router = APIRouter()
 
 def get_db():
@@ -19,6 +20,11 @@ def get_db():
     finally:
         db.close()
 
+def get_default_user_id() -> int:
+    """Get the default user's ID from the database."""
+    default_user = get_default_user()
+    return default_user.user_id
+
 @router.post("/", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
 async def create_new_workflow(
     workflow: WorkflowCreate,
@@ -27,7 +33,7 @@ async def create_new_workflow(
     """Create a new workflow."""
     db_workflow = Workflow(
         name=workflow.name,
-        user_id=DEFAULT_USER_ID 
+        user_id=get_default_user_id() 
     )
     
     if workflow.steps:
@@ -55,7 +61,7 @@ async def list_workflows(
     db: Session = Depends(get_db)
 ) -> List[WorkflowResponse]:
     """List all workflows."""
-    return get_workflows_for_user(user_id=DEFAULT_USER_ID, db=db)  
+    return get_workflows_for_user(user_id=get_default_user_id(), db=db)  
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
