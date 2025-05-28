@@ -43,4 +43,18 @@ def get_default_user() -> UserModel:
     '''
     with SessionLocal() as session:
         user = session.query(GeistUser).filter_by(email='david@phantasmal.ai').first()
+        
+        if user is None:
+            # Create the default user if it doesn't exist
+            default_user = GeistUser(
+                username='ddworetzky',
+                name='David Dworetzky',
+                email='david@phantasmal.ai',
+                password=''  # Empty password for now
+            )
+            session.add(default_user)
+            session.commit()
+            session.refresh(default_user)
+            user = default_user
+            
         return UserModel(user_id=user.user_id, username=user.username, name=user.name, email=user.email, password=user.password)
