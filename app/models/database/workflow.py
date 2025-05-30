@@ -60,6 +60,9 @@ class WorkflowStep(Base):
 
 class WorkflowStepType(Enum):
     """Enum representing different types of workflow steps."""
+    # Input type - triggers that start workflows
+    TRIGGER = "trigger"
+    # Processing types
     MAP = "map"
     FILTER = "filter"
     REDUCE = "reduce"
@@ -70,6 +73,8 @@ class WorkflowStepType(Enum):
     LLM = "llm"
     #agent flow, can call an agent flow step
     AGENT = "agent"
+    # Output type - adapters that send data to external systems
+    ADAPTER = "adapter"
 
 def get_workflow_by_id(workflow_id: int) -> Optional[Workflow]:
     """Get a workflow by its ID.
