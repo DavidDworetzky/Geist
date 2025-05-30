@@ -23,6 +23,7 @@ import './WorkflowBuilder.css';
 // Custom node component for workflow steps
 const WorkflowStepNode = ({ data, selected }: { data: any; selected: boolean }) => {
     const stepTypeColors: Record<string, string> = {
+        trigger: '#9b59b6',  // Purple for input/trigger
         map: '#ff6b6b',
         filter: '#4ecdc4',
         reduce: '#45b7d1',
@@ -30,6 +31,7 @@ const WorkflowStepNode = ({ data, selected }: { data: any; selected: boolean }) 
         custom: '#dda0dd',
         llm: '#ffd93d',
         agent: '#ff8b94',
+        adapter: '#3498db',  // Blue for output/adapter
     };
 
     const bgColor = stepTypeColors[data.stepType] || '#ffffff';
@@ -286,6 +288,7 @@ const WorkflowBuilder: React.FC = () => {
                                     value={nodeFormData.stepType}
                                     onChange={(e) => setNodeFormData({ ...nodeFormData, stepType: e.target.value as WorkflowStep['step_type'] })}
                                 >
+                                    <option value="trigger">Trigger (Input)</option>
                                     <option value="map">Map</option>
                                     <option value="filter">Filter</option>
                                     <option value="reduce">Reduce</option>
@@ -293,6 +296,7 @@ const WorkflowBuilder: React.FC = () => {
                                     <option value="custom">Custom</option>
                                     <option value="llm">LLM</option>
                                     <option value="agent">Agent</option>
+                                    <option value="adapter">Adapter (Output)</option>
                                 </select>
                             </div>
                             <div className="form-group">

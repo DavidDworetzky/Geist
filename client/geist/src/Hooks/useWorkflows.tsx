@@ -10,7 +10,7 @@ export interface WorkflowStep {
     display_x?: number;
     display_y?: number;
     command_str?: string;
-    step_type: 'map' | 'filter' | 'reduce' | 'expand' | 'custom' | 'llm' | 'agent';
+    step_type: 'trigger' | 'map' | 'filter' | 'reduce' | 'expand' | 'custom' | 'llm' | 'agent' | 'adapter';
 }
 
 export interface Workflow {
