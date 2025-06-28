@@ -98,7 +98,16 @@ def test_list_workflows(client, auth_headers, test_user, db_session):
     db_session.add_all([workflow1, workflow2])
     db_session.commit()
     
+    # Debug: Verify workflows were created
+    created_workflows = db_session.query(Workflow).filter_by(user_id=test_user["user_id"]).all()
+    print(f"Created workflows: {[(w.workflow_id, w.name, w.user_id) for w in created_workflows]}")
+    print(f"Auth headers: {auth_headers}")
+    print(f"Test user ID: {test_user['user_id']}")
+    
     response = client.get("/api/v1/workflows/", headers=auth_headers)
+    print(f"Response status: {response.status_code}")
+    print(f"Response body: {response.text}")
+    
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
