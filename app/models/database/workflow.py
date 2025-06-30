@@ -112,6 +112,12 @@ def create_workflow(workflow: Workflow) -> Workflow:
     with SessionLocal() as session:
         session.add(workflow)
         session.commit()
+        
+        # Eagerly load the steps relationship before closing the session
+        workflow = session.query(Workflow).options(
+            selectinload(Workflow.steps)
+        ).filter(Workflow.workflow_id == workflow.workflow_id).one()
+        
         return workflow
     
 def update_workflow(workflow_id: int, workflow_data: 'WorkflowUpdate') -> Optional[Workflow]:
@@ -161,5 +167,10 @@ def update_workflow(workflow_id: int, workflow_data: 'WorkflowUpdate') -> Option
 
         session.add(workflow_in_db) 
         session.commit()
-        session.refresh(workflow_in_db) 
+        
+        # Eagerly load the steps relationship before closing the session
+        workflow_in_db = session.query(Workflow).options(
+            selectinload(Workflow.steps)
+        ).filter(Workflow.workflow_id == workflow_id).one()
+        
         return workflow_in_db

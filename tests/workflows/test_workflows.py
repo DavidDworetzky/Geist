@@ -19,29 +19,45 @@ def db_session():
     try:
         yield session
     finally:
+        # Handle any pending rollback
+        try:
+            session.rollback()
+        except:
+            pass
+        
         # Clean up created test users and workflows
-        session.query(WorkflowStep).delete()
-        session.query(Workflow).delete()
-        session.query(GeistUser).delete()
-        session.commit()
-        session.close()
+        try:
+            session.query(WorkflowStep).delete()
+            session.query(Workflow).delete()
+            session.query(GeistUser).filter(GeistUser.email == "test@example.com").delete()
+            session.commit()
+        except Exception as e:
+            session.rollback()
+        finally:
+            session.close()
 
 @pytest.fixture
 def test_user(db_session: Session):
     """Test user fixture. Creates a user in the database."""
+    # First, ensure no test user exists
+    existing_user = db_session.query(GeistUser).filter_by(email="test@example.com").first()
+    if existing_user:
+        db_session.delete(existing_user)
+        db_session.commit()
+    
     user_data = {
-        "user_id": 1,
+        # Don't set user_id - let it auto-increment
         "email": "test@example.com",
         "username": "testuser",
         "name": "Test User",
-        "password": "testpassword" # Add other required fields as per your GeistUser model
+        "password": "testpassword"
     }
     user = GeistUser(**user_data)
     db_session.add(user)
     db_session.commit()
-    db_session.refresh(user) # Refresh to get the auto-generated ID if it's not manually set
+    db_session.refresh(user)  # Refresh to get the auto-generated ID
     return {
-        "user_id": user.user_id, # Use the actual user_id from the DB
+        "user_id": user.user_id,  # Use the actual user_id from the DB
         "email": user.email
     }
 
@@ -82,7 +98,16 @@ def test_list_workflows(client, auth_headers, test_user, db_session):
     db_session.add_all([workflow1, workflow2])
     db_session.commit()
     
+    # Debug: Verify workflows were created
+    created_workflows = db_session.query(Workflow).filter_by(user_id=test_user["user_id"]).all()
+    print(f"Created workflows: {[(w.workflow_id, w.name, w.user_id) for w in created_workflows]}")
+    print(f"Auth headers: {auth_headers}")
+    print(f"Test user ID: {test_user['user_id']}")
+    
     response = client.get("/api/v1/workflows/", headers=auth_headers)
+    print(f"Response status: {response.status_code}")
+    print(f"Response body: {response.text}")
+    
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
