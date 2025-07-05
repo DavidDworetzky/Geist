@@ -61,7 +61,7 @@ const nodeTypes: NodeTypes = {
 const WorkflowBuilder: React.FC = () => {
     const { workflowId } = useParams<{ workflowId?: string }>();
     const navigate = useNavigate();
-    const { workflows, createWorkflow, updateWorkflow, getWorkflow } = useWorkflows();
+    const { workflows, createWorkflow, updateWorkflow, getWorkflow, runWorkflow, runLoading, runResult, setRunResult } = useWorkflows();
     
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -74,6 +74,8 @@ const WorkflowBuilder: React.FC = () => {
         stepType: 'custom' as WorkflowStep['step_type'],
         commandStr: '',
     });
+    const [showRunDialog, setShowRunDialog] = useState(false);
+    const [runInputData, setRunInputData] = useState('');
 
     const loadWorkflow = useCallback(async (id: number) => {
         const workflow = await getWorkflow(id);
@@ -208,6 +210,29 @@ const WorkflowBuilder: React.FC = () => {
         }
     };
 
+    const handleRunWorkflow = async () => {
+        if (!workflowId) {
+            alert('Please save the workflow first');
+            return;
+        }
+
+        let inputData = {};
+        if (runInputData.trim()) {
+            try {
+                inputData = JSON.parse(runInputData);
+            } catch (e) {
+                alert('Invalid JSON input data');
+                return;
+            }
+        }
+
+        const result = await runWorkflow(parseInt(workflowId), inputData);
+        if (result) {
+            setShowRunDialog(false);
+            setRunInputData('');
+        }
+    };
+
     // Create workflow links for sidebar
     const workflowLinks: ListItem[] = workflows.map((workflow) => ({
         name: workflow.name,
@@ -243,6 +268,15 @@ const WorkflowBuilder: React.FC = () => {
                         <button onClick={saveWorkflow} className="save-workflow-btn">
                             Save Workflow
                         </button>
+                        {workflowId && (
+                            <button 
+                                onClick={() => setShowRunDialog(true)} 
+                                className="run-workflow-btn"
+                                disabled={runLoading}
+                            >
+                                {runLoading ? 'Running...' : 'Run Workflow'}
+                            </button>
+                        )}
                     </div>
                 </div>
                 
@@ -313,6 +347,74 @@ const WorkflowBuilder: React.FC = () => {
                                 <button onClick={() => setShowNodeEditor(false)} className="cancel-btn">Cancel</button>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {showRunDialog && (
+                    <div className="run-dialog-overlay">
+                        <div className="run-dialog">
+                            <h3>Run Workflow</h3>
+                            <div className="form-group">
+                                <label>Input Data (JSON):</label>
+                                <textarea
+                                    value={runInputData}
+                                    onChange={(e) => setRunInputData(e.target.value)}
+                                    placeholder='{"key": "value"}'
+                                    rows={6}
+                                />
+                                <small>Enter JSON data to pass to the workflow (optional)</small>
+                            </div>
+                            <div className="dialog-actions">
+                                <button 
+                                    onClick={handleRunWorkflow} 
+                                    className="run-btn"
+                                    disabled={runLoading}
+                                >
+                                    {runLoading ? 'Running...' : 'Run'}
+                                </button>
+                                <button 
+                                    onClick={() => setShowRunDialog(false)} 
+                                    className="cancel-btn"
+                                    disabled={runLoading}
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {runResult && (
+                    <div className="run-results">
+                        <h3>Workflow Execution Result</h3>
+                        <div className="result-item">
+                            <strong>Status:</strong> 
+                            <span className={`status ${runResult.status}`}>{runResult.status}</span>
+                        </div>
+                        <div className="result-item">
+                            <strong>Run ID:</strong> {runResult.run_id}
+                        </div>
+                        <div className="result-item">
+                            <strong>Started:</strong> {runResult.started_at ? new Date(runResult.started_at).toLocaleString() : 'N/A'}
+                        </div>
+                        <div className="result-item">
+                            <strong>Completed:</strong> {runResult.completed_at ? new Date(runResult.completed_at).toLocaleString() : 'N/A'}
+                        </div>
+                        {runResult.error_message && (
+                            <div className="result-item error">
+                                <strong>Error:</strong> {runResult.error_message}
+                            </div>
+                        )}
+                        <div className="result-item">
+                            <strong>Output Data:</strong>
+                            <pre>{JSON.stringify(runResult.output_data, null, 2)}</pre>
+                        </div>
+                        <button 
+                            onClick={() => setRunResult(null)} 
+                            className="close-results-btn"
+                        >
+                            Close Results
+                        </button>
                     </div>
                 )}
             </div>

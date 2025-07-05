@@ -30,10 +30,23 @@ export interface WorkflowUpdate {
     steps?: WorkflowStep[];
 }
 
+export interface WorkflowRunResult {
+    run_id: number;
+    workflow_id: number;
+    status: string;
+    started_at: string | null;
+    completed_at: string | null;
+    input_data: any;
+    output_data: any;
+    error_message: string | null;
+}
+
 const useWorkflows = () => {
     const [workflows, setWorkflows] = useState<Workflow[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
+    const [runLoading, setRunLoading] = useState<boolean>(false);
+    const [runResult, setRunResult] = useState<WorkflowRunResult | null>(null);
 
     const fetchWorkflows = async () => {
         setLoading(true);
@@ -112,6 +125,23 @@ const useWorkflows = () => {
         }
     };
 
+    const runWorkflow = async (workflowId: number, inputData?: any): Promise<WorkflowRunResult | null> => {
+        setRunLoading(true);
+        setError(null);
+        setRunResult(null);
+        try {
+            const response = await axios.post<WorkflowRunResult>(`/api/v1/workflows/${workflowId}/run`, inputData);
+            setRunResult(response.data);
+            return response.data;
+        } catch (err) {
+            setError('Failed to run workflow');
+            console.error('Error running workflow:', err);
+            return null;
+        } finally {
+            setRunLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchWorkflows();
     }, []);
@@ -120,11 +150,15 @@ const useWorkflows = () => {
         workflows,
         loading,
         error,
+        runLoading,
+        runResult,
+        setRunResult,
         createWorkflow,
         updateWorkflow,
         deleteWorkflow,
         getWorkflow,
-        fetchWorkflows
+        fetchWorkflows,
+        runWorkflow
     };
 };
 
