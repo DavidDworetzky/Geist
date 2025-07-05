@@ -15,7 +15,7 @@ import ReactFlow, {
     Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import useWorkflows, { WorkflowStep, WorkflowCreate, WorkflowUpdate, WorkflowRunResult } from './Hooks/useWorkflows';
+import useWorkflows, { WorkflowStep, WorkflowCreate, WorkflowUpdate } from './Hooks/useWorkflows';
 import { useParams, useNavigate } from 'react-router-dom';
 import LinkList, { ListItem } from './Components/LinkList';
 import './WorkflowBuilder.css';
@@ -61,7 +61,7 @@ const nodeTypes: NodeTypes = {
 const WorkflowBuilder: React.FC = () => {
     const { workflowId } = useParams<{ workflowId?: string }>();
     const navigate = useNavigate();
-    const { workflows, createWorkflow, updateWorkflow, getWorkflow, runWorkflow, runLoading, runResult } = useWorkflows();
+    const { workflows, createWorkflow, updateWorkflow, getWorkflow, runWorkflow, runLoading, runResult, setRunResult } = useWorkflows();
     
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);

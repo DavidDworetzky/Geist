@@ -152,6 +152,7 @@ const useWorkflows = () => {
         error,
         runLoading,
         runResult,
+        setRunResult,
         createWorkflow,
         updateWorkflow,
         deleteWorkflow,
