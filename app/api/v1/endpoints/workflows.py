@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict
+from typing import List, Dict, Any
 from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowResponse,
@@ -10,6 +10,7 @@ from app.models.database.database import SessionLocal
 from sqlalchemy.orm import Session, selectinload
 from app.models.database.geist_user import get_default_user
 from app.api.utils import get_current_user
+from app.services.workflow_execution import WorkflowExecutor
 
 router = APIRouter()
 
@@ -148,4 +149,58 @@ async def delete_workflow(
             Workflow.workflow_id == workflow_id
         ).first()
         session.delete(workflow_to_delete)
-        session.commit() 
+        session.commit()
+
+@router.post("/{workflow_id}/run", status_code=status.HTTP_200_OK)
+async def run_workflow(
+    workflow_id: int,
+    input_data: Dict[str, Any] = None,
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """Execute a workflow synchronously."""
+    # First check if the user owns this workflow
+    workflow = db.query(Workflow).options(selectinload(Workflow.steps)).filter(
+        Workflow.workflow_id == workflow_id,
+        Workflow.user_id == current_user["user_id"]
+    ).first()
+    
+    if not workflow:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found"
+        )
+    
+    if not workflow.steps:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workflow has no steps to execute"
+        )
+    
+    try:
+        # Initialize the workflow executor
+        executor = WorkflowExecutor()
+        
+        # Execute the workflow synchronously
+        run = executor.execute_workflow(
+            workflow=workflow,
+            user_id=current_user["user_id"],
+            input_data=input_data or {}
+        )
+        
+        return {
+            "run_id": run.run_id,
+            "workflow_id": workflow_id,
+            "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "input_data": run.input_data,
+            "output_data": run.output_data,
+            "error_message": run.error_message
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Workflow execution failed: {str(e)}"
+        )
