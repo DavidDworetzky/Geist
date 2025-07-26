@@ -67,7 +67,11 @@ class FunctionalProcessor(StepProcessor):
                     command_config = {"expression": step.command_str}
             
             data = input_data.get("data", input_data)
-            step_type = WorkflowStepType(step.step_type)
+            
+            try:
+                step_type = WorkflowStepType(step.step_type)
+            except ValueError:
+                raise Exception(f"Unsupported functional step type: {step.step_type}")
             
             if step_type == WorkflowStepType.MAP:
                 result = self._process_map(data, command_config)
