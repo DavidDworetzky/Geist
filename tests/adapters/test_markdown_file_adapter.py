@@ -81,8 +81,7 @@ class TestMarkdownFileAdapter:
         result = self.adapter.read_file(f"{subdir}/{filename}")
         assert result == content
     
-    @patch("builtins.open", side_effect=IOError("Permission denied"))
-    def test_read_file_io_error(self, mock_file):
+    def test_read_file_io_error(self):
         """Test IOError handling during file read"""
         # Create a file first
         filename = "test.md"
@@ -90,10 +89,12 @@ class TestMarkdownFileAdapter:
         with open(filepath, 'w') as f:
             f.write("test")
         
-        with pytest.raises(IOError) as exc_info:
-            self.adapter.read_file(filename)
-        
-        assert "Error reading file test.md" in str(exc_info.value)
+        # Now mock open to raise IOError only for the read operation
+        with patch("builtins.open", side_effect=IOError("Permission denied")):
+            with pytest.raises(IOError) as exc_info:
+                self.adapter.read_file(filename)
+            
+            assert "Error reading file test.md" in str(exc_info.value)
     
     def test_write_file_success(self):
         """Test successful file writing"""
