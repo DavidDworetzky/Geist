@@ -84,6 +84,15 @@ const Chat = () => {
         }
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (userInput.trim() && !isLoading) {
+                handleSubmit(e as any);
+            }
+        }
+    };
+
     return (
         <div className="ChatContainer">
             <div className="ChatSidebar">
@@ -96,6 +105,7 @@ const Chat = () => {
                     <textarea
                         value={userInput}
                         onChange={(e) => setUserInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
                         rows={3}
                         cols={50}
                         className="ChatInput"
