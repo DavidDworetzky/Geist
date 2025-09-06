@@ -100,6 +100,15 @@ const Chat = () => {
         }
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (userInput.trim() && !isLoading) {
+                handleSubmit(userInput);
+            }
+        }
+    };
+
     return (
         <div className="ChatContainer">
             <div className="ChatSidebar">
@@ -130,6 +139,7 @@ const Chat = () => {
                         onSubmit={handleSubmit}
                         disabled={isLoading || isProcessingFiles}
                         placeholder="Type your message... Use @ to reference files"
+                        handleKeyDown={handleKeyDown}
                         rows={3}
                     />
                 </div>

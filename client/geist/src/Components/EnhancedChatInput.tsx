@@ -9,6 +9,7 @@ interface EnhancedChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   rows?: number;
+  handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
 interface FileSuggestion extends FileItem {
@@ -21,7 +22,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   onSubmit,
   disabled = false,
   placeholder = "Type your message... Use @ to reference files",
-  rows = 3
+  rows = 3,
+  handleKeyDown: externalHandleKeyDown
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
@@ -61,7 +63,12 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   };
 
   // Handle keyboard navigation in suggestions
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Invoke external handler first to allow prevention/overrides
+    if (externalHandleKeyDown) {
+      externalHandleKeyDown(e);
+      if (e.defaultPrevented) return;
+    }
     if (showFileSuggestions && fileSuggestions.length > 0) {
       switch (e.key) {
         case 'ArrowDown':
@@ -190,7 +197,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             ref={textareaRef}
             value={value}
             onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={internalHandleKeyDown}
             rows={rows}
             disabled={disabled}
             placeholder={placeholder}
