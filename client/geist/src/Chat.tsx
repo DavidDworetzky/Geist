@@ -1,9 +1,11 @@
 import React, { useState, useEffect, FormEvent } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
+import useFileContext from './Hooks/useFileContext';
 import {ChatSession}from './Hooks/useGetChatSessions';
 import ChatTextArea from './Components/ChatTextArea';
 import LinkList from './Components/LinkList';
+import EnhancedChatInput from './Components/EnhancedChatInput';
 import { ChatPair, ChatHistory } from './Components/ChatTextArea';
 import {ListItem} from './Components/LinkList';
 import { useParams } from 'react-router-dom';
@@ -16,14 +18,29 @@ const Chat = () => {
     const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
     const { chatSessions, loading: isChatSessionLoading, error: chatSessionError } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
+    const [fileContextInfo, setFileContextInfo] = useState<string>('');
     const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText();
+    const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
 
     const chatWithServer = async (input: string) => {
         let parsedChatId = chatId ? parseInt(chatId) : state_chat_id;
         try {
-            await completeText(input, parsedChatId);
-        }
-        catch (err) {
+            // Process file references if any exist
+            const processedMessage = await processMessage(input);
+            
+            // Set file context info for display
+            if (processedMessage.contexts.length > 0) {
+                const contextInfo = `Files referenced: ${processedMessage.contexts.map(c => c.filename).join(', ')}`;
+                setFileContextInfo(contextInfo);
+            } else {
+                setFileContextInfo('');
+            }
+            
+            // Use enhanced message (with file content) for the API call
+            const messageToSend = processedMessage.enhancedMessage || input;
+            await completeText(messageToSend, parsedChatId);
+            
+        } catch (err) {
             console.error('Error chatting with server:', err);
         }
     };
@@ -76,10 +93,9 @@ const Chat = () => {
         }
     }, [completedText]);
 
-    const handleSubmit = async (e: FormEvent) => {
-        e.preventDefault();
-        if (userInput.trim()) {
-            await chatWithServer(userInput);
+    const handleSubmit = async (message: string) => {
+        if (message.trim()) {
+            await chatWithServer(message);
             setUserInput('');
         }
     };
@@ -88,7 +104,7 @@ const Chat = () => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (userInput.trim() && !isLoading) {
-                handleSubmit(e as any);
+                handleSubmit(userInput);
             }
         }
     };
@@ -101,24 +117,44 @@ const Chat = () => {
             <div className="ChatContent">
                 <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
                 
-                <form onSubmit={handleSubmit} className="ChatInputForm">
-                    <textarea
+                {/* File context info */}
+                {fileContextInfo && (
+                    <div style={{
+                        padding: '8px 12px',
+                        backgroundColor: '#d4edda',
+                        border: '1px solid #c3e6cb',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        color: '#155724',
+                        marginBottom: '10px'
+                    }}>
+                        {fileContextInfo}
+                    </div>
+                )}
+                
+                <div className="ChatInputForm">
+                    <EnhancedChatInput
                         value={userInput}
-                        onChange={(e) => setUserInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
+                        onChange={setUserInput}
+                        onSubmit={handleSubmit}
+                        disabled={isLoading || isProcessingFiles}
+                        placeholder="Type your message... Use @ to reference files"
+                        handleKeyDown={handleKeyDown}
                         rows={3}
-                        cols={50}
-                        className="ChatInput"
                     />
-                    <button 
-                        type="submit" 
-                        disabled={isLoading} 
-                        className={`ChatSubmitButton ${isLoading ? 'loading-dots' : ''}`}
-                    >
-                        {isLoading ? '' : 'Send'}
-                    </button>
-                </form>
-                {error && <p className="ErrorMessage">Error: {error}</p>}
+                </div>
+                
+                {(error || fileError) && (
+                    <p className="ErrorMessage">
+                        Error: {error || fileError}
+                    </p>
+                )}
+                
+                {isProcessingFiles && (
+                    <p style={{ fontSize: '12px', color: '#6c757d', fontStyle: 'italic' }}>
+                        Processing file references...
+                    </p>
+                )}
             </div>
         </div>
     );

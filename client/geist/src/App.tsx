@@ -5,6 +5,7 @@ import Navigation from './Navigation';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Chat from './Chat';
 import WorkflowBuilder from './WorkflowBuilder';
+import Files from './Files';
 
 
 function App() {
@@ -22,6 +23,11 @@ function App() {
     name: 'Workflows',
     link: '/workflows',
     svg: 'M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z'
+  },
+  {
+    name: 'Files',
+    link: '/files',
+    svg: 'M369.9 97.9L286 14C277 5 264.8-.1 252.1-.1H48C21.5 0 0 21.5 0 48v416c0 26.5 21.5 48 48 48h288c26.5 0 48-21.5 48-48V131.9c0-12.7-5.1-25-14.1-34zM332.1 128H256V51.9l76.1 76.1zM48 464V48h160v104c0 13.3 10.7 24 24 24h104v288H48z'
   }]
   return (
 
@@ -44,6 +50,7 @@ function App() {
             <Route path="/chat/:chatId" element={<Chat/>}/>
             <Route path="/workflows" element={<WorkflowBuilder/>}/>
             <Route path="/workflows/:workflowId" element={<WorkflowBuilder/>}/>
+            <Route path="/files" element={<Files/>}/>
           </Routes>
         </BrowserRouter>
 
