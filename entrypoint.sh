@@ -16,4 +16,5 @@ set -euo pipefail
 #initialize our database
 python initdb.py
 #start our geist server
-python bootstrap.py
+tail -f /dev/null
+#python bootstrap.py
