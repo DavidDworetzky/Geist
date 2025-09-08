@@ -4,7 +4,6 @@ import csv
 import json
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, Any
-from docx import Document
 from openpyxl import load_workbook
 from PyPDF2 import PdfReader
 import pdfplumber
@@ -30,8 +29,6 @@ class TextExtractionService:
                 return TextExtractionService._extract_from_text(file_data)
             elif mime_type == 'application/pdf' or file_ext == '.pdf':
                 return TextExtractionService._extract_from_pdf(file_data)
-            elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' or file_ext == '.docx':
-                return TextExtractionService._extract_from_docx(file_data)
             elif mime_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'] or file_ext in ['.xlsx', '.xls']:
                 return TextExtractionService._extract_from_excel(file_data)
             elif mime_type == 'text/csv' or file_ext == '.csv':
@@ -100,26 +97,6 @@ class TextExtractionService:
                 
         except Exception as e:
             return {'success': False, 'error': f'PDF text extraction failed: {str(e)}'}
-    
-    @staticmethod
-    def _extract_from_docx(file_data: bytes) -> Dict[str, Any]:
-        """Extract text from DOCX files"""
-        try:
-            doc = Document(io.BytesIO(file_data))
-            paragraphs = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
-            
-            # Also extract text from tables
-            for table in doc.tables:
-                for row in table.rows:
-                    row_text = ' | '.join([cell.text.strip() for cell in row.cells])
-                    if row_text.strip():
-                        paragraphs.append(row_text)
-            
-            text = '\n\n'.join(paragraphs)
-            return {'success': True, 'text': text}
-            
-        except Exception as e:
-            return {'success': False, 'error': f'DOCX text extraction failed: {str(e)}'}
     
     @staticmethod
     def _extract_from_excel(file_data: bytes) -> Dict[str, Any]:
