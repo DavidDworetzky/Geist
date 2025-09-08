@@ -1,5 +1,4 @@
 import hashlib
-import magic
 import mimetypes
 from typing import Optional, List, Dict, Any
 from app.models.database.file_upload import FileUploadModel, create_file_upload, get_file_by_hash
