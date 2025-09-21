@@ -28,6 +28,7 @@ const Files: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; fileId: number | null }>({ show: false, fileId: null });
 
   const fetchFiles = async () => {
     try {
@@ -72,11 +73,22 @@ const Files: React.FC = () => {
     }
   };
 
-  const deleteFile = async (fileId: number) => {
-    if (!confirm('Are you sure you want to delete this file?')) {
-      return;
-    }
+  const handleDeleteClick = (fileId: number) => {
+    setDeleteConfirm({ show: true, fileId });
+  };
 
+  const confirmDelete = async () => {
+    if (deleteConfirm.fileId) {
+      await deleteFile(deleteConfirm.fileId);
+    }
+    setDeleteConfirm({ show: false, fileId: null });
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirm({ show: false, fileId: null });
+  };
+
+  const deleteFile = async (fileId: number) => {
     try {
       const response = await fetch(`/api/v1/files/${fileId}`, {
         method: 'DELETE',
@@ -353,7 +365,7 @@ const Files: React.FC = () => {
                     </button>
                     
                     <button
-                      onClick={() => deleteFile(file.file_id)}
+                      onClick={() => handleDeleteClick(file.file_id)}
                       style={{
                         padding: '5px 10px',
                         backgroundColor: '#dc3545',
@@ -403,6 +415,60 @@ const Files: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {deleteConfirm.show && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+            maxWidth: '400px'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0' }}>Confirm Delete</h3>
+            <p style={{ margin: '0 0 20px 0' }}>Are you sure you want to delete this file?</p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={cancelDelete}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
