@@ -166,7 +166,7 @@ class FileReferenceParser {
       if (ref.resolved && ref.fileId) {
         try {
           let content = this.fileContentCache.get(ref.fileId);
-          
+
           if (!content) {
             const response = await fetch(`/api/v1/files/${ref.fileId}/content`);
             if (response.ok) {
@@ -175,7 +175,13 @@ class FileReferenceParser {
               this.fileContentCache.set(ref.fileId, content);
             } else {
               content = `[Error loading file content]`;
+              this.fileContentCache.set(ref.fileId, content);
             }
+          }
+
+          // Ensure content is defined
+          if (!content) {
+            content = '';
           }
 
           // Truncate content if it exceeds character limit
