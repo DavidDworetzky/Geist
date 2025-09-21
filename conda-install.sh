@@ -1,4 +1,5 @@
 #!/bin/bash --login
+source /root/miniconda3/etc/profile.d/conda.sh
 
 cd /opt/geist
 
