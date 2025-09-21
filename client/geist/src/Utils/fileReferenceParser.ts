@@ -172,7 +172,7 @@ class FileReferenceParser {
             if (response.ok) {
               const data = await response.json();
               content = data.extracted_text || '';
-              this.fileContentCache.set(ref.fileId, content);
+              this.fileContentCache.set(ref.fileId, content || '');
             } else {
               content = `[Error loading file content]`;
               this.fileContentCache.set(ref.fileId, content);
