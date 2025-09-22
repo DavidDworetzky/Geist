@@ -24,6 +24,9 @@ if [ ! -f "linux_environment.yml" ]; then
     exit 1
 fi
 
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
 # Temporarily disable strict mode and activate conda:
 set +euo pipefail
 
