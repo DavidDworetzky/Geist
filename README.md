@@ -1,5 +1,5 @@
 # Geist
-FOSS Project for natural language AI Assistants - using GPT, LlaMA, Mistral etc. architectures.
+FOSS Project for private local AI. Chat and Agents / Assistants.
 Geist is a framework for multiple natural language AI Assistants to interact, train, and do work.
 
 # Roadmap
@@ -7,12 +7,13 @@ Geist is a framework for multiple natural language AI Assistants to interact, tr
 2. Create core API surface area for inference for architectures.
 3. Persist conversations, memory, and presets for various agents and feed these back into agent startup / initialization.
 4. Create external world adapters for agents to interact with the real world, such as VoIP, Slack, Notion, etc.
+5. Voice and text modality with useful integrations and memory, as well as interaction with your local Obsidian archive. 
 
-# Roadmap Agents
-1. Software engineer spirit.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
-2. Virtual assistant spirit.  (Summarize and respond to emails, keep track of birthdays, 
-3. Business manager spirit.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
-4. Research assistant spirit. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
+# Different Agents
+1. Software engineer agent.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
+2. Virtual assistant agent.  (Summarize and respond to emails, keep track of birthdays, order gifts, do shopping.)
+3. Business manager agent.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
+4. Research assistant agent. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
 
 # Core Architecture
 
