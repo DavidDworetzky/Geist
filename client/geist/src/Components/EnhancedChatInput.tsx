@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import FileSelectionModal from './FileSelectionModal';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 
 interface EnhancedChatInputProps {
@@ -28,7 +27,6 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
-  const [showFileModal, setShowFileModal] = useState(false);
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -126,25 +124,6 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     }, 0);
   };
 
-  // Handle file selection from modal
-  const handleFilesSelected = (files: FileItem[]) => {
-    const caretPosition = textareaRef.current?.selectionStart || value.length;
-    const textBefore = value.substring(0, caretPosition);
-    const textAfter = value.substring(caretPosition);
-    
-    const fileReferences = files.map(file => 
-      fileReferenceParser.generateFileReference(file)
-    ).join(' ');
-    
-    const newValue = textBefore + (textBefore.endsWith(' ') ? '' : ' ') + 
-                    fileReferences + ' ' + textAfter;
-    onChange(newValue);
-
-    // Focus back on textarea
-    setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 0);
-  };
 
   const handleSubmit = () => {
     if (value.trim() && !disabled) {
@@ -213,26 +192,6 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             }}
           />
           
-          {/* File selection button */}
-          <button
-            type="button"
-            onClick={() => setShowFileModal(true)}
-            disabled={disabled}
-            style={{
-              padding: '10px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              height: '40px',
-              whiteSpace: 'nowrap'
-            }}
-            title="Select files to reference"
-          >
-            📎 Files
-          </button>
 
           <button
             type="button"
@@ -293,19 +252,10 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
         )}
       </div>
 
-      {/* File selection modal */}
-      <FileSelectionModal
-        isOpen={showFileModal}
-        onClose={() => setShowFileModal(false)}
-        onFilesSelected={handleFilesSelected}
-        multiple={true}
-        title="Select Files to Reference"
-      />
 
       {/* Help text */}
       <div style={{ marginTop: '4px', fontSize: '11px', color: '#6c757d' }}>
-        Tips: Use @ to reference files, or click the Files button to select files. 
-        Press Tab or Enter to accept suggestions.
+        Tips: Use @ to reference files. Press Tab or Enter to accept suggestions.
       </div>
     </div>
   );
