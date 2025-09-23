@@ -52,6 +52,7 @@ dependencies:
       - attrs==25.1.0
       - blobfile==3.0.0
       - certifi==2024.12.14
+      - chardet==5.2.0
       - charset-normalizer==3.4.1
       - datasets==3.5.0
       - dill==0.3.8

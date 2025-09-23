@@ -55,5 +55,6 @@ classes are stored in app >> models >> database.
 #Adding Models
 Models should be added to scripts/copy_weights.py as well as the associated agent implementation inheriting from agents/base_agent. (GPT4 Agent, llama_agent, etc.)
 
-
+#preferences
+prefer minimal inline implementations over extra dependency imports. Core libraries are better than pypi packages. 
 
