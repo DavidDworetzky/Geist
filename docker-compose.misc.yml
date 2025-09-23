@@ -13,6 +13,7 @@ services:
       - POSTGRES_DB=geist
       - POSTGRES_USER=geist
       - POSTGRES_PASSWORD=geist
+      - CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
     networks:
       - test_net
 

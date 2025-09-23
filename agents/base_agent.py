@@ -34,7 +34,7 @@ class BaseAgent(ABC):
     @abstractmethod
     def phase_in(self):
         '''
-        Restart an agent's subprocess and rehydrate it (phase in, heh)
+        Restart an agent's subprocess and rehydrate it (phase in)
         '''
 
     @abstractmethod

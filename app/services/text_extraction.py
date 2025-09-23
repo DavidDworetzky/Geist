@@ -5,8 +5,6 @@ import json
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, Any
 from openpyxl import load_workbook
-from PyPDF2 import PdfReader
-import pdfplumber
 import chardet
 
 class TextExtractionService:
@@ -27,8 +25,6 @@ class TextExtractionService:
             # Route to appropriate extraction method
             if mime_type.startswith('text/') or file_ext in ['.txt', '.md']:
                 return TextExtractionService._extract_from_text(file_data)
-            elif mime_type == 'application/pdf' or file_ext == '.pdf':
-                return TextExtractionService._extract_from_pdf(file_data)
             elif mime_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'] or file_ext in ['.xlsx', '.xls']:
                 return TextExtractionService._extract_from_excel(file_data)
             elif mime_type == 'text/csv' or file_ext == '.csv':
@@ -66,37 +62,6 @@ class TextExtractionService:
                 return {'success': True, 'text': text}
             except Exception as e:
                 return {'success': False, 'error': f'Failed to decode text: {str(e)}'}
-    
-    @staticmethod
-    def _extract_from_pdf(file_data: bytes) -> Dict[str, Any]:
-        """Extract text from PDF files using multiple methods"""
-        text_content = []
-        
-        try:
-            # Method 1: Try pdfplumber first (better for complex layouts)
-            with pdfplumber.open(io.BytesIO(file_data)) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_content.append(page_text)
-            
-            if text_content:
-                return {'success': True, 'text': '\n\n'.join(text_content)}
-            
-            # Method 2: Fallback to PyPDF2
-            pdf_reader = PdfReader(io.BytesIO(file_data))
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text_content.append(page_text)
-            
-            if text_content:
-                return {'success': True, 'text': '\n\n'.join(text_content)}
-            else:
-                return {'success': False, 'error': 'No text could be extracted from PDF'}
-                
-        except Exception as e:
-            return {'success': False, 'error': f'PDF text extraction failed: {str(e)}'}
     
     @staticmethod
     def _extract_from_excel(file_data: bytes) -> Dict[str, Any]:

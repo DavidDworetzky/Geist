@@ -15,6 +15,7 @@ services:
       - POSTGRES_USER=geist
       - POSTGRES_PASSWORD=geist
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
     depends_on:
       - db
     env_file:
