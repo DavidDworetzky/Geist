@@ -3,10 +3,14 @@
 `make build` to build the solution
 `make run MLX_BACKEND=1` to run the solution with MLX_BACKEND instead of 
 `make empty` to run an empty container to install dependencies
-
+#package installs
 `docker exec backend /bin/bash` to enter the backend container
 `pip install PACKAGE` to install dependencies
 When installing packages, `conda env export >> linux_environment.yml` after installing to freeze installs. 
+#frontend package installs
+`cd client & npm i PACKAGE`
+
+
 
 
 #SQLAlchemy
