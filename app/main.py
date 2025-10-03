@@ -26,7 +26,10 @@ from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 
 # Initialize agent architecture registry
-import agents.architectures.registry
+from agents.architectures.registry import register_all_runners
+
+# Register all available runners at startup
+register_all_runners()
 
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 

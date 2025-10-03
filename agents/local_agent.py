@@ -5,9 +5,9 @@ import logging
 from typing import Optional, Dict, Any
 from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
-from agents.architectures import register_runner, get_runner
+from agents.architectures import get_runner
 from agents.architectures.base_runner import GenerationConfig
-from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+from agents.architectures.registry import ensure_runners_registered
 from agents.models.agent_completion import AgentCompletion
 from agents.models.llama_completion import LlamaCompletion
 import json
@@ -17,9 +17,6 @@ import signal
 import psutil
 
 logger = logging.getLogger(__name__)
-
-# Register default runners
-register_runner("mlx_llama", MLXLlamaRunner)
 
 # Constants for agent prompting
 WORLD_TICK_PROMPT = """You are a world class executive. Your plans are direct, and detailed only if necessary. 
@@ -79,6 +76,9 @@ class LocalAgent(BaseAgent):
     
     def _initialize_runner(self) -> None:
         """Initialize the specified runner."""
+        # Ensure runners are registered before trying to use them
+        ensure_runners_registered()
+        
         runner_class = get_runner(self.runner_type)
         if not runner_class:
             raise ValueError(f"Unknown runner type: {self.runner_type}")
