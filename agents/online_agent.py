@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
-from agents.models.gpt4_completion import Gpt4Completion
+from agents.models.generic_completion import GenericCompletion
 from agents.models.agent_completion import AgentCompletion
 
 logger = logging.getLogger(__name__)
@@ -194,7 +194,7 @@ class OnlineAgent(BaseAgent):
         response_format: str = "text",
         system_prompt: str = None,
         chat_id: Optional[int] = None
-    ) -> Gpt4Completion:
+    ) -> GenericCompletion:
         """Complete text using the online API."""
         # Set defaults from agent settings
         max_tokens = max_tokens or self._agent_context.settings.max_tokens or 16
@@ -228,8 +228,8 @@ class OnlineAgent(BaseAgent):
         # Make request
         response_data = self._make_request(payload)
         
-        # Convert to Gpt4Completion
-        completion = Gpt4Completion.from_dict(response_data)
+        # Convert to GenericCompletion
+        completion = GenericCompletion.from_dict(response_data)
         
         # Add to chat history
         ai_message = completion.choices[0].message.content
