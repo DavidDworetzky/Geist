@@ -23,6 +23,13 @@ from agents.prompt.prompt import AGENT_PROMPTS
 from app.models.database.chat_session import get_chat_history, get_all_chat_history
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.api.v1.endpoints.files import router as files_router
+from app.api.v1.endpoints.user_settings import router as user_settings_router
+
+# Initialize agent architecture registry
+from agents.architectures.registry import register_all_runners
+
+# Register all available runners at startup
+register_all_runners()
 
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
@@ -65,6 +72,51 @@ def create_app():
     adapter_router = APIRouter()
 
     # Agent routes using agent_router
+    @agent_router.post("/complete_text_new")
+    async def complete_text_new_agents(params: CompleteTextParams) -> AgentCompletion:
+        """Complete text using new agent architecture (LocalAgent/OnlineAgent)."""
+        from app.services.user_settings_service import UserSettingsService
+        from app.models.user_settings import AgentConfigRequest
+        
+        # Create agent config overrides from params
+        overrides = AgentConfigRequest(
+            agent_type=params.agent_type.lower() if hasattr(params, 'agent_type') and params.agent_type else None,
+            max_tokens=params.max_tokens,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty
+        )
+        
+        # Get default agent context
+        agent_context = get_default_agent_context()
+        
+        # Create agent using user settings
+        agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
+        
+        # Complete text
+        completions = agent.complete_text(
+            prompt=params.prompt,
+            max_tokens=params.max_tokens,
+            n=params.n,
+            stop=params.stop,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            echo=params.echo,
+            best_of=params.best_of,
+            prompt_tokens=params.prompt_tokens,
+            response_format=params.response_format,
+            system_prompt=DEFAULT_PROMPT
+        )
+        
+        if completions:
+            completion_object = AgentCompletion.from_completion(completions)
+            return completion_object
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+
     @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
         #if params.agent_type is an AgentType, use it.
@@ -170,6 +222,7 @@ def create_app():
     app.include_router(adapter_router, prefix="/adapter")
     app.include_router(workflow_router, prefix="/api/v1/workflows", tags=["workflows"])
     app.include_router(files_router, prefix="/api/v1/files", tags=["files"])
+    app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
 
     @app.get('/')
     def version():

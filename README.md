@@ -19,6 +19,21 @@ Geist is a framework for multiple natural language AI Assistants to interact, tr
 
 The Geist Architecture consists of three main components: a world model, a task creation model, and an execution-based  model. The diagram below illustrates the architecture and relationships between these components.
 
+## Agent Architecture (New)
+
+Geist now supports a flexible agent architecture with two main agent types:
+
+- **LocalAgent**: Executes local MLX-backed models with pluggable runners (MLX, vLLM)
+- **OnlineAgent**: Routes requests to OpenAI-compatible HTTP endpoints (OpenAI, Anthropic, Groq, Grok)
+
+Both agents inherit from `BaseAgent` and support:
+- Configurable generation parameters
+- Backup provider fallback (OnlineAgent)
+- User settings integration
+- Factory-based instantiation
+
+See `docs/agents.md` for detailed documentation.
+
 ```mermaid
 flowchart LR
     A[World Model] -->|Updates| B[Task Creation Model]
