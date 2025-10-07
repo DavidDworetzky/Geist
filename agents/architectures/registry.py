@@ -4,7 +4,6 @@ Initialize and register all available runners.
 import logging
 from enum import Enum
 from typing import Optional, Dict, Type
-from agents.architectures import get_registry
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.architectures.vllm_runner import VLLMRunner
 
