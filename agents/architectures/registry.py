@@ -2,15 +2,16 @@
 Initialize and register all available runners.
 """
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Dict, Type
-from agents.architectures import get_registry
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.architectures.vllm_runner import VLLMRunner
 
 logger = logging.getLogger(__name__)
 
 _initialized = False
+_registry_instance = None
 
 
 class OnlineModelProviders(Enum):
@@ -27,12 +28,18 @@ class OnlineModelNames(Enum):
     GPT4O_MINI = "gpt-4o-mini"
     GPT4O_MICRO = "gpt-4o-micro"
     GPT4O_MICRO_2024_07_18 = "gpt-4o-micro-2024-07-18"
-    GPT4O_MICRO_2024_07_18 = "gpt-4o-micro-2024-07-18"
     GROK = "grok"
     GROK_2 = "grok-2"
     GROK_2_VISION = "grok-2-vision"
     GROK_2_VISION_2 = "grok-2-vision-2"
+    GROK_3 = "grok-3"
+    # Anthropic models
+    SONNET40 = "sonnet-40"
+    SONNET45 = "sonnet-45"
+    # Open Source Models
+    QWEN3 = "qwen3"
 
+@dataclass
 class OnlineModelConfig():
     """Config for online model."""
     provider: OnlineModelProviders
@@ -68,10 +75,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
         provider=OnlineModelProviders.ANTHROPIC,
-        model=OnlineModelNames.GPT4O,
+        model=OnlineModelNames.SONNET40,
         reasoning=False,
         streaming=False,
         temperature=1.0,
@@ -85,10 +92,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
-        provider=OnlineModelProviders.GROQ,
-        model=OnlineModelNames.GPT4O,
+        provider=OnlineModelProviders.ANTHROPIC,
+        model=OnlineModelNames.SONNET45,
         reasoning=False,
         streaming=False,
         temperature=1.0,
@@ -102,10 +109,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
         provider=OnlineModelProviders.XAI,
-        model=OnlineModelNames.GPT4O,
+        model=OnlineModelNames.GROK_3,
         reasoning=False,
         streaming=False,
         temperature=1.0,
