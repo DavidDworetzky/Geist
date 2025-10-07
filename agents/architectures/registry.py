@@ -26,7 +26,6 @@ class OnlineModelNames(Enum):
     GPT4O_MINI = "gpt-4o-mini"
     GPT4O_MICRO = "gpt-4o-micro"
     GPT4O_MICRO_2024_07_18 = "gpt-4o-micro-2024-07-18"
-    GPT4O_MICRO_2024_07_18 = "gpt-4o-micro-2024-07-18"
     GROK = "grok"
     GROK_2 = "grok-2"
     GROK_2_VISION = "grok-2-vision"
