@@ -32,6 +32,12 @@ class OnlineModelNames(Enum):
     GROK_2 = "grok-2"
     GROK_2_VISION = "grok-2-vision"
     GROK_2_VISION_2 = "grok-2-vision-2"
+    GROK_3 = "grok-3"
+    # Anthropic models
+    SONNET40 = "sonnet-40"
+    SONNET45 = "sonnet-45"
+    # Open Source Models
+    QWEN3 = "qwen3"
 
 class OnlineModelConfig():
     """Config for online model."""
@@ -68,10 +74,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
         provider=OnlineModelProviders.ANTHROPIC,
-        model=OnlineModelNames.GPT4O,
+        model=OnlineModelNames.SONNET40,
         reasoning=False,
         streaming=False,
         temperature=1.0,
@@ -85,10 +91,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
         provider=OnlineModelProviders.GROQ,
-        model=OnlineModelNames.GPT4O,
+        model=OnlineModelNames.SONNET45,
         reasoning=False,
         streaming=False,
         temperature=1.0,
@@ -102,10 +108,10 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )
+    ),
     OnlineModelConfig(
         provider=OnlineModelProviders.XAI,
-        model=OnlineModelNames.GPT4O,
+        model=OnlineModelNames.GROK_3,
         reasoning=False,
         streaming=False,
         temperature=1.0,
