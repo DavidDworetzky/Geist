@@ -22,6 +22,7 @@ Implement a comprehensive Settings UI for the Geist application to allow users t
 - Navigation link
 - Custom hooks for API integration
 - Form components for different settings sections
+- Tests
 
 ## Implementation Plan
 
@@ -83,7 +84,6 @@ export interface UserSettingsUpdate {
 - `useUserSettings()` - Main hook for fetching and managing settings
 - `fetchSettings()` - Get current settings
 - `updateSettings(updates)` - Update specific fields
-- `resetSettings()` - Reset to defaults
 - Loading and error states
 - Auto-refresh after updates
 
@@ -97,13 +97,12 @@ export interface UserSettingsUpdate {
   1. **Agent Configuration** - Model selection, agent type
   2. **Generation Parameters** - Temperature, tokens, penalties
   3. **RAG & Files** - File archives, RAG settings
-  4. **Backup Providers** - Provider management
-  5. **UI Preferences** - Theme, display options
+  4. **UI Preferences** - Theme, display options
 
 **Key Features:**
 - Live preview of changes (unsaved state indicator)
 - Form validation
-- Save/Cancel/Reset buttons
+- Save/Cancel buttons.
 - Success/Error notifications
 - Responsive design matching existing patterns
 
@@ -142,12 +141,6 @@ export interface UserSettingsUpdate {
   - Model
   - API key (masked input)
   - Priority
-
-**e) `client/geist/src/Components/UIPreferencesSection.tsx`**
-- Theme selection (light/dark/auto)
-- Font size
-- Code syntax highlighting preferences
-- Chat display preferences
 
 ### Phase 3: Navigation & Routing
 
@@ -215,12 +208,6 @@ Reusable components:
 **Integration with Backend Preview Endpoint:**
 - Show computed agent configuration
 - Display which settings will be used
-- Test connection button for backup providers
-
-#### 5.3 Import/Export Settings
-- Export settings as JSON
-- Import settings from file
-- Share settings via URL/code
 
 ## Implementation Checklist
 
