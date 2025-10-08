@@ -62,3 +62,10 @@ Models should be added to scripts/copy_weights.py as well as the associated agen
 #preferences
 prefer minimal inline implementations over extra dependency imports. Core libraries are better than pypi packages. 
 
+#SDLC
+
+## first, create a plan for your feature in /plans
+## next, implement the plan, adding the backend data models, middle data models, service layer, routes, backend tests, 
+## finally, test the solution by running `docker compose up -d`, then verifying no error logs in the docker container, then doing a curl command to localhost:3000
+
+
