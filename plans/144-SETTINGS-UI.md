@@ -230,7 +230,6 @@ Reusable components:
 - [ ] Create `AgentConfigSection.tsx`
 - [ ] Create `GenerationParamsSection.tsx`
 - [ ] Create `RAGSettingsSection.tsx`
-- [ ] Create `BackupProvidersSection.tsx`
 - [ ] Create `UIPreferencesSection.tsx`
 
 #### Phase 3: Reusable Controls
@@ -244,20 +243,16 @@ Reusable components:
 - [ ] Add route to `App.tsx`
 - [ ] Add navigation link
 - [ ] Create `Settings.css`
-- [ ] Test navigation flow
 
 #### Phase 5: Polish
 - [ ] Add form validation
 - [ ] Add success/error notifications
 - [ ] Add unsaved changes warning
-- [ ] Add loading states
+- [ ] Add basic loading states
 - [ ] Add responsive design
-- [ ] Test on different screen sizes
 
 #### Phase 6: Advanced Features
 - [ ] Implement preview functionality
-- [ ] Add import/export
-- [ ] Add reset confirmation modal
 - [ ] Add tooltips/help text
 - [ ] Add keyboard shortcuts
 
@@ -294,17 +289,6 @@ Reusable components:
 - Test form validation logic
 - Test component rendering with different props
 
-### Integration Tests
-- Test full settings update flow
-- Test reset functionality
-- Test backup provider CRUD operations
-
-### E2E Tests
-- Navigate to settings
-- Update various settings
-- Verify persistence
-- Test preview functionality
-
 ## Accessibility Considerations
 - Proper ARIA labels for form controls
 - Keyboard navigation support
@@ -315,41 +299,7 @@ Reusable components:
 ## Performance Optimization
 - Lazy load settings page
 - Debounce API calls during typing
-- Memoize expensive computations
-- Virtualize long lists (if applicable)
 
-## Security Considerations
-- Mask API keys in UI
-- Never log sensitive data
-- Validate input on both client and server
-- HTTPS for all API calls
-- Sanitize user input
-
-## Future Enhancements
-- Settings history/audit log
-- Profile presets (dev, production, etc.)
-- Team settings inheritance
-- Settings search functionality
-- Bulk import/export
-- Settings recommendations based on usage
-- A/B testing different configurations
-
-## Dependencies
-**New npm packages needed:**
-- None! Using existing dependencies:
-  - `react-router-dom` - for routing
-  - `axios` - for API calls
-  - Built-in React for state management
-
-## Timeline Estimate
-- Phase 1 (API Hook): 2-3 hours
-- Phase 2 (Components): 8-10 hours
-- Phase 3 (Integration): 1-2 hours
-- Phase 4 (Styling): 3-4 hours
-- Phase 5 (Polish): 4-5 hours
-- Phase 6 (Advanced): 5-6 hours
-
-**Total: 23-30 hours** for complete implementation
 
 ## Success Criteria
 - [ ] User can view all settings in organized UI
@@ -363,40 +313,6 @@ Reusable components:
 - [ ] No console errors or warnings
 - [ ] All existing tests still pass
 
-## Example User Flows
-
-### Flow 1: Change Default Agent
-1. Navigate to Settings
-2. Click Agent Configuration tab
-3. Select "Online" for agent type
-4. Select "anthropic" as provider
-5. Select "claude-3-opus" as model
-6. Click Save
-7. See success notification
-8. Return to Chat
-9. New chat uses Claude by default
-
-### Flow 2: Adjust Generation Parameters
-1. Navigate to Settings
-2. Click Generation Parameters tab
-3. Adjust temperature slider to 0.7
-4. Adjust max tokens to 500
-5. See preview update in real-time
-6. Click Save
-7. New completions use new parameters
-
-### Flow 3: Add Backup Provider
-1. Navigate to Settings
-2. Click Backup Providers tab
-3. Click "Add Provider"
-4. Fill in modal:
-   - Name: "Groq"
-   - Base URL: "https://api.groq.com/openai/v1/chat/completions"
-   - Model: "llama-3.1-70b-versatile"
-   - Priority: 1
-5. Click Save Provider
-6. See provider in list
-7. Primary provider fails → automatically uses Groq
 
 ## UI Mockup Structure
 
