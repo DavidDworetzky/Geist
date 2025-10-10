@@ -4,7 +4,6 @@ import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
-import BackupProvidersSection from './Components/BackupProvidersSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 
 type Tab = 'agent' | 'generation' | 'rag' | 'providers' | 'ui';
@@ -276,13 +275,6 @@ const Settings: React.FC = () => {
             defaultFileArchives={localSettings.default_file_archives}
             onEnableRagChange={(value) => updateLocalSetting('enable_rag_by_default', value)}
             onFileArchivesChange={(value) => updateLocalSetting('default_file_archives', value)}
-          />
-        )}
-
-        {activeTab === 'providers' && (
-          <BackupProvidersSection
-            providers={localSettings.backup_providers}
-            onProvidersChange={(value) => updateLocalSetting('backup_providers', value)}
           />
         )}
 
