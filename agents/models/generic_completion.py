@@ -21,8 +21,19 @@ class Choice:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['message'] = Message.from_dict(data['message'])
-        return cls(**data)
+        # If data is already a Choice object, return it
+        if isinstance(data, cls):
+            return data
+        # If message is already a Message object, use it directly
+        if isinstance(data['message'], Message):
+            message = data['message']
+        else:
+            message = Message.from_dict(data['message'])
+
+        # Create a copy of data to avoid modifying the original
+        data_copy = data.copy()
+        data_copy['message'] = message
+        return cls(**data_copy)
 
 @dataclass
 class TokenDetails:
