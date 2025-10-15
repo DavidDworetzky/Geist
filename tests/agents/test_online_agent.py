@@ -577,13 +577,17 @@ class TestOnlineAgentRetryLogic:
             
             with patch.object(agent.client, 'post') as mock_post:
                 # Primary provider has network error
+                mock_response_success = Mock()
+                mock_response_success.status_code = 200
+                mock_response_success.json.return_value = GROQ_RESPONSE
+
                 mock_post.side_effect = [
                     httpx.RequestError("Connection failed"),
                     httpx.RequestError("Connection failed"),
                     # Backup provider succeeds
-                    Mock(status_code=200, json=lambda: GROQ_RESPONSE)
+                    mock_response_success
                 ]
-                
+
                 result = agent.complete_text(prompt="Test prompt", max_tokens=50)
                 
                 # Verify backup was eventually used
