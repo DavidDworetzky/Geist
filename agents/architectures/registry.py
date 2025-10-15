@@ -242,3 +242,40 @@ def ensure_runners_registered() -> None:
     global _initialized
     if not _initialized:
         register_all_runners()
+
+
+# Convenience functions for test compatibility
+def register_runner(name: str, runner_class: Type) -> None:
+    """
+    Register a runner class with the given name.
+
+    Args:
+        name: Name to register the runner under
+        runner_class: The runner class to register
+    """
+    registry = get_registry()
+    registry.register(name, runner_class)
+
+
+def get_runner(name: str) -> Optional[Type]:
+    """
+    Get a runner class by name.
+
+    Args:
+        name: Name of the runner to retrieve
+
+    Returns:
+        The runner class if found, None otherwise
+    """
+    registry = get_registry()
+    return registry.get(name)
+
+
+def clear_registry() -> None:
+    """
+    Clear all registered runners. Mainly for testing purposes.
+    """
+    global _initialized
+    registry = get_registry()
+    registry.clear()
+    _initialized = False

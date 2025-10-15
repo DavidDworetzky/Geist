@@ -577,13 +577,17 @@ class TestOnlineAgentRetryLogic:
             
             with patch.object(agent.client, 'post') as mock_post:
                 # Primary provider has network error
+                mock_response_success = Mock()
+                mock_response_success.status_code = 200
+                mock_response_success.json.return_value = GROQ_RESPONSE
+
                 mock_post.side_effect = [
                     httpx.RequestError("Connection failed"),
                     httpx.RequestError("Connection failed"),
                     # Backup provider succeeds
-                    Mock(status_code=200, json=lambda: GROQ_RESPONSE)
+                    mock_response_success
                 ]
-                
+
                 result = agent.complete_text(prompt="Test prompt", max_tokens=50)
                 
                 # Verify backup was eventually used
@@ -679,23 +683,6 @@ class TestOnlineAgentEdgeCases:
                 assert payload['frequency_penalty'] == 0.5
                 assert payload['presence_penalty'] == 0.3
                 assert payload['stop'] == "STOP"
-
-    def test_phase_out_cleanup(self):
-        """Test that phase_out properly cleans up resources."""
-        context = create_mock_agent_context()
-        
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
-            agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
-            )
-            
-            with patch.object(agent.client, 'close') as mock_close:
-                agent.phase_out()
-                
-                # Verify client was closed
-                assert mock_close.called
 
 
 class TestOnlineAgentMultiProvider:

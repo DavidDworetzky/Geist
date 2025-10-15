@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 import json
+from copy import deepcopy
 
 @dataclass
 class Message:
@@ -21,8 +22,19 @@ class Choice:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['message'] = Message.from_dict(data['message'])
-        return cls(**data)
+        # If data is already a Choice object, return it
+        if isinstance(data, cls):
+            return data
+        # If message is already a Message object, use it directly
+        if isinstance(data['message'], Message):
+            message = data['message']
+        else:
+            message = Message.from_dict(data['message'])
+
+        # Create a copy of data to avoid modifying the original
+        data_copy = data.copy()
+        data_copy['message'] = message
+        return cls(**data_copy)
 
 @dataclass
 class TokenDetails:
@@ -45,9 +57,21 @@ class Usage:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['prompt_tokens_details'] = TokenDetails.from_dict(data['prompt_tokens_details'])
-        data['completion_tokens_details'] = TokenDetails.from_dict(data['completion_tokens_details'])
-        return cls(**data)
+        # If data is already a Usage object, return it
+        if isinstance(data, cls):
+            return data
+
+        # Create a copy to avoid modifying the original
+        data_copy = deepcopy(data)
+
+        # Convert nested objects if they're not already the correct type
+        if not isinstance(data_copy['prompt_tokens_details'], TokenDetails):
+            data_copy['prompt_tokens_details'] = TokenDetails.from_dict(data_copy['prompt_tokens_details'])
+
+        if not isinstance(data_copy['completion_tokens_details'], TokenDetails):
+            data_copy['completion_tokens_details'] = TokenDetails.from_dict(data_copy['completion_tokens_details'])
+
+        return cls(**data_copy)
 
 @dataclass
 class GenericCompletion:
@@ -62,6 +86,9 @@ class GenericCompletion:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['choices'] = [Choice.from_dict(choice) for choice in data['choices']]
-        data['usage'] = Usage.from_dict(data['usage'])
-        return cls(**data)
+        # Create a copy to avoid modifying the original
+        data_copy = deepcopy(data)
+
+        data_copy['choices'] = [Choice.from_dict(choice) for choice in data_copy['choices']]
+        data_copy['usage'] = Usage.from_dict(data_copy['usage'])
+        return cls(**data_copy)

@@ -3,7 +3,7 @@ Tests for the new agent architecture (LocalAgent and OnlineAgent).
 """
 import pytest
 from unittest.mock import Mock, patch
-from agents.architectures import register_runner, get_runner, clear_registry
+from agents.architectures.registry import register_runner, get_runner, clear_registry
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.factory import AgentFactory
 from agents.agent_context import AgentContext
