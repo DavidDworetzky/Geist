@@ -141,6 +141,8 @@ const Chat = () => {
                         placeholder="Type your message... Use @ to reference files"
                         handleKeyDown={handleKeyDown}
                         rows={3}
+                        sessionId={state_chat_id || (chatId ? parseInt(chatId) : 1)}
+                        enableVoice={true}
                     />
                 </div>
                 
