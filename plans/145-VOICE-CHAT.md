@@ -10,7 +10,7 @@
 ### What exists today
 - `BaseAgent` defines the following relevant methods:
   - `complete_text(...)` (implemented by `OnlineAgent`, `LocalAgent`)
-  - `complete_audio(...)` (mixed coverage: `OnlineAgent` uses Whisper transcription endpoint then calls `complete_text`; `LocalAgent` not implemented; `LlamaAgent` has an experimental path using Sesame CSM + MMS)
+  - `complete_audio(...)` (mixed coverage: `OnlineAgent` uses Whisper transcription endpoint then calls `complete_text`; `LocalAgent` not implemented; using Sesame CSM + MMS)
   - `connect_realtime_audio()` is defined but not implemented across agents (raises `NotImplementedError`).
 - STT adapters exist:
   - `adapters/mms_adapter.py` (Meta MMS local STT; expects 16k samples, full-clip, not streaming by default)
@@ -33,13 +33,14 @@
 Phase 1 (MVP streaming, minimal changes):
 - Introduce a new WebSocket endpoint `ws /agent/voice/stream` to handle real-time audio input and streamed outputs.
 - Server will:
-  1) Accept a chat `session_id` and `agent_type` during handshake (query params or first JSON control frame).
-  2) Receive audio chunks (prefer raw 16k PCM float/int16 frames; if Opus is desired, reuse the Moshi Opus helpers to decode/encode).
+  1) Accept a chat `session_id` and `agent_type` during handshake (query params)
+  2) Receive audio chunks (prefer raw 16k PCM float/int16 frames; reuse the moshi helpers to decode.
   3) Buffer audio and periodically run STT on accumulated windows to produce partial transcripts; stream transcript deltas to the client.
   4) Detect phrase boundaries (VAD or time-based heuristic) → upon boundary, call `agent.complete_text(prompt=phrase_text, chat_id=session_id)`.
   5) Convert final assistant text to audio and stream audio frames back. For MVP, TTS can be non-streaming generation with chunked send; transcript streams immediately.
   6) Add token-level LLM streaming and start TTS synthesis concurrently so both text and audio start almost immediately. 
   7) For online providers that support stream, implement an OnlineAgent.stream_complete_text(...) path; for local runners, enable streaming in runners where available.
+  8) There should be implementation changes made to `BaseAgent`, `LocalAgent` and `OnlineAgent` the other agents, if they need to implement versions, should throw not implemented exceptions. They are deprecated.
 
 ### Backend changes
 1) WebSocket endpoint
@@ -67,7 +68,7 @@ Phase 1 (MVP streaming, minimal changes):
 
 3) TTS provider
    - Preferred path (local): use Sesame CSM generator under `agents/architectures/sesame/` for text → audio; return PCM frames and optionally wrap with Opus.
-   - Online alternative: leave interface open for cloud TTS vendors (can be added later without changing the endpoint contract).
+   - Online alternative: use OpenAI realtime api. 
    - Abstraction: `app/services/tts.py` (new) with a provider interface and a Sesame-backed implementation.
 
 4) Configuration
@@ -101,7 +102,7 @@ Phase 1 (MVP streaming, minimal changes):
 - For `OnlineAgent`, STT can be Whisper (online) or MMS (local) per configuration; for `LocalAgent`, prefer MMS.
 - The voice session service calls `complete_text` at phrase boundaries and handles TTS output streaming.
 
-### Potential BaseAgent extensions (not required for MVP)
+### Potential BaseAgent extensions 
 - Add a non-abstract optional method for token streaming without breaking subclasses:
 
 ```python
@@ -112,8 +113,6 @@ class BaseAgent(ABC):
         """Optional: yield tokens or text deltas. Default: not implemented."""
         raise NotImplementedError("Token streaming not supported for this agent.")
 ```
-
-- Rationale: keeps MVP minimal (use existing `complete_text`) while providing a clear extension point for Phase 2.
 
 ### Data formats over WebSocket
 - Handshake (JSON): `{ "session_id": number, "agent_type": "online"|"local", "stt_provider"?: "mms"|"whisper", "tts_provider"?: "sesame" }`
@@ -137,7 +136,6 @@ class BaseAgent(ABC):
 ### Testing strategy
 - Unit tests for the voice session service: segmentation, STT calls, `complete_text` invocation, and TTS stub.
 - WebSocket integration test (loopback): feed a short PCM clip → expect transcript + assistant text + non-empty audio chunks.
-- Manual E2E: `docker compose up -d`, open the client, click the mic, speak, verify streaming transcript and audible response; `curl` fallback for `/agent/voice/upload`.
 
 ### Rollout plan
 1) Land backend WS endpoint + service with PCM-only MVP and Sesame TTS (or stub returning silence) to validate streaming contract.
@@ -145,13 +143,5 @@ class BaseAgent(ABC):
 3) Add configuration toggles and sensible defaults.
 4) Optimize STT windows/VAD; consider token streaming in Phase 2.
 
-### Out of scope (for now)
-- Token-level LLM streaming across all agents.
-- Advanced VAD/ASR diarization; multi-speaker handling.
-- Mobile-specific audio worklets and echo cancellation tuning beyond browser defaults.
-
-### Open questions
-- Should we support client-side TTS fallback (Web Speech API) if server TTS is unavailable? If yes, add a setting to return `assistant_text` only and let the client synthesize.
-- Do we want to reuse Moshi’s Opus pipeline end-to-end for lower bandwidth, or keep PCM for simplicity?
 
 
