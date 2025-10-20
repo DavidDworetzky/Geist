@@ -25,7 +25,7 @@ from app.api.v1.endpoints.workflows import router as workflow_router
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
-
+from agents.local_agent import LocalAgent
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
 
@@ -241,9 +241,14 @@ def get_llama_agent():
     agent_context = get_default_agent_context()
     return LlamaAgent(agent_context = agent_context, ckpt_dir=None)
 
+def get_local_agent():
+    agent_context = get_default_agent_context()
+    return LocalAgent(agent_context = agent_context, ckpt_dir=None)
+
 agent_mappings = { 
     AgentType.GPT4AGENT : get_gpt4_client,
-    AgentType.LLAMA : get_llama_agent
+    AgentType.LLAMA : get_llama_agent,
+    AgentType.LOCALAGENT : get_local_agent
 }
 
 def get_active_agent(type: AgentType):

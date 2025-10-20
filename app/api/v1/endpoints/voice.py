@@ -1,17 +1,24 @@
 """
 Voice chat WebSocket endpoint for real-time audio streaming.
 """
+import asyncio
+import base64
 import json
 import logging
-from typing import Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
-from app.services.voice_session import VoiceSessionService
-from agents.base_agent import BaseAgent
-from agents.agent_type import AgentType
-from app.services.user_settings_service import UserSettingsService
+import os
+from typing import Optional, Dict, Any
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from starlette.websockets import WebSocketState
+import numpy as np
+
 from agents.agent_context import AgentContext
-from app.models.user_settings import AgentConfigRequest
+from agents.base_agent import BaseAgent
 from agents.prompt.prompt import AGENT_PROMPTS
+from app.models.user_settings import AgentConfigRequest
+from app.services.user_settings_service import UserSettingsService
+from app.services.voice_session import VoiceSessionService
+from app.services.agent_context_provider import get_default_agent_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,6 +59,29 @@ async def get_agent_for_session(
     return agent
 
 
+def _build_provider_kwargs(stt_provider: str, tts_provider: str) -> Dict[str, Any]:
+    """
+    Build provider-specific keyword arguments for STT and TTS providers.
+
+    Args:
+        stt_provider: Selected STT provider name.
+        tts_provider: Selected TTS provider name.
+
+    Returns:
+        Dict[str, Any]: Keyword arguments to pass into `VoiceSessionService`.
+    """
+    provider_kwargs: Dict[str, Any] = {}
+
+    if stt_provider == "whisper":
+        provider_kwargs["whisper_api_key"] = os.getenv("OPENAI_API_KEY")
+
+    if tts_provider == "openai":
+        provider_kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
+    # For "sesame" we rely on the TTS factory to determine the device; no local import needed.
+
+    return provider_kwargs
+
+
 @router.websocket("/stream")
 async def voice_stream_websocket(
     websocket: WebSocket,
@@ -80,28 +110,18 @@ async def voice_stream_websocket(
     logger.info(f"Voice WebSocket connected: session_id={session_id}, agent_type={agent_type}")
     
     voice_service: Optional[VoiceSessionService] = None
+    stop_requested: bool = False
     
     try:
-        # Get agent context (you may need to pass this properly)
-        from app.main import get_default_agent_context
+        # Get agent context and create agent
         agent_context = get_default_agent_context()
-        
-        # Create agent
-        agent = await get_agent_for_session(agent_type, agent_context)
-        
-        # Create voice service
-        import os
-        provider_kwargs = {}
-        
-        if stt_provider == "whisper":
-            provider_kwargs["whisper_api_key"] = os.getenv("OPENAI_API_KEY")
-        
-        if tts_provider == "openai":
-            provider_kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
-        elif tts_provider == "sesame":
-            import torch
-            provider_kwargs["device"] = "cuda" if torch.cuda.is_available() else "cpu"
-        
+        agent = await get_agent_for_session(
+            agent_type=agent_type,
+            agent_context=agent_context
+        )
+
+        # Create voice service with provider-specific kwargs
+        provider_kwargs = _build_provider_kwargs(stt_provider=stt_provider, tts_provider=tts_provider)
         voice_service = VoiceSessionService(
             agent=agent,
             stt_provider=stt_provider,
@@ -112,7 +132,7 @@ async def voice_stream_websocket(
         # Send ready message
         await websocket.send_json({"type": "ready"})
         
-        while True:
+        while websocket.client_state == WebSocketState.CONNECTED and not stop_requested:
             # Receive audio chunk
             try:
                 data = await websocket.receive()
@@ -124,6 +144,10 @@ async def voice_stream_websocket(
                         voice_service.reset()
                         await websocket.send_json({"type": "reset_complete"})
                         continue
+                    if message.get("type") in {"stop", "close", "end"}:
+                        stop_requested = True
+                        await websocket.send_json({"type": "stopped"})
+                        break
                 
                 # Handle binary audio
                 if "bytes" in data:
@@ -210,20 +234,11 @@ async def voice_upload(
     """
     try:
         # Get agent context and create agent
-        from app.main import get_default_agent_context
         agent_context = get_default_agent_context()
         agent = await get_agent_for_session(agent_type, agent_context)
         
         # Setup provider kwargs
-        import os
-        provider_kwargs = {}
-        if stt_provider == "whisper":
-            provider_kwargs["whisper_api_key"] = os.getenv("OPENAI_API_KEY")
-        if tts_provider == "openai":
-            provider_kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
-        elif tts_provider == "sesame":
-            import torch
-            provider_kwargs["device"] = "cuda" if torch.cuda.is_available() else "cpu"
+        provider_kwargs = _build_provider_kwargs(stt_provider=stt_provider, tts_provider=tts_provider)
         
         # Create voice service
         voice_service = VoiceSessionService(
@@ -234,7 +249,6 @@ async def voice_upload(
         )
         
         # Add audio and get transcript
-        import numpy as np
         audio_np = np.frombuffer(audio_file, dtype=np.int16).astype(np.float32) / 32768.0
         
         # Transcribe
@@ -257,7 +271,6 @@ async def voice_upload(
                 audio_chunks.append(response["audio"])
         
         # Combine audio chunks
-        import base64
         combined_audio = b"".join(audio_chunks)
         audio_base64 = base64.b64encode(combined_audio).decode()
         
