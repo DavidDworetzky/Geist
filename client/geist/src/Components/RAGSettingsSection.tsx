@@ -106,7 +106,7 @@ const RAGSettingsSection: React.FC<RAGSettingsSectionProps> = ({
             </button>
             <button
               onClick={clearAll}
-              disabled={loading || defaultFileArchives.length === 0}
+              disabled={loading}
               style={{
                 padding: '4px 10px',
                 fontSize: '12px',
@@ -114,8 +114,8 @@ const RAGSettingsSection: React.FC<RAGSettingsSectionProps> = ({
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: loading || defaultFileArchives.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: loading || defaultFileArchives.length === 0 ? 0.5 : 1
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.5 : 1
               }}
             >
               Clear All

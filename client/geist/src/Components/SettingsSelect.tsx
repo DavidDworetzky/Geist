@@ -15,29 +15,35 @@ const SettingsSelect: React.FC<SettingsSelectProps> = ({
   onChange,
   description
 }) => {
+  const selectId = `settings-select-${label.toLowerCase().replace(/\s+/g, '-')}`;
+
   return (
     <div style={{ marginBottom: '20px' }}>
-      <label style={{ 
-        fontWeight: '500', 
-        color: '#333', 
-        fontSize: '14px', 
-        display: 'block',
-        marginBottom: '8px'
-      }}>
+      <label
+        htmlFor={selectId}
+        style={{
+          fontWeight: '500',
+          color: '#333',
+          fontSize: '14px',
+          display: 'block',
+          marginBottom: '8px'
+        }}
+      >
         {label}
       </label>
-      
+
       {description && (
-        <p style={{ 
-          fontSize: '12px', 
-          color: '#6c757d', 
-          margin: '0 0 8px 0' 
+        <p style={{
+          fontSize: '12px',
+          color: '#6c757d',
+          margin: '0 0 8px 0'
         }}>
           {description}
         </p>
       )}
-      
+
       <select
+        id={selectId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{

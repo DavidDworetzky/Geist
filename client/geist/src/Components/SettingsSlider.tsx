@@ -19,15 +19,17 @@ const SettingsSlider: React.FC<SettingsSliderProps> = ({
   onChange,
   description
 }) => {
+  const sliderId = `settings-slider-${label.toLowerCase().replace(/\s+/g, '-')}`;
+
   return (
     <div style={{ marginBottom: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-        <label style={{ fontWeight: '500', color: '#333', fontSize: '14px' }}>
+        <label htmlFor={sliderId} style={{ fontWeight: '500', color: '#333', fontSize: '14px' }}>
           {label}
         </label>
-        <span style={{ 
-          backgroundColor: '#e9ecef', 
-          padding: '4px 12px', 
+        <span style={{
+          backgroundColor: '#e9ecef',
+          padding: '4px 12px',
           borderRadius: '4px',
           fontSize: '14px',
           fontWeight: 'bold',
@@ -36,18 +38,19 @@ const SettingsSlider: React.FC<SettingsSliderProps> = ({
           {value}
         </span>
       </div>
-      
+
       {description && (
-        <p style={{ 
-          fontSize: '12px', 
-          color: '#6c757d', 
-          margin: '0 0 8px 0' 
+        <p style={{
+          fontSize: '12px',
+          color: '#6c757d',
+          margin: '0 0 8px 0'
         }}>
           {description}
         </p>
       )}
-      
+
       <input
+        id={sliderId}
         type="range"
         min={min}
         max={max}
@@ -63,7 +66,7 @@ const SettingsSlider: React.FC<SettingsSliderProps> = ({
           cursor: 'pointer'
         }}
       />
-      
+
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
         <span style={{ fontSize: '11px', color: '#6c757d' }}>{min}</span>
         <span style={{ fontSize: '11px', color: '#6c757d' }}>{max}</span>

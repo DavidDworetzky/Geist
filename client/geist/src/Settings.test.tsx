@@ -50,7 +50,11 @@ describe('Settings page', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ...baseSettings, default_temperature: 0.8 }) }); // PUT
 
     render(<Settings />);
-    await waitFor(() => screen.getByText('Settings'));
+
+    // Wait for the Generation tab to be visible (indicating loading is complete)
+    await waitFor(() => {
+      expect(screen.getByText('Generation')).toBeInTheDocument();
+    });
 
     // go to Generation tab
     fireEvent.click(screen.getByText('Generation'));
@@ -73,7 +77,11 @@ describe('Settings page', () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => baseSettings });
 
     render(<Settings />);
-    await waitFor(() => screen.getByText('Settings'));
+
+    // Wait for the Generation tab to be visible (indicating loading is complete)
+    await waitFor(() => {
+      expect(screen.getByText('Generation')).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByText('Generation'));
     const slider = screen.getByRole('slider', { name: /Temperature/i }) as HTMLInputElement;
@@ -93,7 +101,11 @@ describe('Settings page', () => {
     jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<Settings />);
-    await waitFor(() => screen.getByText('Settings'));
+
+    // Wait for the Reset button to be visible (indicating loading is complete)
+    await waitFor(() => {
+      expect(screen.getByText(/Reset to Defaults/i)).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByText(/Reset to Defaults/i));
     await waitFor(() => {
