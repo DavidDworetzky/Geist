@@ -105,7 +105,7 @@ class LocalAgent(BaseAgent):
             presence_penalty=presence_penalty or self._agent_context.settings.presence_penalty or 0.0,
             stop=stop
         )
-    
+
     def complete_text(
         self,
         prompt: str,

@@ -6,7 +6,7 @@ import json
 import logging
 import subprocess
 import signal
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Iterator
 import httpx
 from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
@@ -241,6 +241,104 @@ class OnlineAgent(BaseAgent):
         
         completion.chat_id = chat_history.chat_session_id
         return completion
+    
+    def stream_complete_text(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        n: int = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
+        stop: Optional[str] = None,
+        echo: bool = False,
+        best_of: Optional[int] = None,
+        prompt_tokens: Optional[int] = None,
+        response_format: str = "text",
+        system_prompt: str = None,
+        chat_id: Optional[int] = None
+    ) -> Iterator[str]:
+        """Stream text completion from the online API."""
+        # Set defaults from agent settings
+        max_tokens = max_tokens or self._agent_context.settings.max_tokens or 16
+        n = n or self._agent_context.settings.n or 1
+        temperature = temperature or self._agent_context.settings.temperature or 1.0
+        top_p = top_p or self._agent_context.settings.top_p or 1.0
+        frequency_penalty = frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0
+        presence_penalty = presence_penalty or self._agent_context.settings.presence_penalty or 0.0
+        
+        # Build messages
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        # Build payload with streaming enabled
+        payload = {
+            "messages": messages,
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "n": n,
+            "temperature": temperature,
+            "top_p": top_p,
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+            "stream": True
+        }
+        
+        if stop is not None:
+            payload["stop"] = stop
+        
+        # Ensure endpoint includes chat/completions
+        current_url = self.base_url
+        if not current_url.endswith("/chat/completions"):
+            current_url = f"{current_url}/chat/completions"
+        
+        # Stream the response
+        full_content = ""
+        try:
+            with httpx.stream(
+                "POST",
+                current_url,
+                json=payload,
+                headers=self.headers,
+                timeout=self.timeout
+            ) as response:
+                if response.status_code != 200:
+                    raise Exception(
+                        f"Streaming request failed with status {response.status_code}: {response.text}"
+                    )
+                
+                for line in response.iter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]  # Remove "data: " prefix
+                        
+                        if data.strip() == "[DONE]":
+                            break
+                        
+                        try:
+                            chunk = json.loads(data)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                delta = chunk["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    full_content += content
+                                    yield content
+                        except json.JSONDecodeError:
+                            self.logger.warning(f"Failed to parse SSE chunk: {data}")
+                            continue
+            
+            # Add to chat history after streaming completes
+            if chat_id is not None:
+                self._agent_context._add_to_chat_history(
+                    user_message=prompt,
+                    ai_message=full_content,
+                    chat_id=chat_id
+                )
+        except Exception as e:
+            self.logger.error(f"Streaming error: {e}")
+            raise
     
     def complete_audio(
         self,

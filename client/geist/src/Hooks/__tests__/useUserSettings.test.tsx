@@ -47,6 +47,8 @@ describe('useUserSettings', () => {
   });
 
   it('handles fetch error on mount', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
       statusText: 'Server Error',
@@ -58,6 +60,8 @@ describe('useUserSettings', () => {
     expect(result.current.loading).toBe(false);
     expect(result.current.settings).toBeNull();
     expect(result.current.error).toMatch(/Failed to fetch settings/i);
+
+    consoleErrorSpy.mockRestore();
   });
 
   it('updates settings (PUT success)', async () => {
@@ -80,6 +84,8 @@ describe('useUserSettings', () => {
   });
 
   it('handles update error (PUT)', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => mockSettings });
     const { result } = renderHook(() => useUserSettings());
     await act(async () => {});
@@ -91,6 +97,8 @@ describe('useUserSettings', () => {
     });
 
     expect(result.current.error).toMatch(/Failed to update settings/i);
+
+    consoleErrorSpy.mockRestore();
   });
 
   it('resets settings (POST success)', async () => {
