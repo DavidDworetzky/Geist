@@ -64,7 +64,7 @@ class LlamaAgent(BaseAgent):
     def phase_in(self):
         self.initialize()
     
-    def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None, top_p:float = None, temperature:float = None):
+    def _complete_llama_sequence(self, prompt:str, system_prompt:str, max_tokens:int = None, top_p:float = None, temperature:float = None, streaming:bool = False):
         if not self.llama:
             if torch.backends.mps.is_available():
                 self.llama = LlamaMLX(max_new_tokens=self._agent_context.settings.max_tokens, top_p = top_p if top_p else 0.95, temperature = temperature if temperature else 0.7)
@@ -72,7 +72,8 @@ class LlamaAgent(BaseAgent):
                 self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
-            user_prompt=prompt
+            user_prompt=prompt,
+            streaming=streaming
         )
         self.logger.info(f"Llama completion: {llama_completion}")
         return LlamaCompletion.from_dict(llama_completion)
@@ -133,7 +134,10 @@ class LlamaAgent(BaseAgent):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
-    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
+    def stream_complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
+        return self.complete_text(prompt, max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty, stop, echo, best_of, prompt_tokens, response_format, system_prompt, chat_id, streaming=True)
+        
+    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None, streaming:bool = False):
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
         n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
