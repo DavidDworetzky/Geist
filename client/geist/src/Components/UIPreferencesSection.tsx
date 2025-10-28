@@ -49,14 +49,6 @@ const UIPreferencesSection: React.FC<UIPreferencesSectionProps> = ({
       </h3>
 
       <SettingsSelect
-        label="Theme"
-        value={uiPreferences.theme || 'light'}
-        options={themeOptions}
-        onChange={(value) => updatePreference('theme', value)}
-        description="Choose your preferred color theme"
-      />
-
-      <SettingsSelect
         label="Font Size"
         value={uiPreferences.fontSize || 'medium'}
         options={fontSizeOptions}
