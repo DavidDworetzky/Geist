@@ -40,6 +40,18 @@ jobs:
         activate-environment: geist-linux-docker
         environment-file: linux_environment_x86_x64.yml
 
+    - name: Initialize database
+      shell: bash -l {0}
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        DB_HOST: localhost
+        DB_PORT: 5432
+        POSTGRES_DB: geist
+        POSTGRES_USER: geist
+        POSTGRES_PASSWORD: geist
+      run: |
+        python initdb.py
+
     - name: Run tests
       shell: bash -l {0}
       env:
