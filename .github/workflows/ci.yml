@@ -9,6 +9,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14.9
+        env:
+          POSTGRES_DB: geist
+          POSTGRES_USER: geist
+          POSTGRES_PASSWORD: geist
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - uses: actions/checkout@v4
 
@@ -24,11 +40,28 @@ jobs:
         activate-environment: geist-linux-docker
         environment-file: linux_environment_x86_x64.yml
 
+    - name: Initialize database
+      shell: bash -l {0}
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        DB_HOST: localhost
+        DB_PORT: 5432
+        POSTGRES_DB: geist
+        POSTGRES_USER: geist
+        POSTGRES_PASSWORD: geist
+      run: |
+        python initdb.py
+
     - name: Run tests
       shell: bash -l {0}
       env:
         HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         PYTHONPATH: ${{ github.workspace }}
+        DB_HOST: localhost
+        DB_PORT: 5432
+        POSTGRES_DB: geist
+        POSTGRES_USER: geist
+        POSTGRES_PASSWORD: geist
       run: |
         conda info
         conda list

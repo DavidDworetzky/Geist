@@ -9,6 +9,8 @@
 When installing packages, `conda env export >> linux_environment.yml` after installing to freeze installs. 
 #frontend package installs
 `cd client & npm i PACKAGE`
+#running tests
+`cd /opt/geist && PYTHONPATH=/opt/geist pytest` in the backend container
 
 
 

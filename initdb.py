@@ -54,6 +54,8 @@ conn = connect(
 #database imports
 from app.models.database.database import Base
 from app.models.database.database import Engine
+# Import all models to register them with Base.metadata
+import app.models.database
 
 #create models if they do not exist
 Base.metadata.create_all(bind=Engine)

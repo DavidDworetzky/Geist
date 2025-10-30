@@ -105,7 +105,6 @@ const Settings: React.FC = () => {
     { id: 'agent' as Tab, label: 'Agent Config', icon: '🤖' },
     { id: 'generation' as Tab, label: 'Generation', icon: '⚙️' },
     { id: 'rag' as Tab, label: 'RAG & Files', icon: '📁' },
-    { id: 'providers' as Tab, label: 'Backup Providers', icon: '🔄' },
     { id: 'ui' as Tab, label: 'UI Preferences', icon: '🎨' }
   ];
 
