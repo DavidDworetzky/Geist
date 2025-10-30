@@ -1,6 +1,7 @@
-FROM --platform=linux/arm64 python:3.10
+FROM python:3.10
 
-ENV GEIST_HOME /opt/geist
+ARG TARGETARCH
+ENV GEIST_HOME=/opt/geist
 ENV PATH="/root/miniconda3/bin:${PATH}"
 RUN echo 'export PATH="/root/miniconda3/bin:$PATH"' >> /etc/profile
 WORKDIR $GEIST_HOME
@@ -17,7 +18,13 @@ RUN apt-get update && apt-get install -y \
     libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh && \
+# Install Miniconda based on architecture
+RUN case "${TARGETARCH}" in \
+    arm64) MINICONDA_ARCH="aarch64" ;; \
+    amd64) MINICONDA_ARCH="x86_64" ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh -O miniconda.sh && \
     mkdir /root/.conda && \
     bash miniconda.sh -b && \
     rm -f miniconda.sh
@@ -31,7 +38,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN which conda && conda --version
 RUN conda init bash
 
-COPY linux_environment.yml .
+# Copy both environment files so the install script can choose the right one
+COPY linux_environment*.yml ./
 COPY . .
 
 RUN chmod +x *.sh
