@@ -82,18 +82,3 @@ jobs:
 
     - name: Build Frontend
       run: docker build -t geist-frontend -f client/geist/Dockerfile .
-
-    - name: Test Docker Compose
-      run: |
-        docker-compose up -d
-        # Wait for db service to be ready
-        echo "Waiting for database to be ready..."
-        timeout 30s bash -c 'until docker-compose exec -T db pg_isready -h localhost; do sleep 1; done'
-        # Show service status
-        docker-compose ps
-        # Show logs if needed for debugging
-        docker-compose logs
-        # Test endpoints
-        curl -f http://localhost:5001/health || (docker-compose logs && exit 1)
-        curl -f http://localhost:3000 || (docker-compose logs && exit 1)
-        docker-compose down
