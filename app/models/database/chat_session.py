@@ -70,7 +70,12 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
             chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
 
         if not session_id or not chat_session:
-            chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
+            chat_session = ChatSession(
+                chat_session_id=session_id,  # Use the provided session_id
+                chat_history="[]",
+                create_date=datetime.now(),
+                update_date=datetime.now()
+            )
             session.add(chat_session)
         
         # Load existing history or create new
