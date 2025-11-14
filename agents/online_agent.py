@@ -12,6 +12,7 @@ from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
 from agents.models.generic_completion import GenericCompletion
 from agents.models.agent_completion import AgentCompletion
+from app.models.database.chat_session import get_chat_history
 
 logger = logging.getLogger(__name__)
 
@@ -204,10 +205,23 @@ class OnlineAgent(BaseAgent):
         frequency_penalty = frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0
         presence_penalty = presence_penalty or self._agent_context.settings.presence_penalty or 0.0
         
-        # Build messages
+        # Build messages with server-side hydration of prior chat turns
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        messages.append({"role": "user", "content": user_msg})
+                    if ai_msg is not None:
+                        messages.append({"role": "assistant", "content": ai_msg})
+            except Exception as e:
+                self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
+        # Append current user prompt last
         messages.append({"role": "user", "content": prompt})
         
         # Build payload
@@ -268,10 +282,22 @@ class OnlineAgent(BaseAgent):
         frequency_penalty = frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0
         presence_penalty = presence_penalty or self._agent_context.settings.presence_penalty or 0.0
         
-        # Build messages
+        # Build messages with server-side hydration for streaming as well
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        messages.append({"role": "user", "content": user_msg})
+                    if ai_msg is not None:
+                        messages.append({"role": "assistant", "content": ai_msg})
+            except Exception as e:
+                self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
         messages.append({"role": "user", "content": prompt})
         
         # Build payload with streaming enabled
