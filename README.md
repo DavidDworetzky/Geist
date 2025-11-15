@@ -48,8 +48,10 @@ flowchart LR
 ## Install Postgresql
 1. Version 16.2 on Mac or Windows
 
-## Install Miniconda
-1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
+## Install uv
+1. Install uv package manager: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+2. Install Python dependencies: `uv sync`
+   - This will create a virtual environment and install all required packages from `uv.lock`
 
 ## Setting up your environment
 1. Make sure that your .env file is initialized - the following values are included but you may not need to set all of these depending on agent utilization and DEV/PROD settings:
@@ -74,8 +76,8 @@ client/geist/.env settings:
     - REACT_APP_API_BASE_URL = http://localhost:3000
 
 ## Starting the solution
-1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` 
-2. Run `python bootstrap.py`
+1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start`
+2. Run `uv run python bootstrap.py`
 
 
 ## Starting the solution with docker compose (no mlx support)
