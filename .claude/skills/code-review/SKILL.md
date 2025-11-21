@@ -188,8 +188,6 @@ Categorize issues into severity levels:
 - Logic bugs that would cause data corruption or system failure
 - Performance issues that would cause severe degradation (e.g., O(N³) in hot path)
 - ORM issues causing catastrophic N+1 queries
-
-**Important (Fix Before Commit):**
 - Moderate security issues (information disclosure, weak validation)
 - Significant performance problems (O(N²) where N could be large)
 - Logic bugs that affect core functionality
