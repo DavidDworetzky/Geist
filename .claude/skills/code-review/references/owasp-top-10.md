@@ -329,6 +329,14 @@ def safe_pickle_loads(data, secret_key):
     if not hmac.compare_digest(signature, expected_sig):
         raise ValueError("Invalid signature")
     return pickle.loads(pickled_data)
+
+# for model loading, use safe tensors
+from safetensors import safe_open
+
+tensors = {}
+with safe_open("model.safetensors", framework="pt", device=0) as f:
+    for k in f.keys():
+        tensors[k] = f.get_tensor(k)
 ```
 
 ## 9. Using Components with Known Vulnerabilities
