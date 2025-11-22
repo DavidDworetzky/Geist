@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect, FormEvent, useRef, useLayoutEffect } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
@@ -16,11 +16,102 @@ const Chat = () => {
     const [chatHistory, setChatHistory] = useState<ChatHistory>();
     const [chatSessionData, setChatSessions] = useState<ChatSession[]>([]);
     const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
-    const { chatSessions, loading: isChatSessionLoading, error: chatSessionError } = useGetChatSessions();
+    const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
     const [fileContextInfo, setFileContextInfo] = useState<string>('');
     const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText();
     const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
+
+    // Pagination state for chat history
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const PAGE_SIZE = 20;
+    const chatContainerRef = useRef<HTMLDivElement>(null);
+    const prevScrollHeightRef = useRef<number>(0);
+    const shouldRestoreScrollRef = useRef(false);
+
+    const fetchHistory = async (pageNum: number, currentChatId: string) => {
+        if (!currentChatId) return;
+        setIsLoadingHistory(true);
+        if (pageNum > 1) shouldRestoreScrollRef.current = true;
+        
+        try {
+            const res = await fetch(`/agent/chat_history/${currentChatId}/paginated?page=${pageNum}&page_size=${PAGE_SIZE}`);
+            if (!res.ok) throw new Error('Failed to fetch history');
+            
+            const data = await res.json();
+            const newMessages = data.chat_history.map((h: any) => ({
+                user: h.user,
+                ai: h.ai
+            }));
+
+            setChatHistory(prev => {
+                if (pageNum === 1) {
+                    return { chatHistory: newMessages };
+                }
+                return {
+                    chatHistory: [...newMessages, ...(prev?.chatHistory || [])]
+                };
+            });
+
+            const total = data.total_messages || 0;
+            if (newMessages.length < PAGE_SIZE || (pageNum * PAGE_SIZE >= total)) {
+                setHasMore(false);
+            } else {
+                setHasMore(true);
+            }
+        } catch (err) {
+            console.error('Error fetching chat history:', err);
+        } finally {
+            setIsLoadingHistory(false);
+        }
+    };
+
+    // Load history when chatId changes
+    useEffect(() => {
+        if (chatId) {
+            setPage(1);
+            setHasMore(true);
+            fetchHistory(1, chatId);
+        }
+    }, [chatId]);
+
+    // Restore scroll position after prepending messages
+    useLayoutEffect(() => {
+        if (shouldRestoreScrollRef.current && chatContainerRef.current && prevScrollHeightRef.current) {
+            const newScrollHeight = chatContainerRef.current.scrollHeight;
+            const diff = newScrollHeight - prevScrollHeightRef.current;
+            chatContainerRef.current.scrollTop = diff;
+            shouldRestoreScrollRef.current = false;
+        } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
+             // Scroll to bottom on initial load
+             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+    }, [chatHistory, page]);
+
+    const handleScroll = () => {
+        if (chatContainerRef.current) {
+            const { scrollTop, scrollHeight } = chatContainerRef.current;
+            if (scrollTop === 0 && hasMore && !isLoadingHistory) {
+                prevScrollHeightRef.current = scrollHeight;
+                const nextPage = page + 1;
+                setPage(nextPage);
+                if (chatId) {
+                    fetchHistory(nextPage, chatId);
+                }
+            }
+        }
+    };
+
+    // Attach scroll listener
+    useEffect(() => {
+        const container = chatContainerRef.current;
+        if (container) {
+            container.addEventListener('scroll', handleScroll);
+            return () => container.removeEventListener('scroll', handleScroll);
+        }
+    }, [hasMore, isLoadingHistory, page, chatId]); // Re-bind when dependencies change
 
     const chatWithServer = async (input: string) => {
         let parsedChatId = chatId ? parseInt(chatId) : state_chat_id;
@@ -45,14 +136,13 @@ const Chat = () => {
         }
     };
 
-    // when chat sessions are done loading, set the chat history
     useEffect(() => {
-        if (!isChatSessionLoading && chatSessions) {
+        if (chatSessions) {
             setChatSessions(chatSessions);
             const chatSessionListItems = chatSessions.map((session) => {
                 const date = new Date(session.create_date);
                 const formattedDate = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-                const firstLine = session.chat_history[0].user.split('\n')[0];
+                const firstLine = session.chat_history[0]?.user?.split('\n')[0] || 'New Chat';
                 const firstThreeWords = firstLine.split(' ').slice(0, 3).join(' ');
                 const summary = `${formattedDate} - ${firstThreeWords}`;
                 return {
@@ -61,26 +151,21 @@ const Chat = () => {
                     date: date,
                 };
             });
+            // Sorting is handled by backend mostly, but safe to keep for accumulated list
             const sortedItems = chatSessionListItems.sort((a, b) => b.date.getTime() - a.date.getTime());
             setChatSessionLinks(sortedItems);
+        }
+    }, [chatSessions]);
 
-            // Load chat history for specific chat ID
-            if (chatId) {
-                const selectedSession = chatSessions.find(
-                    session => session.chat_id.toString() === chatId
-                );
-                if (selectedSession?.chat_history) {
-                    const initialHistory: ChatHistory = {
-                        chatHistory: selectedSession.chat_history.map(h => ({
-                            user: h.user,
-                            ai: h.ai
-                        }))
-                    };
-                    setChatHistory(initialHistory);
-                }
+    const handleSidebarScroll = (e: React.UIEvent<HTMLDivElement>) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        // Load more when scrolled to bottom (with small buffer)
+        if (scrollHeight - scrollTop <= clientHeight + 50) {
+            if (!isChatSessionLoading && hasMoreSessions) {
+                loadMoreSessions();
             }
         }
-    }, [isChatSessionLoading, chatId]);
+    };
 
     useEffect(() => {
         if (completedText) {
@@ -111,11 +196,12 @@ const Chat = () => {
 
     return (
         <div className="ChatContainer">
-            <div className="ChatSidebar">
+            <div className="ChatSidebar" onScroll={handleSidebarScroll} style={{ overflowY: 'auto' }}>
                 <LinkList listItems={chatSessionLinks} />
+                {isChatSessionLoading && <div style={{ padding: '10px', textAlign: 'center' }}>Loading...</div>}
             </div>
             <div className="ChatContent">
-                <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} />
+                <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} ref={chatContainerRef} />
                 
                 {/* File context info */}
                 {fileContextInfo && (
