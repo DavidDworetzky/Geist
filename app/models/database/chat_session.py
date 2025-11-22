@@ -142,22 +142,12 @@ def get_paginated_chat_history(chat_session_id: int, page: int = 1, page_size: i
             total_count = len(full_history)
             
             # Calculate indices for reverse pagination (latest first)
-            # Page 1: last 20 items -> indices [total-20 : total]
-            # Page 2: items before that -> indices [total-40 : total-20]
             end_idx = total_count - ((page - 1) * page_size)
             start_idx = max(0, end_idx - page_size)
             
             if end_idx <= 0:
                 sliced_history = []
             else:
-                # Python slicing: [start:end]. 
-                # If end_idx > total_count, it's fine (capped at len).
-                # If start_idx < 0, it's 0.
-                # If end_idx is reduced to match array bounds? 
-                # end_idx depends on page. 
-                # Example: total=100, page=1, size=20. end=100, start=80. slice [80:100] (20 items)
-                # Example: total=100, page=5, size=20. end=20, start=0. slice [0:20]
-                # Example: total=100, page=6, size=20. end=0. slice [0:0] -> empty. Correct.
                 sliced_history = full_history[start_idx:end_idx]
                 
             return ChatHistory(
