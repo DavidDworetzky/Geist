@@ -1,8 +1,6 @@
 # Variables
-PYTHON=python
+PYTHON=uv run python
 DOCKER_COMPOSE=docker compose
-CONDA_ENV=geist-mac
-CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
 
 # Default target
 .PHONY: all
@@ -25,7 +23,7 @@ help:
 .PHONY: run
 run:
 ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(PYTHON) bootstrap.py
 else
 	$(DOCKER_COMPOSE) up
 endif
@@ -37,15 +35,15 @@ up: run
 # Run Python server only
 .PHONY: server
 server:
-	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
+	$(PYTHON) bootstrap.py
 
 # Run Python server with debugger (pdb)
 .PHONY: debug
 debug:
 ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && uv run python -m pdb bootstrap.py
 else
-	$(DOCKER_COMPOSE) up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+	$(DOCKER_COMPOSE) up -d && uv run python -m pdb bootstrap.py
 endif
 
 # Run Docker services only
@@ -69,7 +67,7 @@ clean:
 # Initialize database
 .PHONY: init-db
 init-db:
-	$(CONDA_ACTIVATE) && $(PYTHON) initdb.py
+	$(PYTHON) initdb.py
 
 # Build Docker images
 .PHONY: build

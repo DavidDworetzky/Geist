@@ -5,8 +5,8 @@
 `make empty` to run an empty container to install dependencies
 #package installs
 `docker exec backend /bin/bash` to enter the backend container
-`pip install PACKAGE` to install dependencies
-When installing packages, `conda env export >> linux_environment.yml` after installing to freeze installs. 
+`uv add PACKAGE` to install dependencies
+When installing packages, `uv lock` after installing to update the lockfile. 
 #frontend package installs
 `cd client & npm i PACKAGE`
 #running tests
