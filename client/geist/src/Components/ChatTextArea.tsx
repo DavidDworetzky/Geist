@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { forwardRef } from 'react';
 
 export interface ChatPair {
     user: string;
@@ -9,13 +9,13 @@ export interface ChatHistory {
     chatHistory: ChatPair[];
 }
 
-const ChatTextArea = (props: ChatHistory) => {
+const ChatTextArea = forwardRef<HTMLDivElement, ChatHistory>((props, ref) => {
     return (
-        <div style={{
+        <div ref={ref} style={{
             border: '1px solid #ccc',
             borderRadius: '4px',
             padding: '12px',
-            minHeight: '200px',
+            flex: 1,
             width: '100%',
             backgroundColor: 'white',
             overflowY: 'auto',
@@ -30,6 +30,6 @@ const ChatTextArea = (props: ChatHistory) => {
             ))}
         </div>
     );
-};
+});
 
 export default ChatTextArea;;

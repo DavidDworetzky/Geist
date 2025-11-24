@@ -20,7 +20,7 @@ from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
 from agents.models.agent_completion import AgentCompletion
 from agents.prompt.prompt import AGENT_PROMPTS
-from app.models.database.chat_session import get_chat_history, get_all_chat_history
+from app.models.database.chat_session import get_chat_history, get_all_chat_history, get_paginated_chat_history, get_paginated_chat_sessions
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
@@ -188,9 +188,19 @@ def create_app():
         chat_history = get_chat_history(session_id)
         return chat_history
     
+    @agent_router.get("/chat_history/{session_id}/paginated")
+    async def get_paginated_history_endpoint(session_id: int, page: int = 1, page_size: int = 20):
+        chat_history = get_paginated_chat_history(session_id, page, page_size)
+        return chat_history
+
     @agent_router.get("/chat_sessions")
     async def get_chat_sessions():
         chat_sessions = get_all_chat_history()
+        return chat_sessions
+
+    @agent_router.get("/chat_sessions/paginated")
+    async def get_paginated_sessions_endpoint(page: int = 1, page_size: int = 20):
+        chat_sessions = get_paginated_chat_sessions(page, page_size)
         return chat_sessions
 
     @agent_router.post("/initialize_task_and_tick")
