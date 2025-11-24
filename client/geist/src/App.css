@@ -232,6 +232,8 @@ nav svg {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  overflow: hidden; /* Added to constrain height for child scrolling */
+  min-height: 0;   /* Added for flexbox nesting */
 }
 
 .ChatInputForm {

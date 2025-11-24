@@ -15,7 +15,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatHistory>((props, ref) => {
             border: '1px solid #ccc',
             borderRadius: '4px',
             padding: '12px',
-            minHeight: '200px',
+            flex: 1,
             width: '100%',
             backgroundColor: 'white',
             overflowY: 'auto',

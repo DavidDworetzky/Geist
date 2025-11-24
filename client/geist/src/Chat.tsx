@@ -90,10 +90,24 @@ const Chat = () => {
         }
     }, [chatHistory, page]);
 
+    // Auto-load more history if the container is not full
+    useEffect(() => {
+        const container = chatContainerRef.current;
+        if (container && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
+            if (container.scrollHeight <= container.clientHeight) {
+                const nextPage = page + 1;
+                setPage(nextPage);
+                if (chatId) {
+                    fetchHistory(nextPage, chatId);
+                }
+            }
+        }
+    }, [chatHistory, hasMore, isLoadingHistory, page, chatId]);
+
     const handleScroll = () => {
         if (chatContainerRef.current) {
             const { scrollTop, scrollHeight } = chatContainerRef.current;
-            if (scrollTop === 0 && hasMore && !isLoadingHistory) {
+            if (scrollTop <= 10 && hasMore && !isLoadingHistory) {
                 prevScrollHeightRef.current = scrollHeight;
                 const nextPage = page + 1;
                 setPage(nextPage);
