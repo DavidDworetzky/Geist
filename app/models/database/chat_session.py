@@ -40,8 +40,7 @@ class ChatHistory(list):
         if isinstance(self.chat_history, str):
             self.chat_history = json.loads(self.chat_history)
         self.extend(self.chat_history)
-        if self.total_messages == 0:
-            self.total_messages = len(self)
+        self.total_messages = len(self)
 
     def append(self, item: Any) -> None:
         """
