@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface ChatMessage {
     user: string;
@@ -18,7 +18,7 @@ const useGetChatSessions = () => {
     const [hasMore, setHasMore] = useState(true);
     const [page, setPage] = useState(1);
 
-    const fetchChatSessions = async (pageNum: number = 1, reset: boolean = false) => {
+    const fetchChatSessions = useCallback(async (pageNum: number = 1, reset: boolean = false) => {
         setLoading(true);
         setError(null);
         try {
@@ -37,17 +37,19 @@ const useGetChatSessions = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
         fetchChatSessions(1, true);
-    }, []);
+    }, [fetchChatSessions]);
 
-    const loadMore = () => {
+    const loadMore = useCallback(() => {
         if (!loading && hasMore) {
             fetchChatSessions(page + 1, false);
         }
-    };
+    }, [loading, hasMore, page, fetchChatSessions]);
+
+    const refreshChatSessions = useCallback(() => fetchChatSessions(1, true), [fetchChatSessions]);
 
     return {
         chatSessions,
@@ -55,7 +57,7 @@ const useGetChatSessions = () => {
         error,
         hasMore,
         loadMore,
-        refreshChatSessions: () => fetchChatSessions(1, true)
+        refreshChatSessions
     };
 };
 

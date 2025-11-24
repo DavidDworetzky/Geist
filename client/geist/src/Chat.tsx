@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, FormEvent, useRef, useLayoutEffect, useCallback } from 'react';
 import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
@@ -14,7 +14,6 @@ import { useParams } from 'react-router-dom';
 const Chat = () => {
     const { chatId } = useParams<{ chatId?: string }>();
     const [chatHistory, setChatHistory] = useState<ChatHistory>();
-    const [chatSessionData, setChatSessions] = useState<ChatSession[]>([]);
     const [chatSessionLinks, setChatSessionLinks] = useState<ListItem[]>([]);
     const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
@@ -28,7 +27,6 @@ const Chat = () => {
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const PAGE_SIZE = 20;
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const sidebarRef = useRef<HTMLDivElement>(null);
     const prevScrollHeightRef = useRef<number>(0);
     const shouldRestoreScrollRef = useRef(false);
 
@@ -105,15 +103,21 @@ const Chat = () => {
         }
     }, [chatHistory, hasMore, isLoadingHistory, page, chatId]);
 
-    // Auto-load more sessions if the sidebar is not full
-    useEffect(() => {
-        const sidebar = sidebarRef.current;
-        if (sidebar && hasMoreSessions && !isChatSessionLoading && chatSessionLinks.length > 0) {
-            if (sidebar.scrollHeight <= sidebar.clientHeight) {
+    const observer = useRef<IntersectionObserver>();
+    const lastItemRef = useCallback(
+        (node: any) => {
+          if (isChatSessionLoading || chatSessionError) return;
+          if (observer.current) observer.current.disconnect();
+          observer.current = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && hasMoreSessions) {
                 loadMoreSessions();
             }
-        }
-    }, [chatSessionLinks, hasMoreSessions, isChatSessionLoading]);
+          });
+          if (node) observer.current.observe(node);
+        },
+        [isChatSessionLoading, hasMoreSessions, loadMoreSessions, chatSessionError]
+      );
+    
 
     const handleScroll = () => {
         if (chatContainerRef.current) {
@@ -163,7 +167,6 @@ const Chat = () => {
 
     useEffect(() => {
         if (chatSessions) {
-            setChatSessions(chatSessions);
             const chatSessionListItems = chatSessions.map((session) => {
                 const date = new Date(session.create_date);
                 const formattedDate = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -181,16 +184,6 @@ const Chat = () => {
             setChatSessionLinks(sortedItems);
         }
     }, [chatSessions]);
-
-    const handleSidebarScroll = (e: React.UIEvent<HTMLDivElement>) => {
-        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-        // Load more when scrolled to bottom (with small buffer)
-        if (scrollHeight - scrollTop <= clientHeight + 50) {
-            if (!isChatSessionLoading && hasMoreSessions) {
-                loadMoreSessions();
-            }
-        }
-    };
 
     useEffect(() => {
         if (completedText) {
@@ -221,8 +214,8 @@ const Chat = () => {
 
     return (
         <div className="ChatContainer">
-            <div className="ChatSidebar" ref={sidebarRef} onScroll={handleSidebarScroll} style={{ overflowY: 'auto' }}>
-                <LinkList listItems={chatSessionLinks} />
+            <div className="ChatSidebar" style={{ overflowY: 'auto' }}>
+                <LinkList listItems={chatSessionLinks} lastItemRef={lastItemRef}/>
                 {isChatSessionLoading && <div style={{ padding: '10px', textAlign: 'center' }}>Loading...</div>}
             </div>
             <div className="ChatContent">
