@@ -28,6 +28,7 @@ const Chat = () => {
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const PAGE_SIZE = 20;
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    const sidebarRef = useRef<HTMLDivElement>(null);
     const prevScrollHeightRef = useRef<number>(0);
     const shouldRestoreScrollRef = useRef(false);
 
@@ -103,6 +104,16 @@ const Chat = () => {
             }
         }
     }, [chatHistory, hasMore, isLoadingHistory, page, chatId]);
+
+    // Auto-load more sessions if the sidebar is not full
+    useEffect(() => {
+        const sidebar = sidebarRef.current;
+        if (sidebar && hasMoreSessions && !isChatSessionLoading && chatSessionLinks.length > 0) {
+            if (sidebar.scrollHeight <= sidebar.clientHeight) {
+                loadMoreSessions();
+            }
+        }
+    }, [chatSessionLinks, hasMoreSessions, isChatSessionLoading]);
 
     const handleScroll = () => {
         if (chatContainerRef.current) {
@@ -210,7 +221,7 @@ const Chat = () => {
 
     return (
         <div className="ChatContainer">
-            <div className="ChatSidebar" onScroll={handleSidebarScroll} style={{ overflowY: 'auto' }}>
+            <div className="ChatSidebar" ref={sidebarRef} onScroll={handleSidebarScroll} style={{ overflowY: 'auto' }}>
                 <LinkList listItems={chatSessionLinks} />
                 {isChatSessionLoading && <div style={{ padding: '10px', textAlign: 'center' }}>Loading...</div>}
             </div>
