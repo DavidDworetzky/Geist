@@ -44,10 +44,12 @@ const useVoiceChat = ({
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/v1/voice/stream?session_id=${sessionId}&agent_type=${agentType}&stt_provider=${sttProvider}&tts_provider=${ttsProvider}`;
     
+    console.log('Voice WebSocket connecting to:', wsUrl);
+    
     const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-      console.log('Voice WebSocket connected');
+      console.log('Voice WebSocket connected successfully');
     };
     
     ws.onmessage = async (event) => {
@@ -103,11 +105,17 @@ const useVoiceChat = ({
     
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      onError?.('WebSocket connection error');
+      console.error('WebSocket readyState:', ws.readyState);
+      console.error('Attempted URL was:', wsUrl);
+      onError?.('WebSocket connection error - check browser console for details');
     };
     
-    ws.onclose = () => {
-      console.log('Voice WebSocket disconnected');
+    ws.onclose = (event) => {
+      console.log('Voice WebSocket disconnected, code:', event.code, 'reason:', event.reason);
+      if (event.code !== 1000 && event.code !== 1001) {
+        // Abnormal closure
+        console.warn('WebSocket closed abnormally. This may indicate a proxy or server issue.');
+      }
     };
     
     wsRef.current = ws;

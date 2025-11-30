@@ -101,6 +101,7 @@ dependencies:
       - tzdata==2025.2
       - urllib3==2.3.0
       - uvicorn==0.34.0
+      - websockets==15.0.1
       - xxhash==3.5.0
       - yarl==1.18.3
 prefix: /Users/daviddworetzky/miniconda3/envs/geist-mac
