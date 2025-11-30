@@ -39,13 +39,34 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
     { value: 'custom', label: 'Custom Provider' }
   ];
 
-  const onlineModelOptions = [
-    { value: 'gpt-4', label: 'GPT-4' },
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-    { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' }
-  ];
+  // Models organized by provider
+  const modelsByProvider: Record<string, { value: string; label: string }[]> = {
+    openai: [
+      { value: 'gpt-4', label: 'GPT-4' },
+      { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+    ],
+    anthropic: [
+      { value: 'claude-3-opus', label: 'Claude 3 Opus' },
+      { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' }
+    ],
+    custom: [
+      { value: 'custom-model', label: 'Custom Model' }
+    ]
+  };
+
+  // Get filtered model options based on selected provider
+  const onlineModelOptions = modelsByProvider[onlineProvider] || [];
+
+  // Handle provider change - reset model if current model isn't available for new provider
+  const handleProviderChange = (newProvider: string) => {
+    onOnlineProviderChange(newProvider);
+    const newProviderModels = modelsByProvider[newProvider] || [];
+    const currentModelAvailable = newProviderModels.some(m => m.value === onlineModel);
+    if (!currentModelAvailable && newProviderModels.length > 0) {
+      onOnlineModelChange(newProviderModels[0].value);
+    }
+  };
 
   return (
     <div style={{
@@ -87,7 +108,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             label="Online Provider"
             value={onlineProvider}
             options={onlineProviderOptions}
-            onChange={onOnlineProviderChange}
+            onChange={handleProviderChange}
             description="Select your preferred online API provider"
           />
           
