@@ -18,6 +18,7 @@ import torchaudio
 import os
 import time
 from transformers import pipeline
+from app.models.database.chat_session import get_chat_history
 
 WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
 Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
@@ -148,8 +149,25 @@ class LlamaAgent(BaseAgent):
         
         if not system_prompt:
             system_prompt = SYSTEM_PROMPT
+        # Build a hydrated prompt that includes chat history if available
+        hydrated_user_prompt = prompt
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                history_lines: List[str] = []
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        history_lines.append(f"User: {user_msg}")
+                    if ai_msg is not None:
+                        history_lines.append(f"Assistant: {ai_msg}")
+                history_lines.append(f"User: {prompt}")
+                hydrated_user_prompt = "\n".join(history_lines)
+            except Exception as e:
+                self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
 
-        completion = self._complete_llama_sequence(prompt = prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt, top_p = top_p if top_p else None, temperature = temperature if temperature else None)
+        completion = self._complete_llama_sequence(prompt = hydrated_user_prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt, top_p = top_p if top_p else None, temperature = temperature if temperature else None)
         ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
         chat_history = self._agent_context._add_to_chat_history(user_message=prompt, ai_message=ai_message, chat_id=chat_id)
 

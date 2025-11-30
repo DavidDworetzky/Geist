@@ -10,6 +10,7 @@ import json
 import logging
 from utils.logging import log_function_call
 from agents.models.gpt4_completion import Gpt4Completion
+from app.models.database.chat_session import get_chat_history
 
 
 
@@ -141,8 +142,27 @@ class GPT4Agent(BaseAgent):
         frequency_penalty = self._agent_context.settings.frequency_penalty if self._agent_context.settings.frequency_penalty and not frequency_penalty else 0
         presence_penalty = self._agent_context.settings.presence_penalty if self._agent_context.settings.presence_penalty and not presence_penalty else 0
         
+        # Build messages with server-side hydration of prior chat turns
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        messages.append({"role": "user", "content": user_msg})
+                    if ai_msg is not None:
+                        messages.append({"role": "assistant", "content": ai_msg})
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
+        # Append current prompt
+        messages.append({"role": "user", "content": prompt})
+
         payload = {
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "model": "gpt-4",
             "max_tokens": max_tokens,
             "n": n,
