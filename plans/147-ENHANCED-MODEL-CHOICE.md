@@ -476,6 +476,8 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({...}) => {
 - [ ] Create `scripts/model_filter_config.py`
 - [ ] Add documentation for script usage
 - [ ] Test with real API keys
+- [ ] Create Claude Skill for updating models
+- [ ] Add section to claude md and agents md for updating models. 
 
 ### Phase 3: Frontend Integration
 - [ ] Create `useAvailableModels.tsx` hook
