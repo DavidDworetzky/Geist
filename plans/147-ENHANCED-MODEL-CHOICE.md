@@ -17,10 +17,14 @@ Implement a dynamic model discovery system that augments the statically defined 
 3. Synchronize frontend model options with backend-defined models
 4. Reduce maintenance burden when new models are released
 5. Support fallback to static models when API discovery fails
+6. Set families of models that are supported (such as kimi k2, glm, qwen, grok, claude/anthropic, openai) by the script, which we search for on huggingface to implement into the registry.
 
 ## Architecture
 
 ### High-Level Flow
+1. Open AI API, models as discovery source
+2. Anthropic API, models as discovery source
+3. Huggingface models source for offline models as discovery source. 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     Model Discovery Flow                            │
@@ -91,7 +95,8 @@ from enum import Enum
 class Provider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
-    CUSTOM = "custom"
+    HUGGINGFACE = "huggingface"
+    OFFLINE = "offline"
 
 @dataclass
 class ModelInfo:
@@ -139,8 +144,6 @@ def get_all_models() -> dict[Provider, list[ModelInfo]]:
 |--------|----------|---------|
 | GET | `/api/v1/models/` | Get all available models |
 | GET | `/api/v1/models/{provider}` | Get models for a specific provider |
-| POST | `/api/v1/models/refresh` | Trigger dynamic model discovery (admin) |
-| GET | `/api/v1/models/validate` | Validate configured models against API keys |
 
 **Response Schema**:
 ```python
@@ -168,7 +171,7 @@ class ModelsListResponse(BaseModel):
 **Purpose**: Fetch available models from provider APIs and update registry
 
 **Features**:
-- Reads API keys from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+- Reads API keys from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `HUGGINGFACE_API_KEY`)
 - Queries provider model listing endpoints
 - Filters models based on configurable criteria (e.g., exclude deprecated, fine-tuned)
 - Generates/updates the `DISCOVERED_MODELS` section in `model_registry.py`
