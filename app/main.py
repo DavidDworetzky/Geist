@@ -25,6 +25,7 @@ from app.api.v1.endpoints.workflows import router as workflow_router
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
+from app.api.v1.endpoints.models import router as models_router
 from agents.local_agent import LocalAgent
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
@@ -235,6 +236,7 @@ def create_app():
     app.include_router(files_router, prefix="/api/v1/files", tags=["files"])
     app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
+    app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
 
     @app.get('/')
     def version():
