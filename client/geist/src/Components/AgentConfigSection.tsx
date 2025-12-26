@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import SettingsSelect from './SettingsSelect';
+import { useAvailableModels } from '../Hooks/useAvailableModels';
 
 interface AgentConfigSectionProps {
   agentType: string;
@@ -12,6 +13,17 @@ interface AgentConfigSectionProps {
   onOnlineModelChange: (value: string) => void;
 }
 
+// Provider display names mapping
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  xai: 'xAI (Grok)',
+  groq: 'Groq',
+  huggingface: 'Hugging Face',
+  offline: 'Local/Offline',
+  custom: 'Custom Provider',
+};
+
 const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   agentType,
   localModel,
@@ -22,49 +34,59 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   onOnlineProviderChange,
   onOnlineModelChange
 }) => {
+  const { getModelsForProvider, loading: modelsLoading, providers } = useAvailableModels();
+
   const agentTypeOptions = [
     { value: 'local', label: 'Local Model' },
     { value: 'online', label: 'Online Model' }
   ];
 
-  const localModelOptions = [
-    { value: 'Meta-Llama-3.1-8B-Instruct', label: 'Meta-Llama-3.1-8B-Instruct' },
-    { value: 'Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
-    { value: 'Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
-  ];
+  // Get local models from the offline provider
+  const localModelOptions = useMemo(() => {
+    const offlineModels = getModelsForProvider('offline');
+    if (offlineModels.length > 0) {
+      return offlineModels.map(m => ({ value: m.id, label: m.name }));
+    }
+    // Fallback to static options
+    return [
+      { value: 'Meta-Llama-3.1-8B-Instruct', label: 'Meta-Llama-3.1-8B-Instruct' },
+      { value: 'Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
+      { value: 'Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
+    ];
+  }, [getModelsForProvider]);
 
-  const onlineProviderOptions = [
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'anthropic', label: 'Anthropic' },
-    { value: 'custom', label: 'Custom Provider' }
-  ];
+  // Generate online provider options from dynamic providers
+  const onlineProviderOptions = useMemo(() => {
+    // Filter out 'offline' as it's for local models
+    const onlineProviders = providers.filter(p => p !== 'offline');
 
-  // Models organized by provider
-  const modelsByProvider: Record<string, { value: string; label: string }[]> = {
-    openai: [
-      { value: 'gpt-4', label: 'GPT-4' },
-      { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
-    ],
-    anthropic: [
-      { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-      { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' }
-    ],
-    custom: [
-      { value: 'custom-model', label: 'Custom Model' }
-    ]
-  };
+    return onlineProviders.map(p => ({
+      value: p,
+      label: PROVIDER_DISPLAY_NAMES[p] || p.charAt(0).toUpperCase() + p.slice(1)
+    }));
+  }, [providers]);
 
-  // Get filtered model options based on selected provider
-  const onlineModelOptions = modelsByProvider[onlineProvider] || [];
+  // Get model options for current provider
+  const onlineModelOptions = useMemo(() => {
+    const providerModels = getModelsForProvider(onlineProvider);
+    if (providerModels.length > 0) {
+      return providerModels.map(m => ({ value: m.id, label: m.name }));
+    }
+    // Fallback for custom or unknown providers
+    return [{ value: 'custom-model', label: 'Custom Model' }];
+  }, [getModelsForProvider, onlineProvider]);
 
   // Handle provider change - reset model if current model isn't available for new provider
   const handleProviderChange = (newProvider: string) => {
     onOnlineProviderChange(newProvider);
-    const newProviderModels = modelsByProvider[newProvider] || [];
-    const currentModelAvailable = newProviderModels.some(m => m.value === onlineModel);
+    const newProviderModels = getModelsForProvider(newProvider);
+    const modelOptions = newProviderModels.map(m => m.id);
+    const currentModelAvailable = modelOptions.includes(onlineModel);
+
     if (!currentModelAvailable && newProviderModels.length > 0) {
-      onOnlineModelChange(newProviderModels[0].value);
+      // Prefer recommended models, otherwise use first available
+      const recommendedModel = newProviderModels.find(m => m.recommended);
+      onOnlineModelChange(recommendedModel?.id || newProviderModels[0].id);
     }
   };
 
@@ -76,9 +98,9 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
       border: '1px solid #ddd',
       marginBottom: '20px'
     }}>
-      <h3 style={{ 
-        margin: '0 0 20px 0', 
-        color: '#333', 
+      <h3 style={{
+        margin: '0 0 20px 0',
+        color: '#333',
         fontSize: '18px',
         borderBottom: '2px solid #007bff',
         paddingBottom: '10px'
@@ -111,13 +133,13 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             onChange={handleProviderChange}
             description="Select your preferred online API provider"
           />
-          
+
           <SettingsSelect
             label="Online Model"
             value={onlineModel}
             options={onlineModelOptions}
             onChange={onOnlineModelChange}
-            description="Choose which model from the provider to use"
+            description={modelsLoading ? "Loading models..." : "Choose which model from the provider to use"}
           />
         </>
       )}
@@ -126,4 +148,3 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
 };
 
 export default AgentConfigSection;
-

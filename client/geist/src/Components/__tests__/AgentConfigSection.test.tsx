@@ -30,36 +30,37 @@ describe('AgentConfigSection', () => {
       expect(optionValues).toContain('gpt-4');
       expect(optionValues).toContain('gpt-4-turbo');
       expect(optionValues).toContain('gpt-3.5-turbo');
-      expect(optionValues).not.toContain('claude-3-opus');
-      expect(optionValues).not.toContain('claude-3-sonnet');
+      expect(optionValues).not.toContain('claude-3-opus-20240229');
+      expect(optionValues).not.toContain('claude-3-sonnet-20240229');
     });
 
     it('shows only Anthropic models when Anthropic provider is selected', () => {
-      render(<AgentConfigSection {...defaultProps} onlineProvider="anthropic" onlineModel="claude-3-opus" />);
+      render(<AgentConfigSection {...defaultProps} onlineProvider="anthropic" onlineModel="claude-3-opus-20240229" />);
 
       const modelSelect = screen.getByLabelText('Online Model');
       const options = modelSelect.querySelectorAll('option');
 
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
-      
-      expect(optionValues).toContain('claude-3-opus');
-      expect(optionValues).toContain('claude-3-sonnet');
+
+      expect(optionValues).toContain('claude-3-opus-20240229');
+      expect(optionValues).toContain('claude-3-sonnet-20240229');
       expect(optionValues).not.toContain('gpt-4');
       expect(optionValues).not.toContain('gpt-4-turbo');
       expect(optionValues).not.toContain('gpt-3.5-turbo');
     });
 
-    it('shows only custom models when custom provider is selected', () => {
-      render(<AgentConfigSection {...defaultProps} onlineProvider="custom" onlineModel="custom-model" />);
+    it('shows only xAI models when xAI provider is selected', () => {
+      render(<AgentConfigSection {...defaultProps} onlineProvider="xai" onlineModel="grok-2" />);
 
       const modelSelect = screen.getByLabelText('Online Model');
       const options = modelSelect.querySelectorAll('option');
 
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
-      
-      expect(optionValues).toContain('custom-model');
+
+      expect(optionValues).toContain('grok-2');
+      expect(optionValues).toContain('grok-3');
       expect(optionValues).not.toContain('gpt-4');
-      expect(optionValues).not.toContain('claude-3-opus');
+      expect(optionValues).not.toContain('claude-3-opus-20240229');
     });
   });
 
@@ -82,7 +83,7 @@ describe('AgentConfigSection', () => {
       fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
 
       expect(onOnlineProviderChange).toHaveBeenCalledWith('anthropic');
-      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-3-opus');
+      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-3-opus-20240229');
     });
 
     it('resets model to first available when switching from Anthropic to OpenAI', () => {
@@ -93,7 +94,7 @@ describe('AgentConfigSection', () => {
         <AgentConfigSection
           {...defaultProps}
           onlineProvider="anthropic"
-          onlineModel="claude-3-opus"
+          onlineModel="claude-3-opus-20240229"
           onOnlineProviderChange={onOnlineProviderChange}
           onOnlineModelChange={onOnlineModelChange}
         />
@@ -103,7 +104,8 @@ describe('AgentConfigSection', () => {
       fireEvent.change(providerSelect, { target: { value: 'openai' } });
 
       expect(onOnlineProviderChange).toHaveBeenCalledWith('openai');
-      expect(onOnlineModelChange).toHaveBeenCalledWith('gpt-4');
+      // First recommended model for OpenAI is gpt-4-turbo
+      expect(onOnlineModelChange).toHaveBeenCalledWith('gpt-4-turbo');
     });
 
     it('does not reset model when switching providers if model somehow matches', () => {
@@ -145,9 +147,8 @@ describe('AgentConfigSection', () => {
       const options = modelSelect.querySelectorAll('option');
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
 
+      // STATIC_MODELS.offline only contains Meta-Llama-3.1-8B-Instruct
       expect(optionValues).toContain('Meta-Llama-3.1-8B-Instruct');
-      expect(optionValues).toContain('Meta-Llama-3.1-8B');
-      expect(optionValues).toContain('Meta-Llama-3-8B-Instruct');
     });
 
     it('shows online provider and model options when agent type is online', () => {
@@ -200,9 +201,9 @@ describe('AgentConfigSection', () => {
       );
 
       const modelSelect = screen.getByLabelText('Local Model');
-      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B' } });
+      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B-Instruct' } });
 
-      expect(onLocalModelChange).toHaveBeenCalledWith('Meta-Llama-3.1-8B');
+      expect(onLocalModelChange).toHaveBeenCalledWith('Meta-Llama-3.1-8B-Instruct');
     });
   });
 
@@ -222,7 +223,8 @@ describe('AgentConfigSection', () => {
 
       expect(optionLabels).toContain('OpenAI');
       expect(optionLabels).toContain('Anthropic');
-      expect(optionLabels).toContain('Custom Provider');
+      expect(optionLabels).toContain('xAI (Grok)');
+      expect(optionLabels).toContain('Groq');
     });
 
     it('displays correct descriptions for settings', () => {
@@ -230,7 +232,8 @@ describe('AgentConfigSection', () => {
 
       expect(screen.getByText('Choose whether to use a local or online language model by default')).toBeInTheDocument();
       expect(screen.getByText('Select your preferred online API provider')).toBeInTheDocument();
-      expect(screen.getByText('Choose which model from the provider to use')).toBeInTheDocument();
+      // Description may show "Loading models..." or the actual text depending on loading state
+      expect(screen.getByText(/Choose which model from the provider to use|Loading models.../)).toBeInTheDocument();
     });
   });
 });
