@@ -25,6 +25,11 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -357,7 +362,7 @@ def check_missing_api_keys(provider: str = "all") -> List[str]:
 
     # Define required keys for each provider
     key_checks = {
-        "openai": ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_TOKEN")),
+        "openai": ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY")),
         "anthropic": ("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY")),
     }
 
@@ -451,7 +456,7 @@ def main():
     print_missing_keys_warning(missing_keys)
 
     # Get API keys from environment
-    openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_TOKEN")
+    openai_key = os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     huggingface_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
 

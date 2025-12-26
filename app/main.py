@@ -36,7 +36,7 @@ register_all_runners()
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
-openai_key = os.getenv("OPENAI_TOKEN")
+openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = os.getenv("ENHANCED_LOGGING")
 enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else False
 

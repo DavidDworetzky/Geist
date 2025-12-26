@@ -53,7 +53,7 @@ flowchart LR
 
 ## Setting up your environment
 1. Make sure that your .env file is initialized - the following values are included but you may not need to set all of these depending on agent utilization and DEV/PROD settings:
-    - OPENAI_TOKEN = TOKEN
+    - OPENAI_API_KEY = TOKEN
     - POSTGRES_PWD = PASSWORD
     - POSTGRES_DB = geist
     - TWILIO_SID = ACCOUNT_SIDE

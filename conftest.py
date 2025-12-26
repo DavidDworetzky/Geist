@@ -14,7 +14,7 @@ from app.environment import LoadEnvironmentDictionary
 def CreateAgentSettings(include_world_processing: bool = True):
     return AgentSettings(name="default agent", version="1.0", description="default", include_world_processing=include_world_processing)
 
-openai_key = os.getenv("OPENAI_TOKEN")
+openai_key = os.getenv("OPENAI_API_KEY")
 def get_envs() -> dict[str,str]:
     return LoadEnvironmentDictionary()
 
