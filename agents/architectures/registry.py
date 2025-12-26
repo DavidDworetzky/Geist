@@ -643,43 +643,33 @@ DISCOVERED_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {}
 _last_model_sync: Optional[datetime] = None
 
 
-def get_models_for_provider(provider: OnlineModelProviders, include_deprecated: bool = False) -> List[ModelInfo]:
+def get_models_for_provider(provider: OnlineModelProviders) -> List[ModelInfo]:
     """
     Get all available models for a provider, preferring discovered models.
 
     Args:
         provider: The provider to get models for
-        include_deprecated: Whether to include deprecated models
 
     Returns:
         List of ModelInfo objects for the provider
     """
     # Prefer discovered models if available
     if provider in DISCOVERED_MODELS and DISCOVERED_MODELS[provider]:
-        models = DISCOVERED_MODELS[provider]
+        return DISCOVERED_MODELS[provider]
     else:
-        models = STATIC_MODELS.get(provider, [])
-
-    # Filter deprecated models if requested
-    if not include_deprecated:
-        models = [m for m in models if not m.deprecated]
-
-    return models
+        return STATIC_MODELS.get(provider, [])
 
 
-def get_all_models(include_deprecated: bool = False) -> Dict[OnlineModelProviders, List[ModelInfo]]:
+def get_all_models() -> Dict[OnlineModelProviders, List[ModelInfo]]:
     """
     Get all available models grouped by provider.
-
-    Args:
-        include_deprecated: Whether to include deprecated models
 
     Returns:
         Dictionary mapping Provider to list of ModelInfo
     """
     result = {}
     for provider in OnlineModelProviders:
-        models = get_models_for_provider(provider, include_deprecated)
+        models = get_models_for_provider(provider)
         if models:  # Only include providers with models
             result[provider] = models
     return result
@@ -701,26 +691,6 @@ def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
             if model.id == model_id:
                 return model
     return None
-
-
-def get_recommended_models(provider: Optional[OnlineModelProviders] = None) -> List[ModelInfo]:
-    """
-    Get recommended models, optionally filtered by provider.
-
-    Args:
-        provider: Optional provider to filter by
-
-    Returns:
-        List of recommended ModelInfo objects
-    """
-    if provider:
-        models = get_models_for_provider(provider)
-    else:
-        models = []
-        for p in OnlineModelProviders:
-            models.extend(get_models_for_provider(p))
-
-    return [m for m in models if m.recommended]
 
 
 def update_discovered_models(provider: OnlineModelProviders, models: List[ModelInfo]) -> None:

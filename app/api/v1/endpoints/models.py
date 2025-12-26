@@ -12,7 +12,6 @@ from agents.architectures.registry import (
     get_models_for_provider,
     get_all_models,
     get_model_by_id,
-    get_recommended_models,
     get_last_model_sync_time,
     provider_from_string,
 )
@@ -44,18 +43,15 @@ class ModelsListResponse(BaseModel):
 
 
 @router.get("/", response_model=ModelsListResponse)
-async def get_available_models(include_deprecated: bool = False):
+async def get_available_models():
     """
     Get all available models grouped by provider.
-
-    Args:
-        include_deprecated: Whether to include deprecated models (default: False)
 
     Returns:
         ModelsListResponse: All available models grouped by provider
     """
     try:
-        all_models = get_all_models(include_deprecated=include_deprecated)
+        all_models = get_all_models()
 
         providers_dict = {}
         for provider, models in all_models.items():
@@ -73,13 +69,12 @@ async def get_available_models(include_deprecated: bool = False):
 
 
 @router.get("/provider/{provider}", response_model=List[ModelResponse])
-async def get_models_by_provider(provider: str, include_deprecated: bool = False):
+async def get_models_by_provider(provider: str):
     """
     Get available models for a specific provider.
 
     Args:
         provider: Provider name (openai, anthropic, groq, xai, huggingface, offline)
-        include_deprecated: Whether to include deprecated models (default: False)
 
     Returns:
         List[ModelResponse]: Models for the specified provider
@@ -92,7 +87,7 @@ async def get_models_by_provider(provider: str, include_deprecated: bool = False
                 detail=f"Invalid provider: {provider}. Valid providers: {[p.value for p in OnlineModelProviders]}"
             )
 
-        models = get_models_for_provider(provider_enum, include_deprecated=include_deprecated)
+        models = get_models_for_provider(provider_enum)
         return [ModelResponse(**model.to_dict()) for model in models]
     except HTTPException:
         raise
@@ -122,36 +117,6 @@ async def get_model(model_id: str):
         raise
     except Exception as e:
         logger.error(f"Error getting model {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.get("/recommended", response_model=List[ModelResponse])
-async def get_recommended(provider: Optional[str] = None):
-    """
-    Get recommended models, optionally filtered by provider.
-
-    Args:
-        provider: Optional provider name to filter by
-
-    Returns:
-        List[ModelResponse]: Recommended models
-    """
-    try:
-        provider_enum = None
-        if provider:
-            provider_enum = provider_from_string(provider)
-            if provider_enum is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid provider: {provider}. Valid providers: {[p.value for p in OnlineModelProviders]}"
-                )
-
-        models = get_recommended_models(provider_enum)
-        return [ModelResponse(**model.to_dict()) for model in models]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting recommended models: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

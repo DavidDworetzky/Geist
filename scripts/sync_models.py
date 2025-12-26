@@ -54,7 +54,6 @@ class DiscoveredModel:
     supports_vision: bool = False
     supports_function_calling: bool = False
     supports_streaming: bool = True
-    deprecated: bool = False
     recommended: bool = False
     family: Optional[str] = None
 
@@ -98,7 +97,6 @@ def fetch_openai_models(api_key: str) -> List[DiscoveredModel]:
                 supports_vision=metadata.get("supports_vision", False),
                 supports_function_calling=metadata.get("supports_function_calling", True),
                 supports_streaming=True,
-                deprecated=False,
                 recommended=metadata.get("recommended", False),
                 family=metadata.get("family"),
             ))
@@ -152,7 +150,6 @@ def fetch_anthropic_models(api_key: str) -> List[DiscoveredModel]:
                 supports_vision=metadata.get("supports_vision", True),
                 supports_function_calling=metadata.get("supports_function_calling", True),
                 supports_streaming=True,
-                deprecated=False,
                 recommended=metadata.get("recommended", True),
                 family=metadata.get("family", "claude"),
             ))
@@ -205,7 +202,6 @@ def fetch_huggingface_models(api_key: Optional[str] = None) -> List[DiscoveredMo
                     supports_vision=False,
                     supports_function_calling=False,
                     supports_streaming=True,
-                    deprecated=False,
                     recommended=True,
                     family=name_parts[0] if len(name_parts) > 1 else None,
                 ))
@@ -263,7 +259,6 @@ def generate_model_registry_code(models_by_provider: Dict[str, List[DiscoveredMo
             lines.append(f"            supports_vision={model.supports_vision},")
             lines.append(f"            supports_function_calling={model.supports_function_calling},")
             lines.append(f"            supports_streaming={model.supports_streaming},")
-            lines.append(f"            deprecated={model.deprecated},")
             lines.append(f"            recommended={model.recommended},")
             if model.family:
                 lines.append(f'            family="{model.family}",')

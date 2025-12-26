@@ -9,7 +9,6 @@ export interface ModelInfo {
   supports_vision: boolean;
   supports_function_calling: boolean;
   supports_streaming: boolean;
-  deprecated: boolean;
   recommended: boolean;
   family: string | null;
 }
@@ -43,7 +42,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: false,
         family: 'gpt-4',
       },
@@ -56,7 +54,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'gpt-4',
       },
@@ -69,7 +66,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'gpt-4o',
       },
@@ -82,7 +78,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'gpt-4o',
       },
@@ -95,7 +90,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: false,
         family: 'gpt-3.5',
       },
@@ -110,7 +104,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'claude-3',
       },
@@ -123,7 +116,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'claude-3',
       },
@@ -136,7 +128,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: true,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'claude-3.5',
       },
@@ -151,7 +142,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'grok',
       },
@@ -164,7 +154,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'grok',
       },
@@ -179,7 +168,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: true,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'llama-3',
       },
@@ -194,7 +182,6 @@ const STATIC_MODELS: AvailableModels = {
         supports_vision: false,
         supports_function_calling: false,
         supports_streaming: true,
-        deprecated: false,
         recommended: true,
         family: 'llama-3',
       },
