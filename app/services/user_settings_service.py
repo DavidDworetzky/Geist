@@ -95,17 +95,32 @@ class UserSettingsService:
     def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> Optional[UserSettingsResponse]:
         """
         Update user settings.
-        
+
         Args:
             user_id: User ID
             updates: Settings updates
-            
+
         Returns:
             Updated UserSettingsResponse if successful, None if user not found
         """
         # Convert Pydantic model to dict, excluding None values
         update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-        
+
+        # Backend validation: auto-infer agent_type based on model/provider changes
+        # This acts as a safety net if the frontend doesn't set agent_type correctly
+        if 'default_agent_type' not in update_dict or update_dict.get('default_agent_type') is None:
+            # If online model or online provider is being set, infer agent_type as 'online'
+            if 'default_online_model' in update_dict or 'default_online_provider' in update_dict:
+                provider = update_dict.get('default_online_provider', '')
+                # Only set to online if provider is not 'offline'
+                if provider != 'offline':
+                    update_dict['default_agent_type'] = 'online'
+                    logger.info(f"Auto-inferred agent_type='online' based on online model/provider update")
+            # If local model is being set, infer agent_type as 'local'
+            elif 'default_local_model' in update_dict:
+                update_dict['default_agent_type'] = 'local'
+                logger.info(f"Auto-inferred agent_type='local' based on local model update")
+
         settings_model = update_user_settings(user_id, update_dict)
         if settings_model:
             return UserSettingsResponse(

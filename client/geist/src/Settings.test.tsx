@@ -169,4 +169,121 @@ describe('Settings page', () => {
     fireEvent.click(screen.getByText('Retry'));
     await waitFor(() => screen.getByText('Settings'));
   });
+
+  describe('Agent type auto-sync', () => {
+    it('auto-syncs agent_type to online when selecting an online provider', async () => {
+      let savedUpdates: any = null;
+      // @ts-ignore
+      global.fetch = jest.fn((url: string, options?: any) => {
+        if (url === '/api/v1/models/') {
+          return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+        }
+        if (options?.method === 'PUT') {
+          savedUpdates = JSON.parse(options.body);
+          return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => baseSettings });
+      });
+
+      render(<Settings />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+      });
+
+      // Switch to online agent type first to see the provider dropdown
+      const agentTypeSelect = screen.getByLabelText('Default Agent Type');
+      fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
+
+      // Change the online provider
+      const providerSelect = screen.getByLabelText('Online Provider');
+      fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
+
+      // Save and verify agent_type is 'online'
+      fireEvent.click(screen.getByText(/Save Changes/i));
+
+      await waitFor(() => {
+        expect(savedUpdates).not.toBeNull();
+        expect(savedUpdates.default_agent_type).toBe('online');
+        expect(savedUpdates.default_online_provider).toBe('anthropic');
+      });
+    });
+
+    it('auto-syncs agent_type to online when selecting an online model', async () => {
+      let savedUpdates: any = null;
+      // @ts-ignore
+      global.fetch = jest.fn((url: string, options?: any) => {
+        if (url === '/api/v1/models/') {
+          return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+        }
+        if (options?.method === 'PUT') {
+          savedUpdates = JSON.parse(options.body);
+          return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => baseSettings });
+      });
+
+      render(<Settings />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+      });
+
+      // Switch to online agent type to see the model dropdown
+      const agentTypeSelect = screen.getByLabelText('Default Agent Type');
+      fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
+
+      // Change the online model
+      const modelSelect = screen.getByLabelText('Online Model');
+      fireEvent.change(modelSelect, { target: { value: 'gpt-4-turbo' } });
+
+      // Save and verify agent_type is 'online'
+      fireEvent.click(screen.getByText(/Save Changes/i));
+
+      await waitFor(() => {
+        expect(savedUpdates).not.toBeNull();
+        expect(savedUpdates.default_agent_type).toBe('online');
+        expect(savedUpdates.default_online_model).toBe('gpt-4-turbo');
+      });
+    });
+
+    it('auto-syncs agent_type to local when selecting a local model', async () => {
+      const onlineSettings = { ...baseSettings, default_agent_type: 'online' };
+      let savedUpdates: any = null;
+      // @ts-ignore
+      global.fetch = jest.fn((url: string, options?: any) => {
+        if (url === '/api/v1/models/') {
+          return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+        }
+        if (options?.method === 'PUT') {
+          savedUpdates = JSON.parse(options.body);
+          return Promise.resolve({ ok: true, json: async () => ({ ...onlineSettings, ...savedUpdates }) });
+        }
+        return Promise.resolve({ ok: true, json: async () => onlineSettings });
+      });
+
+      render(<Settings />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+      });
+
+      // Switch to local agent type
+      const agentTypeSelect = screen.getByLabelText('Default Agent Type');
+      fireEvent.change(agentTypeSelect, { target: { value: 'local' } });
+
+      // Change the local model
+      const modelSelect = screen.getByLabelText('Local Model');
+      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B-Instruct' } });
+
+      // Save and verify agent_type is 'local'
+      fireEvent.click(screen.getByText(/Save Changes/i));
+
+      await waitFor(() => {
+        expect(savedUpdates).not.toBeNull();
+        expect(savedUpdates.default_agent_type).toBe('local');
+        expect(savedUpdates.default_local_model).toBe('Meta-Llama-3.1-8B-Instruct');
+      });
+    });
+  });
 });

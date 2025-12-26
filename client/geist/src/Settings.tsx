@@ -247,9 +247,27 @@ const Settings: React.FC = () => {
             onlineProvider={localSettings.default_online_provider}
             onlineModel={localSettings.default_online_model}
             onAgentTypeChange={(value) => updateLocalSetting('default_agent_type', value)}
-            onLocalModelChange={(value) => updateLocalSetting('default_local_model', value)}
-            onOnlineProviderChange={(value) => updateLocalSetting('default_online_provider', value)}
-            onOnlineModelChange={(value) => updateLocalSetting('default_online_model', value)}
+            onLocalModelChange={(value) => {
+              updateLocalSetting('default_local_model', value);
+              // Auto-sync agent_type to local when selecting a local model
+              if (localSettings.default_agent_type !== 'local') {
+                updateLocalSetting('default_agent_type', 'local');
+              }
+            }}
+            onOnlineProviderChange={(value) => {
+              updateLocalSetting('default_online_provider', value);
+              // Auto-sync agent_type to online when selecting an online provider
+              if (localSettings.default_agent_type !== 'online') {
+                updateLocalSetting('default_agent_type', 'online');
+              }
+            }}
+            onOnlineModelChange={(value) => {
+              updateLocalSetting('default_online_model', value);
+              // Auto-sync agent_type to online when selecting an online model
+              if (localSettings.default_agent_type !== 'online') {
+                updateLocalSetting('default_agent_type', 'online');
+              }
+            }}
           />
         )}
 
