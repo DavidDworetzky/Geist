@@ -348,6 +348,70 @@ def print_model_summary(models_by_provider: Dict[str, List[DiscoveredModel]], ve
     print(f"\nTotal: {total} models\n")
 
 
+def check_missing_api_keys(provider: str = "all") -> List[str]:
+    """
+    Check for missing API keys for online providers.
+
+    Args:
+        provider: Which provider to check ("openai", "anthropic", "huggingface", or "all")
+
+    Returns:
+        List of missing API key names
+    """
+    missing_keys = []
+
+    # Define required keys for each provider
+    key_checks = {
+        "openai": ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_TOKEN")),
+        "anthropic": ("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY")),
+    }
+
+    # Check which providers need keys
+    providers_to_check = list(key_checks.keys()) if provider == "all" else [provider]
+
+    for prov in providers_to_check:
+        if prov in key_checks:
+            key_name, key_value = key_checks[prov]
+            if not key_value:
+                missing_keys.append(key_name)
+
+    return missing_keys
+
+
+def print_missing_keys_warning(missing_keys: List[str]) -> None:
+    """
+    Print a prominent warning about missing API keys.
+
+    Args:
+        missing_keys: List of missing API key environment variable names
+    """
+    if not missing_keys:
+        return
+
+    warning_lines = [
+        "",
+        "=" * 60,
+        "⚠️  WARNING: Missing API Keys for Online Providers",
+        "=" * 60,
+        "",
+        "The following API keys are not set in your environment:",
+    ]
+    for key in missing_keys:
+        warning_lines.append(f"  • {key}")
+    warning_lines.extend([
+        "",
+        "Models from these providers will NOT be synced.",
+        "Set these environment variables to enable syncing:",
+    ])
+    for key in missing_keys:
+        warning_lines.append(f"  export {key}=your_key_here")
+    warning_lines.extend(["=" * 60, ""])
+
+    # Print to stderr to match logger output ordering
+    for line in warning_lines:
+        print(line, file=sys.stderr)
+
+
 def main():
     """Main entry point for the sync script."""
     parser = argparse.ArgumentParser(
@@ -386,6 +450,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Check for missing API keys and warn user
+    missing_keys = check_missing_api_keys(args.provider)
+    print_missing_keys_warning(missing_keys)
 
     # Get API keys from environment
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_TOKEN")

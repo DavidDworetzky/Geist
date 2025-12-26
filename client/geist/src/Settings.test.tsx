@@ -22,6 +22,35 @@ const baseSettings = {
   update_date: '2025-01-01T00:00:00Z'
 };
 
+const mockModelsResponse = {
+  providers: {
+    openai: [
+      { id: 'gpt-4', name: 'GPT-4', provider: 'openai', recommended: false },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'openai', recommended: true },
+    ],
+    anthropic: [
+      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', recommended: true },
+    ],
+    offline: [
+      { id: 'Meta-Llama-3.1-8B-Instruct', name: 'Meta Llama 3.1 8B Instruct', provider: 'offline', recommended: true },
+    ],
+  },
+  last_updated: '2025-01-01T00:00:00Z',
+};
+
+// Helper to create fetch mock that handles both settings and models endpoints
+const createFetchMock = (settingsResponses: any[]) => {
+  let settingsCallIndex = 0;
+  return jest.fn((url: string) => {
+    if (url === '/api/v1/models/') {
+      return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+    }
+    // Settings endpoints
+    const response = settingsResponses[settingsCallIndex++];
+    return Promise.resolve(response);
+  });
+};
+
 describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -30,7 +59,8 @@ describe('Settings page', () => {
   });
 
   it('shows loading, then renders tabs', async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => baseSettings });
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
     render(<Settings />);
     expect(screen.getByText(/Loading settings/i)).toBeInTheDocument();
@@ -45,9 +75,11 @@ describe('Settings page', () => {
   });
 
   it('marks unsaved changes when local values change and saves', async () => {
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce({ ok: true, json: async () => baseSettings }) // initial GET
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...baseSettings, default_temperature: 0.8 }) }); // PUT
+    // @ts-ignore
+    global.fetch = createFetchMock([
+      { ok: true, json: async () => baseSettings }, // initial GET
+      { ok: true, json: async () => ({ ...baseSettings, default_temperature: 0.8 }) }, // PUT
+    ]);
 
     render(<Settings />);
 
@@ -74,7 +106,8 @@ describe('Settings page', () => {
   });
 
   it('cancel reverts local changes', async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => baseSettings });
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
     render(<Settings />);
 
@@ -93,9 +126,11 @@ describe('Settings page', () => {
   });
 
   it('reset triggers API and shows success', async () => {
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce({ ok: true, json: async () => baseSettings }) // initial GET
-      .mockResolvedValueOnce({ ok: true, json: async () => baseSettings }); // POST reset
+    // @ts-ignore
+    global.fetch = createFetchMock([
+      { ok: true, json: async () => baseSettings }, // initial GET
+      { ok: true, json: async () => baseSettings }, // POST reset
+    ]);
 
     // confirm window
     jest.spyOn(window, 'confirm').mockReturnValue(true);
@@ -114,9 +149,19 @@ describe('Settings page', () => {
   });
 
   it('shows error with Retry on initial fetch failure', async () => {
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce({ ok: false, statusText: 'Server Error' })
-      .mockResolvedValueOnce({ ok: true, json: async () => baseSettings });
+    let callCount = 0;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      // Settings endpoint - first call fails, second succeeds
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({ ok: false, statusText: 'Server Error' });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
 
     render(<Settings />);
     await waitFor(() => screen.getByText(/Error loading settings/i));
