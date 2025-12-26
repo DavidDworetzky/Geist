@@ -324,7 +324,6 @@ class ModelInfo:
     supports_vision: bool = False        # Multimodal support
     supports_function_calling: bool = False
     supports_streaming: bool = True
-    deprecated: bool = False             # Mark deprecated models
     recommended: bool = False            # Highlight recommended models
     family: Optional[str] = None         # Model family (e.g., "gpt-4", "claude-3")
 
@@ -339,7 +338,6 @@ class ModelInfo:
             "supports_vision": self.supports_vision,
             "supports_function_calling": self.supports_function_calling,
             "supports_streaming": self.supports_streaming,
-            "deprecated": self.deprecated,
             "recommended": self.recommended,
             "family": self.family
         }

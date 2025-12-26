@@ -32,7 +32,7 @@ class ModelResponse(BaseModel):
     supports_vision: bool
     supports_function_calling: bool
     supports_streaming: bool
-    deprecated: bool
+    #recommended models can be filtered to the top in the UI.
     recommended: bool
     family: Optional[str]
 
