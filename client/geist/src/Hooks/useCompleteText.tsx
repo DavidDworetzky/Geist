@@ -4,26 +4,25 @@ import { UserSettings } from './useUserSettings';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
+const AGENT_TYPE_MAPPING = {
+  "online": "HTTPAGENT",
+  "local": "LOCALAGENT",
+  "default": "LOCALAGENT"
+}
+
 interface CompleteTextResponse {
   message: string;
   chat_id: number | null;
 }
 
-const DEFAULT_AGENT_TYPE = "LLAMA";
+const DEFAULT_AGENT_TYPE = "LOCALAGENT";
 
 const getAgentTypeFromSettings = (settings: UserSettings | null): string => {
   if (!settings) {
     return DEFAULT_AGENT_TYPE;
   }
-
-  // Map user settings agent type to backend agent type
-  if (settings.default_agent_type === "online") {
-    return "HTTPAGENT";
-  } else if (settings.default_agent_type === "local") {
-    return "LOCALAGENT";
-  }
-
-  return DEFAULT_AGENT_TYPE;
+  const agentType = AGENT_TYPE_MAPPING[settings.default_agent_type as keyof typeof AGENT_TYPE_MAPPING] || DEFAULT_AGENT_TYPE;
+  return agentType;
 };
 
 const getDefaultParams = (settings: UserSettings | null) => ({
