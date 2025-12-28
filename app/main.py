@@ -39,6 +39,7 @@ register_all_runners()
 DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
+DEFAULT_API_URL = "https://api.openai.com/v1"
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = os.getenv("ENHANCED_LOGGING")
 enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else False
@@ -282,7 +283,7 @@ def get_online_agent():
 
     return OnlineAgent(
         agent_context=agent_context,
-        base_url=factory_config.endpoint or "https://api.openai.com/v1",
+        base_url=factory_config.endpoint or DEFAULT_API_URL,
         model=factory_config.model,
         api_key=api_key
     )
