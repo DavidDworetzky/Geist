@@ -18,6 +18,7 @@ import uvicorn
 import json
 from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
+from agents.online_agent import OnlineAgent
 from agents.models.agent_completion import AgentCompletion
 from agents.prompt.prompt import AGENT_PROMPTS
 from app.models.database.chat_session import get_chat_history, get_all_chat_history, get_paginated_chat_history, get_paginated_chat_sessions
@@ -27,6 +28,8 @@ from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.models import router as models_router
 from agents.local_agent import LocalAgent
+from app.services.user_settings_service import UserSettingsService
+from app.models.user_settings import AgentFactoryConfig
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
 
@@ -43,7 +46,9 @@ enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else
 #in memory agent cache
 agent_cache = {
     AgentType.LLAMA : None,
-    AgentType.GPT4AGENT : None
+    AgentType.GPT4AGENT : None,
+    AgentType.HTTPAGENT : None,
+    AgentType.LOCALAGENT : None
 }
 
 #constants
@@ -257,10 +262,36 @@ def get_local_agent():
     agent_context = get_default_agent_context()
     return LocalAgent(agent_context = agent_context, ckpt_dir=None)
 
-agent_mappings = { 
+def get_online_agent():
+    agent_context = get_default_agent_context()
+    # Get user settings to determine provider-specific configuration
+    settings = UserSettingsService.get_default_user_settings()
+    factory_config = AgentFactoryConfig.from_user_settings(settings)
+
+    # Get provider-specific API key from environment
+    provider = settings.default_online_provider
+    api_key = None
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+    elif provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+    elif provider == "groq":
+        api_key = os.getenv("GROQ_API_KEY")
+    elif provider == "grok":
+        api_key = os.getenv("GROK_API_KEY")
+
+    return OnlineAgent(
+        agent_context=agent_context,
+        base_url=factory_config.endpoint or "https://api.openai.com/v1",
+        model=factory_config.model,
+        api_key=api_key
+    )
+
+agent_mappings = {
     AgentType.GPT4AGENT : get_gpt4_client,
     AgentType.LLAMA : get_llama_agent,
-    AgentType.LOCALAGENT : get_local_agent
+    AgentType.LOCALAGENT : get_local_agent,
+    AgentType.HTTPAGENT : get_online_agent
 }
 
 def get_active_agent(type: AgentType):
