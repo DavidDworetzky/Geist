@@ -4,6 +4,7 @@ from typing import Any
 import logging
 from agents.models.gpt4_completion import Gpt4Completion
 from agents.models.llama_completion import LlamaCompletion
+from agents.models.generic_completion import GenericCompletion
 import uuid
 
 # Create logger
@@ -16,8 +17,14 @@ class AgentCompletion:
     chat_id: int
 
     @classmethod
-    def from_completion(cls, completion: Union['Gpt4Completion', 'LlamaCompletion']):
+    def from_completion(cls, completion: Union['Gpt4Completion', 'LlamaCompletion', 'GenericCompletion']):
         if isinstance(completion, Gpt4Completion):
+            return cls(
+                message=[completion.choices[0].message.content],
+                id=completion.id,
+                chat_id=completion.chat_id
+            )
+        elif isinstance(completion, GenericCompletion):
             return cls(
                 message=[completion.choices[0].message.content],
                 id=completion.id,

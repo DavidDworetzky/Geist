@@ -2,6 +2,7 @@ import React, { useState, useEffect, FormEvent, useRef, useLayoutEffect, useCall
 import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
+import useUserSettings from './Hooks/useUserSettings';
 import {ChatSession}from './Hooks/useGetChatSessions';
 import ChatTextArea from './Components/ChatTextArea';
 import LinkList from './Components/LinkList';
@@ -18,7 +19,8 @@ const Chat = () => {
     const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions } = useGetChatSessions();
     const [userInput, setUserInput] = useState('');
     const [fileContextInfo, setFileContextInfo] = useState<string>('');
-    const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText();
+    const { settings: userSettings } = useUserSettings();
+    const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText(userSettings);
     const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
 
     // Pagination state for chat history

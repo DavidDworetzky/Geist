@@ -11,7 +11,8 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        return cls(**data)
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(**valid_fields)
 
 @dataclass
 class Choice:
@@ -31,10 +32,10 @@ class Choice:
         else:
             message = Message.from_dict(data['message'])
 
-        # Create a copy of data to avoid modifying the original
-        data_copy = data.copy()
-        data_copy['message'] = message
-        return cls(**data_copy)
+        # Filter to only valid fields and set message
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        valid_fields['message'] = message
+        return cls(**valid_fields)
 
 @dataclass
 class TokenDetails:
@@ -61,17 +62,17 @@ class Usage:
         if isinstance(data, cls):
             return data
 
-        # Create a copy to avoid modifying the original
-        data_copy = deepcopy(data)
+        # Filter to only valid fields
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
 
         # Convert nested objects if they're not already the correct type
-        if not isinstance(data_copy['prompt_tokens_details'], TokenDetails):
-            data_copy['prompt_tokens_details'] = TokenDetails.from_dict(data_copy['prompt_tokens_details'])
+        if 'prompt_tokens_details' in valid_fields and not isinstance(valid_fields['prompt_tokens_details'], TokenDetails):
+            valid_fields['prompt_tokens_details'] = TokenDetails.from_dict(valid_fields['prompt_tokens_details'])
 
-        if not isinstance(data_copy['completion_tokens_details'], TokenDetails):
-            data_copy['completion_tokens_details'] = TokenDetails.from_dict(data_copy['completion_tokens_details'])
+        if 'completion_tokens_details' in valid_fields and not isinstance(valid_fields['completion_tokens_details'], TokenDetails):
+            valid_fields['completion_tokens_details'] = TokenDetails.from_dict(valid_fields['completion_tokens_details'])
 
-        return cls(**data_copy)
+        return cls(**valid_fields)
 
 @dataclass
 class GenericCompletion:
@@ -86,9 +87,9 @@ class GenericCompletion:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        # Create a copy to avoid modifying the original
-        data_copy = deepcopy(data)
+        # Filter to only valid fields
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
 
-        data_copy['choices'] = [Choice.from_dict(choice) for choice in data_copy['choices']]
-        data_copy['usage'] = Usage.from_dict(data_copy['usage'])
-        return cls(**data_copy)
+        valid_fields['choices'] = [Choice.from_dict(choice) for choice in data['choices']]
+        valid_fields['usage'] = Usage.from_dict(data['usage'])
+        return cls(**valid_fields)

@@ -1,29 +1,46 @@
 import { useState } from 'react';
+import { UserSettings } from './useUserSettings';
 
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
+
+const AGENT_TYPE_MAPPING = {
+  "online": "HTTPAGENT",
+  "local": "LOCALAGENT",
+  "default": "LOCALAGENT"
+}
 
 interface CompleteTextResponse {
   message: string;
   chat_id: number | null;
 }
 
-const params = {
-  max_tokens: 1024,
+const DEFAULT_AGENT_TYPE = "LOCALAGENT";
+
+const getAgentTypeFromSettings = (settings: UserSettings | null): string => {
+  if (!settings) {
+    return DEFAULT_AGENT_TYPE;
+  }
+  const agentType = AGENT_TYPE_MAPPING[settings.default_agent_type as keyof typeof AGENT_TYPE_MAPPING] || DEFAULT_AGENT_TYPE;
+  return agentType;
+};
+
+const getDefaultParams = (settings: UserSettings | null) => ({
+  max_tokens: settings?.default_max_tokens ?? 1024,
   n: 1,
   stop: ["string"],
-  temperature: 1,
-  top_p: 1,
-  frequency_penalty: 0,
-  presence_penalty: 0,
+  temperature: settings?.default_temperature ?? 1,
+  top_p: settings?.default_top_p ?? 1,
+  frequency_penalty: settings?.default_frequency_penalty ?? 0,
+  presence_penalty: settings?.default_presence_penalty ?? 0,
   echo: false,
   best_of: 0,
   prompt_tokens: [0],
   response_format: "text",
-  agent_type: "LLAMA"
-};
+  agent_type: getAgentTypeFromSettings(settings)
+});
 
-const useCompleteText = () => {
+const useCompleteText = (userSettings: UserSettings | null = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completedText, setCompletedText] = useState<string | null>(null);
@@ -37,11 +54,12 @@ const useCompleteText = () => {
     chat_id = chat_id ?? state_chat_id;
     setStateChatId(null);
     const prompt = inputText;
+    const params = getDefaultParams(userSettings);
     try {
-      const endpoint = chat_id !== null 
+      const endpoint = chat_id !== null
         ? `/agent/complete_text/${chat_id}`
         : '/agent/complete_text';
-      
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
