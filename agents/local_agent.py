@@ -160,7 +160,42 @@ class LocalAgent(BaseAgent):
         
         completion.chat_id = chat_history.chat_session_id
         return completion
-    
+
+    def stream_complete_text(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        n: int = None,
+        stop: Optional[str] = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
+        echo: bool = False,
+        best_of: Optional[int] = None,
+        prompt_tokens: Optional[int] = None,
+        response_format: str = "text",
+        system_prompt: Optional[str] = None,
+        chat_id: Optional[int] = None
+    ):
+        """Stream text completion - delegates to complete_text for now."""
+        return self.complete_text(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            n=n,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            stop=stop,
+            echo=echo,
+            best_of=best_of,
+            prompt_tokens=prompt_tokens,
+            response_format=response_format,
+            system_prompt=system_prompt,
+            chat_id=chat_id
+        )
+
     def complete_audio(
         self,
         audio_file,
