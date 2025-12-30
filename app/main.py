@@ -40,6 +40,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
+DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = os.getenv("ENHANCED_LOGGING")
 enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else False
@@ -261,7 +262,10 @@ def get_llama_agent():
 
 def get_local_agent():
     agent_context = get_default_agent_context()
-    return LocalAgent(agent_context = agent_context, ckpt_dir=None)
+    # Get user settings to determine local model configuration
+    settings = UserSettingsService.get_default_user_settings()
+    model_id = settings.default_local_model or DEFAULT_LOCAL_MODEL
+    return LocalAgent(agent_context=agent_context, model_id=model_id, runner_type="mlx_llama")
 
 def get_online_agent():
     agent_context = get_default_agent_context()
