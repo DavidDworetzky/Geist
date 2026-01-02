@@ -1,7 +1,6 @@
 {
   "name": "geist",
   "version": "0.1.0",
-  "proxy": "http://host.docker.internal:5001",
   "private": true,
   "dependencies": {
     "@testing-library/jest-dom": "^5.16.5",
