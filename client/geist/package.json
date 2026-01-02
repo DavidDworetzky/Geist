@@ -1,7 +1,7 @@
 {
   "name": "geist",
   "version": "0.1.0",
-  "proxy": "http://backend:5000",
+  "proxy": "http://backend:5001",
   "private": true,
   "dependencies": {
     "@testing-library/jest-dom": "^5.16.5",
