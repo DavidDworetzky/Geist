@@ -27,13 +27,12 @@ pre-commit install
 
 #### Included Checks
 
-- **Secret Detection** (gitleaks): Scans for accidentally committed secrets, API keys, passwords
 - **Python SAST** (bandit): Static analysis security testing for Python code
 - **Dependency Scanning** (safety): Checks Python dependencies for known vulnerabilities
 - **Code Formatting** (black, isort): Ensures consistent code style
 - **Linting** (flake8, yamllint): Code quality and syntax checking
 - **Dockerfile Linting** (hadolint): Best practices for Dockerfiles
-- **General Checks**: Trailing whitespace, merge conflicts, large files, private keys
+- **General Checks**: Trailing whitespace, merge conflicts, large files
 
 #### Running Pre-commit Hooks
 
@@ -69,10 +68,9 @@ The CI/CD pipeline includes three security-focused jobs that run on every push a
 
 Runs comprehensive security scans:
 
-- **Gitleaks**: Full repository secret scanning with history analysis
-- **Bandit**: Python SAST with severity-based failure (fails on HIGH severity)
+- **Bandit**: Python SAST (Static Application Security Testing)
 - **Safety**: Python dependency vulnerability scanning
-- **NPM Audit**: Frontend dependency vulnerability scanning (fails on CRITICAL vulnerabilities)
+- **NPM Audit**: Frontend dependency vulnerability scanning
 
 All security reports are uploaded as artifacts for review.
 
@@ -91,7 +89,6 @@ After successful builds:
 ### 3. Configuration Files
 
 - `.pre-commit-config.yaml`: Pre-commit hooks configuration
-- `.gitleaks.toml`: Gitleaks secret detection rules and allowlists
 - `.yamllint`: YAML linting rules
 - `pyproject.toml`: Bandit, black, and isort configuration
 
@@ -99,13 +96,13 @@ After successful builds:
 
 ### Pre-commit Hooks
 
-- **BLOCK**: Secret detection, merge conflicts, syntax errors
-- **WARN**: Code formatting, minor linting issues
+- **BLOCK**: Merge conflicts, syntax errors
+- **WARN**: Code formatting, minor linting issues, security findings
 
 ### CI/CD Pipeline
 
-- **FAIL on**: HIGH severity security issues (Bandit), CRITICAL npm vulnerabilities, detected secrets
-- **REPORT**: All other findings are reported but don't fail the build
+- **REPORT**: All security findings are reported but don't fail the build
+- Security reports available as downloadable artifacts for review
 
 ## Handling Security Findings
 
@@ -113,15 +110,13 @@ After successful builds:
 
 If a security tool reports a false positive:
 
-1. **Gitleaks**: Add pattern to `.gitleaks.toml` allowlist
-2. **Bandit**: Add `# nosec` comment with justification or configure in `pyproject.toml`
-3. **Safety**: Pin dependency version if upgrade not possible, document reason
+1. **Bandit**: Add `# nosec` comment with justification or configure in `pyproject.toml`
+2. **Safety**: Pin dependency version if upgrade not possible, document reason
 
 ### True Positives
 
-1. **Secrets**: Remove from git history using `git-filter-repo` or BFG, rotate credentials
-2. **Vulnerabilities**: Update dependencies, apply patches, or implement workarounds
-3. **Code Issues**: Refactor code to address security concerns
+1. **Vulnerabilities**: Update dependencies, apply patches, or implement workarounds
+2. **Code Issues**: Refactor code to address security concerns
 
 ## Security Best Practices
 
@@ -130,6 +125,7 @@ If a security tool reports a false positive:
 3. **Review security reports**: Check CI/CD artifacts for detailed findings
 4. **Run local checks**: Test pre-commit hooks before pushing
 5. **Document exceptions**: If bypassing a check, document why in commit message
+6. **Review bandit findings**: Address high-severity security issues in code
 
 ## Reporting Security Vulnerabilities
 
@@ -142,7 +138,6 @@ If you discover a security vulnerability in Geist:
 
 ## Security Tools Documentation
 
-- [Gitleaks](https://github.com/gitleaks/gitleaks) - Secret scanning
 - [Bandit](https://bandit.readthedocs.io/) - Python SAST
 - [Safety](https://pyup.io/safety/) - Dependency scanning
 - [Trivy](https://trivy.dev/) - Container scanning

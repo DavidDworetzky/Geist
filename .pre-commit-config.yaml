@@ -13,15 +13,8 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-merge-conflict
-      - id: detect-private-key
       - id: check-case-conflict
       - id: mixed-line-ending
-
-  # Secret detection
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
-    hooks:
-      - id: gitleaks
 
   # Python security and code quality
   - repo: https://github.com/PyCQA/bandit

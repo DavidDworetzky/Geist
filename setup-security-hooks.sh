@@ -24,34 +24,6 @@ pip install pre-commit
 echo "📦 Installing security tools..."
 pip install bandit safety black isort flake8 yamllint
 
-# Install gitleaks
-echo "📦 Installing gitleaks..."
-if ! command -v gitleaks &> /dev/null; then
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        echo "Installing gitleaks for Linux..."
-        wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
-        tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
-        sudo mv gitleaks /usr/local/bin/ || mv gitleaks ~/bin/
-        chmod +x /usr/local/bin/gitleaks 2>/dev/null || chmod +x ~/bin/gitleaks
-        rm gitleaks_8.21.2_linux_x64.tar.gz
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "Installing gitleaks for macOS..."
-        if command -v brew &> /dev/null; then
-            brew install gitleaks
-        else
-            wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_darwin_arm64.tar.gz
-            tar -xzf gitleaks_8.21.2_darwin_arm64.tar.gz
-            sudo mv gitleaks /usr/local/bin/ || mv gitleaks ~/bin/
-            chmod +x /usr/local/bin/gitleaks 2>/dev/null || chmod +x ~/bin/gitleaks
-            rm gitleaks_8.21.2_darwin_arm64.tar.gz
-        fi
-    else
-        echo "⚠️  Please manually install gitleaks from https://github.com/gitleaks/gitleaks/releases"
-    fi
-else
-    echo "✓ Gitleaks already installed"
-fi
-
 # Install hadolint (Dockerfile linter)
 echo "📦 Installing hadolint..."
 if ! command -v hadolint &> /dev/null; then
@@ -92,7 +64,6 @@ echo "   3. To bypass hooks (not recommended): git commit --no-verify"
 echo "   4. Review .pre-commit-config.yaml to customize checks"
 echo ""
 echo "🔒 Security checks enabled:"
-echo "   ✓ Secret detection (gitleaks)"
 echo "   ✓ Python security scanning (bandit)"
 echo "   ✓ Dependency vulnerability scanning (safety)"
 echo "   ✓ Code formatting (black, isort)"

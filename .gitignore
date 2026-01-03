@@ -143,7 +143,6 @@ app/model_weights/*
 # Security and pre-commit
 .pre-commit-cache/
 *-report.json
-gitleaks-report.json
 bandit-report.json
 safety-report.json
 npm-audit-report.json

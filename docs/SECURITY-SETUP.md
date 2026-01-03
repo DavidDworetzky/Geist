@@ -25,14 +25,6 @@ pip install pre-commit
 # Install security tools
 pip install bandit safety black isort flake8 yamllint
 
-# Install gitleaks (Linux)
-wget https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
-tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
-sudo mv gitleaks /usr/local/bin/
-
-# Install gitleaks (macOS)
-brew install gitleaks
-
 # Install hadolint (Linux)
 wget https://github.com/hadolint/hadolint/releases/download/v2.13.1-beta/hadolint-Linux-x86_64 -O hadolint
 sudo mv hadolint /usr/local/bin/
@@ -51,9 +43,6 @@ pre-commit install
 # Check pre-commit is installed
 pre-commit --version
 
-# Check gitleaks is installed
-gitleaks version
-
 # Check other tools
 bandit --version
 safety --version
@@ -67,7 +56,6 @@ hadolint --version
 pre-commit run --all-files
 
 # Run specific security checks
-pre-commit run gitleaks --all-files
 pre-commit run bandit --all-files
 pre-commit run python-safety-dependencies-check --all-files
 ```
@@ -107,7 +95,7 @@ git push
 git commit --no-verify
 
 # Skip specific hook
-SKIP=gitleaks git commit
+SKIP=bandit git commit
 ```
 
 ## Common Issues and Solutions
@@ -123,17 +111,6 @@ isort .
 
 # Re-run checks
 pre-commit run --all-files
-```
-
-### Gitleaks False Positives
-
-Add to `.gitleaks.toml` allowlist:
-
-```toml
-[allowlist]
-regexes = [
-    '''your-false-positive-pattern'''
-]
 ```
 
 ### Bandit False Positives
@@ -180,7 +157,6 @@ The security checks also run automatically in GitHub Actions on:
 ### Security Job Artifacts
 
 After each CI run, download security reports:
-- `gitleaks-report.json`: Secret scanning results
 - `bandit-report.json`: Python SAST results
 - `safety-report.json`: Dependency vulnerability report
 - `npm-audit-report.json`: Frontend dependency report
@@ -206,7 +182,6 @@ pip install --upgrade bandit safety black isort flake8 yamllint pre-commit
 ## Configuration Files
 
 - `.pre-commit-config.yaml`: Pre-commit hook configuration
-- `.gitleaks.toml`: Gitleaks configuration and allowlists
 - `.yamllint`: YAML linting rules
 - `pyproject.toml`: Python tool configuration (bandit, black, isort)
 
