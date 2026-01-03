@@ -267,6 +267,101 @@ The system automatically tracks:
 5. **Resource Management**: Call `phase_out()` to clean up agent resources
 6. **Error Handling**: Implement proper error handling for network failures
 
+## Script Parameter Conventions
+
+When working with scripts in the `scripts/` directory (model management, database setup, utilities), follow these command-line parameter conventions:
+
+### Required Conventions
+
+- **Use `--` prefix** (double dash) for all named parameters
+- **Use `argparse`** for all argument parsing
+- **Provide `--help`** documentation with clear descriptions
+- **Include type hints** and default values where appropriate
+- **Avoid positional arguments** unless absolutely necessary
+
+### Acceptable Patterns
+
+1. **Named Arguments**
+   ```python
+   parser.add_argument("--model_id", type=str, default="meta-llama/Meta-Llama-3.1-8B-Instruct",
+                       help="HuggingFace model ID to download")
+   ```
+
+2. **Short Aliases**
+   ```python
+   parser.add_argument("-v", "--verbose", action="store_true",
+                       help="Enable verbose output")
+   parser.add_argument("-c", "--config", type=Path, default="containers.json",
+                       help="Configuration file path")
+   ```
+
+3. **Boolean Flags**
+   ```python
+   parser.add_argument("--commit", action="store_true",
+                       help="Commit changes to database (default: dry run)")
+   parser.add_argument("--dry-run", action="store_true",
+                       help="Preview changes without writing")
+   ```
+
+4. **Choice Arguments**
+   ```python
+   parser.add_argument("--provider",
+                       choices=["openai", "anthropic", "huggingface", "all"],
+                       default="all",
+                       help="Specific provider to sync")
+   ```
+
+5. **Subcommand Architecture**
+   ```python
+   subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+   delete_parser = subparsers.add_parser("delete", help="Delete all weights")
+   copy_parser = subparsers.add_parser("copy", help="Copy weights from source")
+   copy_parser.add_argument("--source", type=str, help="Source directory")
+   ```
+
+### Example Usage
+
+**Good Examples:**
+```bash
+# Model downloads with named parameters
+python scripts/download_models.py --model_id meta-llama/Meta-Llama-3.1-70B-Instruct --use_cli
+
+# Model syncing with provider selection
+python scripts/sync_models.py --provider openai --verbose --dry-run
+
+# Database operations with boolean flags
+python scripts/insert_presets.py --commit --overwrite
+
+# Subcommand with parameters
+python scripts/copy_weights.py copy --source /path/to/weights
+
+# Short aliases
+python scripts/generate_compose.py -c custom.json -o docker-compose.prod.yml
+```
+
+**Avoid:**
+```bash
+# Positional arguments without names
+python scripts/download_models.py meta-llama/Meta-Llama-3.1-8B-Instruct  # Bad
+
+# Single dash for long names
+python scripts/sync_models.py -provider openai  # Bad (should be --provider)
+
+# Unclear abbreviations
+python scripts/sync_models.py -p openai  # Unclear (what is -p?)
+```
+
+### Script Categories
+
+The `scripts/` directory contains:
+
+- **Model Management**: `download_models.py`, `copy_weights.py`, `sync_models.py`, `list_hf_open_models.py`
+- **Environment Setup**: `copy_environment.py`, `generate_compose.py`
+- **Database Setup**: `insert_presets.py`, `insert_default_user.py`
+- **Utilities**: `test_arch_availability.py`, `model_filter_config.py`
+
+All scripts should maintain consistent parameter naming and conventions across categories.
+
 ## Troubleshooting
 
 ### Common Issues

@@ -1,8 +1,40 @@
 #commands
 `docker compose up` to run the docker container
 `make build` to build the solution
-`make run MLX_BACKEND=1` to run the solution with MLX_BACKEND instead of 
+`make run MLX_BACKEND=1` to run the solution with MLX_BACKEND instead of
 `make empty` to run an empty container to install dependencies
+
+#script parameter conventions
+All scripts in the `scripts/` directory should follow these command-line parameter conventions:
+
+**Required Conventions:**
+- Use `--` prefix (double dash) for all named parameters
+- Use `argparse` for argument parsing
+- Provide clear `--help` documentation for all parameters
+- Include type hints and default values where appropriate
+
+**Acceptable Patterns:**
+- Short aliases (e.g., `-v` for `--verbose`, `-c` for `--config`) are acceptable
+- Boolean flags using `action="store_true"` (e.g., `--dry-run`, `--commit`)
+- Subcommand architectures using `subparsers` for complex scripts
+
+**Examples:**
+```bash
+# Good: Named parameters with -- prefix
+python scripts/download_models.py --model_id meta-llama/Meta-Llama-3.1-8B-Instruct --weights_dir app/model_weights
+
+# Good: Short aliases
+python scripts/sync_models.py -v --provider openai
+
+# Good: Boolean flags
+python scripts/insert_presets.py --commit --overwrite
+
+# Avoid: Positional arguments without names
+python scripts/download_models.py meta-llama/Meta-Llama-3.1-8B-Instruct  # Bad
+```
+
+When creating new scripts, always use `argparse.ArgumentParser()` and define parameters with descriptive help text.
+
 #package installs
 `docker exec backend /bin/bash` to enter the backend container
 `pip install PACKAGE` to install dependencies
