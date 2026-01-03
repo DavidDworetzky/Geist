@@ -50,7 +50,6 @@ dependencies:
       - antlr4-python3-runtime==4.9.3
       - anyio==4.8.0
       - attrs==25.1.0
-      - black==24.10.0
       - blobfile==3.0.0
       - certifi==2024.12.14
       - chardet==5.2.0
@@ -70,7 +69,6 @@ dependencies:
       - huggingface-hub==0.27.1
       - idna==3.10
       - iniconfig==2.0.0
-      - isort==5.13.2
       - jinja2==3.1.5
       - kagglehub==0.3.10
       - lxml==5.3.1
@@ -106,6 +104,7 @@ dependencies:
       - pyyaml==6.0.2
       - regex==2024.11.6
       - requests==2.32.3
+      - ruff==0.8.4
       - safetensors==0.5.2
       - sentencepiece==0.2.0
       - six==1.17.0

@@ -1,13 +1,12 @@
 # Pre-commit Hooks Setup
 
-This document explains how to set up and use pre-commit hooks for Python type checking in the Geist project.
+This document explains how to set up and use pre-commit hooks for Python type checking and code quality in the Geist project.
 
 ## Overview
 
 Pre-commit hooks automatically run checks on your code before each commit. This project uses:
-- **mypy**: Python type checking
-- **black**: Code formatting
-- **isort**: Import sorting
+- **Ruff**: Fast Python linter and code formatter (replaces black, isort, flake8, and more)
+- **mypy**: Python static type checking
 - **Standard pre-commit hooks**: File checks, YAML validation, etc.
 
 ## Installation
@@ -63,6 +62,7 @@ pre-commit run --files path/to/file.py
 
 # Run a specific hook
 pre-commit run mypy --all-files
+pre-commit run ruff --all-files
 ```
 
 ### Bypassing hooks (not recommended)
@@ -92,35 +92,55 @@ disallow_untyped_defs = true  # Make stricter
 disallow_untyped_calls = true  # Make stricter
 ```
 
-### black Configuration
+### Ruff Configuration
 
-Code formatting settings in `pyproject.toml`:
+Ruff combines linting and formatting in one fast tool. Configuration is in `pyproject.toml`:
+
+**General settings:**
 - Line length: 100 characters
 - Target Python version: 3.11
+- Excluded paths: migrations/, .venv/, build/, dist/, etc.
 
-### isort Configuration
+**Linting rules enabled:**
+- `E/W`: pycodestyle errors and warnings
+- `F`: Pyflakes (undefined names, unused imports)
+- `I`: isort (import sorting)
+- `N`: pep8-naming conventions
+- `UP`: pyupgrade (modern Python syntax)
+- `B`: flake8-bugbear (likely bugs and design problems)
+- `C4`: flake8-comprehensions (better comprehensions)
+- `SIM`: flake8-simplify (code simplification)
 
-Import sorting settings in `pyproject.toml`:
-- Profile: black (compatible with black formatter)
-- Line length: 100 characters
+**Import sorting:**
 - Known first-party modules: app, agents, adapters, utils
+- Two blank lines after imports
+
+**Formatting:**
+- Double quotes for strings
+- Space indentation
+- Unix line endings (LF)
+
+To customize rules, edit `[tool.ruff.lint]` in `pyproject.toml`
 
 ## Pre-commit Hook Details
 
+### Ruff Linting
+- Runs on: All `.py` files
+- Purpose: Catches code quality issues, style violations, and potential bugs
+- Action on failure: Auto-fixes many issues (unused imports, outdated syntax, etc.), you'll need to re-stage and commit
+- Speed: Extremely fast (10-100x faster than traditional tools)
+
+### Ruff Formatting
+- Runs on: All `.py` files
+- Purpose: Ensures consistent code style and formatting
+- Action on failure: Auto-formats code, you'll need to re-stage and commit
+- Compatible with: Black formatting style
+
 ### Type Checking (mypy)
 - Runs on: All `.py` files (excluding tests/, scripts/, migrations/)
-- Purpose: Catches type-related bugs before runtime
+- Purpose: Catches type-related bugs before runtime through static analysis
 - Action on failure: Blocks commit and shows type errors
-
-### Code Formatting (black)
-- Runs on: All `.py` files
-- Purpose: Ensures consistent code style
-- Action on failure: Auto-formats code, you'll need to re-stage and commit
-
-### Import Sorting (isort)
-- Runs on: All `.py` files
-- Purpose: Organizes imports consistently
-- Action on failure: Auto-sorts imports, you'll need to re-stage and commit
+- Note: Requires manual fixes (cannot auto-fix type errors)
 
 ### Other Checks
 - Large file detection (max 1MB)
@@ -151,16 +171,23 @@ If mypy complains about missing type stubs, you can:
    ignore_missing_imports = true
    ```
 
-### Hooks are too slow
+### Ruff formatting conflicts
 
-You can temporarily skip hooks for a commit:
-```bash
-git commit -m "Your message" --no-verify
+If Ruff's formatting conflicts with existing code style:
+1. Run `ruff format .` to see what changes would be made
+2. Review the changes
+3. Adjust `[tool.ruff.format]` settings in `pyproject.toml` if needed
+
+### Disabling specific Ruff rules
+
+To disable a specific rule for a file, add to the top:
+```python
+# ruff: noqa: E501
 ```
 
-But remember to run them before pushing:
-```bash
-pre-commit run --all-files
+To disable for a specific line:
+```python
+x = really_long_line()  # noqa: E501
 ```
 
 ### Updating hooks
@@ -183,9 +210,17 @@ pre-commit autoupdate
 
 4. **Use type hints**: Add type hints to new code to maximize the benefits of type checking.
 
+## Why Ruff?
+
+Ruff is a modern, fast alternative to multiple Python tools:
+- **Speed**: Written in Rust, 10-100x faster than traditional Python linters
+- **All-in-one**: Replaces black, isort, flake8, pyupgrade, and more
+- **Compatible**: Follows black's formatting style by default
+- **Actively maintained**: Regular updates and new features
+
 ## Additional Resources
 
 - [pre-commit documentation](https://pre-commit.com/)
 - [mypy documentation](https://mypy.readthedocs.io/)
-- [black documentation](https://black.readthedocs.io/)
-- [isort documentation](https://pycqa.github.io/isort/)
+- [Ruff documentation](https://docs.astral.sh/ruff/)
+- [Ruff rules reference](https://docs.astral.sh/ruff/rules/)

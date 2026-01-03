@@ -56,26 +56,61 @@ ignore_errors = true
 module = "scripts.*"
 ignore_errors = true
 
-[tool.black]
+[tool.ruff]
+# Target Python 3.11
+target-version = "py311"
 line-length = 100
-target-version = ['py311']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.venv
-  | venv
-  | \.mypy_cache
-  | \.pytest_cache
-  | \.tox
-  | build
-  | dist
-  | migrations
-)/
-'''
 
-[tool.isort]
-profile = "black"
-line_length = 100
-skip_gitignore = true
-known_first_party = ["app", "agents", "adapters", "utils"]
+# Exclude directories
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "build",
+    "dist",
+    "migrations",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# Enable these rule sets:
+# E/W - pycodestyle errors and warnings
+# F - Pyflakes
+# I - isort (import sorting)
+# N - pep8-naming
+# UP - pyupgrade (upgrade syntax for newer Python versions)
+# B - flake8-bugbear (find likely bugs)
+# C4 - flake8-comprehensions (better list/dict/set comprehensions)
+# SIM - flake8-simplify (simplify code)
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
+
+# Ignore specific rules if needed
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Do not perform function calls in argument defaults (common in FastAPI)
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "agents", "adapters", "utils"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with spaces
+indent-style = "space"
+
+# Use `\n` line endings for all files
+line-ending = "lf"
