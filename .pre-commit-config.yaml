@@ -1,0 +1,57 @@
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
+repos:
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Prevent large files from being committed
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      # Check for files that would conflict in case-insensitive filesystems
+      - id: check-case-conflict
+      # Check for merge conflicts
+      - id: check-merge-conflict
+      # Check yaml files are valid
+      - id: check-yaml
+        exclude: '^(linux_environment|mac_environment|conda).*\.yml$'
+      # Check toml files are valid
+      - id: check-toml
+      # Detect private keys
+      - id: detect-private-key
+      # Ensure files end with a newline
+      - id: end-of-file-fixer
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+
+  # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the linter
+      - id: ruff
+        name: ruff linting
+        args: [--fix]
+      # Run the formatter
+      - id: ruff-format
+        name: ruff formatting
+
+  # Python type checking with mypy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy type checking
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+          - types-six
+          - types-python-dateutil
+          - pydantic>=2.0
+          - sqlalchemy>=2.0
+          - fastapi>=0.100
+        exclude: '^(tests/|scripts/|migrations/)'
+        # Run mypy only on Python files that are tracked by git
+        pass_filenames: true
+        files: \.py$
