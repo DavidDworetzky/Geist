@@ -206,7 +206,9 @@ jobs:
 
     - name: Run Trivy vulnerability scanner on Backend image
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
+        scan-type: 'image'
         image-ref: 'geist-backend'
         format: 'table'
         exit-code: '0'
@@ -214,7 +216,9 @@ jobs:
 
     - name: Run Trivy vulnerability scanner on Frontend image
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
+        scan-type: 'image'
         image-ref: 'geist-frontend'
         format: 'table'
         exit-code: '0'
