@@ -18,6 +18,11 @@ class Agent(Base):
     task_context = Column(String)
     execution_context = Column(String)
 
+    # LangGraph checkpoint fields
+    checkpoint_data = Column(String, nullable=True)  # JSON serialized checkpoint
+    checkpoint_metadata = Column(String, nullable=True)  # JSON serialized metadata
+    pending_writes = Column(String, nullable=True)  # JSON serialized pending writes
+
 
     @classmethod
     def get_agent_by_id(cls, agent_id):

@@ -19,11 +19,12 @@ class AgentFactory:
         api_key: Optional[str] = None,
         runner_type: Optional[str] = None,
         as_subprocess: bool = False,
+        use_langgraph: bool = True,
         **kwargs
     ):
         """
         Create an agent instance based on the specified type and configuration.
-        
+
         Args:
             agent_type: Type of agent to create ('local' or 'online')
             agent_context: Agent context object
@@ -32,19 +33,21 @@ class AgentFactory:
             api_key: API key (for online agents)
             runner_type: Type of runner for local agents
             as_subprocess: Whether to run as subprocess
+            use_langgraph: Whether to use LangGraph-enabled agents (default: True)
             **kwargs: Additional arguments for agent initialization
-            
+
         Returns:
             Agent instance
         """
         agent_type = agent_type.lower()
-        
+
         if agent_type == "local":
             return AgentFactory._create_local_agent(
                 agent_context=agent_context,
                 model=model,
                 runner_type=runner_type,
                 as_subprocess=as_subprocess,
+                use_langgraph=use_langgraph,
                 **kwargs
             )
         elif agent_type == "online":
@@ -54,6 +57,7 @@ class AgentFactory:
                 endpoint=endpoint,
                 api_key=api_key,
                 as_subprocess=as_subprocess,
+                use_langgraph=use_langgraph,
                 **kwargs
             )
         else:
@@ -65,22 +69,28 @@ class AgentFactory:
         model: Optional[str] = None,
         runner_type: Optional[str] = None,
         as_subprocess: bool = False,
+        use_langgraph: bool = True,
         **kwargs
     ):
         """Create a LocalAgent instance."""
         try:
-            from agents.local_agent import LocalAgent
-            
+            if use_langgraph:
+                from agents.local_agent_langgraph import LocalAgentLangGraph as AgentClass
+                logger.info("Using LangGraph-enabled LocalAgent")
+            else:
+                from agents.local_agent import LocalAgent as AgentClass
+                logger.info("Using traditional LocalAgent")
+
             # Default to MLX Llama runner if not specified
             if not runner_type:
                 runner_type = "mlx_llama"
-            
+
             # Default model
             if not model:
                 model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-            
+
             logger.info(f"Creating LocalAgent with runner: {runner_type}, model: {model}")
-            return LocalAgent(
+            return AgentClass(
                 agent_context=agent_context,
                 model_id=model,
                 runner_type=runner_type,
@@ -98,20 +108,26 @@ class AgentFactory:
         endpoint: Optional[str] = None,
         api_key: Optional[str] = None,
         as_subprocess: bool = False,
+        use_langgraph: bool = True,
         **kwargs
     ):
         """Create an OnlineAgent instance."""
         try:
-            from agents.online_agent import OnlineAgent
-            
+            if use_langgraph:
+                from agents.online_agent_langgraph import OnlineAgentLangGraph as AgentClass
+                logger.info("Using LangGraph-enabled OnlineAgent")
+            else:
+                from agents.online_agent import OnlineAgent as AgentClass
+                logger.info("Using traditional OnlineAgent")
+
             # Default values
             if not endpoint:
                 endpoint = "https://api.openai.com/v1/chat/completions"
             if not model:
                 model = "gpt-4"
-            
+
             logger.info(f"Creating OnlineAgent with endpoint: {endpoint}, model: {model}")
-            return OnlineAgent(
+            return AgentClass(
                 agent_context=agent_context,
                 base_url=endpoint,
                 model=model,
@@ -148,7 +164,8 @@ class AgentFactory:
             api_key=config.get("api_key"),
             runner_type=config.get("runner_type"),
             as_subprocess=config.get("as_subprocess", False),
+            use_langgraph=config.get("use_langgraph", True),
             **{k: v for k, v in config.items() if k not in [
-                "agent_type", "model", "endpoint", "api_key", "runner_type", "as_subprocess"
+                "agent_type", "model", "endpoint", "api_key", "runner_type", "as_subprocess", "use_langgraph"
             ]}
         )

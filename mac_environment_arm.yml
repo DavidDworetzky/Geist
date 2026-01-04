@@ -106,4 +106,8 @@ dependencies:
       - websockets==15.0.1
       - xxhash==3.5.0
       - yarl==1.18.3
+      - langchain==0.3.13
+      - langchain-core==0.3.28
+      - langgraph==0.2.62
+      - langgraph-checkpoint==2.0.6
 prefix: /Users/daviddworetzky/miniconda3/envs/geist-mac
