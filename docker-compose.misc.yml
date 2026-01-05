@@ -28,6 +28,8 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
+      - REACT_APP_BACKEND_HOST=host.docker.internal
+      - REACT_APP_BACKEND_PORT=5001
     networks:
       - test_net
 
