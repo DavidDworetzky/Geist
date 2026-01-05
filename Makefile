@@ -25,7 +25,7 @@ help:
 .PHONY: run
 run:
 ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) bootstrap.py
 else
 	$(DOCKER_COMPOSE) up
 endif
@@ -43,9 +43,9 @@ server:
 .PHONY: debug
 debug:
 ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
 else
-	$(DOCKER_COMPOSE) up -d && $(CONDA_ACTIVATE) && $(PYTHON) -m pdb bootstrap.py
+	$(DOCKER_COMPOSE) up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
 endif
 
 # Run Docker services only
