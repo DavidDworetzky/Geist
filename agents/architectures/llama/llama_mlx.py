@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from agents.models.llama_completion import strings_to_message_dict
 
 # MLX imports
@@ -43,6 +43,63 @@ class ModelConfig:
     vocab_size: int = 32000
     rope_theta: float = 10000
     rope_traditional: bool = True
+    max_position_embeddings: int = 2048
+    rope_scaling: Optional[Dict] = field(default=None)
+
+
+class Llama3RoPE(nn.Module):
+    """
+    Llama 3 style RoPE scaling with low/high frequency factors.
+    """
+    def __init__(self, dim: int, base: float, rope_scaling: Dict, max_position_embeddings: int):
+        super().__init__()
+        self.dim = dim
+        self.base = base
+        self.rope_scaling = rope_scaling or {}
+        self.max_position_embeddings = max_position_embeddings
+
+        # Precompute scaled inverse frequencies.
+        inv_freq = 1.0 / (self.base ** (mx.arange(0, dim, 2, dtype=mx.float32) / dim))
+        self.inv_freq = self._apply_llama3_scaling(inv_freq)
+
+    def _apply_llama3_scaling(self, inv_freq: mx.array) -> mx.array:
+        factor = float(self.rope_scaling.get("factor", 1.0))
+        low_freq_factor = float(self.rope_scaling.get("low_freq_factor", 1.0))
+        high_freq_factor = float(self.rope_scaling.get("high_freq_factor", 1.0))
+        orig_max_pos = float(self.rope_scaling.get("original_max_position_embeddings", self.max_position_embeddings))
+
+        if factor == 1.0 or low_freq_factor == high_freq_factor:
+            return inv_freq
+
+        wavelen = (2.0 * np.pi) / inv_freq
+        low_freq_wavelen = orig_max_pos / low_freq_factor
+        high_freq_wavelen = orig_max_pos / high_freq_factor
+
+        # Start with low-frequency scaled down by factor.
+        inv_freq_scaled = mx.where(wavelen > low_freq_wavelen, inv_freq / factor, inv_freq)
+
+        # Smoothly interpolate in the middle band.
+        smooth = (orig_max_pos / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
+        smooth = mx.clip(smooth, 0.0, 1.0)
+        interp = inv_freq / (factor * (1.0 - smooth) + smooth)
+        mid_mask = mx.logical_and(wavelen <= low_freq_wavelen, wavelen >= high_freq_wavelen)
+        inv_freq_scaled = mx.where(mid_mask, interp, inv_freq_scaled)
+
+        return inv_freq_scaled
+
+    def __call__(self, x: mx.array, offset: int = 0) -> mx.array:
+        # x: [B, H, L, D]
+        seq_len = x.shape[2]
+        positions = mx.arange(offset, offset + seq_len, dtype=self.inv_freq.dtype)
+        freqs = positions[:, None] * self.inv_freq[None, :]
+        cos = mx.cos(freqs)[None, None, :, :].astype(x.dtype)
+        sin = mx.sin(freqs)[None, None, :, :].astype(x.dtype)
+
+        x_ = x.reshape(*x.shape[:-1], -1, 2)
+        x1 = x_[..., 0]
+        x2 = x_[..., 1]
+        out = mx.stack([x1 * cos - x2 * sin, x1 * sin + x2 * cos], axis=-1)
+        return out.reshape(x.shape)
 
 class Attention(nn.Module):
     def __init__(self, args: ModelConfig):
@@ -64,7 +121,15 @@ class Attention(nn.Module):
         self.wo = nn.Linear(args.n_heads * args.head_dim, args.dim, bias=False)
 
         # RoPE for positional embeddings
-        self.rope = nn.RoPE(args.head_dim, traditional=args.rope_traditional, base=args.rope_theta)
+        if args.rope_scaling and args.rope_scaling.get("rope_type") == "llama3":
+            self.rope = Llama3RoPE(
+                args.head_dim,
+                base=args.rope_theta,
+                rope_scaling=args.rope_scaling,
+                max_position_embeddings=args.max_position_embeddings,
+            )
+        else:
+            self.rope = nn.RoPE(args.head_dim, traditional=args.rope_traditional, base=args.rope_theta)
 
     def __call__(
         self,
@@ -387,6 +452,7 @@ class LlamaMLX:
             "rms_norm_eps": "norm_eps",
             "vocab_size": "vocab_size",
             "rope_theta": "rope_theta",
+            "max_position_embeddings": "max_position_embeddings",
         }
         for hf_key, internal_key in hf_to_internal.items():
             if hf_key in config_json:
@@ -403,8 +469,10 @@ class LlamaMLX:
         # Llama 3 uses non-traditional RoPE. We don't fully implement rope_scaling,
         # but we can at least switch off "traditional" RoPE when rope_type is llama3.
         rope_scaling = config_json.get("rope_scaling") or {}
-        if rope_scaling.get("rope_type") == "llama3":
-            self.config.rope_traditional = False
+        if rope_scaling:
+            self.config.rope_scaling = rope_scaling
+            if rope_scaling.get("rope_type") == "llama3":
+                self.config.rope_traditional = False
 
         # Track EOS token IDs from config for stopping conditions.
         eos_ids = config_json.get("eos_token_id")
@@ -431,7 +499,7 @@ class LlamaMLX:
         if key == "lm_head.weight":
             return "output.weight"
 
-        layer_match = re.match(r"model\\.layers\\.(\\d+)\\.(.+)", key)
+        layer_match = re.match(r"model\.layers\.(\d+)\.(.+)", key)
         if not layer_match:
             return None
 
@@ -649,8 +717,19 @@ class LlamaMLX:
         """
         logger.info("Beginning completion call...")
 
-        # Format the prompt according to the Llama 3.1 chat template.
-        prompt = self._build_instruct_prompt(system_prompt, user_prompt)
+        # Format the prompt according to the tokenizer's chat template when available.
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": user_prompt})
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            prompt = self._build_instruct_prompt(system_prompt, user_prompt)
 
         logger.info(
             f"Starting text generation with temperature={self.temperature}, "

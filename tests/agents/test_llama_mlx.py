@@ -4,7 +4,7 @@ import pytest
 mlx = pytest.importorskip("mlx")
 import mlx.core as mx
 
-from agents.architectures.llama.llama_mlx import Attention, Llama, LlamaMLX, ModelConfig
+from agents.architectures.llama.llama_mlx import Attention, Llama, Llama3RoPE, LlamaMLX, ModelConfig
 
 
 def _make_llama_mlx_stub():
@@ -57,6 +57,7 @@ def test_apply_hf_config_mapping():
         "vocab_size": 256,
         "rope_theta": 500000.0,
         "rope_scaling": {"rope_type": "llama3"},
+        "max_position_embeddings": 8192,
         "eos_token_id": [1, 2, 3],
         "torch_dtype": "bfloat16",
     }
@@ -71,9 +72,32 @@ def test_apply_hf_config_mapping():
     assert obj.config.norm_eps == 1e-6
     assert obj.config.vocab_size == 256
     assert obj.config.rope_theta == 500000.0
+    assert obj.config.max_position_embeddings == 8192
     assert obj.config.head_dim == 16
     assert obj.config.rope_traditional is False
     assert obj.eos_token_ids == [1, 2, 3]
+
+
+def test_attention_uses_llama3_rope():
+    cfg = ModelConfig(
+        dim=16,
+        n_layers=1,
+        n_heads=4,
+        head_dim=4,
+        n_kv_heads=2,
+        hidden_dim=32,
+        vocab_size=64,
+        rope_scaling={
+            "rope_type": "llama3",
+            "factor": 8.0,
+            "low_freq_factor": 1.0,
+            "high_freq_factor": 4.0,
+            "original_max_position_embeddings": 8192,
+        },
+        max_position_embeddings=131072,
+    )
+    attn = Attention(cfg)
+    assert isinstance(attn.rope, Llama3RoPE)
 
 
 def test_map_hf_to_mlx_key():
