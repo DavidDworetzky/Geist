@@ -2,6 +2,7 @@ import os
 import time
 import json
 import glob
+import re
 import logging
 import numpy as np
 from pathlib import Path
@@ -83,24 +84,6 @@ class Attention(nn.Module):
         keys    = keys   .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
         values  = values .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
 
-        # More efficient implementation of key/value head repetition
-        if self.repeats > 1:
-            # Use reshape and repeat operations more efficiently
-            # This avoids creating multiple copies in memory
-            keys_expanded = mx.repeat(
-                mx.expand_dims(keys, axis=1),  # Shape: [B, 1, n_kv_heads, L, head_dim]
-                repeats=self.repeats,
-                axis=1
-            )  # Shape: [B, repeats, n_kv_heads, L, head_dim]
-            keys = keys_expanded.reshape(B, self.n_heads, L, self.args.head_dim)
-            
-            values_expanded = mx.repeat(
-                mx.expand_dims(values, axis=1),  # Shape: [B, 1, n_kv_heads, L, head_dim]
-                repeats=self.repeats,
-                axis=1
-            )  # Shape: [B, repeats, n_kv_heads, L, head_dim]
-            values = values_expanded.reshape(B, self.n_heads, L, self.args.head_dim)
-        
         # Handle caching
         if cache is not None:
             key_cache, value_cache = cache
@@ -108,14 +91,34 @@ class Attention(nn.Module):
             offset = key_cache.shape[2]
             queries = self.rope(queries, offset=offset)
             keys    = self.rope(keys,    offset=offset)
+            # Cache in KV-head space to avoid expanding cache size by repeats.
             keys    = mx.concatenate([key_cache, keys], axis=2)
             values  = mx.concatenate([value_cache, values], axis=2)
         else:
             queries = self.rope(queries)
             keys    = self.rope(keys)
 
+        # Repeat KV heads only for the attention matmul (avoid bloating cache).
+        if self.repeats > 1:
+            keys_expanded = mx.repeat(
+                mx.expand_dims(keys, axis=1),  # [B, 1, n_kv_heads, S, head_dim]
+                repeats=self.repeats,
+                axis=1
+            )
+            keys_for_attn = keys_expanded.reshape(B, self.n_heads, keys.shape[2], self.args.head_dim)
+
+            values_expanded = mx.repeat(
+                mx.expand_dims(values, axis=1),  # [B, 1, n_kv_heads, S, head_dim]
+                repeats=self.repeats,
+                axis=1
+            )
+            values_for_attn = values_expanded.reshape(B, self.n_heads, values.shape[2], self.args.head_dim)
+        else:
+            keys_for_attn = keys
+            values_for_attn = values
+
         # Compute attention scores with better numerical stability
-        scores = (queries * self.scale) @ keys.transpose(0, 1, 3, 2)
+        scores = (queries * self.scale) @ keys_for_attn.transpose(0, 1, 3, 2)
 
         # Apply mask if provided
         if mask is not None:
@@ -135,7 +138,7 @@ class Attention(nn.Module):
         attention_probs = attention_probs.astype(scores.dtype)
 
         # Apply attention to values
-        output = (attention_probs @ values).transpose(0, 2, 1, 3).reshape(B, L, D)
+        output = (attention_probs @ values_for_attn).transpose(0, 2, 1, 3).reshape(B, L, D)
         return self.wo(output), (keys, values)
 
 
@@ -215,6 +218,15 @@ class Llama(nn.Module):
         Yields:
             int: Generated token IDs one at a time
         """
+        def _normalize_eos_ids(eos_ids):
+            if eos_ids is None:
+                return None
+            if isinstance(eos_ids, (list, tuple, set)):
+                return set(int(e) for e in eos_ids)
+            return {int(eos_ids)}
+
+        eos_ids = _normalize_eos_ids(eos_token_id)
+
         def sample_logits(logits: mx.array) -> int:
             """
             Sample a token from the logits with temperature scaling and optional nucleus sampling.
@@ -268,7 +280,13 @@ class Llama(nn.Module):
                 next_id = np.random.choice(len(masked_probs), p=masked_probs)
                 return int(next_id)
             else:
-                return int(np_logits.argmax())
+                # Full-distribution sampling (top_p == 1.0) unless temp == 0.
+                if temp == 0.0:
+                    return int(np_logits.argmax())
+                probs = np.exp(np_logits - np.max(np_logits))
+                probs = probs / np.sum(probs)
+                next_id = np.random.choice(len(probs), p=probs)
+                return int(next_id)
 
         # Caches to store K/V from each layer
         cache_per_layer = []
@@ -293,7 +311,7 @@ class Llama(nn.Module):
         yield new_token
         
         # Check if we should stop after the first token
-        if eos_token_id is not None and new_token == eos_token_id:
+        if eos_ids is not None and new_token in eos_ids:
             logger.info("Generation stopped after first token (EOS token generated)")
             return
 
@@ -323,7 +341,7 @@ class Llama(nn.Module):
             yield new_token
             
             # Stop if we hit the EOS token
-            if eos_token_id is not None and new_token == eos_token_id:
+            if eos_ids is not None and new_token in eos_ids:
                 logger.info(f"Generation stopped at token {tokens_generated}: EOS token generated")
                 break
 
@@ -348,10 +366,112 @@ class LlamaMLX:
         
         # Our merged config
         self.config = ModelConfig()
+        self.eos_token_ids: Optional[List[int]] = None
+        self._weights_dtype = mx.float16
 
         logger.info("Initializing LlamaMLX.")
         self.load_model_and_tokenizer()
         logger.info("LlamaMLX initialized successfully.")
+
+    def _apply_hf_config(self, config_json: Dict):
+        """
+        Apply HF config.json fields to our ModelConfig, with Llama 3.1-specific keys.
+        """
+        # Map HF config keys to ModelConfig fields.
+        hf_to_internal = {
+            "hidden_size": "dim",
+            "num_hidden_layers": "n_layers",
+            "num_attention_heads": "n_heads",
+            "num_key_value_heads": "n_kv_heads",
+            "intermediate_size": "hidden_dim",
+            "rms_norm_eps": "norm_eps",
+            "vocab_size": "vocab_size",
+            "rope_theta": "rope_theta",
+        }
+        for hf_key, internal_key in hf_to_internal.items():
+            if hf_key in config_json:
+                setattr(self.config, internal_key, config_json[hf_key])
+
+        # Ensure head_dim stays consistent with dim/n_heads.
+        if self.config.n_heads:
+            self.config.head_dim = self.config.dim // self.config.n_heads
+
+        # Some Llama 3 configs omit num_key_value_heads; default to n_heads.
+        if not self.config.n_kv_heads:
+            self.config.n_kv_heads = self.config.n_heads
+
+        # Llama 3 uses non-traditional RoPE. We don't fully implement rope_scaling,
+        # but we can at least switch off "traditional" RoPE when rope_type is llama3.
+        rope_scaling = config_json.get("rope_scaling") or {}
+        if rope_scaling.get("rope_type") == "llama3":
+            self.config.rope_traditional = False
+
+        # Track EOS token IDs from config for stopping conditions.
+        eos_ids = config_json.get("eos_token_id")
+        if isinstance(eos_ids, list):
+            self.eos_token_ids = [int(e) for e in eos_ids]
+        elif eos_ids is not None:
+            self.eos_token_ids = [int(eos_ids)]
+
+        # Choose a sensible default weights dtype based on config.
+        torch_dtype = str(config_json.get("torch_dtype", "")).lower()
+        if "bfloat16" in torch_dtype and hasattr(mx, "bfloat16"):
+            self._weights_dtype = mx.bfloat16
+        else:
+            self._weights_dtype = mx.float16
+
+    def _map_hf_to_mlx_key(self, key: str) -> Optional[str]:
+        """
+        Map HuggingFace Llama parameter names to MLX module names.
+        """
+        if key == "model.embed_tokens.weight":
+            return "tok_embeddings.weight"
+        if key == "model.norm.weight":
+            return "norm.weight"
+        if key == "lm_head.weight":
+            return "output.weight"
+
+        layer_match = re.match(r"model\\.layers\\.(\\d+)\\.(.+)", key)
+        if not layer_match:
+            return None
+
+        layer_idx, rest = layer_match.groups()
+        prefix = f"layers.{layer_idx}."
+
+        if rest == "input_layernorm.weight":
+            return prefix + "attention_norm.weight"
+        if rest == "post_attention_layernorm.weight":
+            return prefix + "ffn_norm.weight"
+        if rest == "self_attn.q_proj.weight":
+            return prefix + "attention.wq.weight"
+        if rest == "self_attn.k_proj.weight":
+            return prefix + "attention.wk.weight"
+        if rest == "self_attn.v_proj.weight":
+            return prefix + "attention.wv.weight"
+        if rest == "self_attn.o_proj.weight":
+            return prefix + "attention.wo.weight"
+        if rest == "mlp.gate_proj.weight":
+            return prefix + "feed_forward.w1.weight"
+        if rest == "mlp.down_proj.weight":
+            return prefix + "feed_forward.w2.weight"
+        if rest == "mlp.up_proj.weight":
+            return prefix + "feed_forward.w3.weight"
+
+        return None
+
+    def _build_instruct_prompt(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Build a Llama 3.1 instruct/chat prompt string.
+        """
+        # Llama 3.1 chat template with explicit headers and <|eot_id|> delimiters.
+        return (
+            "<|begin_of_text|>"
+            "<|start_header_id|>system<|end_header_id|>\n\n"
+            f"{system_prompt}<|eot_id|>"
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+            f"{user_prompt}<|eot_id|>"
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
 
     def download_model(self):
         """
@@ -407,42 +527,55 @@ class LlamaMLX:
         with open(config_path, "r") as f:
             config_json = json.load(f)
 
-        # Merge what we read into self.config
-        # We allow the config.json to override defaults in ModelConfig
-        for field in vars(self.config):
-            if field in config_json:
-                setattr(self.config, field, config_json[field])
+        # Merge HF config into our ModelConfig with Llama-specific keys.
+        self._apply_hf_config(config_json)
+        if self.eos_token_ids:
+            # Tokenizer expects a single eos_token_id; use the primary one for decode.
+            self.tokenizer.eos_token_id = self.eos_token_ids[0]
+        elif self.tokenizer.eos_token_id is not None:
+            # Fall back to tokenizer eos if config didn't provide a list.
+            self.eos_token_ids = [int(self.tokenizer.eos_token_id)]
 
         # Step 4: Load the weights
         logger.info(f"Loading model weights from {self.weights_dir} ...")
-        weights_dict = {}
         safetensors_files = glob.glob(os.path.join(self.weights_dir, "model-*.safetensors"))
         
         if not safetensors_files:
             raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
         
+        mapped_weights: Dict[str, mx.array] = {}
+        unmapped_keys = 0
         for file_path in safetensors_files:
             logger.info(f"Loading safetensors file: {file_path}")
             # Load the safetensors file using PyTorch
             tensors = safetensors.torch.load_file(file_path, device="cpu")
             for key, tensor in tensors.items():
-                # Convert to float32 PyTorch tensor
-                tensor = tensor.to(torch.float32)
-                weights_dict[key] = tensor
+                # Convert HF key names to MLX parameter names.
+                mlx_key = self._map_hf_to_mlx_key(key)
+                if not mlx_key:
+                    unmapped_keys += 1
+                    continue
+
+                # Convert tensor to MLX-friendly dtype (float16/bfloat16) to speed inference.
+                tensor = tensor.to(torch.float32)  # keep stable conversion before cast
+                np_tensor = tensor.cpu().numpy()
+                mapped_weights[mlx_key] = mx.array(np_tensor, dtype=self._weights_dtype)
 
         # Step 5: Instantiate the LLaMA model using our config and the converted weights
         logger.info("Instantiating LLaMA model.")
         self.model = Llama(self.config)
         # Load the converted weights
-        for key, tensor in weights_dict.items():
-            self.model.update({key: mx.array(tensor.numpy())})
+        self.model.update(mapped_weights)
+        if unmapped_keys:
+            logger.warning(f"Unmapped HF weights encountered: {unmapped_keys}")
         logger.info("Model loaded into MLX successfully.")
 
         if self.cache_converted_safetensors:
-            # Save the converted weights to a new safetensors file
+            # Save the converted weights (MLX-named) to a new safetensors file for reuse.
             converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
             metadata = {"format": "pt"}  # Metadata should be a dictionary
-            safetensors.torch.save(weights_dict, converted_weights_path, metadata=metadata)
+            torch_weights = {k: torch.from_numpy(np.array(v)) for k, v in mapped_weights.items()}
+            safetensors.torch.save(torch_weights, converted_weights_path, metadata=metadata)
 
     def generate_text(self, prompt: str) -> mx.array:
         """
@@ -469,7 +602,7 @@ class LlamaMLX:
             temp=self.temperature,
             top_p=self.top_p,
             max_new_tokens=self.max_new_tokens,
-            eos_token_id=self.tokenizer.eos_token_id
+            eos_token_id=self.eos_token_ids or self.tokenizer.eos_token_id
         )
 
         # Set a timeout for the entire generation process
@@ -486,7 +619,8 @@ class LlamaMLX:
                     break
                 
                 # If we hit EOS, we can stop
-                if new_tok == self.tokenizer.eos_token_id:
+                eos_ids = self.eos_token_ids or [self.tokenizer.eos_token_id]
+                if new_tok in eos_ids:
                     logger.info("Generation complete: EOS token generated")
                     break
                 
@@ -515,13 +649,8 @@ class LlamaMLX:
         """
         logger.info("Beginning completion call...")
 
-        # Format the prompt according to Llama 3.1 chat template
-        prompt = f"""<s>[INST] <<SYS>>
-{system_prompt}
-<</SYS>>
-
-{user_prompt} [/INST]
-"""
+        # Format the prompt according to the Llama 3.1 chat template.
+        prompt = self._build_instruct_prompt(system_prompt, user_prompt)
 
         logger.info(
             f"Starting text generation with temperature={self.temperature}, "
@@ -535,10 +664,15 @@ class LlamaMLX:
             output_list = output_tokens.tolist()
             output_text = self.tokenizer.decode(output_list)
             
-            # Extract just the assistant's response (remove the prompt)
-            response_start = output_text.find("[/INST]") + len("[/INST]")
-            if response_start >= 0:
-                output_text = output_text[response_start:].strip()
+            # Extract just the assistant's response (strip headers + <|eot_id|> if present).
+            assistant_tag = "<|start_header_id|>assistant<|end_header_id|>"
+            response_start = output_text.find(assistant_tag)
+            if response_start != -1:
+                output_text = output_text[response_start + len(assistant_tag):]
+            output_text = output_text.strip()
+            eot_idx = output_text.find("<|eot_id|>")
+            if eot_idx != -1:
+                output_text = output_text[:eot_idx].strip()
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")
