@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import glob
@@ -353,6 +354,80 @@ class LlamaMLX:
         self.load_model_and_tokenizer()
         logger.info("LlamaMLX initialized successfully.")
 
+    def _map_hf_weights_to_mlx(self, hf_weights: Dict[str, torch.Tensor]) -> Dict[str, mx.array]:
+        """
+        Map HuggingFace weight names to MLX model weight names.
+
+        HuggingFace uses names like:
+        - model.embed_tokens.weight -> tok_embeddings.weight
+        - model.layers.N.self_attn.q_proj.weight -> layers.N.attention.wq.weight
+        - model.layers.N.self_attn.k_proj.weight -> layers.N.attention.wk.weight
+        - model.layers.N.self_attn.v_proj.weight -> layers.N.attention.wv.weight
+        - model.layers.N.self_attn.o_proj.weight -> layers.N.attention.wo.weight
+        - model.layers.N.mlp.gate_proj.weight -> layers.N.feed_forward.w1.weight
+        - model.layers.N.mlp.down_proj.weight -> layers.N.feed_forward.w2.weight
+        - model.layers.N.mlp.up_proj.weight -> layers.N.feed_forward.w3.weight
+        - model.layers.N.input_layernorm.weight -> layers.N.attention_norm.weight
+        - model.layers.N.post_attention_layernorm.weight -> layers.N.ffn_norm.weight
+        - model.norm.weight -> norm.weight
+        - lm_head.weight -> output.weight
+
+        Parameters:
+            hf_weights: Dictionary of HuggingFace weights
+
+        Returns:
+            Dictionary of MLX weights with mapped names
+        """
+        mlx_weights = {}
+
+        name_mapping = {
+            "model.embed_tokens.weight": "tok_embeddings.weight",
+            "model.norm.weight": "norm.weight",
+            "lm_head.weight": "output.weight",
+        }
+
+        layer_mapping = {
+            "self_attn.q_proj": "attention.wq",
+            "self_attn.k_proj": "attention.wk",
+            "self_attn.v_proj": "attention.wv",
+            "self_attn.o_proj": "attention.wo",
+            "mlp.gate_proj": "feed_forward.w1",
+            "mlp.down_proj": "feed_forward.w2",
+            "mlp.up_proj": "feed_forward.w3",
+            "input_layernorm": "attention_norm",
+            "post_attention_layernorm": "ffn_norm",
+        }
+
+        for hf_name, tensor in hf_weights.items():
+            mlx_name = None
+
+            # Check for direct mapping
+            if hf_name in name_mapping:
+                mlx_name = name_mapping[hf_name]
+            else:
+                # Check for layer-specific mappings
+                # Pattern: model.layers.N.component.weight
+                layer_match = re.match(r"model\.layers\.(\d+)\.(.+)", hf_name)
+                if layer_match:
+                    layer_num = layer_match.group(1)
+                    component = layer_match.group(2)
+
+                    # Find the mapping for this component
+                    for hf_comp, mlx_comp in layer_mapping.items():
+                        if component.startswith(hf_comp):
+                            suffix = component[len(hf_comp):]  # Get .weight or similar
+                            mlx_name = f"layers.{layer_num}.{mlx_comp}{suffix}"
+                            break
+
+            if mlx_name:
+                # Convert PyTorch tensor to MLX array
+                mlx_weights[mlx_name] = mx.array(tensor.numpy())
+                logger.debug(f"Mapped {hf_name} -> {mlx_name}")
+            else:
+                logger.warning(f"No mapping found for weight: {hf_name}")
+
+        return mlx_weights
+
     def download_model(self):
         """
         Download model files from huggingface_hub if they are not present locally.
@@ -416,11 +491,11 @@ class LlamaMLX:
         # Step 4: Load the weights
         logger.info(f"Loading model weights from {self.weights_dir} ...")
         weights_dict = {}
-        safetensors_files = glob.glob(os.path.join(self.weights_dir, "model-*.safetensors"))
-        
+        safetensors_files = sorted(glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")))
+
         if not safetensors_files:
             raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
-        
+
         for file_path in safetensors_files:
             logger.info(f"Loading safetensors file: {file_path}")
             # Load the safetensors file using PyTorch
@@ -430,12 +505,16 @@ class LlamaMLX:
                 tensor = tensor.to(torch.float32)
                 weights_dict[key] = tensor
 
-        # Step 5: Instantiate the LLaMA model using our config and the converted weights
+        # Step 5: Map HuggingFace weight names to MLX model weight names
+        mlx_weights = self._map_hf_weights_to_mlx(weights_dict)
+
+        # Step 6: Instantiate the LLaMA model using our config and the converted weights
         logger.info("Instantiating LLaMA model.")
         self.model = Llama(self.config)
-        # Load the converted weights
-        for key, tensor in weights_dict.items():
-            self.model.update({key: mx.array(tensor.numpy())})
+
+        # Load the converted weights using tree_unflatten
+        weights_list = [(k, v) for k, v in mlx_weights.items()]
+        self.model.load_weights(weights_list)
         logger.info("Model loaded into MLX successfully.")
 
         if self.cache_converted_safetensors:
@@ -503,24 +582,26 @@ class LlamaMLX:
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         """
-        Provide a standard "instruct" format completion. 
+        Provide a standard "instruct" format completion.
         Combines system_prompt and user_prompt into a single prompt, then calls `generate_text`.
-        
+
         Parameters:
             system_prompt (str): The system instructions for the model
             user_prompt (str): The user's query or instruction
-            
+
         Returns:
             str: The generated completion text
         """
         logger.info("Beginning completion call...")
 
         # Format the prompt according to Llama 3.1 chat template
-        prompt = f"""<s>[INST] <<SYS>>
-{system_prompt}
-<</SYS>>
+        # Llama 3.1 uses a different format than Llama 2
+        prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-{user_prompt} [/INST]
+{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+{user_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
 """
 
         logger.info(
@@ -534,11 +615,19 @@ class LlamaMLX:
             # Decode the output
             output_list = output_tokens.tolist()
             output_text = self.tokenizer.decode(output_list)
-            
+
             # Extract just the assistant's response (remove the prompt)
-            response_start = output_text.find("[/INST]") + len("[/INST]")
-            if response_start >= 0:
+            # Look for the assistant header marker
+            assistant_marker = "<|start_header_id|>assistant<|end_header_id|>"
+            marker_pos = output_text.find(assistant_marker)
+            if marker_pos != -1:
+                response_start = marker_pos + len(assistant_marker)
                 output_text = output_text[response_start:].strip()
+                # Remove any end-of-turn tokens from the response
+                eot_marker = "<|eot_id|>"
+                eot_pos = output_text.find(eot_marker)
+                if eot_pos != -1:
+                    output_text = output_text[:eot_pos].strip()
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")
