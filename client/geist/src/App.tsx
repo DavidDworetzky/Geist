@@ -1,7 +1,7 @@
 import React from 'react';
-import geist_avatar from './geist_avatar.png'
 import './App.css';
 import Navigation from './Navigation';
+import GhostLogo from './GhostLogo';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Chat from './Chat';
 import WorkflowBuilder from './WorkflowBuilder';
@@ -39,7 +39,7 @@ function App() {
 
     <div id="Container" className="Wrapper">
       <aside className="App-header">
-      <img src={geist_avatar} className="App-logo" alt="logo" /> 
+      <GhostLogo /> 
       <a className="App-link" 
         href="https://github.com/DavidDworetzky/Geist"
         target="_blank"
