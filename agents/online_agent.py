@@ -244,9 +244,11 @@ class OnlineAgent(BaseAgent):
         
         # Convert to GenericCompletion
         completion = GenericCompletion.from_dict(response_data)
-        
-        # Add to chat history
-        ai_message = completion.choices[0].message.content
+
+        # Add to chat history with None check
+        ai_message = None
+        if completion.choices and len(completion.choices) > 0:
+            ai_message = completion.choices[0].message.content
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
@@ -437,15 +439,31 @@ class OnlineAgent(BaseAgent):
         """Initialize the agent with optional task."""
         if task_prompt:
             self._agent_context.task_context.append(task_prompt)
-        
+
         if self.as_subprocess:
             self.logger.info("Initializing agent with subprocess.")
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-            self._agent_context.subprocess_id = process.pid
+            try:
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                self.logger.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             self.logger.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
     
+    def __del__(self):
+        """Clean up HTTP client on destruction."""
+        if hasattr(self, 'client') and self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+
     def phase_out(self):
         """Phase out the agent and clean up resources."""
         self._agent_context._save()
@@ -461,8 +479,14 @@ class OnlineAgent(BaseAgent):
         """Terminate any running subprocess."""
         subprocess_id = self._agent_context.subprocess_id
         if subprocess_id:
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
+            try:
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     def tick(self):
         """Execute one agent tick."""

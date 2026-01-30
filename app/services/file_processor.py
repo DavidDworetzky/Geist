@@ -79,8 +79,10 @@ class FileProcessingService:
                     extracted_text=None,
                     processing_error=error_message
                 )
-            except:
-                pass
+            except Exception as db_error:
+                # Log but don't propagate database errors during error handling
+                import logging
+                logging.warning(f"Failed to update file processing status for file {file_id}: {db_error}")
             
             return {
                 'success': False,
