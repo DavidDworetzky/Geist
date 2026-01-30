@@ -10,37 +10,22 @@ from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.models.agent_completion import AgentCompletion
 from agents.models.llama_completion import LlamaCompletion
-import json
 import subprocess
 import os
 import signal
 import psutil
+from agents.response_utils import (
+    AgentResponseMixin,
+    WORLD_TICK_PROMPT,
+    TASK_TICK_PROMPT,
+    EXECUTION_TICK_PROMPT,
+    SYSTEM_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
-# Constants for agent prompting
-WORLD_TICK_PROMPT = """You are a world class executive. Your plans are direct, and detailed only if necessary. 
-Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 
-TASK_TICK_PROMPT = "You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
-
-FUNCTION_CALL_JSON = """
-{
-    "class" : "class_name",
-    "function": "function_name",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    }
-}
-"""
-
-EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
-
-SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You will be given context about the world, the task and functions you can call. Take the most direct and thorough way of satisfying these constraints."
-
-class LocalAgent(BaseAgent):
+class LocalAgent(AgentResponseMixin, BaseAgent):
     """
     Local agent implementation that uses pluggable runners for inference.
     """
@@ -150,14 +135,14 @@ class LocalAgent(BaseAgent):
         # Convert to LlamaCompletion format for compatibility
         completion = LlamaCompletion.from_dict(completion_result)
         
-        # Add to chat history
-        ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
+        # Add to chat history using the common extraction method
+        ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
             chat_id=chat_id
         )
-        
+
         completion.chat_id = chat_history.chat_session_id
         return completion
 
@@ -288,63 +273,3 @@ class LocalAgent(BaseAgent):
         self._agent_context.execution_context = split_result
         return split_result
     
-    def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
-        """Get aggregated context string."""
-        context_string = ""
-        if world_context:
-            context_string += "WORLD_CONTEXT:" + "\\n".join(self._agent_context.world_context)
-        if task_context:
-            context_string += "TASK_CONTEXT:" + "\\n".join(self._agent_context.task_context)
-        if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + "\\n".join(self._agent_context.execution_context)
-        return context_string
-    
-    def _transform_completions(self, completion):
-        """Transform completion to list of content strings."""
-        try:
-            if hasattr(completion, 'messages'):
-                # LlamaCompletion format
-                return [msg.content for msg in completion.messages if msg.role == 'assistant']
-            elif isinstance(completion, dict) and 'choices' in completion:
-                # GPT-style format
-                return [choice['message']['content'] for choice in completion['choices']]
-            else:
-                # Fallback
-                return [str(completion)]
-        except Exception as e:
-            self.logger.error(f"Failed to transform completion: {completion}, exception: {e}")
-            raise Exception(f"Completion failed to destructure: {completion}")
-    
-    def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate function call JSON format."""
-        try:
-            function_json = function_json.replace('\\n', '')
-            parsed_json = json.loads(function_json)
-            required_keys = ["function", "parameters", "class"]
-            if all(key in parsed_json for key in required_keys):
-                if isinstance(parsed_json["parameters"], dict):
-                    return True
-            return False
-        except json.JSONDecodeError:
-            return False
-    
-    def _take_json_and_call_function(self, function_json: str):
-        """Execute function call from JSON specification."""
-        if not self._is_valid_function_json(function_json):
-            raise Exception(f"Invalid function call json: {function_json}")
-        
-        json_data = json.loads(function_json)
-        class_name = json_data["class"]
-        adapter_class = next(
-            (wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name),
-            None
-        )
-        
-        if not adapter_class:
-            raise Exception(f"No adapter class matching {class_name}")
-        
-        adapter_class = adapter_class.instance
-        function_to_call = getattr(adapter_class, json_data["function"])
-        parameters = json_data["parameters"]
-        
-        return function_to_call(**parameters)

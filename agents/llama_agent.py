@@ -5,7 +5,6 @@ import subprocess
 import os
 import signal
 import psutil
-import json
 import logging
 from utils.logging import log_function_call
 from agents.architectures.llama.llama_mlx import LlamaMLX
@@ -15,36 +14,21 @@ import torch
 from typing import Optional, List, Dict, Any
 from agents.architectures.sesame.generator import load_csm_1b
 import torchaudio
-import os
 import time
 from transformers import pipeline
 from app.models.database.chat_session import get_chat_history
+from agents.response_utils import (
+    AgentResponseMixin,
+    WORLD_TICK_PROMPT,
+    TASK_TICK_PROMPT,
+    EXECUTION_TICK_PROMPT,
+    SYSTEM_PROMPT,
+)
 
-WORLD_TICK_PROMPT = f"""You are a world class executive. Your plans are plans are direct, and detailed only if necessary. 
-Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
-
-TASK_TICK_PROMPT = f"You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
-
-FUNCTION_CALL_JSON = """
-{
-    "class" : "class_name",
-    "function": "function_name",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    }
-}
-"""
-
-EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
-
-
-SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You will be given context about the world, the task and functions you can call. Take the most direct and thorough way of satisfying these constraints."
 
 MAX_BATCH_SIZE = 1000
 
-class LlamaAgent(BaseAgent):
+class LlamaAgent(AgentResponseMixin, BaseAgent):
     def __init__(self, agent_context, ckpt_dir, as_subprocess=False, pre_initialize_model=True):
         # call super constructor
         super().__init__(agent_context, as_subprocess)
@@ -80,75 +64,16 @@ class LlamaAgent(BaseAgent):
         return LlamaCompletion.from_dict(llama_completion)
 
 
-    def _is_valid_function_json(self, function_json:str):
-        try:
-            function_json = function_json.replace('\n', '')
-            # Attempt to parse the JSON string
-            parsed_json = json.loads(function_json)
-            # Check if the required keys are present
-            required_keys = ["function", "parameters", "class"]
-            if all(key in parsed_json for key in required_keys):
-                # Check if parameters have the correct structure
-                if isinstance(parsed_json["parameters"], dict) :
-                    return True
-            return False
-        except json.JSONDecodeError:
-            # Return False if JSON is invalid
-            return False        
-        
-
-    def _take_json_and_call_function(self, function_json:str):
-        '''
-        takes a json definition of a function call and uses it to call one of our function adapters.
-        '''
-        if not self._is_valid_function_json(function_json):
-            raise Exception(f"invalid function call json: {function_json}")
-    
-        json_data = json.loads(function_json)
-    
-        # now, find our adapter class and call the relevant function on it.
-        class_name = json_data["class"]
-        adapter_class = next((wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name), None)
-
-        if not adapter_class:
-            raise Exception(f"No adapter class matching{class_name}")
-    
-        adapter_class = adapter_class.instance
-        # now, call the relevant function on the adapter_class through reflection
-        function_to_call = getattr(adapter_class, json_data["function"])
-        parameters = json_data["parameters"]
-    
-        # Execute the function with the provided parameters
-        result = function_to_call(**parameters)
-    
-        return result
-        
-
-    def _aggregated_context(self, world_context : bool, task_context : bool, execution_context: bool):
-        #get aggregated context for world, task and execution context if requested
-        context_string = ""
-        if world_context:
-            context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
-        if task_context:
-            context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
-        if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
-        return context_string
-
     def stream_complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
         return self.complete_text(prompt, max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty, stop, echo, best_of, prompt_tokens, response_format, system_prompt, chat_id, streaming=True)
         
     def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None, streaming:bool = False):
-        #set defaults for agent settings based off of settings values. If undefined,\
-        max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
-        n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
-        temperature = self._agent_context.settings.temperature if self._agent_context.settings.temperature and not temperature else 1.0
-        top_p = self._agent_context.settings.top_p if self._agent_context.settings.top_p and not top_p else 1
-        frequency_penalty = self._agent_context.settings.frequency_penalty if self._agent_context.settings.frequency_penalty and not frequency_penalty else 0
-        presence_penalty = self._agent_context.settings.presence_penalty if self._agent_context.settings.presence_penalty and not presence_penalty else 0
-        
+        # Normalize parameters using shared utility
+        params = self._normalize_params(max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty)
+
         if not system_prompt:
             system_prompt = SYSTEM_PROMPT
+
         # Build a hydrated prompt that includes chat history if available
         hydrated_user_prompt = prompt
         if chat_id is not None:
@@ -167,10 +92,17 @@ class LlamaAgent(BaseAgent):
             except Exception as e:
                 self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
 
-        completion = self._complete_llama_sequence(prompt = hydrated_user_prompt, max_tokens = max_tokens if max_tokens else None, system_prompt=system_prompt, top_p = top_p if top_p else None, temperature = temperature if temperature else None)
-        ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
-        chat_history = self._agent_context._add_to_chat_history(user_message=prompt, ai_message=ai_message, chat_id=chat_id)
+        completion = self._complete_llama_sequence(
+            prompt=hydrated_user_prompt,
+            max_tokens=params.max_tokens,
+            system_prompt=system_prompt,
+            top_p=params.top_p,
+            temperature=params.temperature
+        )
 
+        # Use the common extraction method
+        ai_message = completion.get_assistant_content()
+        chat_history = self._agent_context._add_to_chat_history(user_message=prompt, ai_message=ai_message, chat_id=chat_id)
         completion.chat_id = chat_history.chat_session_id
 
         return completion
@@ -263,15 +195,6 @@ class LlamaAgent(BaseAgent):
             return p.is_running()
         except psutil.NoSuchProcess:
             return False
-
-    def _transform_completions(self, completion):
-        try:
-            choices_list = completion['choices']
-            transformed_content = list(map(lambda x: x['message']['content'], choices_list))
-            return transformed_content
-        except Exception as e:
-            logging.error(f"contents of completion, failed to destructure: {completion}, exception {e}")
-            raise Exception(f"completion failed to destructure: {completion}. Format interop failure. Is your LLM protocol returning the correct format?")
 
     @log_function_call
     def tick_world(self):

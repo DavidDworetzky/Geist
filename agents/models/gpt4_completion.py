@@ -65,3 +65,9 @@ class Gpt4Completion:
         data['choices'] = [Choice.from_dict(choice) for choice in data['choices']]
         data['usage'] = Usage.from_dict(data['usage'])
         return cls(**data)
+
+    def get_assistant_content(self) -> Optional[str]:
+        """Get the assistant message content from this completion."""
+        if self.choices:
+            return self.choices[0].message.content
+        return None

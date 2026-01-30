@@ -13,30 +13,18 @@ from agents.agent_context import AgentContext
 from agents.models.generic_completion import GenericCompletion
 from agents.models.agent_completion import AgentCompletion
 from app.models.database.chat_session import get_chat_history
+from agents.response_utils import (
+    AgentResponseMixin,
+    WORLD_TICK_PROMPT,
+    TASK_TICK_PROMPT,
+    EXECUTION_TICK_PROMPT,
+    build_chat_messages,
+)
 
 logger = logging.getLogger(__name__)
 
-# Constants for agent prompting
-WORLD_TICK_PROMPT = """You are a world class executive. Your plans are direct, and detailed only if necessary. 
-Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
 
-TASK_TICK_PROMPT = "You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
-
-FUNCTION_CALL_JSON = """
-{
-    "class" : "class_name",
-    "function": "function_name",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    }
-}
-"""
-
-EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
-
-class OnlineAgent(BaseAgent):
+class OnlineAgent(AgentResponseMixin, BaseAgent):
     """
     Online agent implementation that routes requests to OpenAI-compatible HTTP endpoints.
     Supports multiple providers including OpenAI, Anthropic, Grok, and Groq.
@@ -197,62 +185,48 @@ class OnlineAgent(BaseAgent):
         chat_id: Optional[int] = None
     ) -> GenericCompletion:
         """Complete text using the online API."""
-        # Set defaults from agent settings
-        max_tokens = max_tokens or self._agent_context.settings.max_tokens or 16
-        n = n or self._agent_context.settings.n or 1
-        temperature = temperature or self._agent_context.settings.temperature or 1.0
-        top_p = top_p or self._agent_context.settings.top_p or 1.0
-        frequency_penalty = frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0
-        presence_penalty = presence_penalty or self._agent_context.settings.presence_penalty or 0.0
-        
-        # Build messages with server-side hydration of prior chat turns
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        # Normalize parameters using shared utility
+        params = self._normalize_params(max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty)
+
+        # Build messages with chat history hydration
+        history = None
         if chat_id is not None:
             try:
                 history = get_chat_history(chat_id)
-                for pair in history.chat_history:
-                    user_msg = pair.get("user")
-                    ai_msg = pair.get("ai")
-                    if user_msg is not None:
-                        messages.append({"role": "user", "content": user_msg})
-                    if ai_msg is not None:
-                        messages.append({"role": "assistant", "content": ai_msg})
             except Exception as e:
                 self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
-        # Append current user prompt last
-        messages.append({"role": "user", "content": prompt})
-        
+
+        messages = build_chat_messages(prompt, system_prompt, history)
+
         # Build payload
         payload = {
             "messages": messages,
             "model": self.model,
-            "max_tokens": max_tokens,
-            "n": n,
-            "temperature": temperature,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
+            "max_tokens": params.max_tokens,
+            "n": params.n,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "frequency_penalty": params.frequency_penalty,
+            "presence_penalty": params.presence_penalty,
         }
-        
+
         if stop is not None:
             payload["stop"] = stop
-        
+
         # Make request
         response_data = self._make_request(payload)
-        
+
         # Convert to GenericCompletion
         completion = GenericCompletion.from_dict(response_data)
-        
-        # Add to chat history
-        ai_message = completion.choices[0].message.content
+
+        # Add to chat history using the common extraction method
+        ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
             chat_id=chat_id
         )
-        
+
         completion.chat_id = chat_history.chat_session_id
         return completion
     
@@ -274,45 +248,32 @@ class OnlineAgent(BaseAgent):
         chat_id: Optional[int] = None
     ) -> Iterator[str]:
         """Stream text completion from the online API."""
-        # Set defaults from agent settings
-        max_tokens = max_tokens or self._agent_context.settings.max_tokens or 16
-        n = n or self._agent_context.settings.n or 1
-        temperature = temperature or self._agent_context.settings.temperature or 1.0
-        top_p = top_p or self._agent_context.settings.top_p or 1.0
-        frequency_penalty = frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0
-        presence_penalty = presence_penalty or self._agent_context.settings.presence_penalty or 0.0
-        
-        # Build messages with server-side hydration for streaming as well
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        # Normalize parameters using shared utility
+        params = self._normalize_params(max_tokens, n, temperature, top_p, frequency_penalty, presence_penalty)
+
+        # Build messages with chat history hydration
+        history = None
         if chat_id is not None:
             try:
                 history = get_chat_history(chat_id)
-                for pair in history.chat_history:
-                    user_msg = pair.get("user")
-                    ai_msg = pair.get("ai")
-                    if user_msg is not None:
-                        messages.append({"role": "user", "content": user_msg})
-                    if ai_msg is not None:
-                        messages.append({"role": "assistant", "content": ai_msg})
             except Exception as e:
                 self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
-        messages.append({"role": "user", "content": prompt})
-        
+
+        messages = build_chat_messages(prompt, system_prompt, history)
+
         # Build payload with streaming enabled
         payload = {
             "messages": messages,
             "model": self.model,
-            "max_tokens": max_tokens,
-            "n": n,
-            "temperature": temperature,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
+            "max_tokens": params.max_tokens,
+            "n": params.n,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "frequency_penalty": params.frequency_penalty,
+            "presence_penalty": params.presence_penalty,
             "stream": True
         }
-        
+
         if stop is not None:
             payload["stop"] = stop
         
@@ -499,60 +460,3 @@ class OnlineAgent(BaseAgent):
         self._agent_context.execution_context = split_result
         return split_result
     
-    def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
-        """Get aggregated context string."""
-        context_string = ""
-        if world_context and self._agent_context.settings.include_world_processing:
-            context_string += "WORLD_CONTEXT:" + "\\n".join(self._agent_context.world_context)
-        if task_context:
-            context_string += "TASK_CONTEXT:" + "\\n".join(self._agent_context.task_context)
-        if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + "\\n".join(self._agent_context.execution_context)
-        return context_string
-    
-    def _transform_completions(self, completion):
-        """Transform completion to list of content strings."""
-        try:
-            if hasattr(completion, 'choices') and completion.choices:
-                return [choice.message.content for choice in completion.choices]
-            elif isinstance(completion, dict) and 'choices' in completion:
-                return [choice['message']['content'] for choice in completion['choices']]
-            else:
-                return [str(completion)]
-        except Exception as e:
-            self.logger.error(f"Failed to transform completion: {completion}, exception: {e}")
-            raise Exception(f"Completion failed to destructure: {completion}")
-    
-    def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate function call JSON format."""
-        try:
-            function_json = function_json.replace('\\n', '')
-            parsed_json = json.loads(function_json)
-            required_keys = ["function", "parameters", "class"]
-            if all(key in parsed_json for key in required_keys):
-                if isinstance(parsed_json["parameters"], dict):
-                    return True
-            return False
-        except json.JSONDecodeError:
-            return False
-    
-    def _take_json_and_call_function(self, function_json: str):
-        """Execute function call from JSON specification."""
-        if not self._is_valid_function_json(function_json):
-            raise Exception(f"Invalid function call json: {function_json}")
-        
-        json_data = json.loads(function_json)
-        class_name = json_data["class"]
-        adapter_class = next(
-            (wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name),
-            None
-        )
-        
-        if not adapter_class:
-            raise Exception(f"No adapter class matching {class_name}")
-        
-        adapter_class = adapter_class.instance
-        function_to_call = getattr(adapter_class, json_data["function"])
-        parameters = json_data["parameters"]
-        
-        return function_to_call(**parameters)
