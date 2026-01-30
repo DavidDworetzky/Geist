@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from agents.llama_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
+from agents.response_utils import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
 from app.main import app
 from agents.llama_agent import LlamaAgent
 from agents.models.llama_completion import LlamaCompletion, Message
@@ -86,16 +86,14 @@ def test_llama_tick_with_prompt(log, complete_text, mock_llama_agent, llama_agen
     print(response_payload)
     assert response_payload == {
         'world_context': [
-            'You are a world class executive. Your plans are plans are direct, and detailed only if necessary. \n'
-            'Given what you know about the world today, and the main task that you need to complete, consider if there are any '
-            'additional facts that you should add to the list of things you consider. \n'
-            "Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with "
-            'simpler statements.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1',
-            'You are a world class executive. Your plans are plans are direct, and detailed only if necessary. \n'
-            'Given what you know about the world today, and the main task that you need to complete, consider if there are any '
-            'additional facts that you should add to the list of things you consider. \n'
-            "Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with "
-            'simpler statements.WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2'
+            'You are a world class executive. Your plans are direct, and detailed only if necessary.\n'
+            'Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider.\n'
+            "Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."
+            'WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion1',
+            'You are a world class executive. Your plans are direct, and detailed only if necessary.\n'
+            'Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider.\n'
+            "Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."
+            'WORLD_CONTEXT:TASK_CONTEXT:Write a haiku:completion2'
         ],
         'task_context': [],
         'execution_context': []

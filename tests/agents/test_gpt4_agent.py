@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from agents.gpt4_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
+from agents.response_utils import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
 from app.main import app
 import pytest
 
