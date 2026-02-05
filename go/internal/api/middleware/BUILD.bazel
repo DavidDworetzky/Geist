@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "middleware",
+    srcs = [
+        "cors.go",
+        "logging.go",
+    ],
+    importpath = "github.com/DavidDworetzky/Geist/internal/api/middleware",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_rs_zerolog//log",
+    ],
+)

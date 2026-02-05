@@ -1,0 +1,22 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "models",
+    srcs = [
+        "agent.go",
+        "completion.go",
+        "registry.go",
+    ],
+    importpath = "github.com/DavidDworetzky/Geist/internal/models",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "models_test",
+    srcs = ["//tests/unit:models_test.go"],
+    embed = [":models"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

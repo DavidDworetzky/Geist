@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # Go HTTP Server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - POSTGRES_DB=geist
+      - POSTGRES_USER=geist
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geist}
+      - MLX_SERVICE_ADDR=mlx-inference:50051
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROK_API_KEY=${GROK_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlx-inference:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - geist-network
+
+  # MLX Inference Service (gRPC)
+  mlx-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlx
+    ports:
+      - "50051:50051"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - LOCAL_WEIGHTS_DIR=/app/weights
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+    volumes:
+      - model-weights:/app/weights
+      - huggingface-cache:/home/geist/.cache/huggingface
+    # Note: For Apple Silicon, you'll need to run this natively, not in Docker
+    # This container is for Linux deployment without MLX
+    restart: unless-stopped
+    networks:
+      - geist-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=geist
+      - POSTGRES_USER=geist
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-geist}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geist -d geist"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - geist-network
+
+  # React Frontend (optional)
+  frontend:
+    build:
+      context: ./client/geist
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - server
+    profiles:
+      - frontend
+    networks:
+      - geist-network
+
+networks:
+  geist-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  model-weights:
+  huggingface-cache:

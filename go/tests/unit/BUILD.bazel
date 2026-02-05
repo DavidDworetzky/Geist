@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "unit_tests",
+    srcs = [
+        "agent_test.go",
+        "config_test.go",
+        "handlers_test.go",
+        "models_test.go",
+    ],
+    deps = [
+        "//internal/agent",
+        "//internal/api/handlers",
+        "//internal/config",
+        "//internal/models",
+        "@com_github_go_chi_chi_v5//:chi",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

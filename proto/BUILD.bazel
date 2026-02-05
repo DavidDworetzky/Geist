@@ -1,0 +1,21 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_proto_grpc//go:defs.bzl", "go_grpc_library")
+load("@rules_proto_grpc//python:defs.bzl", "python_grpc_library")
+
+proto_library(
+    name = "inference_proto",
+    srcs = ["inference.proto"],
+    visibility = ["//visibility:public"],
+)
+
+go_grpc_library(
+    name = "inference_go_grpc",
+    protos = [":inference_proto"],
+    visibility = ["//visibility:public"],
+)
+
+python_grpc_library(
+    name = "inference_python_grpc",
+    protos = [":inference_proto"],
+    visibility = ["//visibility:public"],
+)

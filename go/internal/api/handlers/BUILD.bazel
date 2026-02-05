@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "handlers",
+    srcs = [
+        "agent.go",
+        "health.go",
+        "helpers.go",
+        "models.go",
+        "user_settings.go",
+    ],
+    importpath = "github.com/DavidDworetzky/Geist/internal/api/handlers",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/agent",
+        "//internal/database",
+        "//internal/database/repository",
+        "//internal/models",
+        "@com_github_go_chi_chi_v5//:chi",
+        "@com_github_rs_zerolog//log",
+    ],
+)
+
+go_test(
+    name = "handlers_test",
+    srcs = ["//tests/unit:handlers_test.go"],
+    embed = [":handlers"],
+    deps = [
+        "//internal/models",
+        "@com_github_go_chi_chi_v5//:chi",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

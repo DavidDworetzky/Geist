@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "repository",
+    srcs = ["chat_session.go"],
+    importpath = "github.com/DavidDworetzky/Geist/internal/database/repository",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/models",
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgxpool",
+    ],
+)

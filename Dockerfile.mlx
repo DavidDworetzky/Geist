@@ -1,0 +1,58 @@
+# MLX Inference Service Dockerfile
+# This image is designed to run on Apple Silicon with MLX support
+
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 geist
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY mlx_service/requirements.txt ./mlx_service/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r mlx_service/requirements.txt
+
+# Copy the inference service code
+COPY mlx_service/ ./mlx_service/
+
+# Copy proto files
+COPY proto/ ./proto/
+
+# Copy existing agent code for compatibility
+COPY agents/ ./agents/
+
+# Generate gRPC code
+RUN python -m grpc_tools.protoc \
+    --proto_path=./proto \
+    --python_out=./mlx_service \
+    --grpc_python_out=./mlx_service \
+    ./proto/inference.proto || true
+
+# Set ownership
+RUN chown -R geist:geist /app
+
+# Switch to non-root user
+USER geist
+
+# Expose gRPC port
+EXPOSE 50051
+
+# Health check (uses gRPC health check)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import grpc; channel = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(channel).result(timeout=5)" || exit 1
+
+# Set environment defaults
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Run the inference service
+ENTRYPOINT ["python", "-m", "mlx_service.service"]
+CMD ["--port", "50051"]

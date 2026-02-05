@@ -1,0 +1,25 @@
+# Build options
+build --enable_bzlmod
+
+# Go options
+build --@rules_go//go/config:pure
+
+# Test options
+test --test_output=errors
+test --test_verbose_timeout_warnings
+
+# Performance
+build --jobs=auto
+build --experimental_remote_cache_async
+
+# CI options
+build:ci --curses=no
+build:ci --progress_report_interval=60
+
+# Debug options
+build:debug --compilation_mode=dbg
+build:debug --strip=never
+
+# Release options
+build:release --compilation_mode=opt
+build:release --strip=always

@@ -1,0 +1,258 @@
+syntax = "proto3";
+
+package geist.inference.v1;
+
+option go_package = "github.com/DavidDworetzky/Geist/internal/inference/proto;inferencepb";
+
+// InferenceService provides ML model inference capabilities.
+// This service is implemented by the Python MLX subprocess and consumed by the Go server.
+service InferenceService {
+  // Complete performs a single completion request and returns the full response.
+  rpc Complete(CompletionRequest) returns (CompletionResponse);
+
+  // StreamComplete streams tokens as they are generated.
+  rpc StreamComplete(CompletionRequest) returns (stream TokenChunk);
+
+  // LoadModel loads a model into memory for inference.
+  rpc LoadModel(LoadModelRequest) returns (LoadModelResponse);
+
+  // UnloadModel removes a model from memory.
+  rpc UnloadModel(UnloadModelRequest) returns (UnloadModelResponse);
+
+  // ListModels returns a list of available and loaded models.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+
+  // Health returns the health status of the inference service.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // GetModelInfo returns detailed information about a specific model.
+  rpc GetModelInfo(GetModelInfoRequest) returns (GetModelInfoResponse);
+}
+
+// CompletionRequest contains all parameters needed for text completion.
+message CompletionRequest {
+  // model_id is the identifier of the model to use for inference.
+  string model_id = 1;
+
+  // system_prompt is the system-level instruction for the model.
+  string system_prompt = 2;
+
+  // user_prompt is the user's input to complete.
+  string user_prompt = 3;
+
+  // config contains generation parameters.
+  GenerationConfig config = 4;
+
+  // chat_history contains previous messages in the conversation.
+  repeated Message chat_history = 5;
+}
+
+// GenerationConfig contains parameters that control text generation.
+message GenerationConfig {
+  // max_tokens is the maximum number of tokens to generate.
+  int32 max_tokens = 1;
+
+  // temperature controls randomness in generation (0.0 = deterministic, 1.0 = maximum randomness).
+  float temperature = 2;
+
+  // top_p is the nucleus sampling parameter (1.0 = no nucleus sampling).
+  float top_p = 3;
+
+  // frequency_penalty penalizes tokens based on their frequency in the text so far.
+  float frequency_penalty = 4;
+
+  // presence_penalty penalizes tokens that have appeared in the text so far.
+  float presence_penalty = 5;
+
+  // stop_sequences are strings that stop generation when encountered.
+  repeated string stop_sequences = 6;
+
+  // top_k limits sampling to the k most likely tokens (0 = disabled).
+  int32 top_k = 7;
+
+  // repetition_penalty penalizes repeated tokens.
+  float repetition_penalty = 8;
+}
+
+// Message represents a single message in a conversation.
+message Message {
+  // role is the role of the message sender (system, user, assistant).
+  string role = 1;
+
+  // content is the text content of the message.
+  string content = 2;
+
+  // name is an optional name for the message sender.
+  string name = 3;
+}
+
+// CompletionResponse contains the result of a completion request.
+message CompletionResponse {
+  // id is a unique identifier for this completion.
+  string id = 1;
+
+  // content is the generated text.
+  string content = 2;
+
+  // finish_reason indicates why generation stopped (stop, length, content_filter).
+  string finish_reason = 3;
+
+  // usage contains token usage statistics.
+  UsageStats usage = 4;
+
+  // model_id is the model that was used for generation.
+  string model_id = 5;
+
+  // created is the Unix timestamp when the completion was created.
+  int64 created = 6;
+}
+
+// TokenChunk represents a single token in a streaming response.
+message TokenChunk {
+  // token is the generated token text.
+  string token = 1;
+
+  // is_final indicates if this is the last token in the stream.
+  bool is_final = 2;
+
+  // finish_reason is populated on the final token.
+  string finish_reason = 3;
+
+  // index is the position of this token in the generated sequence.
+  int32 index = 4;
+
+  // logprob is the log probability of this token (if requested).
+  float logprob = 5;
+}
+
+// UsageStats contains token usage statistics for a completion.
+message UsageStats {
+  // prompt_tokens is the number of tokens in the prompt.
+  int32 prompt_tokens = 1;
+
+  // completion_tokens is the number of tokens in the completion.
+  int32 completion_tokens = 2;
+
+  // total_tokens is the sum of prompt and completion tokens.
+  int32 total_tokens = 3;
+}
+
+// LoadModelRequest contains parameters for loading a model.
+message LoadModelRequest {
+  // model_id is the identifier of the model to load (e.g., "meta-llama/Llama-3.1-8B-Instruct").
+  string model_id = 1;
+
+  // runner_type is the type of runner to use (e.g., "mlx_llama", "vllm").
+  string runner_type = 2;
+
+  // device_config contains device-specific configuration.
+  map<string, string> device_config = 3;
+
+  // quantization specifies the quantization level (e.g., "4bit", "8bit", "none").
+  string quantization = 4;
+}
+
+// LoadModelResponse contains the result of loading a model.
+message LoadModelResponse {
+  // success indicates if the model was loaded successfully.
+  bool success = 1;
+
+  // message contains additional information or error details.
+  string message = 2;
+
+  // load_time_ms is the time taken to load the model in milliseconds.
+  int64 load_time_ms = 3;
+
+  // memory_usage_bytes is the memory used by the loaded model.
+  int64 memory_usage_bytes = 4;
+}
+
+// UnloadModelRequest contains parameters for unloading a model.
+message UnloadModelRequest {
+  // model_id is the identifier of the model to unload.
+  string model_id = 1;
+}
+
+// UnloadModelResponse contains the result of unloading a model.
+message UnloadModelResponse {
+  // success indicates if the model was unloaded successfully.
+  bool success = 1;
+
+  // message contains additional information or error details.
+  string message = 2;
+}
+
+// ListModelsRequest contains parameters for listing models.
+message ListModelsRequest {
+  // include_unloaded indicates whether to include models that are not currently loaded.
+  bool include_unloaded = 1;
+}
+
+// ListModelsResponse contains the list of available models.
+message ListModelsResponse {
+  // models is the list of available models.
+  repeated ModelInfo models = 1;
+}
+
+// ModelInfo contains information about a model.
+message ModelInfo {
+  // id is the unique identifier of the model.
+  string id = 1;
+
+  // name is the human-readable name of the model.
+  string name = 2;
+
+  // loaded indicates if the model is currently loaded in memory.
+  bool loaded = 3;
+
+  // context_window is the maximum context length supported by the model.
+  int32 context_window = 4;
+
+  // supports_streaming indicates if the model supports streaming generation.
+  bool supports_streaming = 5;
+
+  // family is the model family (e.g., "llama", "mistral").
+  string family = 6;
+
+  // parameter_count is the number of parameters in the model.
+  int64 parameter_count = 7;
+
+  // quantization is the quantization level of the loaded model.
+  string quantization = 8;
+}
+
+// GetModelInfoRequest contains parameters for getting model information.
+message GetModelInfoRequest {
+  // model_id is the identifier of the model.
+  string model_id = 1;
+}
+
+// GetModelInfoResponse contains detailed information about a model.
+message GetModelInfoResponse {
+  // model contains the model information.
+  ModelInfo model = 1;
+
+  // exists indicates if the model exists.
+  bool exists = 2;
+}
+
+// HealthRequest is an empty request for health checks.
+message HealthRequest {}
+
+// HealthResponse contains the health status of the inference service.
+message HealthResponse {
+  // status is the health status (SERVING, NOT_SERVING).
+  string status = 1;
+
+  // version is the version of the inference service.
+  string version = 2;
+
+  // loaded_models is the number of models currently loaded.
+  int32 loaded_models = 3;
+
+  // uptime_seconds is the time since the service started.
+  int64 uptime_seconds = 4;
+
+  // memory_usage_bytes is the current memory usage.
+  int64 memory_usage_bytes = 5;
+}

@@ -1,0 +1,10 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# gazelle:prefix github.com/DavidDworetzky/Geist
+gazelle(name = "gazelle")
+
+# Export go.mod for dependency resolution
+exports_files([
+    "go/go.mod",
+    "go/go.sum",
+])

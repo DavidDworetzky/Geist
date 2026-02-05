@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "agent",
+    srcs = [
+        "agent.go",
+        "factory.go",
+        "local_agent.go",
+        "online_agent.go",
+    ],
+    importpath = "github.com/DavidDworetzky/Geist/internal/agent",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/config",
+        "//internal/inference/proto",
+        "//internal/models",
+        "@com_github_google_uuid//:uuid",
+        "@com_github_rs_zerolog//log",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//credentials/insecure",
+        "@org_golang_google_grpc//keepalive",
+    ],
+)
+
+go_test(
+    name = "agent_test",
+    srcs = ["//tests/unit:agent_test.go"],
+    embed = [":agent"],
+    deps = [
+        "//internal/models",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

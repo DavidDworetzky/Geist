@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "integration_tests",
+    srcs = ["api_test.go"],
+    tags = ["integration"],
+    deps = [
+        "//internal/agent",
+        "//internal/api",
+        "//internal/config",
+        "//internal/database",
+        "//internal/models",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

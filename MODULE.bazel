@@ -1,0 +1,54 @@
+"""Bazel module definition for Geist server."""
+
+module(
+    name = "geist",
+    version = "1.0.0",
+)
+
+# Go rules
+bazel_dep(name = "rules_go", version = "0.46.0")
+bazel_dep(name = "gazelle", version = "0.35.0")
+
+# Protocol buffers
+bazel_dep(name = "rules_proto", version = "6.0.0")
+bazel_dep(name = "protobuf", version = "26.0")
+
+# gRPC
+bazel_dep(name = "rules_proto_grpc", version = "5.0.0")
+
+# Python rules
+bazel_dep(name = "rules_python", version = "0.31.0")
+
+# Go toolchain
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.22.1")
+
+# Go dependencies
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_mod = "//:go/go.mod")
+use_repo(
+    go_deps,
+    "com_github_go_chi_chi_v5",
+    "com_github_jackc_pgx_v5",
+    "com_github_kelseyhightower_envconfig",
+    "com_github_rs_zerolog",
+    "com_github_stretchr_testify",
+    "com_github_google_uuid",
+    "org_golang_google_grpc",
+    "org_golang_google_protobuf",
+    "org_golang_x_crypto",
+)
+
+# Python toolchain
+python = use_extension("@rules_python//python:extensions.bzl", "python")
+python.toolchain(
+    python_version = "3.11",
+)
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.11",
+    requirements_lock = "//:mlx_service/requirements.txt",
+)
+use_repo(pip, "pip")

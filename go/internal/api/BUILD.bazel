@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "api",
+    srcs = ["router.go"],
+    importpath = "github.com/DavidDworetzky/Geist/internal/api",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/agent",
+        "//internal/api/handlers",
+        "//internal/api/middleware",
+        "//internal/config",
+        "//internal/database",
+        "//internal/database/repository",
+        "//internal/models",
+        "@com_github_go_chi_chi_v5//:chi",
+        "@com_github_go_chi_chi_v5//middleware",
+    ],
+)
