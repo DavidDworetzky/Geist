@@ -139,3 +139,11 @@ dmypy.json
 
 #model weights
 app/model_weights/*
+
+# Go build artifacts
+bin/
+go/coverage.out
+go/coverage.html
+
+# Bazel
+bazel-*
