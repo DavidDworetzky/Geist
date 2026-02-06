@@ -27,6 +27,7 @@ from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.notes import router as notes_router
 from agents.local_agent import LocalAgent
 from app.services.user_settings_service import UserSettingsService
 from app.models.user_settings import AgentFactoryConfig
@@ -248,6 +249,7 @@ def create_app():
     app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
+    app.include_router(notes_router, prefix="/api/v1/notes", tags=["notes"])
 
     @app.get('/')
     def version():

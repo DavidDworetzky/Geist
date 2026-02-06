@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Chat from './Chat';
 import WorkflowBuilder from './WorkflowBuilder';
 import Files from './Files';
+import Notes from './Notes';
 import Settings from './Settings';
 
 
@@ -29,6 +30,11 @@ function App() {
     name: 'Files',
     link: '/files',
     svg: 'M369.9 97.9L286 14C277 5 264.8-.1 252.1-.1H48C21.5 0 0 21.5 0 48v416c0 26.5 21.5 48 48 48h288c26.5 0 48-21.5 48-48V131.9c0-12.7-5.1-25-14.1-34zM332.1 128H256V51.9l76.1 76.1zM48 464V48h160v104c0 13.3 10.7 24 24 24h104v288H48z'
+  },
+  {
+    name: 'Notes',
+    link: '/notes',
+    svg: 'M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384L256 0zM112 256H272c8.8 0 16 7.2 16 16s-7.2 16-16 16H112c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64H272c8.8 0 16 7.2 16 16s-7.2 16-16 16H112c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64H272c8.8 0 16 7.2 16 16s-7.2 16-16 16H112c-8.8 0-16-7.2-16-16s7.2-16 16-16z'
   },
   {
     name: 'Settings',
@@ -57,6 +63,7 @@ function App() {
             <Route path="/workflows" element={<WorkflowBuilder/>}/>
             <Route path="/workflows/:workflowId" element={<WorkflowBuilder/>}/>
             <Route path="/files" element={<Files/>}/>
+            <Route path="/notes" element={<Notes/>}/>
             <Route path="/settings" element={<Settings/>}/>
           </Routes>
         </BrowserRouter>

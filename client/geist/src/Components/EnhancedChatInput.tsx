@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
+import { fileReferenceParser, FileItem, NoteItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
 import useVoiceChat from '../Hooks/useVoiceChat';
 
@@ -19,6 +19,12 @@ interface FileSuggestion extends FileItem {
   suggestionText: string;
 }
 
+interface NoteSuggestion {
+  note_id: number;
+  title: string;
+  suggestionText: string;
+}
+
 const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   value,
   onChange,
@@ -32,8 +38,10 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
+  const [noteSuggestions, setNoteSuggestions] = useState<NoteSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
+  const [suggestionMode, setSuggestionMode] = useState<'file' | 'note'>('file');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Voice chat integration
@@ -60,21 +68,43 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     }
   });
 
-  // Handle @ symbol detection and file suggestions
+  // Handle @ symbol detection and file/note suggestions
   const handleInputChange = (newValue: string) => {
     onChange(newValue);
 
-    // Check for @ symbol followed by partial filename
     const caretPosition = textareaRef.current?.selectionStart || 0;
     const textBeforeCaret = newValue.substring(0, caretPosition);
-    const atMatch = textBeforeCaret.match(/@([^@\s]*)$/);
 
+    // Check for @note: pattern first
+    const noteMatch = textBeforeCaret.match(/@note:"?([^@"]*)"?$/);
+    if (noteMatch) {
+      const partial = noteMatch[1];
+      const atPosition = textBeforeCaret.lastIndexOf('@note:');
+      setCurrentAtPosition(atPosition);
+      setSuggestionMode('note');
+
+      const suggestions = fileReferenceParser.getNoteSuggestions(partial);
+      const enhancedNoteSuggestions: NoteSuggestion[] = suggestions.map(note => ({
+        note_id: note.note_id,
+        title: note.title,
+        suggestionText: fileReferenceParser.generateNoteReference(note)
+      }));
+
+      setNoteSuggestions(enhancedNoteSuggestions);
+      setFileSuggestions([]);
+      setShowFileSuggestions(enhancedNoteSuggestions.length > 0);
+      setSelectedSuggestionIndex(-1);
+      return;
+    }
+
+    // Check for @ symbol followed by partial filename
+    const atMatch = textBeforeCaret.match(/@([^@\s]*)$/);
     if (atMatch) {
       const partial = atMatch[1];
       const atPosition = caretPosition - partial.length - 1;
       setCurrentAtPosition(atPosition);
+      setSuggestionMode('file');
 
-      // Get file suggestions
       const suggestions = fileReferenceParser.getFileSuggestions(`@${partial}`);
       const enhancedSuggestions: FileSuggestion[] = suggestions.map(file => ({
         ...file,
@@ -82,6 +112,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       }));
 
       setFileSuggestions(enhancedSuggestions);
+      setNoteSuggestions([]);
       setShowFileSuggestions(enhancedSuggestions.length > 0);
       setSelectedSuggestionIndex(-1);
     } else {
@@ -90,6 +121,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     }
   };
 
+  const allSuggestionCount = suggestionMode === 'note' ? noteSuggestions.length : fileSuggestions.length;
+
   // Handle keyboard navigation in suggestions
   const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Invoke external handler first to allow prevention/overrides
@@ -97,25 +130,29 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       externalHandleKeyDown(e);
       if (e.defaultPrevented) return;
     }
-    if (showFileSuggestions && fileSuggestions.length > 0) {
+    if (showFileSuggestions && allSuggestionCount > 0) {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedSuggestionIndex(prev => 
-            prev < fileSuggestions.length - 1 ? prev + 1 : 0
+          setSelectedSuggestionIndex(prev =>
+            prev < allSuggestionCount - 1 ? prev + 1 : 0
           );
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedSuggestionIndex(prev => 
-            prev > 0 ? prev - 1 : fileSuggestions.length - 1
+          setSelectedSuggestionIndex(prev =>
+            prev > 0 ? prev - 1 : allSuggestionCount - 1
           );
           break;
         case 'Tab':
         case 'Enter':
           if (selectedSuggestionIndex >= 0) {
             e.preventDefault();
-            insertFileSuggestion(fileSuggestions[selectedSuggestionIndex]);
+            if (suggestionMode === 'note') {
+              insertNoteSuggestion(noteSuggestions[selectedSuggestionIndex]);
+            } else {
+              insertFileSuggestion(fileSuggestions[selectedSuggestionIndex]);
+            }
           } else if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSubmit();
@@ -138,13 +175,32 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     const caretPosition = textareaRef.current?.selectionStart || 0;
     const textBeforeCaret = value.substring(0, currentAtPosition);
     const textAfterCaret = value.substring(caretPosition);
-    
+
     const newValue = textBeforeCaret + suggestion.suggestionText + ' ' + textAfterCaret;
     onChange(newValue);
     setShowFileSuggestions(false);
     setSelectedSuggestionIndex(-1);
 
-    // Set cursor position after the inserted text
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newPosition = textBeforeCaret.length + suggestion.suggestionText.length + 1;
+        textareaRef.current.setSelectionRange(newPosition, newPosition);
+        textareaRef.current.focus();
+      }
+    }, 0);
+  };
+
+  // Insert selected note suggestion
+  const insertNoteSuggestion = (suggestion: NoteSuggestion) => {
+    const caretPosition = textareaRef.current?.selectionStart || 0;
+    const textBeforeCaret = value.substring(0, currentAtPosition);
+    const textAfterCaret = value.substring(caretPosition);
+
+    const newValue = textBeforeCaret + suggestion.suggestionText + ' ' + textAfterCaret;
+    onChange(newValue);
+    setShowFileSuggestions(false);
+    setSelectedSuggestionIndex(-1);
+
     setTimeout(() => {
       if (textareaRef.current) {
         const newPosition = textBeforeCaret.length + suggestion.suggestionText.length + 1;
@@ -186,7 +242,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
         </div>
       )}
 
-      {/* File references info */}
+      {/* File/Note references info */}
       {hasFileReferences && (
         <div style={{
           marginBottom: '8px',
@@ -197,10 +253,10 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
           fontSize: '12px'
         }}>
           <div style={{ marginBottom: '4px', fontWeight: 'bold' }}>
-            File References ({parseResult.references.length}):
+            References ({parseResult.references.length}):
           </div>
           {parseResult.references.map((ref, index) => (
-            <div key={index} style={{ 
+            <div key={index} style={{
               color: ref.resolved ? '#155724' : '#856404',
               display: 'flex',
               alignItems: 'center',
@@ -208,9 +264,9 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             }}>
               <span>{ref.resolved ? '✓' : '⚠'}</span>
               <span>{ref.originalText}</span>
-              {ref.resolved && <span style={{ color: '#6c757d' }}>→ {ref.filename}</span>}
+              {ref.resolved && <span style={{ color: '#6c757d' }}>→ {ref.filename} ({ref.type})</span>}
               {!ref.resolved && <span style={{ color: '#856404', fontStyle: 'italic' }}>
-                (file not found)
+                ({ref.type} not found)
               </span>}
             </div>
           ))}
@@ -270,7 +326,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
           </button>
         </div>
 
-        {/* File suggestions dropdown */}
+        {/* File/Note suggestions dropdown */}
         {showFileSuggestions && (
           <div style={{
             position: 'absolute',
@@ -285,26 +341,49 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             maxHeight: '200px',
             overflowY: 'auto'
           }}>
-            {fileSuggestions.map((suggestion, index) => (
-              <div
-                key={suggestion.file_id}
-                onClick={() => insertFileSuggestion(suggestion)}
-                style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  backgroundColor: index === selectedSuggestionIndex ? '#e3f2fd' : 'white',
-                  borderBottom: index < fileSuggestions.length - 1 ? '1px solid #eee' : 'none'
-                }}
-                onMouseEnter={() => setSelectedSuggestionIndex(index)}
-              >
-                <div style={{ fontWeight: 'bold', fontSize: '13px' }}>
-                  {suggestion.suggestionText}
+            {suggestionMode === 'note' ? (
+              noteSuggestions.map((suggestion, index) => (
+                <div
+                  key={suggestion.note_id}
+                  onClick={() => insertNoteSuggestion(suggestion)}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    backgroundColor: index === selectedSuggestionIndex ? '#e3f2fd' : 'white',
+                    borderBottom: index < noteSuggestions.length - 1 ? '1px solid #eee' : 'none'
+                  }}
+                  onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                >
+                  <div style={{ fontWeight: 'bold', fontSize: '13px' }}>
+                    {suggestion.suggestionText}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>
+                    Note: {suggestion.title}
+                  </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#666' }}>
-                  {suggestion.original_filename} • {Math.round(suggestion.file_size / 1024)}KB
+              ))
+            ) : (
+              fileSuggestions.map((suggestion, index) => (
+                <div
+                  key={suggestion.file_id}
+                  onClick={() => insertFileSuggestion(suggestion)}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    backgroundColor: index === selectedSuggestionIndex ? '#e3f2fd' : 'white',
+                    borderBottom: index < fileSuggestions.length - 1 ? '1px solid #eee' : 'none'
+                  }}
+                  onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                >
+                  <div style={{ fontWeight: 'bold', fontSize: '13px' }}>
+                    {suggestion.suggestionText}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>
+                    {suggestion.original_filename} • {Math.round(suggestion.file_size / 1024)}KB
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
       </div>
@@ -312,7 +391,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
       {/* Help text */}
       <div style={{ marginTop: '4px', fontSize: '11px', color: '#6c757d' }}>
-        Tips: Use @ to reference files. Press Tab or Enter to accept suggestions.
+        Tips: Use @ to reference files, @note: to reference notes. Press Tab or Enter to accept suggestions.
       </div>
     </div>
   );
