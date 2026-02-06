@@ -226,11 +226,19 @@ class LocalAgent(BaseAgent):
         """Initialize the agent with optional task."""
         if task_prompt:
             self._agent_context.task_context.append(task_prompt)
-        
+
         if self.as_subprocess:
             self.logger.info("Initializing agent with subprocess.")
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-            self._agent_context.subprocess_id = process.pid
+            try:
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                self.logger.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             self.logger.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
@@ -250,8 +258,14 @@ class LocalAgent(BaseAgent):
         """Terminate any running subprocess."""
         subprocess_id = self._agent_context.subprocess_id
         if subprocess_id:
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
+            try:
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     def tick(self):
         """Execute one agent tick."""

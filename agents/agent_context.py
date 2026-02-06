@@ -1,11 +1,15 @@
 from app.models.database import database
 from agents.agent_settings import AgentSettings
 from typing import List, Any, Dict
-from app.models.database import agent
-from app.models.database.database import Base, Session
-import uuid  # Added import for uuid library
+from app.models.database.agent import Agent
+from app.models.database.database import Base, SessionLocal
+import uuid
+import json
+import logging
 from adapters.adapter_registry import find_adapter_classes, init_adapter_class
 from app.models.database.chat_session import get_chat_history, update_chat_history, ChatSession
+
+logger = logging.getLogger(__name__)
 class AgentContext():
     def __init__(self, settings: AgentSettings, agent_id = None, world_context:List[str] = [], task_context: List[str] = [], execution_context: List[str] = [], function_log: List[str] = [], execution_classes: List[Any] = [], subprocess_id: int = None, envs : Dict[str, str] = {}, include_world_processing = False):
         if agent_id is None:
@@ -28,18 +32,32 @@ class AgentContext():
         self.include_world_processing = include_world_processing
 
         if self.envs and len(self.envs.keys()) > 0:
-            self.initialized_classes = [init_adapter_class(cls[0], self.envs) for cls in self.execution_classes if init_adapter_class(cls[0], self.envs) is not None]
+            # Fix: avoid calling init_adapter_class twice by storing result first
+            self.initialized_classes = []
+            for cls in self.execution_classes:
+                initialized = init_adapter_class(cls[0], self.envs)
+                if initialized is not None:
+                    self.initialized_classes.append(initialized)
             
                 
 
     def _save(self):
-        #get existing agent in database.
-        session = Session
-        session.query(agent).filter_by(id = self.agent_id).first()
-        agent.world_context = self.world_context
-        agent.task_context = self.task_context
-        agent.execution_context = self.task_context
-        session.commit()
+        """Save agent context to database."""
+        try:
+            with SessionLocal() as session:
+                # Query for existing agent
+                agent_obj = session.query(Agent).filter_by(agent_id=self.agent_id).first()
+                if agent_obj:
+                    # Update existing agent context (serialize lists to JSON)
+                    agent_obj.world_context = json.dumps(self.world_context)
+                    agent_obj.task_context = json.dumps(self.task_context)
+                    agent_obj.execution_context = json.dumps(self.execution_context)
+                    session.commit()
+                    logger.info(f"Saved agent context for agent_id={self.agent_id}")
+                else:
+                    logger.warning(f"Agent with agent_id={self.agent_id} not found in database, skipping save")
+        except Exception as e:
+            logger.error(f"Failed to save agent context: {e}")
 
     def _add_to_chat_history(self, user_message: str, ai_message: str, chat_id: int = None) -> ChatSession:
         chat_history = get_chat_history(chat_id)
