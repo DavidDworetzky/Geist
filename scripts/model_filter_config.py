@@ -219,7 +219,7 @@ HUGGINGFACE_MODEL_FAMILIES: List[str] = [
     "deepseek-ai",
     "01-ai",
     "THUDM",  # GLM models
-    "moonshot",  # Kimi models
+    "moonshotai",  # Kimi models
 ]
 
 # Specific HuggingFace models to include
@@ -233,6 +233,7 @@ HUGGINGFACE_MODELS: List[str] = [
     "mistralai/Mistral-7B-Instruct-v0.3",
     "deepseek-ai/DeepSeek-V2.5",
     "THUDM/glm-4-9b-chat",
+    "moonshotai/Kimi-K2.5",
 ]
 
 

@@ -150,7 +150,7 @@ class TestUserSettingsIntegration:
             user_settings_id=1,
             user_id=1,
             default_agent_type="local",
-            default_local_model="test-model",
+            default_local_model="meta-llama/Meta-Llama-3.1-8B-Instruct",
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
@@ -169,7 +169,7 @@ class TestUserSettingsIntegration:
         # Test local agent config
         config = AgentFactoryConfig.from_user_settings(settings)
         assert config.agent_type == "local"
-        assert config.model == "test-model"
+        assert config.model == "meta-llama/Meta-Llama-3.1-8B-Instruct"
         assert config.runner_type == "mlx_llama"
         assert config.endpoint is None
         

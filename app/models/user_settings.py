@@ -71,6 +71,27 @@ class BackupProviderConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API key for this provider")
     priority: int = Field(default=1, description="Priority (1 = highest)")
     
+# Models that use the MLX Llama runner (Llama-family models)
+_MLX_LLAMA_MODEL_PREFIXES = [
+    "meta-llama/",
+    "Meta-Llama",
+    "Llama-",
+]
+
+
+def _infer_runner_type(model: str) -> str:
+    """Infer the appropriate runner type based on the model identifier.
+
+    Models matching Llama-family prefixes use the mlx_llama runner.
+    All other models (e.g., Kimi K2.5, Qwen, Mixtral) use the generic
+    huggingface runner.
+    """
+    for prefix in _MLX_LLAMA_MODEL_PREFIXES:
+        if model.startswith(prefix):
+            return "mlx_llama"
+    return "huggingface"
+
+
 class AgentFactoryConfig(BaseModel):
     """Model for configuring agent factory from user settings."""
     agent_type: str
@@ -90,7 +111,7 @@ class AgentFactoryConfig(BaseModel):
         
         if agent_type == "local":
             model = overrides.model or settings.default_local_model
-            runner_type = overrides.runner_type or "mlx_llama"
+            runner_type = overrides.runner_type or _infer_runner_type(model)
             endpoint = None
             api_key = None
         else:  # online
