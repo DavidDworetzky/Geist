@@ -56,6 +56,7 @@ CHAT_MODEL_PREFIXES: List[str] = [
     "llama",
     "mixtral",
     "qwen",
+    "glm",
 ]
 
 # Model metadata overrides - used to enhance API-provided data
@@ -233,6 +234,7 @@ HUGGINGFACE_MODELS: List[str] = [
     "mistralai/Mistral-7B-Instruct-v0.3",
     "deepseek-ai/DeepSeek-V2.5",
     "THUDM/glm-4-9b-chat",
+    "THUDM/glm-4-9b-chat-1m",
 ]
 
 

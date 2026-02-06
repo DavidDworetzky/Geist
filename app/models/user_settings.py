@@ -90,7 +90,13 @@ class AgentFactoryConfig(BaseModel):
         
         if agent_type == "local":
             model = overrides.model or settings.default_local_model
-            runner_type = overrides.runner_type or "mlx_llama"
+            # Auto-select runner based on model family when not explicitly set
+            if overrides.runner_type:
+                runner_type = overrides.runner_type
+            elif model and ("glm" in model.lower() or "thudm" in model.lower()):
+                runner_type = "glm"
+            else:
+                runner_type = "mlx_llama"
             endpoint = None
             api_key = None
         else:  # online

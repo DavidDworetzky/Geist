@@ -5,8 +5,8 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Dict, Type
-from agents.architectures.mlx_llama_runner import MLXLlamaRunner
-from agents.architectures.vllm_runner import VLLMRunner
+# Runner imports are deferred to register_all_runners() to avoid hard
+# failures on platforms that lack optional dependencies (e.g. mlx on Linux).
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,9 @@ class OnlineModelNames(Enum):
     QWEN25_72B = "Qwen/Qwen2.5-72B-Instruct"
     META_LLAMA_31_8B = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     MIXTRAL_8X7B_HF = "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    # GLM models (HuggingFace / THUDM)
+    GLM_4_9B_CHAT = "THUDM/glm-4-9b-chat"
+    GLM_4_9B_CHAT_LOCAL = "glm-4-9b-chat"
     # Offline / Local models
     META_LLAMA_31_8B_LOCAL = "Meta-Llama-3.1-8B-Instruct"
     META_LLAMA_31_8B_BASE_LOCAL = "Meta-Llama-3.1-8B"
@@ -248,13 +251,28 @@ def register_all_runners(registry: Optional[RunnerRegistry] = None) -> None:
         registry = get_registry()
     
     logger.info("Registering all available runners...")
-    
+
     # Register MLX Llama runner
-    registry.register("mlx_llama", MLXLlamaRunner)
-    
+    try:
+        from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+        registry.register("mlx_llama", MLXLlamaRunner)
+    except ImportError as e:
+        logger.warning(f"MLX Llama runner not available: {e}")
+
+    # Register GLM runner
+    try:
+        from agents.architectures.glm_runner import GLMRunner
+        registry.register("glm", GLMRunner)
+    except ImportError as e:
+        logger.warning(f"GLM runner not available: {e}")
+
     # Register vLLM runner (placeholder)
-    registry.register("vllm", VLLMRunner)
-    
+    try:
+        from agents.architectures.vllm_runner import VLLMRunner
+        registry.register("vllm", VLLMRunner)
+    except ImportError as e:
+        logger.warning(f"vLLM runner not available: {e}")
+
     _initialized = True
     logger.info("All runners registered successfully")
 
@@ -630,6 +648,18 @@ STATIC_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
             supports_function_calling=False,
             recommended=False,
             family="llama-3"
+        ),
+        ModelInfo(
+            id="THUDM/glm-4-9b-chat",
+            name="GLM-4 9B Chat (Local)",
+            provider=OnlineModelProviders.OFFLINE,
+            context_window=131072,
+            max_output_tokens=8192,
+            supports_vision=False,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=True,
+            family="glm-4"
         ),
     ],
 }

@@ -70,11 +70,14 @@ class AgentFactory:
         """Create a LocalAgent instance."""
         try:
             from agents.local_agent import LocalAgent
-            
-            # Default to MLX Llama runner if not specified
+
+            # Auto-select runner type based on model when not specified
             if not runner_type:
-                runner_type = "mlx_llama"
-            
+                if model and ("glm" in model.lower() or "thudm" in model.lower()):
+                    runner_type = "glm"
+                else:
+                    runner_type = "mlx_llama"
+
             # Default model
             if not model:
                 model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
