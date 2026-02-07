@@ -1,0 +1,116 @@
+[tool.mypy]
+# Python version to target
+python_version = "3.11"
+
+# Enable warnings for untyped code
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+# Disallow untyped definitions and calls
+disallow_untyped_defs = false  # Start with false, can be made stricter later
+disallow_untyped_calls = false  # Start with false, can be made stricter later
+disallow_incomplete_defs = false
+check_untyped_defs = true
+
+# Strict optional checking
+strict_optional = true
+
+# Import discovery
+namespace_packages = true
+explicit_package_bases = true
+
+# Platform configuration
+platform = "linux"
+
+# Ignore missing imports for third-party libraries without type stubs
+ignore_missing_imports = true
+
+# Show error codes in output
+show_error_codes = true
+show_column_numbers = true
+pretty = true
+
+# Exclude paths
+exclude = [
+    '^migrations/',
+    '^tests/',
+    '^scripts/',
+    '^venv/',
+    '^\.venv/',
+    '^build/',
+    '^dist/',
+]
+
+# Per-module options
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "scripts.*"
+ignore_errors = true
+
+[tool.ruff]
+# Target Python 3.11
+target-version = "py311"
+line-length = 100
+
+# Exclude directories
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "build",
+    "dist",
+    "migrations",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# Enable these rule sets:
+# E/W - pycodestyle errors and warnings
+# F - Pyflakes
+# I - isort (import sorting)
+# N - pep8-naming
+# UP - pyupgrade (upgrade syntax for newer Python versions)
+# B - flake8-bugbear (find likely bugs)
+# C4 - flake8-comprehensions (better list/dict/set comprehensions)
+# SIM - flake8-simplify (simplify code)
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
+
+# Ignore specific rules if needed
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Do not perform function calls in argument defaults (common in FastAPI)
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "agents", "adapters", "utils"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with spaces
+indent-style = "space"
+
+# Use `\n` line endings for all files
+line-ending = "lf"
