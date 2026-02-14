@@ -105,9 +105,9 @@ class AgentFactory:
             if not runner_type:
                 runner_type = AgentFactory._infer_runner_type(model)
 
-            # For qwen3 runner, propagate weights_dir into device_config so
-            # the runner can load safetensors from a custom path.
-            if runner_type == "qwen3" and "weights_dir" in kwargs:
+            # Propagate weights_dir into device_config so the runner can
+            # load safetensors / pretrained weights from a custom path.
+            if "weights_dir" in kwargs:
                 device_config = kwargs.pop("device_config", None) or {}
                 device_config["weights_dir"] = kwargs.pop("weights_dir")
                 kwargs["device_config"] = device_config

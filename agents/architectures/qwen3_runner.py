@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 # Default Qwen 3 model for local inference
 DEFAULT_QWEN3_MODEL_ID = "Qwen/Qwen3-8B"
-DEFAULT_QWEN3_WEIGHTS_DIR = "app/model_weights/qwen3"
 
 
 class Qwen3Runner(BaseRunner):
@@ -33,7 +32,7 @@ class Qwen3Runner(BaseRunner):
     def __init__(self):
         self.model = None
         self.tokenizer = None
-        self.pipeline = None
+        self._pipeline = None
         self.model_id = None
         self.weights_dir = None
         self.device = None
@@ -245,14 +244,15 @@ class Qwen3Runner(BaseRunner):
         )
 
         try:
-            pipeline = transformers.pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=self.device,
-            )
+            if self._pipeline is None:
+                self._pipeline = transformers.pipeline(
+                    "text-generation",
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    device=self.device,
+                )
 
-            outputs = pipeline(
+            outputs = self._pipeline(
                 prompt_text,
                 max_new_tokens=generation_config.max_tokens,
                 do_sample=generation_config.temperature > 0,
@@ -288,15 +288,15 @@ class Qwen3Runner(BaseRunner):
 
     def cleanup(self) -> None:
         """Clean up model resources."""
+        if self._pipeline:
+            del self._pipeline
+            self._pipeline = None
         if self.model:
             del self.model
             self.model = None
         if self.tokenizer:
             del self.tokenizer
             self.tokenizer = None
-        if self.pipeline:
-            del self.pipeline
-            self.pipeline = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         logger.info("Qwen3 runner cleaned up")
