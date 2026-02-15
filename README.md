@@ -94,10 +94,3 @@ client/geist/.env settings:
 ## Scripts 
 1. scripts/download_models.py - download models from huggingface.
 2. scripts/copy_weights.py - copy weights from desktop to /app/models/weights/. Used for weights that are not hosted on huggingface. 
-
-
-
-
-
-
-
