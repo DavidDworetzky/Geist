@@ -1,68 +1,61 @@
-from psycopg2 import connect, extensions, sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from psycopg2.errors import DuplicateDatabase
-from psycopg2.extras import execute_values
+import importlib
+
 from dotenv import load_dotenv
-import os
+
+from app.models.database.database import Base, DATABASE_BACKEND, Engine
+
 
 load_dotenv()
 
-# Use environment variables set in docker-compose.yml
-DB_NAME = os.getenv("POSTGRES_DB", "geist")
-DB_USER = os.getenv("POSTGRES_USER", "geist")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "geist")
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_PORT = os.getenv("DB_PORT", "5432")
 
-# Connect to the default 'postgres' database first
-conn = connect(
-    dbname="postgres",
-    user=DB_USER,
-    host=DB_HOST,
-    port=DB_PORT,
-    password=DB_PASSWORD,
-)
-conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-cur = conn.cursor()
+def ensure_postgres_database() -> None:
+    import os
 
-# Check if database exists
-cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
-exists = cur.fetchone()
+    from psycopg2 import connect, sql
+    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-if not exists:
-    try:
-        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_NAME)))
-        print(f"Database '{DB_NAME}' created successfully")
-    except Exception as e:
-        print(f"An error occurred while creating the database: {e}")
-else:
-    print(f"Database '{DB_NAME}' already exists")
+    db_name = os.getenv("POSTGRES_DB", "geist")
+    db_user = os.getenv("POSTGRES_USER", "geist")
+    db_password = os.getenv("POSTGRES_PASSWORD", "geist")
+    db_host = os.getenv("DB_HOST", "db")
+    db_port = os.getenv("DB_PORT", "5432")
 
-cur.close()
-conn.close()
+    conn = connect(
+        dbname="postgres",
+        user=db_user,
+        host=db_host,
+        port=db_port,
+        password=db_password,
+    )
+    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+    cur = conn.cursor()
 
-# Now connect to the new database to create tables
-conn = connect(
-    dbname=DB_NAME,
-    user=DB_USER,
-    host=DB_HOST,
-    port=DB_PORT,
-    password=DB_PASSWORD,
-)
+    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+    exists = cur.fetchone()
 
-# Rest of your code...
-#database imports
-from app.models.database.database import Base
-from app.models.database.database import Engine
-# Import all models to register them with Base.metadata
-import app.models.database
+    if not exists:
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+        print(f"Database '{db_name}' created successfully")
+    else:
+        print(f"Database '{db_name}' already exists")
 
-#create models if they do not exist
-Base.metadata.create_all(bind=Engine)
+    cur.close()
+    conn.close()
 
-#now, run all other idempotent insertion scripts
-from scripts.insert_presets import main as insert_presets
-# Add the 'overwrite' argument here. You may want to set this to False if you don't want to overwrite existing data
-insert_presets(to_commit=True, overwrite=False)
 
-conn.close()
+def main() -> None:
+    if DATABASE_BACKEND != "sqlite":
+        ensure_postgres_database()
+
+    # Import all models to register them with Base.metadata.
+    importlib.import_module("app.models.database")
+
+    Base.metadata.create_all(bind=Engine)
+
+    from scripts.insert_presets import main as insert_presets
+
+    insert_presets(to_commit=True, overwrite=False)
+
+
+if __name__ == "__main__":
+    main()
