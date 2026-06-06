@@ -5,10 +5,13 @@
 `make empty` to run an empty container to install dependencies
 #package installs
 `docker exec backend /bin/bash` to enter the backend container
-`pip install PACKAGE` to install dependencies
-When installing packages, `conda env export >> linux_environment.yml` after installing to freeze installs. 
+`pip install --only-binary=:all: PACKAGE==VERSION` to install pinned binary dependencies when possible
+When installing packages, `conda env export > linux_environment.yml` after installing to freeze installs.
+Run a Python dependency audit before committing dependency changes.
 #frontend package installs
-`cd client & npm i PACKAGE`
+`cd client/geist && npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION`
+Use `npm ci --ignore-scripts --audit=false --fund=false` for frontend installs from the committed lockfile.
+Run `npm audit --package-lock-only` before committing frontend dependency changes.
 #running tests
 `cd /opt/geist && PYTHONPATH=/opt/geist pytest` in the backend container
 
@@ -69,5 +72,4 @@ prefer minimal inline implementations over extra dependency imports. Core librar
 ## first, create a plan for your feature in /plans
 ## next, implement the plan, adding the backend data models, middle data models, service layer, routes, backend tests, 
 ## finally, test the solution by running `docker compose up -d`, then verifying no error logs in the docker container, then doing a curl command to localhost:3000
-
 

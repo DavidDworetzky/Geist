@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package.json and package-lock.json
 COPY client/geist/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies from the committed lockfile without lifecycle scripts
+RUN npm ci --ignore-scripts --audit=false --fund=false
 
 # Copy the rest of the client code
 COPY client/geist/ .

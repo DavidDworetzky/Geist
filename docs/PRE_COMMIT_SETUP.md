@@ -8,6 +8,7 @@ Pre-commit hooks automatically run checks on your code before each commit. This 
 - **Ruff**: Fast Python linter and code formatter (replaces black, isort, flake8, and more)
 - **mypy**: Python static type checking
 - **Standard pre-commit hooks**: File checks, YAML validation, etc.
+- **Dependency policy checks**: Supply-chain guardrails for npm, Docker, and Python environment files
 
 ## Installation
 
@@ -36,6 +37,17 @@ pre-commit install
 
 This command sets up git hooks that will run automatically before each commit.
 
+### 3. Install frontend dependencies safely
+
+Use the committed npm lockfile and disable dependency lifecycle scripts:
+
+```bash
+cd client/geist
+npm ci --ignore-scripts --audit=false --fund=false
+```
+
+Do not use bare `npm install` or `npm i` for project setup.
+
 ## Usage
 
 ### Automatic execution
@@ -63,6 +75,7 @@ pre-commit run --files path/to/file.py
 # Run a specific hook
 pre-commit run mypy --all-files
 pre-commit run ruff --all-files
+pre-commit run dependency-supply-chain-policy --all-files
 ```
 
 ### Bypassing hooks (not recommended)
@@ -151,6 +164,35 @@ To customize rules, edit `[tool.ruff.lint]` in `pyproject.toml`
 - Trailing whitespace removal
 - End-of-file newline enforcement
 
+### Dependency Supply-Chain Policy
+- Runs on: npm manifests, frontend Dockerfile, conda environment files, and the policy script
+- Purpose: Blocks dependency drift that increases supply-chain risk
+- Checks:
+  - Frontend direct dependencies use exact versions, not ranges like `^` or `~`
+  - `package-lock.json` root dependencies match `package.json`
+  - Registry packages in `package-lock.json` include integrity hashes
+  - Frontend Docker builds use `npm ci --ignore-scripts`
+  - Pip dependencies in environment files use exact `==` pins
+  - Conda dependencies in environment files use at least exact `name=version` pins
+
+When adding frontend packages:
+
+```bash
+cd client/geist
+npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION
+npm audit --package-lock-only
+```
+
+When adding backend pip packages:
+
+```bash
+docker exec backend /bin/bash
+pip install --only-binary=:all: PACKAGE==VERSION
+conda env export > linux_environment.yml
+```
+
+Review dependency diffs before committing.
+
 ## Troubleshooting
 
 ### "command not found: pre-commit"
@@ -163,7 +205,7 @@ conda activate geist-linux-docker  # or your environment name
 ### Type checking errors on third-party libraries
 
 If mypy complains about missing type stubs, you can:
-1. Install type stubs: `pip install types-<library-name>`
+1. Install exact type stubs: `pip install --only-binary=:all: types-<library-name>==VERSION`
 2. Or add to `pyproject.toml`:
    ```toml
    [[tool.mypy.overrides]]
