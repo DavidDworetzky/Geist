@@ -1,23 +1,26 @@
-# SQLite Storage Engine Plan
+# Injectable SQLAlchemy Provider Plan
 
 ## Goal
 
-Add an opt-in SQLite persistence implementation for the existing SQLAlchemy database layer while keeping PostgreSQL as the default runtime backend.
+Add a provider-neutral SQLAlchemy configuration layer that can select PostgreSQL or SQLite at runtime while keeping PostgreSQL as the default provider.
 
 ## Approach
 
-1. Extend `app.models.database.database` so it can build either:
-   - the current PostgreSQL engine from `POSTGRES_*` variables, or
-   - a SQLite engine from `GEIST_DATABASE_BACKEND=sqlite` plus `SQLITE_DATABASE_PATH` or `SQLITE_DATABASE_URL`.
-2. Preserve the current public API used throughout the codebase:
+1. Add an immutable `DatabaseConfig` and provider registry outside the process-wide session module.
+2. Implement PostgreSQL and SQLite as registered providers responsible for:
+   - building their default connection URL,
+   - creating their SQLAlchemy engine, and
+   - performing provider-specific database initialization.
+3. Load configuration from environment variables only as the default adapter. Tests and application composition can inject a `DatabaseConfig` directly without mutating process environment.
+4. Preserve the current public API used throughout the codebase:
    - `Engine`
    - `SessionLocal`
    - `Session`
    - `Base`
    - `SQLALCHEMY_DATABASE_URL`
-3. Make model declarations portable where they currently depend on PostgreSQL-specific types.
-4. Update database initialization so SQLite creates its file-backed database and tables without requiring `psycopg2` setup.
-5. Add unit tests that bind the application models to a temporary SQLite file and validate persistence across the existing model helper functions.
+5. Make model declarations portable where they currently depend on PostgreSQL-specific types.
+6. Update database initialization to delegate setup to the selected provider.
+7. Add unit tests for provider selection, direct configuration injection, and SQLite persistence across existing model helper functions.
 
 ## Verification
 
@@ -27,16 +30,25 @@ Add an opt-in SQLite persistence implementation for the existing SQLAlchemy data
 
 ## Configuration
 
-PostgreSQL remains the default. To opt into SQLite:
+PostgreSQL remains the default. Provider selection uses:
 
 ```bash
-GEIST_DATABASE_BACKEND=sqlite
+GEIST_DATABASE_PROVIDER=sqlite
 SQLITE_DATABASE_PATH=/opt/geist/data/geist.sqlite3
 ```
 
 or:
 
 ```bash
-GEIST_DATABASE_BACKEND=sqlite
+GEIST_DATABASE_PROVIDER=sqlite
 SQLITE_DATABASE_URL=sqlite:////opt/geist/data/geist.sqlite3
+```
+
+`GEIST_DATABASE_BACKEND` and `DB_BACKEND` remain supported as compatibility aliases. Application code and tests can bypass environment loading entirely:
+
+```python
+DatabaseConfig(
+    provider="sqlite",
+    database_url="sqlite:////tmp/geist.sqlite3",
+)
 ```

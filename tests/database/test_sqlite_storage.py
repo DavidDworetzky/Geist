@@ -5,21 +5,23 @@ import pytest
 
 from app.models.database.database import (
     Base,
-    DATABASE_BACKEND,
-    SQLALCHEMY_DATABASE_URL,
+    DATABASE_CONFIG,
     Session,
     SessionLocal,
     configure_database,
 )
+from app.models.database.database_config import DatabaseConfig
 
 
 @pytest.fixture()
 def sqlite_database(tmp_path):
-    original_url = SQLALCHEMY_DATABASE_URL
-    original_backend = DATABASE_BACKEND
-    sqlite_url = f"sqlite:///{tmp_path / 'geist.sqlite3'}"
+    original_config = DATABASE_CONFIG
+    sqlite_config = DatabaseConfig(
+        provider="sqlite",
+        database_url=f"sqlite:///{tmp_path / 'geist.sqlite3'}",
+    )
 
-    engine = configure_database(database_url=sqlite_url, backend="sqlite")
+    engine = configure_database(sqlite_config)
 
     importlib.import_module("app.models.database")
 
@@ -29,7 +31,7 @@ def sqlite_database(tmp_path):
     finally:
         Session.remove()
         Base.metadata.drop_all(bind=engine)
-        configure_database(database_url=original_url, backend=original_backend)
+        configure_database(original_config)
 
 
 def create_test_user() -> int:
@@ -125,7 +127,9 @@ def test_sqlite_persists_core_database_models(sqlite_database):
         restriction_id = restriction.restriction_id
 
     with SessionLocal() as session:
-        saved_restriction = session.query(Restriction).filter_by(restriction_id=restriction_id).one()
+        saved_restriction = (
+            session.query(Restriction).filter_by(restriction_id=restriction_id).one()
+        )
         assert saved_restriction.allowed_plugins == ["files"]
         assert saved_restriction.allowed_methods == ["read"]
 
