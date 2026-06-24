@@ -21,6 +21,12 @@ Add a provider-neutral SQLAlchemy configuration layer that can select PostgreSQL
 5. Make model declarations portable where they currently depend on PostgreSQL-specific types.
 6. Update database initialization to delegate setup to the selected provider.
 7. Add unit tests for provider selection, direct configuration injection, and SQLite persistence across existing model helper functions.
+8. Exercise the shared agent lifecycle against SQLite for both `LocalAgent` and
+   `OnlineAgent`, with inference and HTTP boundaries mocked:
+   - initialization and state inspection,
+   - chat completion persistence,
+   - context persistence during phase out, and
+   - phase in without subprocess creation.
 
 ## Verification
 
