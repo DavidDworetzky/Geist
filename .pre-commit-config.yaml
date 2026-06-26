@@ -1,6 +1,16 @@
 # Pre-commit hooks configuration
 # See https://pre-commit.com for more information
 repos:
+  # Local supply-chain policy checks
+  - repo: local
+    hooks:
+      - id: dependency-supply-chain-policy
+        name: dependency supply-chain policy
+        entry: python scripts/verify_dependency_policy.py
+        language: system
+        pass_filenames: false
+        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^.*environment.*\.yml$|^scripts/verify_dependency_policy\.py$)'
+
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
