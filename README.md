@@ -45,8 +45,8 @@ flowchart LR
 ```
 
 # Versioning and Setup
-## Install Postgresql
-1. Version 16.2 on Mac or Windows
+## Install PostgreSQL
+PostgreSQL is the default database provider. Install version 16.2 on Mac or Windows when using the default provider.
 
 ## Install Miniconda
 1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
@@ -63,6 +63,21 @@ flowchart LR
     - DB_HOST = localhost
     - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
     - LOCAL_WEIGHTS_DIR = WHERE_YOUR_WEIGHTS_ARE (non docker mount)
+
+### Database provider configuration
+
+Select the SQLAlchemy provider with `GEIST_DATABASE_PROVIDER`. PostgreSQL remains the default and continues to use the existing `POSTGRES_*`, `DB_HOST`, and `DB_PORT` settings.
+
+To use a local SQLite database instead:
+
+```bash
+GEIST_DATABASE_PROVIDER=sqlite
+SQLITE_DATABASE_PATH=/absolute/path/to/geist.sqlite3
+```
+
+`SQLITE_DATABASE_URL` can be used instead of `SQLITE_DATABASE_PATH`. `SQLALCHEMY_DATABASE_URL` overrides provider-specific URL construction when its URL scheme matches the selected provider.
+
+Tests and alternate application entry points can inject `DatabaseConfig(provider=..., database_url=...)` directly into `configure_database()` without changing environment variables.
 
 2. Copy any model weights into app/models/weights/MODEL_NAME.
     - Currently supported Models: llama_3_1
@@ -140,8 +155,3 @@ The dependency policy hook rejects npm version ranges, unsafe frontend Docker in
 ## Scripts 
 1. scripts/download_models.py - download models from huggingface.
 2. scripts/copy_weights.py - copy weights from desktop to /app/models/weights/. Used for weights that are not hosted on huggingface. 
-
-
-
-
-
