@@ -43,7 +43,7 @@ class VoiceSessionService:
         Args:
             agent: Agent to use for text completion
             stt_provider: STT provider ("mms" or "whisper")
-            tts_provider: TTS provider ("sesame" or "openai")
+            tts_provider: TTS provider ("sesame", "openai", or "qwen3")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
@@ -248,4 +248,3 @@ class VoiceSessionService:
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.logger.info("Voice session reset")
-
