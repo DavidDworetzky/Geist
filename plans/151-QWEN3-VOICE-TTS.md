@@ -22,7 +22,7 @@ Add backend support for Qwen3 as a selectable text-to-speech voice model and exp
 
 ## Implementation Notes
 
-- Qwen3 support will use a lazy import of the `qwen_tts` package and raise a clear runtime error when dependencies are missing.
+- Qwen3 support will use the `qwen_tts` package and raise a clear runtime error when dependencies are missing.
 - The first implementation can generate full audio and chunk it through the existing streaming interface. If the local Qwen runtime exposes true incremental audio chunks, the provider should consume that path later without changing the API surface.
 - Provider metadata should include whether a provider is local/API backed, whether it supports instruction control, and the default sample rate.
 

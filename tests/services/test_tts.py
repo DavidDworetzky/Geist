@@ -45,7 +45,6 @@ def test_create_tts_provider_builds_qwen3_provider_without_loading_model():
     assert provider.speed == 0.9
     assert provider.device == "cpu"
     assert provider._engine is None
-    assert provider._model_instance is None
 
 
 def test_qwen3_provider_chunks_full_audio_when_native_streaming_is_unavailable():
@@ -54,7 +53,6 @@ def test_qwen3_provider_chunks_full_audio_when_native_streaming_is_unavailable()
             return torch.ones(250) * 0.5, 1000
 
     provider = Qwen3TTSProvider(device="cpu", sample_rate=1000)
-    provider._backend = "qwen_tts"
     provider._engine = FakeQwenEngine()
 
     chunks = list(provider.synthesize_streaming("hello", chunk_size_ms=100))
@@ -75,7 +73,6 @@ def test_qwen3_provider_uses_native_streaming_when_available():
             )
 
     provider = Qwen3TTSProvider(device="cpu", sample_rate=1000)
-    provider._backend = "qwen_tts"
     provider._engine = FakeStreamingQwenEngine()
 
     chunks = list(provider.synthesize_streaming("hello", chunk_size_ms=100))

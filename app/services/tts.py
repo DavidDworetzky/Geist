@@ -378,50 +378,27 @@ class Qwen3TTSProvider(TTSProvider):
         self.speed = speed
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._sample_rate = sample_rate
-        self._backend = None
         self._engine = None
-        self._processor = None
-        self._model_instance = None
         self.logger = logging.getLogger(__name__)
 
     def _ensure_initialized(self):
         """Lazy initialize Qwen3 TTS so normal app startup stays lightweight."""
-        if self._engine is not None or self._model_instance is not None:
+        if self._engine is not None:
             return
 
         try:
             from qwen_tts import QwenTTS
-
-            self.logger.info(f"Initializing Qwen3 TTS via qwen_tts: {self.model}")
-            if hasattr(QwenTTS, "from_pretrained"):
-                self._engine = QwenTTS.from_pretrained(self.model, device=self.device)
-            else:
-                self._engine = QwenTTS(model=self.model, device=self.device)
-            self._backend = "qwen_tts"
-            return
-        except ImportError:
-            self.logger.info("qwen_tts package not found; falling back to Transformers")
-
-        try:
-            from transformers import AutoProcessor
-            try:
-                from transformers import AutoModelForTextToWaveform as AutoTTSModel
-            except ImportError:
-                from transformers import AutoModel as AutoTTSModel
         except ImportError as exc:
             raise RuntimeError(
-                "Qwen3 TTS requires either the qwen_tts package or Transformers."
+                "Qwen3 TTS provider requires the qwen_tts package. "
+                "Install qwen_tts before selecting tts_provider=qwen3."
             ) from exc
 
-        self.logger.info(f"Initializing Qwen3 TTS via Transformers: {self.model}")
-        self._processor = AutoProcessor.from_pretrained(self.model, trust_remote_code=True)
-        self._model_instance = AutoTTSModel.from_pretrained(
-            self.model,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            trust_remote_code=True,
-        )
-        self._model_instance = self._model_instance.to(self.device)
-        self._backend = "transformers"
+        self.logger.info(f"Initializing Qwen3 TTS via qwen_tts: {self.model}")
+        if hasattr(QwenTTS, "from_pretrained"):
+            self._engine = QwenTTS.from_pretrained(self.model, device=self.device)
+        else:
+            self._engine = QwenTTS(model=self.model, device=self.device)
 
     def _build_kwargs(self, text: str) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
@@ -452,24 +429,6 @@ class Qwen3TTSProvider(TTSProvider):
             return self._coerce_audio_result(result)
 
         raise RuntimeError("Loaded qwen_tts engine does not expose synthesize, generate, or infer.")
-
-    def _generate_with_transformers(self, text: str) -> Tuple[torch.Tensor, int]:
-        processor_kwargs = self._build_kwargs(text)
-        processor_kwargs["return_tensors"] = "pt"
-
-        try:
-            inputs = self._processor(**processor_kwargs)
-        except TypeError:
-            processor_kwargs.pop("speed", None)
-            inputs = self._processor(**processor_kwargs)
-
-        inputs = {
-            key: value.to(self.device) if hasattr(value, "to") else value
-            for key, value in inputs.items()
-        }
-        with torch.no_grad():
-            result = self._model_instance.generate(**inputs)
-        return self._coerce_audio_result(result)
 
     def _coerce_audio_result(self, result: Any) -> Tuple[torch.Tensor, int]:
         sample_rate = self._sample_rate
@@ -519,7 +478,7 @@ class Qwen3TTSProvider(TTSProvider):
 
     def _stream_native(self, text: str) -> Optional[Iterator[bytes]]:
         self._ensure_initialized()
-        engine = self._engine or self._model_instance
+        engine = self._engine
         if engine is None:
             return None
 
@@ -543,10 +502,7 @@ class Qwen3TTSProvider(TTSProvider):
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         self._ensure_initialized()
 
-        if self._backend == "qwen_tts":
-            audio, _ = self._generate_with_qwen_tts(text)
-        else:
-            audio, _ = self._generate_with_transformers(text)
+        audio, _ = self._generate_with_qwen_tts(text)
         return audio
 
     def synthesize_streaming(
