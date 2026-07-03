@@ -55,3 +55,19 @@ repos:
         # Run mypy only on Python files that are tracked by git
         pass_filenames: true
         files: \.py$
+
+  # Repo-local checks that avoid adding runtime dependencies.
+  - repo: local
+    hooks:
+      - id: staged-secret-scan
+        name: staged secret scan
+        entry: python scripts/pre_commit_security_check.py
+        language: system
+        pass_filenames: false
+
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash scripts/pre_commit_frontend_lint.sh
+        language: system
+        pass_filenames: false
+        files: ^client/geist/src/.*\.(js|jsx|ts|tsx)$

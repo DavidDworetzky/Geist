@@ -12,6 +12,12 @@ When installing packages, `conda env export >> linux_environment.yml` after inst
 #running tests
 `cd /opt/geist && PYTHONPATH=/opt/geist pytest` in the backend container
 
+#pre-push AI testing
+Before pushing, publishing, or opening a PR, use `.agents/skills/geist-test-loop/SKILL.md` when feasible. The loop should collect evidence from relevant fast checks, Docker startup/logs/curl, browser UI smoke testing, basic chat, settings defaults, and native `make run MLX_BACKEND=1` when the change touches native/local model behavior.
+
+#pre-commit hooks
+Use `pre-commit install` to enable local hooks. Keep hooks fast: linting, formatting, type checks, staged secret scanning, and basic frontend lint are appropriate here. Full Docker/native/browser smoke testing belongs in the AI pre-push test loop, not in pre-commit.
+
 
 
 
@@ -69,5 +75,4 @@ prefer minimal inline implementations over extra dependency imports. Core librar
 ## first, create a plan for your feature in /plans
 ## next, implement the plan, adding the backend data models, middle data models, service layer, routes, backend tests, 
 ## finally, test the solution by running `docker compose up -d`, then verifying no error logs in the docker container, then doing a curl command to localhost:3000
-
 
