@@ -386,13 +386,7 @@ class Qwen3TTSProvider(TTSProvider):
         if self._engine is not None:
             return
 
-        try:
-            from qwen_tts import QwenTTS
-        except ImportError as exc:
-            raise RuntimeError(
-                "Qwen3 TTS provider requires the qwen_tts package. "
-                "Install qwen_tts before selecting tts_provider=qwen3."
-            ) from exc
+        from qwen_tts import QwenTTS
 
         self.logger.info(f"Initializing Qwen3 TTS via qwen_tts: {self.model}")
         if hasattr(QwenTTS, "from_pretrained"):

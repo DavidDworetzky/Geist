@@ -238,6 +238,16 @@ class VoiceSessionService:
                 
                 yield {"type": "audio_complete"}
                 
+        except ModuleNotFoundError as e:
+            if e.name == "qwen_tts":
+                message = (
+                    "Qwen3 TTS provider requires the qwen_tts package. "
+                    "Install qwen_tts before selecting tts_provider=qwen3."
+                )
+            else:
+                message = str(e)
+            self.logger.error(f"Agent processing failed: {message}")
+            yield {"type": "error", "message": message}
         except Exception as e:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
