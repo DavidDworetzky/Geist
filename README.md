@@ -45,8 +45,8 @@ flowchart LR
 ```
 
 # Versioning and Setup
-## Install Postgresql
-1. Version 16.2 on Mac or Windows
+## Install PostgreSQL
+PostgreSQL is the default database provider. Install version 16.2 on Mac or Windows when using the default provider.
 
 ## Install Miniconda
 1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
@@ -64,6 +64,21 @@ flowchart LR
     - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
     - LOCAL_WEIGHTS_DIR = WHERE_YOUR_WEIGHTS_ARE (non docker mount)
 
+### Database provider configuration
+
+Select the SQLAlchemy provider with `GEIST_DATABASE_PROVIDER`. PostgreSQL remains the default and continues to use the existing `POSTGRES_*`, `DB_HOST`, and `DB_PORT` settings.
+
+To use a local SQLite database instead:
+
+```bash
+GEIST_DATABASE_PROVIDER=sqlite
+SQLITE_DATABASE_PATH=/absolute/path/to/geist.sqlite3
+```
+
+`SQLITE_DATABASE_URL` can be used instead of `SQLITE_DATABASE_PATH`. `SQLALCHEMY_DATABASE_URL` overrides provider-specific URL construction when its URL scheme matches the selected provider.
+
+Tests and alternate application entry points can inject `DatabaseConfig(provider=..., database_url=...)` directly into `configure_database()` without changing environment variables.
+
 2. Copy any model weights into app/models/weights/MODEL_NAME.
     - Currently supported Models: llama_3_1
     - This can be run from python scripts/download_models.py 
@@ -72,6 +87,52 @@ flowchart LR
 
 client/geist/.env settings:
     - REACT_APP_API_BASE_URL = http://localhost:3000
+
+## Dependency supply-chain policy
+
+Use lockfile-based installs and exact pins. Avoid ad hoc install commands that resolve new dependency versions without review.
+
+### Frontend dependencies
+
+Install the committed frontend lockfile without running package lifecycle scripts:
+
+```bash
+cd client/geist
+npm ci --ignore-scripts --audit=false --fund=false
+```
+
+When adding or updating a frontend package, pin the exact version and update only the manifest and lockfile first:
+
+```bash
+cd client/geist
+npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION
+npm audit --package-lock-only
+```
+
+Review both `package.json` and `package-lock.json` before committing. Do not use bare `npm install` or `npm i` for project setup.
+
+### Backend dependencies
+
+Backend dependencies are frozen in the conda environment files. Prefer conda packages for compiled dependencies. For pip packages, use exact `==` versions and prefer binary wheels:
+
+```bash
+docker exec backend /bin/bash
+pip install --only-binary=:all: PACKAGE==VERSION
+conda env export > linux_environment.yml
+```
+
+After changing backend dependencies, audit the pinned pip section and review the environment file diff before committing.
+
+### Hooks
+
+Install hooks after creating the environment:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+The dependency policy hook rejects npm version ranges, unsafe frontend Docker installs, missing npm lockfile integrity entries, and unpinned Python environment dependencies.
 
 ## Starting the solution
 1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` 
@@ -94,10 +155,3 @@ client/geist/.env settings:
 ## Scripts 
 1. scripts/download_models.py - download models from huggingface.
 2. scripts/copy_weights.py - copy weights from desktop to /app/models/weights/. Used for weights that are not hosted on huggingface. 
-
-
-
-
-
-
-
