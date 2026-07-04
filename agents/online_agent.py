@@ -88,7 +88,7 @@ class OnlineAgent(BaseAgent):
             self.headers["Authorization"] = f"Bearer {self.api_key}"
     
     def _get_api_key_from_env(self) -> Optional[str]:
-        """Get API key from environment variables based on the endpoint."""
+        """Get provider-specific API key from environment variables based on the endpoint."""
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
         elif "anthropic" in self.base_url:
@@ -97,9 +97,7 @@ class OnlineAgent(BaseAgent):
             return os.getenv("GROQ_API_KEY")
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
-        else:
-            # Fallback to generic API key
-            return os.getenv("API_KEY")
+        return None
     
     def _make_request(
         self,
