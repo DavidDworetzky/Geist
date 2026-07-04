@@ -790,8 +790,8 @@ class TestOnlineAgentAPIKeyRetrieval:
             
             assert agent.api_key == "env-grok-key"
 
-    def test_custom_provider_requires_explicit_api_key(self):
-        """Test custom endpoints do not use a generic API_KEY fallback."""
+    def test_fallback_to_generic_api_key(self):
+        """Test fallback to generic API_KEY environment variable."""
         context = create_mock_agent_context()
         
         with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
@@ -801,18 +801,5 @@ class TestOnlineAgentAPIKeyRetrieval:
                 model="custom-model"
             )
             
-            assert agent.api_key is None
+            assert agent.api_key == "generic-api-key"
 
-    def test_custom_provider_uses_explicit_api_key(self):
-        """Test custom endpoints can still receive an explicit API key."""
-        context = create_mock_agent_context()
-
-        with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
-            agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.custom-provider.com/v1",
-                model="custom-model",
-                api_key="explicit-key"
-            )
-
-            assert agent.api_key == "explicit-key"

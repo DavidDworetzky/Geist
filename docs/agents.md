@@ -112,6 +112,7 @@ User settings control default agent behavior and can be configured via API:
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `GROQ_API_KEY` - Groq API key
 - `GROK_API_KEY` - Grok (X.AI) API key
+- `API_KEY` - Generic fallback API key
 
 ## Usage Examples
 
@@ -374,7 +375,6 @@ All scripts should maintain consistent parameter naming and conventions across c
    - Verify API keys are correctly set
    - Check API key permissions
    - Ensure endpoint URLs are correct
-   - Pass an explicit API key for custom endpoints
 
 3. **Runner Not Found**
    - Verify runner is registered: `register_runner("name", Class)`
