@@ -180,7 +180,10 @@ register_runner("my_custom_runner", MyCustomRunner)
 
 ### From Legacy Agents
 
-The legacy `LlamaAgent` and `GPT4Agent` classes are deprecated. To migrate:
+The legacy `LlamaAgent` and `GPT4Agent` classes have been removed; `LocalAgent`
+and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
+`GPT4AGENT` API agent types remain accepted and are served by `LocalAgent` and
+`OnlineAgent` respectively. To migrate code that used the old classes:
 
 1. **Replace direct instantiation:**
    ```python

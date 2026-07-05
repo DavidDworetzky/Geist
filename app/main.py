@@ -2,7 +2,6 @@ import sys
 from typing import Optional
 import logging
 from app.models.completion import CompleteTextParams, InitializeAgentParams
-from agents.gpt4_agent import GPT4Agent
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, APIRouter
 from adapters.mms_adapter import MMSAdapter
 from dotenv import load_dotenv
@@ -10,13 +9,11 @@ from agents import agent_context
 from agents.agent_settings import AgentSettings
 import os
 from app.models.database.database import SessionLocal
-from app.models.database.agent_preset import AgentPreset  
-from agents.agent_context import AgentContext  
-from app.models.agent import Agent
+from app.models.database.agent_preset import AgentPreset
+from agents.agent_context import AgentContext
 from app.environment import LoadEnvironmentDictionary
 import uvicorn
 import json
-from agents.llama_agent import LlamaAgent
 from agents.agent_type import AgentType
 from agents.online_agent import OnlineAgent
 from agents.models.agent_completion import AgentCompletion
@@ -42,8 +39,7 @@ load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
 DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 openai_key = os.getenv("OPENAI_API_KEY")
-enhanced_logging = os.getenv("ENHANCED_LOGGING")
-enhanced_logging = json.loads(enhanced_logging.lower()) if enhanced_logging else False
+enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
 #in memory agent cache
 agent_cache = {
@@ -51,6 +47,14 @@ agent_cache = {
     AgentType.GPT4AGENT : None,
     AgentType.HTTPAGENT : None,
     AgentType.LOCALAGENT : None
+}
+
+#mapping from public AgentType values to the agent factory's "local"/"online" types
+AGENT_TYPE_TO_FACTORY_TYPE = {
+    AgentType.LLAMA: "local",
+    AgentType.LOCALAGENT: "local",
+    AgentType.GPT4AGENT: "online",
+    AgentType.HTTPAGENT: "online",
 }
 
 #constants
@@ -84,12 +88,11 @@ def create_app():
     @agent_router.post("/complete_text_new")
     async def complete_text_new_agents(params: CompleteTextParams) -> AgentCompletion:
         """Complete text using new agent architecture (LocalAgent/OnlineAgent)."""
-        from app.services.user_settings_service import UserSettingsService
         from app.models.user_settings import AgentConfigRequest
-        
+
         # Create agent config overrides from params
         overrides = AgentConfigRequest(
-            agent_type=params.agent_type.lower() if hasattr(params, 'agent_type') and params.agent_type else None,
+            agent_type=AGENT_TYPE_TO_FACTORY_TYPE.get(params.agent_type) if params.agent_type else None,
             max_tokens=params.max_tokens,
             temperature=params.temperature,
             top_p=params.top_p,
@@ -192,9 +195,8 @@ def create_app():
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
         
     @agent_router.get("/chat_history/{session_id}")
-    async def get_chat_history(session_id: int):
-        chat_history = get_chat_history(session_id)
-        return chat_history
+    async def get_chat_history_endpoint(session_id: int):
+        return get_chat_history(session_id)
     
     @agent_router.get("/chat_history/{session_id}/paginated")
     async def get_paginated_history_endpoint(session_id: int, page: int = 1, page_size: int = 20):
@@ -222,17 +224,13 @@ def create_app():
         return state_snapshot
 
     @agent_router.post("/phase_out")
-    async def phase_out_agent(agent_id: int):
-        agent_to_phase = Agent.get_agent_by_id(agent_id)
-        if not agent_to_phase:
-            raise HTTPException(status_code=404, detail=f"Agent with id {agent_id} not found")
+    async def phase_out_agent(agent_type: str):
+        agent_to_phase = _get_cached_agent_or_404(agent_type)
         agent_to_phase.phase_out()
 
     @agent_router.post("/phase_in")
-    async def phase_in_agent(agent_id: int):
-        agent_to_phase = Agent.get_agent_by_id(agent_id)
-        if not agent_to_phase:
-            raise HTTPException(status_code=404, detail=f"Agent with id {agent_id} not found")
+    async def phase_in_agent(agent_type: str):
+        agent_to_phase = _get_cached_agent_or_404(agent_type)
         agent_to_phase.phase_in()
 
     # Adapter routes using adapter_router
@@ -255,14 +253,36 @@ def create_app():
 
     return app
 
+def _parse_agent_type(agent_type: str) -> AgentType:
+    try:
+        return AgentType[agent_type.upper()]
+    except KeyError:
+        raise HTTPException(status_code=422, detail=f"Unknown agent type: {agent_type}")
+
+def _get_cached_agent_or_404(agent_type: str):
+    parsed_type = _parse_agent_type(agent_type)
+    agent = agent_cache.get(parsed_type)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"No active agent of type {parsed_type.value}")
+    return agent
+
 def get_gpt4_client():
+    '''
+    Legacy GPT4AGENT type: an OnlineAgent pinned to the OpenAI gpt-4 endpoint.
+    '''
     agent_context = get_default_agent_context()
-    api_key = openai_key
-    return GPT4Agent(api_key=api_key, agent_context=agent_context)
+    return OnlineAgent(
+        agent_context=agent_context,
+        base_url=DEFAULT_API_URL,
+        model="gpt-4",
+        api_key=openai_key
+    )
 
 def get_llama_agent():
-    agent_context = get_default_agent_context()
-    return LlamaAgent(agent_context = agent_context, ckpt_dir=None)
+    '''
+    Legacy LLAMA type: a LocalAgent running the default local model.
+    '''
+    return get_local_agent()
 
 def get_local_agent():
     agent_context = get_default_agent_context()
