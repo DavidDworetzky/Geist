@@ -70,6 +70,79 @@ agent = AgentFactory.create_agent(
 )
 ```
 
+## State Snapshots
+
+Agents persist append-only snapshots of their execution state (world, task,
+and execution contexts plus the function log) to the `agent_snapshot` table:
+
+- After every `tick()` (reason `tick`)
+- On `phase_out()` (reason `phase_out`), and `phase_in()` restores the latest snapshot
+- On demand via `agent.save_state_snapshot(reason="manual")`
+
+Each snapshot gets a monotonic `step` number per agent, enabling crash
+recovery, tick-by-tick inspection, and rollback to an earlier step:
+
+```python
+# Roll back to a specific step
+from app.models.database.agent_snapshot import get_snapshots
+
+history = get_snapshots(agent_identifier=context.agent_id)
+agent.restore_state_snapshot(snapshot_id=history[2].snapshot_id)
+
+# Resume the latest state after a restart
+agent.restore_state_snapshot()
+```
+
+Snapshot writes never raise into the agent loop — failures are logged and the
+tick continues. Use `prune_snapshots(agent_identifier, keep_last=100)` to cap
+history for long-running agents.
+
+## Structured Tool Calling
+
+Adapter actions are reflected into JSON schemas (`adapters/tool_schema.py`)
+from method signatures, type hints, and docstrings, giving models full
+function visibility: adapter/action names, typed parameters, and required
+arguments. The shared pipeline (`agents/tool_calling.py`) then parses,
+validates, and dispatches model-emitted tool calls.
+
+### OnlineAgent (native function calling)
+
+`OnlineAgent.complete_with_tools()` exposes the schemas through the
+OpenAI-compatible `tools` parameter, dispatches returned `tool_calls`, and
+feeds results back as `tool` messages until the model produces a final
+answer. If the endpoint rejects the `tools` payload, it automatically falls
+back to the prompt-based path.
+
+```python
+completion = agent.complete_with_tools(
+    "Write today's notes to notes.md",
+    max_tool_iterations=4,
+)
+print(completion.content)        # final model answer
+print(completion.tool_results)   # every dispatched ToolResult
+```
+
+### LocalAgent (schema-grounded prompting)
+
+Local models keep reflection-based function visibility: schemas are rendered
+into the prompt, and robustness comes from tolerant JSON extraction (markdown
+fences, JSON embedded in prose, alias keys), schema validation with type
+coercion (`"7"` → `7`), and validation-error feedback on retries:
+
+```python
+completion = local_agent.complete_with_tools("What is 7 + 8?")
+```
+
+### Dispatch guarantees
+
+- Unknown tools, missing required arguments, and uncoercible types are
+  rejected with actionable error messages (fed back to the model on retry)
+- Hallucinated argument names are dropped with a warning
+- Adapter exceptions are captured as unsuccessful `ToolResult`s instead of
+  crashing the agent loop
+- Every dispatch is journaled to the agent context's `function_log`, which is
+  captured by state snapshots
+
 ## User Settings
 
 ### Configuration
