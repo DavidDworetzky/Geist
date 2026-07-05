@@ -2,48 +2,51 @@
 UserSettings database model for storing user preferences and default agent configurations.
 """
 import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Boolean, JSON, Float
-from sqlalchemy.orm import relationship
-from app.models.database.database import Base, SessionLocal
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
+from app.models.database.database import Base, SessionLocal
+
 
 class UserSettings(Base):
     """
     Database model for user settings and agent preferences.
     """
     __tablename__ = 'user_settings'
-    
+
     user_settings_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
-    
+
     # Default agent preferences
     default_agent_type = Column(String, default='local')  # 'local' or 'online'
     default_local_model = Column(String, default='meta-llama/Meta-Llama-3.1-8B-Instruct')
     default_online_model = Column(String, default='gpt-4')
     default_online_provider = Column(String, default='openai')  # 'openai', 'anthropic', 'groq', 'grok'
-    
+
     # RAG and file settings
     default_file_archives = Column(JSON, default=list)  # List of file IDs to search by default
     enable_rag_by_default = Column(Boolean, default=True)
-    
+
     # Model generation settings
     default_max_tokens = Column(Integer, default=4096)
     default_temperature = Column(Float, default=1.0)
     default_top_p = Column(Float, default=1.0)
     default_frequency_penalty = Column(Float, default=0.0)
     default_presence_penalty = Column(Float, default=0.0)
-    
+
     # Backup provider settings (JSON field)
     backup_providers = Column(JSON, default=list)  # List of backup provider configurations
-    
+
     # UI preferences
     ui_preferences = Column(JSON, default=dict)  # General UI preferences
-    
+
     # Timestamps
     create_date = Column(DateTime, default=datetime.datetime.utcnow)
     update_date = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
-    
+
     # Relationships
     user = relationship("GeistUser", backref="settings")
 
@@ -58,25 +61,25 @@ class UserSettingsModel:
     default_local_model: str
     default_online_model: str
     default_online_provider: str
-    default_file_archives: List[int]
+    default_file_archives: list[int]
     enable_rag_by_default: bool
     default_max_tokens: int
     default_temperature: float
     default_top_p: float
     default_frequency_penalty: float
     default_presence_penalty: float
-    backup_providers: List[Dict[str, Any]]
-    ui_preferences: Dict[str, Any]
+    backup_providers: list[dict[str, Any]]
+    ui_preferences: dict[str, Any]
     create_date: datetime.datetime
     update_date: datetime.datetime
 
-def get_user_settings(user_id: int) -> Optional[UserSettingsModel]:
+def get_user_settings(user_id: int) -> UserSettingsModel | None:
     """
     Get user settings by user ID.
-    
+
     Args:
         user_id: User ID to get settings for
-        
+
     Returns:
         UserSettingsModel if found, None otherwise
     """
@@ -107,10 +110,10 @@ def get_user_settings(user_id: int) -> Optional[UserSettingsModel]:
 def create_default_user_settings(user_id: int) -> UserSettingsModel:
     """
     Create default user settings for a user.
-    
+
     Args:
         user_id: User ID to create settings for
-        
+
     Returns:
         Created UserSettingsModel
     """
@@ -134,7 +137,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
         session.add(settings)
         session.commit()
         session.refresh(settings)
-        
+
         return UserSettingsModel(
             user_settings_id=settings.user_settings_id,
             user_id=settings.user_id,
@@ -155,14 +158,14 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             update_date=settings.update_date
         )
 
-def update_user_settings(user_id: int, updates: Dict[str, Any]) -> Optional[UserSettingsModel]:
+def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsModel | None:
     """
     Update user settings.
-    
+
     Args:
         user_id: User ID to update settings for
         updates: Dictionary of field updates
-        
+
     Returns:
         Updated UserSettingsModel if successful, None if user not found
     """
@@ -170,16 +173,16 @@ def update_user_settings(user_id: int, updates: Dict[str, Any]) -> Optional[User
         settings = session.query(UserSettings).filter_by(user_id=user_id).first()
         if not settings:
             return None
-        
+
         # Update fields that are provided
         for field, value in updates.items():
             if hasattr(settings, field):
                 setattr(settings, field, value)
-        
+
         settings.update_date = datetime.datetime.utcnow()
         session.commit()
         session.refresh(settings)
-        
+
         return UserSettingsModel(
             user_settings_id=settings.user_settings_id,
             user_id=settings.user_id,
@@ -203,10 +206,10 @@ def update_user_settings(user_id: int, updates: Dict[str, Any]) -> Optional[User
 def get_or_create_user_settings(user_id: int) -> UserSettingsModel:
     """
     Get user settings, creating default ones if they don't exist.
-    
+
     Args:
         user_id: User ID to get or create settings for
-        
+
     Returns:
         UserSettingsModel
     """

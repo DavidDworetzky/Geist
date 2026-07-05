@@ -1,16 +1,23 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict, Any
+from sqlalchemy.orm import Session, selectinload
+
+from app.api.utils import get_current_user
+from app.models.database.database import SessionLocal
+from app.models.database.workflow import (
+    Workflow,
+    WorkflowStep,
+    get_workflows_for_user,
+    update_workflow,
+)
 from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowResponse,
     WorkflowUpdate,
 )
-from app.models.database.workflow import Workflow, WorkflowStep, get_workflow_by_id, get_workflows_for_user, create_workflow, update_workflow
-from app.models.database.database import SessionLocal
-from sqlalchemy.orm import Session, selectinload
-from app.models.database.geist_user import get_default_user
-from app.api.utils import get_current_user
 from app.services.workflow_execution import WorkflowExecutor
+
 
 router = APIRouter()
 
@@ -26,39 +33,39 @@ def get_db():
 async def create_new_workflow(
     workflow: WorkflowCreate,
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
-) -> WorkflowResponse:
+    current_user: dict = Depends(get_current_user)
+) -> Workflow:
     """Create a new workflow."""
     db_workflow = Workflow(
         name=workflow.name,
         user_id=current_user["user_id"]
     )
-    
+
     if workflow.steps:
         db_workflow.steps = []
-        for step_create_schema in workflow.steps: 
+        for step_create_schema in workflow.steps:
             step_data_dict = step_create_schema.dict()
             # Ensure enum value is used if step_type in schema is an enum and model expects its value
             step_data_dict['step_type'] = step_create_schema.step_type.value
             db_workflow.steps.append(WorkflowStep(**step_data_dict))
-    
+
     # Add the workflow and its steps to the session
     db.add(db_workflow)
     db.commit()
-    
+
     created_workflow_id = db_workflow.workflow_id
-    
+
     fully_loaded_workflow = db.query(Workflow).options(
         selectinload(Workflow.steps)
     ).filter(Workflow.workflow_id == created_workflow_id).one()
-    
+
     return fully_loaded_workflow
 
-@router.get("/", response_model=List[WorkflowResponse])
+@router.get("/", response_model=list[WorkflowResponse])
 async def list_workflows(
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
-) -> List[WorkflowResponse]:
+    current_user: dict = Depends(get_current_user)
+) -> list[Workflow]:
     """List all workflows for the authenticated user."""
     return get_workflows_for_user(user_id=current_user["user_id"], db=db)
 
@@ -66,8 +73,8 @@ async def list_workflows(
 async def get_workflow(
     workflow_id: int,
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
-) -> WorkflowResponse:
+    current_user: dict = Depends(get_current_user)
+) -> Workflow:
     """Get a specific workflow by ID."""
     workflow = db.query(Workflow).options(selectinload(Workflow.steps)).filter(
         Workflow.workflow_id == workflow_id,
@@ -86,15 +93,15 @@ async def update_existing_workflow(
     workflow_id: int,
     workflow_update: WorkflowUpdate,
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
-) -> WorkflowResponse:
+    current_user: dict = Depends(get_current_user)
+) -> Workflow:
     """Update an existing workflow."""
     # First check if the user owns this workflow
     workflow = db.query(Workflow).filter(
         Workflow.workflow_id == workflow_id,
         Workflow.user_id == current_user["user_id"]
     ).first()
-    
+
     if not workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -103,7 +110,7 @@ async def update_existing_workflow(
 
     try:
         updated_db_workflow_from_crud = update_workflow(workflow_id=workflow_id, workflow_data=workflow_update)
-        
+
         if updated_db_workflow_from_crud is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -112,23 +119,23 @@ async def update_existing_workflow(
 
         # Return the updated workflow directly instead of re-querying
         return updated_db_workflow_from_crud
-        
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
-        )
+        ) from e
 
 @router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workflow(
     workflow_id: int,
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ) -> None:
     """Delete a workflow."""
     # First check if the user owns this workflow
@@ -136,13 +143,13 @@ async def delete_workflow(
         Workflow.workflow_id == workflow_id,
         Workflow.user_id == current_user["user_id"]
     ).first()
-    
+
     if not workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found"
         )
-    
+
     with SessionLocal() as session:
         # Re-fetch in the new session
         workflow_to_delete = session.query(Workflow).filter(
@@ -154,40 +161,40 @@ async def delete_workflow(
 @router.post("/{workflow_id}/run", status_code=status.HTTP_200_OK)
 async def run_workflow(
     workflow_id: int,
-    input_data: Dict[str, Any] = None,
+    input_data: dict[str, Any] | None = None,
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+    current_user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
     """Execute a workflow synchronously."""
     # First check if the user owns this workflow
     workflow = db.query(Workflow).options(selectinload(Workflow.steps)).filter(
         Workflow.workflow_id == workflow_id,
         Workflow.user_id == current_user["user_id"]
     ).first()
-    
+
     if not workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found"
         )
-    
+
     if not workflow.steps:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workflow has no steps to execute"
         )
-    
+
     try:
         # Initialize the workflow executor
         executor = WorkflowExecutor()
-        
+
         # Execute the workflow synchronously
         run = executor.execute_workflow(
             workflow=workflow,
             user_id=current_user["user_id"],
             input_data=input_data or {}
         )
-        
+
         return {
             "run_id": run.run_id,
             "workflow_id": workflow_id,
@@ -198,9 +205,9 @@ async def run_workflow(
             "output_data": run.output_data,
             "error_message": run.error_message
         }
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Workflow execution failed: {str(e)}"
-        )
+        ) from e

@@ -1,15 +1,15 @@
-from app.models.database.database import Session
-
 import argparse
-from app.models.database.database import Session
-from app.models.database.agent_preset import AgentPreset
 import datetime
 import logging
+
+from app.models.database.agent_preset import AgentPreset
+from app.models.database.database import Session
+
 
 def main(to_commit: bool, overwrite: bool):
 
     logging.info("to_commit is {to_commit}, overwrite is {overwrite}")
-    
+
     default_preset = Session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
     default_preset_exists = Session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first() is not None
 
@@ -39,7 +39,7 @@ def main(to_commit: bool, overwrite: bool):
             create_date=datetime.datetime.now(),
             update_date=datetime.datetime.now()
         )
-    
+
         # Add the dummy preset to the session
         Session.add(default_preset)
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Insert dummy data into the database.")
     parser.add_argument("--commit", action="store_true", help="Commit the changes to the database.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing presets")
-    
+
     args = parser.parse_args()
-    
+
     main(args.commit, args.overwrite)

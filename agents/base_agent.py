@@ -4,8 +4,8 @@ import os
 import signal
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, List, Optional
 
 import psutil
 
@@ -68,30 +68,30 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def complete_text(self, prompt: str, max_tokens: Optional[int] = None, n: Optional[int] = None,
-                      temperature: Optional[float] = None, top_p: Optional[float] = None,
-                      frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
-                      stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
-                      prompt_tokens: Optional[int] = None, response_format: str = "text",
-                      system_prompt: Optional[str] = None, chat_id: Optional[int] = None):
+    def complete_text(self, prompt: str, max_tokens: int | None = None, n: int | None = None,
+                      temperature: float | None = None, top_p: float | None = None,
+                      frequency_penalty: float | None = None, presence_penalty: float | None = None,
+                      stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
+                      prompt_tokens: list[int] | None = None, response_format: str = "text",
+                      system_prompt: str | None = None, chat_id: int | None = None):
         """Generate a completion for the given prompt."""
 
     @abstractmethod
-    def stream_complete_text(self, prompt: str, max_tokens: Optional[int] = None, n: Optional[int] = None,
-                             temperature: Optional[float] = None, top_p: Optional[float] = None,
-                             frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
-                             stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
-                             prompt_tokens: Optional[int] = None, response_format: str = "text",
-                             system_prompt: Optional[str] = None, chat_id: Optional[int] = None) -> Iterator[str]:
+    def stream_complete_text(self, prompt: str, max_tokens: int | None = None, n: int | None = None,
+                             temperature: float | None = None, top_p: float | None = None,
+                             frequency_penalty: float | None = None, presence_penalty: float | None = None,
+                             stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
+                             prompt_tokens: list[int] | None = None, response_format: str = "text",
+                             system_prompt: str | None = None, chat_id: int | None = None) -> Iterator[str]:
         """Stream a completion for the given prompt, yielding text chunks."""
 
     @abstractmethod
-    def complete_audio(self, audio_file, max_tokens: Optional[int] = None, n: Optional[int] = None,
-                       temperature: Optional[float] = None, top_p: Optional[float] = None,
-                       frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
-                       stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
-                       prompt_tokens: Optional[int] = None, response_format: str = "text",
-                       system_prompt: Optional[str] = None, chat_id: Optional[int] = None):
+    def complete_audio(self, audio_file, max_tokens: int | None = None, n: int | None = None,
+                       temperature: float | None = None, top_p: float | None = None,
+                       frequency_penalty: float | None = None, presence_penalty: float | None = None,
+                       stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
+                       prompt_tokens: list[int] | None = None, response_format: str = "text",
+                       system_prompt: str | None = None, chat_id: int | None = None):
         """Generate a completion from an audio input."""
 
     @abstractmethod
@@ -102,10 +102,10 @@ class BaseAgent(ABC):
     # Generation parameter resolution
     # ------------------------------------------------------------------
 
-    def _resolve_generation_params(self, max_tokens: Optional[int] = None, n: Optional[int] = None,
-                                   temperature: Optional[float] = None, top_p: Optional[float] = None,
-                                   frequency_penalty: Optional[float] = None,
-                                   presence_penalty: Optional[float] = None) -> GenerationParams:
+    def _resolve_generation_params(self, max_tokens: int | None = None, n: int | None = None,
+                                   temperature: float | None = None, top_p: float | None = None,
+                                   frequency_penalty: float | None = None,
+                                   presence_penalty: float | None = None) -> GenerationParams:
         """
         Merge explicit caller values with agent settings and hard defaults.
 
@@ -134,8 +134,8 @@ class BaseAgent(ABC):
     # Chat history
     # ------------------------------------------------------------------
 
-    def _build_messages(self, prompt: str, system_prompt: Optional[str] = None,
-                        chat_id: Optional[int] = None) -> List[dict]:
+    def _build_messages(self, prompt: str, system_prompt: str | None = None,
+                        chat_id: int | None = None) -> list[dict]:
         """Build a chat message list, hydrating prior turns from the stored session."""
         messages = []
         if system_prompt:
@@ -159,7 +159,7 @@ class BaseAgent(ABC):
     # Agent lifecycle
     # ------------------------------------------------------------------
 
-    def initialize(self, task_prompt: Optional[str] = None):
+    def initialize(self, task_prompt: str | None = None):
         """Initialize the agent, optionally pushing a task and starting the tick subprocess."""
         if task_prompt:
             self._agent_context.task_context.append(task_prompt)
@@ -190,7 +190,7 @@ class BaseAgent(ABC):
         """Restart the agent and rehydrate its state."""
         self.initialize()
 
-    def _cleanup_resources(self):
+    def _cleanup_resources(self):  # noqa: B027 - optional hook, subclasses override as needed
         """Release provider-specific resources (HTTP clients, model runners). Override as needed."""
 
     def terminate_subprocess(self):
@@ -269,7 +269,7 @@ class BaseAgent(ABC):
         self._agent_context.execution_context = []
         return results
 
-    def _request_function_json(self, task: str, context_string: str) -> Optional[str]:
+    def _request_function_json(self, task: str, context_string: str) -> str | None:
         """Ask the model for a valid function-call JSON, retrying on malformed output."""
         prompt = f"task: {task}" + EXECUTION_TICK_PROMPT + context_string
         candidate = None
@@ -302,7 +302,7 @@ class BaseAgent(ABC):
             context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
         return context_string
 
-    def _transform_completions(self, completion) -> List[str]:
+    def _transform_completions(self, completion) -> list[str]:
         """Extract assistant message contents from any supported completion shape."""
         try:
             if hasattr(completion, 'choices') and completion.choices:

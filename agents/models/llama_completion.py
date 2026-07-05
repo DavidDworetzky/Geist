@@ -1,15 +1,15 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+
 
 @dataclass
 class Message:
     role: str
     content: str
-    chat_id: Optional[int] = None
+    chat_id: int | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, str]) -> 'Message':
-        try: 
+    def from_dict(cls, data: dict[str, str]) -> 'Message':
+        try:
             return cls(
             role=data.get('role', ''),
             content=data.get('content', ''),
@@ -19,19 +19,19 @@ class Message:
 
 @dataclass
 class LlamaCompletion:
-    messages: List[Message]
-    chat_id: Optional[int] = None
+    messages: list[Message]
+    chat_id: int | None = None
 
     @classmethod
-    def from_dict(cls, data: List[Dict[str, str]]) -> 'LlamaCompletion':
+    def from_dict(cls, data: list[dict[str, str]]) -> 'LlamaCompletion':
         return cls(
             messages=[Message.from_dict(message) for message in data],
             #chat id is assigned after construction
             chat_id=None
         )
-    
 
-def strings_to_message_dict(prompt: str, response: str):
+
+def strings_to_message_dict(prompt: str, response: str) -> list[dict[str, str]]:
     '''
     Converts autoregressive LLM output into a list of messages
     '''

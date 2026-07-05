@@ -1,34 +1,36 @@
-import sys
-from typing import Optional
 import logging
-from app.models.completion import CompleteTextParams, InitializeAgentParams
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, APIRouter
-from adapters.mms_adapter import MMSAdapter
-from dotenv import load_dotenv
-from agents import agent_context
-from agents.agent_settings import AgentSettings
 import os
-from app.models.database.database import SessionLocal
-from app.models.database.agent_preset import AgentPreset
-from agents.agent_context import AgentContext
-from app.environment import LoadEnvironmentDictionary
+
 import uvicorn
-import json
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
+
+from adapters.mms_adapter import MMSAdapter
 from agents.agent_type import AgentType
-from agents.online_agent import OnlineAgent
-from agents.models.agent_completion import AgentCompletion
-from agents.prompt.prompt import AGENT_PROMPTS
-from app.models.database.chat_session import get_chat_history, get_all_chat_history, get_paginated_chat_history, get_paginated_chat_sessions
-from app.api.v1.endpoints.workflows import router as workflow_router
-from app.api.v1.endpoints.files import router as files_router
-from app.api.v1.endpoints.user_settings import router as user_settings_router
-from app.api.v1.endpoints.voice import router as voice_router
-from app.api.v1.endpoints.models import router as models_router
-from agents.local_agent import LocalAgent
-from app.services.user_settings_service import UserSettingsService
-from app.models.user_settings import AgentFactoryConfig
+
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
+from agents.local_agent import LocalAgent
+from agents.models.agent_completion import AgentCompletion
+from agents.online_agent import OnlineAgent
+from agents.prompt.prompt import AGENT_PROMPTS
+from app.api.v1.endpoints.files import router as files_router
+from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.user_settings import router as user_settings_router
+from app.api.v1.endpoints.voice import router as voice_router
+from app.api.v1.endpoints.workflows import router as workflow_router
+from app.environment import load_environment_dictionary
+from app.models.completion import CompleteTextParams, InitializeAgentParams
+from app.models.database.chat_session import (
+    get_all_chat_history,
+    get_chat_history,
+    get_paginated_chat_history,
+    get_paginated_chat_sessions,
+)
+from app.models.user_settings import AgentFactoryConfig
+from app.services.agent_context_provider import get_default_agent_context
+from app.services.user_settings_service import UserSettingsService
+
 
 # Register all available runners at startup
 register_all_runners()
@@ -67,7 +69,14 @@ if enhanced_logging:
 logger = logging.getLogger(__name__)
 
 def get_envs() -> dict[str,str]:
-    return LoadEnvironmentDictionary()
+    return load_environment_dictionary()
+
+def _resolve_agent_type(agent_type: AgentType | str | None) -> AgentType:
+    if agent_type is None:
+        return default_agent_type
+    if isinstance(agent_type, AgentType):
+        return agent_type
+    return AgentType[agent_type.upper()]
 
 def get_or_create_agent(agent_type: AgentType):
     if agent_cache[agent_type] is None:
@@ -99,13 +108,13 @@ def create_app():
             frequency_penalty=params.frequency_penalty,
             presence_penalty=params.presence_penalty
         )
-        
+
         # Get default agent context
         agent_context = get_default_agent_context()
-        
+
         # Create agent using user settings
         agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
-        
+
         # Complete text
         completions = agent.complete_text(
             prompt=params.prompt,
@@ -122,7 +131,7 @@ def create_app():
             response_format=params.response_format,
             system_prompt=DEFAULT_PROMPT
         )
-        
+
         if completions:
             completion_object = AgentCompletion.from_completion(completions)
             return completion_object
@@ -131,11 +140,7 @@ def create_app():
 
     @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
-        #if params.agent_type is an AgentType, use it.
-        if not isinstance(params.agent_type, AgentType):
-            agent_type = AgentType[params.agent_type.upper()]
-        else:
-            agent_type = params.agent_type
+        agent_type = _resolve_agent_type(params.agent_type)
 
         agent = get_active_agent(agent_type)
 
@@ -160,14 +165,10 @@ def create_app():
             return completion_object
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
-        
+
     @agent_router.post("/complete_text/{session_id}")
     async def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
-        #if params.agent_type is an AgentType, use it.
-        if not isinstance(params.agent_type, AgentType):
-            agent_type = AgentType[params.agent_type.upper()]
-        else:
-            agent_type = params.agent_type
+        agent_type = _resolve_agent_type(params.agent_type)
 
         agent = get_active_agent(agent_type)
 
@@ -193,11 +194,11 @@ def create_app():
             return completion_object
         else:
             raise HTTPException(status_code=500, detail="Failed to generate completions.")
-        
+
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
         return get_chat_history(session_id)
-    
+
     @agent_router.get("/chat_history/{session_id}/paginated")
     async def get_paginated_history_endpoint(session_id: int, page: int = 1, page_size: int = 20):
         chat_history = get_paginated_chat_history(session_id, page, page_size)
@@ -257,7 +258,7 @@ def _parse_agent_type(agent_type: str) -> AgentType:
     try:
         return AgentType[agent_type.upper()]
     except KeyError:
-        raise HTTPException(status_code=422, detail=f"Unknown agent type: {agent_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown agent type: {agent_type}") from None
 
 def _get_cached_agent_or_404(agent_type: str):
     parsed_type = _parse_agent_type(agent_type)
@@ -326,36 +327,6 @@ agent_mappings = {
 def get_active_agent(type: AgentType):
     return get_or_create_agent(type)
 
-def get_default_agent_context():
-    '''
-    Gets an agent context matching "Default Context" from the database
-    '''
-    with SessionLocal() as session:
-        # Query for the agent preset with name "Default Context"
-        default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
-        logging.info(f"Default agent preset: {default_preset}")
-
-        if not default_preset:
-            raise ValueError("Default Context preset not found in the database.")
-
-        agent_settings = AgentSettings(
-            name=default_preset.name,
-            version=default_preset.version,
-            description=default_preset.description,
-            max_tokens=default_preset.max_tokens,
-            n=default_preset.n,
-            temperature=default_preset.temperature,
-            top_p=default_preset.top_p,
-            frequency_penalty=default_preset.frequency_penalty,
-            presence_penalty=default_preset.presence_penalty,
-            interactive_only=default_preset.interactive_only,
-            include_world_processing=default_preset.process_world,
-        )
-        # Create an agent context with the found preset
-        context = AgentContext(settings=agent_settings, envs=get_envs())
-        return context
-
-
 def get_speech_to_text_client():
     return MMSAdapter()
 
@@ -363,7 +334,7 @@ def get_speech_to_text_client():
 app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
-        app, 
-        host="0.0.0.0", 
+        app,
+        host="0.0.0.0",
         port=8000, # 1MB (1024 * 1024 bytes)
     )

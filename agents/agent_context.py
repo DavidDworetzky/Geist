@@ -1,6 +1,7 @@
+import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from adapters.adapter_registry import find_adapter_classes, init_adapter_class
 from agents.agent_settings import AgentSettings
@@ -8,20 +9,19 @@ from app.models.database.agent import Agent
 from app.models.database.chat_session import ChatSession, update_chat_history
 from app.models.database.database import SessionLocal
 
-import json
 
 logger = logging.getLogger(__name__)
 
 
-class AgentContext():
-    def __init__(self, settings: AgentSettings, agent_id: Optional[str] = None,
-                 world_context: Optional[List[str]] = None,
-                 task_context: Optional[List[str]] = None,
-                 execution_context: Optional[List[str]] = None,
-                 function_log: Optional[List[str]] = None,
-                 execution_classes: Optional[List[Any]] = None,
-                 subprocess_id: Optional[int] = None,
-                 envs: Optional[Dict[str, str]] = None,
+class AgentContext:
+    def __init__(self, settings: AgentSettings, agent_id: str | None = None,
+                 world_context: list[str] | None = None,
+                 task_context: list[str] | None = None,
+                 execution_context: list[str] | None = None,
+                 function_log: list[str] | None = None,
+                 execution_classes: list[Any] | None = None,
+                 subprocess_id: int | None = None,
+                 envs: dict[str, str] | None = None,
                  include_world_processing: bool = False):
         self.agent_id = agent_id if agent_id is not None else str(uuid.uuid4())
         self.world_context = world_context if world_context is not None else []
@@ -63,5 +63,5 @@ class AgentContext():
         except Exception as e:
             logger.error(f"Failed to save agent context: {e}")
 
-    def _add_to_chat_history(self, user_message: str, ai_message: str, chat_id: Optional[int] = None) -> ChatSession:
+    def _add_to_chat_history(self, user_message: str, ai_message: str | None, chat_id: int | None = None) -> ChatSession:
         return update_chat_history(session_id=chat_id, new_user_message=user_message, new_ai_message=ai_message)

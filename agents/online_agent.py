@@ -1,10 +1,12 @@
 """
 OnlineAgent implementation for routing to OpenAI-compatible HTTP endpoints.
 """
+import contextlib
 import json
 import logging
 import os
-from typing import Any, Dict, Iterator, List, Optional
+from collections.abc import Iterator
+from typing import Any, cast
 
 import httpx
 
@@ -12,6 +14,7 @@ from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
 from agents.models.generic_completion import GenericCompletion
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +30,8 @@ class OnlineAgent(BaseAgent):
         agent_context: AgentContext,
         base_url: str,
         model: str,
-        api_key: Optional[str] = None,
-        backup_providers: Optional[List[Dict[str, str]]] = None,
+        api_key: str | None = None,
+        backup_providers: list[dict[str, str]] | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
         as_subprocess: bool = False,
@@ -66,7 +69,7 @@ class OnlineAgent(BaseAgent):
         if self.api_key:
             self.headers["Authorization"] = f"Bearer {self.api_key}"
 
-    def _get_api_key_from_env(self) -> Optional[str]:
+    def _get_api_key_from_env(self) -> str | None:
         """Get provider-specific API key from environment variables based on the endpoint."""
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
@@ -80,10 +83,10 @@ class OnlineAgent(BaseAgent):
 
     def _make_request(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         use_backup: bool = False,
         backup_index: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Make HTTP request to the API endpoint with retry logic.
 
@@ -126,7 +129,7 @@ class OnlineAgent(BaseAgent):
                 )
 
                 if response.status_code == 200:
-                    return response.json()
+                    return cast(dict[str, Any], response.json())
                 else:
                     self.logger.warning(
                         f"Request failed with status {response.status_code}: {response.text}"
@@ -157,11 +160,11 @@ class OnlineAgent(BaseAgent):
 
         raise CompletionRequestError("Unexpected error in request handling")
 
-    def _build_payload(self, prompt: str, max_tokens: Optional[int], n: Optional[int],
-                       temperature: Optional[float], top_p: Optional[float],
-                       frequency_penalty: Optional[float], presence_penalty: Optional[float],
-                       stop: Optional[str], system_prompt: Optional[str],
-                       chat_id: Optional[int]) -> Dict[str, Any]:
+    def _build_payload(self, prompt: str, max_tokens: int | None, n: int | None,
+                       temperature: float | None, top_p: float | None,
+                       frequency_penalty: float | None, presence_penalty: float | None,
+                       stop: str | list[str] | None, system_prompt: str | None,
+                       chat_id: int | None) -> dict[str, Any]:
         """Build a chat-completions payload from resolved params and hydrated history."""
         params = self._resolve_generation_params(
             max_tokens=max_tokens, n=n, temperature=temperature, top_p=top_p,
@@ -184,19 +187,19 @@ class OnlineAgent(BaseAgent):
     def complete_text(
         self,
         prompt: str,
-        max_tokens: int = None,
-        n: int = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
-        stop: Optional[str] = None,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: str = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None
     ) -> GenericCompletion:
         """Complete text using the online API."""
         payload = self._build_payload(
@@ -225,19 +228,19 @@ class OnlineAgent(BaseAgent):
     def stream_complete_text(
         self,
         prompt: str,
-        max_tokens: int = None,
-        n: int = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
-        stop: Optional[str] = None,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: str = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None
     ) -> Iterator[str]:
         """Stream text completion from the online API."""
         payload = self._build_payload(
@@ -299,19 +302,19 @@ class OnlineAgent(BaseAgent):
     def complete_audio(
         self,
         audio_file,
-        max_tokens: int = 16,
-        n: int = 1,
-        stop: Optional[str] = None,
-        temperature: float = 1.0,
-        top_p: float = 1,
-        frequency_penalty: float = 0,
-        presence_penalty: float = 0,
+        max_tokens: int | None = 16,
+        n: int | None = 1,
+        temperature: float | None = 1.0,
+        top_p: float | None = 1,
+        frequency_penalty: float | None = 0,
+        presence_penalty: float | None = 0,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: Optional[str] = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None
     ):
         """Audio completion for online providers (OpenAI Whisper API)."""
         if "openai.com" not in self.base_url:
@@ -367,10 +370,8 @@ class OnlineAgent(BaseAgent):
     def _cleanup_resources(self):
         """Close the HTTP client."""
         if getattr(self, 'client', None):
-            try:
+            with contextlib.suppress(Exception):
                 self.client.close()
-            except Exception:
-                pass
 
     def __del__(self):
         """Clean up HTTP client on destruction."""

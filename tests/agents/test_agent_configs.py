@@ -1,4 +1,6 @@
 from agents.agent_registry import get_all_base_agent_classes
+
+
 VALID_AGENTS = ['OnlineAgent', 'LocalAgent']
 
 def test_assert_valid_agents():

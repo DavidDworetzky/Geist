@@ -3,11 +3,13 @@ Initialize and register all available runners.
 """
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, Type
+
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
-from agents.architectures.vllm_runner import VLLMRunner
 from agents.architectures.qwen3_runner import Qwen3Runner
+from agents.architectures.vllm_runner import VLLMRunner
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ class OnlineModelNames(Enum):
     QWEN3_0_6B_LOCAL = "Qwen/Qwen3-0.6B"
 
 @dataclass
-class OnlineModelConfig():
+class OnlineModelConfig:
     """Config for online model."""
     provider: OnlineModelProviders
     model: OnlineModelNames
@@ -82,11 +84,11 @@ class OnlineModelConfig():
     presence_penalty: float = 0.0
     max_tokens: int = 16
     n: int = 1
-    stop: Optional[str] = None
+    stop: str | None = None
     echo: bool = False
-    best_of: Optional[int] = None
-    prompt_tokens: Optional[int] = None
-    response_format: Optional[str] = None
+    best_of: int | None = None
+    prompt_tokens: int | None = None
+    response_format: str | None = None
 
 OnlineModelDefaults = [
     OnlineModelConfig(
@@ -156,72 +158,72 @@ OnlineModelDefaults = [
         best_of=None,
         prompt_tokens=None,
         response_format=None
-    )   
+    )
 ]
 
 
 class RunnerRegistry:
     """
     Registry for managing runner classes used in agent inference.
-    
+
     This class encapsulates the runner registration logic and provides
     a clean interface for registering, retrieving, and listing runners.
     """
-    
+
     def __init__(self):
         """Initialize an empty runner registry."""
-        self._registry: Dict[str, Type] = {}
+        self._registry: dict[str, type] = {}
         self._logger = logging.getLogger(__name__)
-    
-    def register(self, name: str, runner_class: Type) -> None:
+
+    def register(self, name: str, runner_class: type) -> None:
         """
         Register a runner class with the given name.
-        
+
         Args:
             name: Name to register the runner under
             runner_class: The runner class to register
         """
         if name in self._registry:
             self._logger.warning(f"Overriding existing runner registration for '{name}'")
-        
+
         self._registry[name] = runner_class
         self._logger.info(f"Registered runner '{name}': {runner_class.__name__}")
-    
-    def get(self, name: str) -> Optional[Type]:
+
+    def get(self, name: str) -> type | None:
         """
         Get a runner class by name.
-        
+
         Args:
             name: Name of the runner to retrieve
-            
+
         Returns:
             The runner class if found, None otherwise
         """
         return self._registry.get(name)
-    
-    def list(self) -> Dict[str, Type]:
+
+    def list(self) -> dict[str, type]:
         """
         Get all registered runners.
-        
+
         Returns:
             Dictionary of runner name to runner class mappings
         """
         return self._registry.copy()
-    
+
     def clear(self) -> None:
         """
         Clear all registered runners. Mainly for testing purposes.
         """
         self._registry.clear()
         self._logger.info("Cleared runner registry")
-    
+
     def __contains__(self, name: str) -> bool:
         """
         Check if a runner is registered.
-        
+
         Args:
             name: Name of the runner to check
-            
+
         Returns:
             True if the runner is registered, False otherwise
         """
@@ -230,7 +232,7 @@ class RunnerRegistry:
 def get_registry() -> RunnerRegistry:
     """
     Get the global runner registry instance.
-    
+
     Returns:
         The global RunnerRegistry instance
     """
@@ -240,23 +242,23 @@ def get_registry() -> RunnerRegistry:
     return _registry_instance
 
 
-def register_all_runners(registry: Optional[RunnerRegistry] = None) -> None:
+def register_all_runners(registry: RunnerRegistry | None = None) -> None:
     """
     Register all available runners with the registry.
-    
+
     Args:
         registry: Optional RunnerRegistry instance. If None, uses the global registry.
     """
     global _initialized
-    
+
     if registry is None:
         registry = get_registry()
-    
+
     logger.info("Registering all available runners...")
-    
+
     # Register MLX Llama runner
     registry.register("mlx_llama", MLXLlamaRunner)
-    
+
     # Register vLLM runner (placeholder)
     registry.register("vllm", VLLMRunner)
 
@@ -278,7 +280,7 @@ def ensure_runners_registered() -> None:
 
 
 # Convenience functions for test compatibility
-def register_runner(name: str, runner_class: Type) -> None:
+def register_runner(name: str, runner_class: type) -> None:
     """
     Register a runner class with the given name.
 
@@ -290,7 +292,7 @@ def register_runner(name: str, runner_class: Type) -> None:
     registry.register(name, runner_class)
 
 
-def get_runner(name: str) -> Optional[Type]:
+def get_runner(name: str) -> type | None:
     """
     Get a runner class by name.
 
@@ -318,22 +320,19 @@ def clear_registry() -> None:
 # Model Registry - Available models with metadata
 # ============================================================================
 
-from datetime import datetime
-from typing import List
-
 @dataclass
 class ModelInfo:
     """Information about an available model with full metadata."""
     id: str                              # Model identifier (e.g., "gpt-4")
     name: str                            # Display name (e.g., "GPT-4")
     provider: OnlineModelProviders       # Provider enum
-    context_window: Optional[int] = None # Max context tokens
-    max_output_tokens: Optional[int] = None  # Max output tokens
+    context_window: int | None = None # Max context tokens
+    max_output_tokens: int | None = None  # Max output tokens
     supports_vision: bool = False        # Multimodal support
     supports_function_calling: bool = False
     supports_streaming: bool = True
     recommended: bool = False            # Highlight recommended models
-    family: Optional[str] = None         # Model family (e.g., "gpt-4", "claude-3")
+    family: str | None = None         # Model family (e.g., "gpt-4", "claude-3")
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -352,7 +351,7 @@ class ModelInfo:
 
 
 # Static registry - always available as fallback
-STATIC_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
+STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
         ModelInfo(
             id="gpt-4",
@@ -691,7 +690,7 @@ STATIC_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
 # Auto-generated by scripts/sync_models.py
 # Do not edit manually
 
-DISCOVERED_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
+DISCOVERED_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
         ModelInfo(
             id="gpt-4-0613",
@@ -1331,10 +1330,10 @@ DISCOVERED_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
 }
 
 # Timestamp of last model sync
-_last_model_sync: Optional[datetime] = None
+_last_model_sync: datetime | None = None
 
 
-def get_models_for_provider(provider: OnlineModelProviders) -> List[ModelInfo]:
+def get_models_for_provider(provider: OnlineModelProviders) -> list[ModelInfo]:
     """
     Get all available models for a provider, preferring discovered models.
 
@@ -1351,7 +1350,7 @@ def get_models_for_provider(provider: OnlineModelProviders) -> List[ModelInfo]:
         return STATIC_MODELS.get(provider, [])
 
 
-def get_all_models() -> Dict[OnlineModelProviders, List[ModelInfo]]:
+def get_all_models() -> dict[OnlineModelProviders, list[ModelInfo]]:
     """
     Get all available models grouped by provider.
 
@@ -1366,7 +1365,7 @@ def get_all_models() -> Dict[OnlineModelProviders, List[ModelInfo]]:
     return result
 
 
-def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
+def get_model_by_id(model_id: str) -> ModelInfo | None:
     """
     Find a model by its ID across all providers.
 
@@ -1384,7 +1383,7 @@ def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
     return None
 
 
-def update_discovered_models(provider: OnlineModelProviders, models: List[ModelInfo]) -> None:
+def update_discovered_models(provider: OnlineModelProviders, models: list[ModelInfo]) -> None:
     """
     Update the discovered models for a provider.
 
@@ -1398,12 +1397,12 @@ def update_discovered_models(provider: OnlineModelProviders, models: List[ModelI
     logger.info(f"Updated discovered models for {provider.value}: {len(models)} models")
 
 
-def get_last_model_sync_time() -> Optional[datetime]:
+def get_last_model_sync_time() -> datetime | None:
     """Get the timestamp of the last model sync."""
     return _last_model_sync
 
 
-def provider_from_string(provider_str: str) -> Optional[OnlineModelProviders]:
+def provider_from_string(provider_str: str) -> OnlineModelProviders | None:
     """
     Convert a provider string to OnlineModelProviders enum.
 

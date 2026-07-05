@@ -1,11 +1,14 @@
+import contextlib
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+
 from app.main import app
 from app.models.database.database import SessionLocal
-from app.models.database.workflow import Workflow, WorkflowStep
 from app.models.database.geist_user import GeistUser
-from app.schemas.workflow import WorkflowCreate, WorkflowStepCreate
+from app.models.database.workflow import Workflow, WorkflowStep
+
 
 @pytest.fixture
 def client():
@@ -20,18 +23,16 @@ def db_session():
         yield session
     finally:
         # Handle any pending rollback
-        try:
+        with contextlib.suppress(Exception):
             session.rollback()
-        except:
-            pass
-        
+
         # Clean up created test users and workflows
         try:
             session.query(WorkflowStep).delete()
             session.query(Workflow).delete()
             session.query(GeistUser).filter(GeistUser.email == "test@example.com").delete()
             session.commit()
-        except Exception as e:
+        except Exception:
             session.rollback()
         finally:
             session.close()
@@ -44,7 +45,7 @@ def test_user(db_session: Session):
     if existing_user:
         db_session.delete(existing_user)
         db_session.commit()
-    
+
     user_data = {
         # Don't set user_id - let it auto-increment
         "email": "test@example.com",
@@ -82,7 +83,7 @@ def test_create_workflow(client, auth_headers, test_user):
             }
         ]
     }
-    
+
     response = client.post("/api/v1/workflows/", json=workflow_data, headers=auth_headers)
     assert response.status_code == 201
     data = response.json()
@@ -97,17 +98,17 @@ def test_list_workflows(client, auth_headers, test_user, db_session):
     workflow2 = Workflow(name="Workflow 2", user_id=test_user["user_id"])
     db_session.add_all([workflow1, workflow2])
     db_session.commit()
-    
+
     # Debug: Verify workflows were created
     created_workflows = db_session.query(Workflow).filter_by(user_id=test_user["user_id"]).all()
     print(f"Created workflows: {[(w.workflow_id, w.name, w.user_id) for w in created_workflows]}")
     print(f"Auth headers: {auth_headers}")
     print(f"Test user ID: {test_user['user_id']}")
-    
+
     response = client.get("/api/v1/workflows/", headers=auth_headers)
     print(f"Response status: {response.status_code}")
     print(f"Response body: {response.text}")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -119,7 +120,7 @@ def test_get_workflow(client, auth_headers, test_user, db_session):
     workflow = Workflow(name="Test Workflow", user_id=test_user["user_id"])
     db_session.add(workflow)
     db_session.commit()
-    
+
     response = client.get(f"/api/v1/workflows/{workflow.workflow_id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
@@ -132,7 +133,7 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
     workflow = Workflow(name="Original Name", user_id=test_user["user_id"])
     db_session.add(workflow)
     db_session.commit()
-    
+
     update_data = {
         "name": "Updated Name",
         "steps": [
@@ -147,7 +148,7 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
             }
         ]
     }
-    
+
     response = client.put(
         f"/api/v1/workflows/{workflow.workflow_id}",
         json=update_data,
@@ -165,10 +166,10 @@ def test_delete_workflow(client, auth_headers, test_user, db_session):
     workflow = Workflow(name="To Delete", user_id=test_user["user_id"])
     db_session.add(workflow)
     db_session.commit()
-    
+
     response = client.delete(f"/api/v1/workflows/{workflow.workflow_id}", headers=auth_headers)
     assert response.status_code == 204
-    
+
     # Verify workflow is deleted
     deleted_workflow = db_session.query(Workflow).filter_by(workflow_id=workflow.workflow_id).first()
     assert deleted_workflow is None

@@ -12,11 +12,9 @@ Example transformation:
   libblas=3.9.0=26_linuxaarch64_openblas  ->  libblas=3.9.0
 """
 
-import os
 import logging
 from pathlib import Path
-from typing import Tuple
-import re
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -71,7 +69,7 @@ def remove_fingerprint(line: str) -> str:
 
 
 def copy_environment(source_path: Path = None,
-                     dest_path: Path = None) -> Tuple[bool, str]:
+                     dest_path: Path = None) -> tuple[bool, str]:
     """
     Copy environment file and remove fingerprints from conda dependencies.
 
@@ -102,7 +100,7 @@ def copy_environment(source_path: Path = None,
 
     try:
         # Read source file
-        with open(source_path, 'r') as f:
+        with open(source_path) as f:
             lines = f.readlines()
 
         # Process each line

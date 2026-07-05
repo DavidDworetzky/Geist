@@ -7,18 +7,22 @@ standard BaseRunner interface. Can load models from:
   - Raw safetensors files directory (config.json + *.safetensors + tokenizer)
   - HuggingFace Hub (by model ID)
 """
-from typing import Dict, Any, Optional, List
-import logging
-import os
 import glob
 import json
+import logging
+import os
+from typing import Any
+
+import safetensors.torch
 import torch
 import transformers
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from huggingface_hub import login
-import safetensors.torch
-from .base_runner import BaseRunner, GenerationConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
 from agents.models.llama_completion import strings_to_message_dict
+
+from .base_runner import BaseRunner, GenerationConfig
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,7 @@ class Qwen3Runner(BaseRunner):
         self.weights_dir = None
         self.device = None
 
-    def load(self, model_id: str, device_config: Optional[Dict[str, Any]] = None) -> None:
+    def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """
         Load a Qwen 3 model for inference.
 
@@ -106,7 +110,7 @@ class Qwen3Runner(BaseRunner):
         logger.info(f"Qwen3 runner loaded for model: {model_id}")
 
     @staticmethod
-    def _find_safetensors_files(directory: str) -> List[str]:
+    def _find_safetensors_files(directory: str) -> list[str]:
         """Find all safetensors files in a directory."""
         return sorted(glob.glob(os.path.join(directory, "*.safetensors")))
 
@@ -120,7 +124,7 @@ class Qwen3Runner(BaseRunner):
         self.model = self.model.to(self.device)
         logger.info(f"Model loaded from local weights. Parameters: {self.model.num_parameters()}")
 
-    def _load_from_safetensors(self, safetensors_files: List[str]) -> None:
+    def _load_from_safetensors(self, safetensors_files: list[str]) -> None:
         """
         Load model from raw safetensors files and a config.json.
 
@@ -132,6 +136,8 @@ class Qwen3Runner(BaseRunner):
         Args:
             safetensors_files: List of paths to safetensors files
         """
+        if self.weights_dir is None:
+            raise ValueError("weights_dir must be set to load local weights")
         # Load tokenizer — look in weights_dir first, fall back to hub
         tokenizer_files = [
             os.path.join(self.weights_dir, f)
@@ -145,7 +151,7 @@ class Qwen3Runner(BaseRunner):
 
         # Load config and determine dtype
         config_path = os.path.join(self.weights_dir, "config.json")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_json = json.load(f)
 
         torch_dtype_str = str(config_json.get("torch_dtype", "")).lower()
@@ -186,7 +192,7 @@ class Qwen3Runner(BaseRunner):
         self.model = self.model.to(self.device)
         logger.info(f"Model loaded from HuggingFace hub. Parameters: {self.model.num_parameters()}")
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> Dict[str, Any]:
+    def generate(self, prompt: str, generation_config: GenerationConfig) -> dict[str, Any] | list[dict[str, str]]:
         """
         Generate text from a raw prompt.
 
@@ -202,7 +208,7 @@ class Qwen3Runner(BaseRunner):
 
         return self.complete("", prompt, generation_config)
 
-    def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig) -> Dict[str, Any]:
+    def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
         """
         Complete a conversation with system and user prompts using the Qwen 3 chat template.
 

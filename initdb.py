@@ -1,6 +1,6 @@
 import importlib
 
-from app.models.database.database import Base, DATABASE_CONFIG, Engine
+from app.models.database.database import DATABASE_CONFIG, Base, Engine
 from app.models.database.database_config import initialize_database
 
 

@@ -1,14 +1,15 @@
 import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, Text
-from sqlalchemy.orm import relationship
-from app.models.database.database import Base
-from app.models.database.database import SessionLocal
 from dataclasses import dataclass
-from typing import Optional, List
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy.orm import relationship
+
+from app.models.database.database import Base, SessionLocal
+
 
 class FileUpload(Base):
     __tablename__ = "file_uploads"
-    
+
     file_id = Column(Integer, primary_key=True, autoincrement=True)
     filename = Column(String, nullable=False)
     original_filename = Column(String, nullable=False)
@@ -18,29 +19,29 @@ class FileUpload(Base):
     file_hash = Column(String, nullable=False)  # SHA-256 hash for deduplication
     upload_date = Column(DateTime, default=datetime.datetime.utcnow)
     user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
-    
+
     # Extracted content for searchability
     extracted_text = Column(Text)  # For PDFs and text files
     is_processed = Column(Boolean, default=False)
     processing_error = Column(String)  # Store any processing errors
-    
+
     # Relationships
     user = relationship("GeistUser", backref="uploaded_files")
 
 @dataclass
 class FileUploadModel:
-    file_id: Optional[int] = None
+    file_id: int | None = None
     filename: str = ""
     original_filename: str = ""
     file_data: bytes = b""
     file_size: int = 0
     mime_type: str = ""
     file_hash: str = ""
-    upload_date: Optional[datetime.datetime] = None
+    upload_date: datetime.datetime | None = None
     user_id: int = 0
-    extracted_text: Optional[str] = None
+    extracted_text: str | None = None
     is_processed: bool = False
-    processing_error: Optional[str] = None
+    processing_error: str | None = None
 
 @dataclass
 class FileUploadResponse:
@@ -52,7 +53,7 @@ class FileUploadResponse:
     upload_date: datetime.datetime
     user_id: int
     is_processed: bool
-    processing_error: Optional[str] = None
+    processing_error: str | None = None
 
 def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
     """Create a new file upload record"""
@@ -72,7 +73,7 @@ def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
         session.add(db_file)
         session.commit()
         session.refresh(db_file)
-        
+
         return FileUploadModel(
             file_id=db_file.file_id,
             filename=db_file.filename,
@@ -88,13 +89,13 @@ def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
             processing_error=db_file.processing_error
         )
 
-def get_file_upload_by_id(file_id: int) -> Optional[FileUploadModel]:
+def get_file_upload_by_id(file_id: int) -> FileUploadModel | None:
     """Get file upload by ID"""
     with SessionLocal() as session:
         db_file = session.query(FileUpload).filter_by(file_id=file_id).first()
         if not db_file:
             return None
-            
+
         return FileUploadModel(
             file_id=db_file.file_id,
             filename=db_file.filename,
@@ -110,11 +111,11 @@ def get_file_upload_by_id(file_id: int) -> Optional[FileUploadModel]:
             processing_error=db_file.processing_error
         )
 
-def get_files_by_user(user_id: int, skip: int = 0, limit: int = 100) -> List[FileUploadResponse]:
+def get_files_by_user(user_id: int, skip: int = 0, limit: int = 100) -> list[FileUploadResponse]:
     """Get files uploaded by a specific user"""
     with SessionLocal() as session:
         files = session.query(FileUpload).filter_by(user_id=user_id).offset(skip).limit(limit).all()
-        
+
         return [FileUploadResponse(
             file_id=f.file_id,
             filename=f.filename,
@@ -127,13 +128,13 @@ def get_files_by_user(user_id: int, skip: int = 0, limit: int = 100) -> List[Fil
             processing_error=f.processing_error
         ) for f in files]
 
-def get_file_by_hash(file_hash: str) -> Optional[FileUploadModel]:
+def get_file_by_hash(file_hash: str) -> FileUploadModel | None:
     """Check if file with given hash already exists"""
     with SessionLocal() as session:
         db_file = session.query(FileUpload).filter_by(file_hash=file_hash).first()
         if not db_file:
             return None
-            
+
         return FileUploadModel(
             file_id=db_file.file_id,
             filename=db_file.filename,
@@ -155,12 +156,12 @@ def delete_file_upload(file_id: int, user_id: int) -> bool:
         db_file = session.query(FileUpload).filter_by(file_id=file_id, user_id=user_id).first()
         if not db_file:
             return False
-            
+
         session.delete(db_file)
         session.commit()
         return True
 
-def update_file_processing_status(file_id: int, extracted_text: str = None, processing_error: str = None):
+def update_file_processing_status(file_id: int, extracted_text: str | None = None, processing_error: str | None = None):
     """Update file processing status and extracted text"""
     with SessionLocal() as session:
         db_file = session.query(FileUpload).filter_by(file_id=file_id).first()
