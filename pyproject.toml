@@ -1,3 +1,81 @@
+[project]
+name = "geist"
+version = "0.1.0"
+description = "FOSS project for private local AI. Chat and Agents / Assistants."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    # API server
+    "fastapi==0.115.8",
+    "uvicorn==0.34.0",
+    "websockets==15.0.1",
+    "python-multipart==0.0.20",
+    # Persistence (SQLite is the default provider; see [project.optional-dependencies] for postgres)
+    "sqlalchemy==2.0.38",
+    "alembic==1.15.2",
+    # Config / models
+    "pydantic==2.10.6",
+    "python-dotenv==1.0.1",
+    # HTTP clients and adapters
+    "requests==2.32.3",
+    "httpx==0.28.1",
+    "aiohttp==3.11.12",
+    "aiohttp-retry==2.9.1",
+    "twilio==9.4.5",
+    # File/text extraction services
+    "openpyxl==3.1.5",
+    "chardet==5.2.0",
+    # Local inference stack
+    "numpy==2.2.3",
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+    "torchtune==0.6.0",
+    # torchtune imports torchao at runtime but does not declare it as a dependency.
+    "torchao==0.10.0",
+    "transformers==4.48.3",
+    "tokenizers==0.21.0",
+    "huggingface-hub==0.28.1",
+    "safetensors==0.5.2",
+    "sentencepiece==0.2.0",
+    "einops==0.8.1",
+    "tiktoken==0.9.0",
+    # Older mlx releases (0.22/0.23 pinned by the conda envs) no longer have wheels on PyPI.
+    # Linux needs an explicit backend (mlx-cpu); macOS arm64 pulls mlx-metal automatically.
+    "mlx==0.31.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx[cpu]==0.31.2; sys_platform == 'linux'",
+    "psutil==6.1.1",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg2-binary==2.9.10",
+]
+voice = [
+    "sounddevice==0.5.0",
+    "sphn==0.1.12",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+    "mypy==1.13.0",
+    "ruff==0.8.4",
+    "pre-commit==4.0.1",
+    "types-PyYAML==6.0.12.20240917",
+    "types-python-dateutil==2.9.0.20241206",
+    "types-requests==2.32.0.20241016",
+    "types-six==1.16.21.20240513",
+]
+
+[tool.uv]
+# Geist is an application, not an installable library.
+package = false
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
+
 [tool.mypy]
 # Python version to target
 python_version = "3.11"

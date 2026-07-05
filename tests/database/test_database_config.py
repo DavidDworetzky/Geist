@@ -23,8 +23,16 @@ class TestDatabaseProvider:
         return None
 
 
-def test_postgresql_is_the_default_provider():
+def test_sqlite_is_the_default_provider():
     config = load_database_config(environ={})
+
+    assert config.provider == "sqlite"
+    assert config.database_url.startswith("sqlite:///")
+    assert config.database_url.endswith("data/geist.sqlite3")
+
+
+def test_postgresql_can_be_selected_from_environment():
+    config = load_database_config(environ={"GEIST_DATABASE_PROVIDER": "postgresql"})
 
     assert config == DatabaseConfig(
         provider="postgresql",
