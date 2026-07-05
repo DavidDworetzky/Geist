@@ -148,9 +148,15 @@ class TestAgentContextSnapshots:
         context = make_context(agent_id="never-snapshotted")
         assert not context.restore_snapshot()
 
-    def test_snapshot_failure_does_not_raise(self):
-        # No reachable database outside the sqlite fixture; snapshot must
-        # swallow the error and return None rather than break the agent loop.
+    def test_snapshot_failure_does_not_raise(self, monkeypatch):
+        # Persistence failures must be swallowed and reported as None rather
+        # than break the agent loop.
+        import agents.agent_context as agent_context_module
+
+        def failing_create_snapshot(*args, **kwargs):
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(agent_context_module, "create_snapshot", failing_create_snapshot)
         context = make_context(agent_id="no-db-agent")
         context.world_context = ["irrelevant"]
         assert context.snapshot(reason="tick") is None
