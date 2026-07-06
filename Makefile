@@ -1,6 +1,17 @@
 # Variables
 PYTHON=python
+IS_WSL=$(shell grep -qi microsoft /proc/version 2>/dev/null && echo 1 || echo 0)
+
+ifeq ($(IS_WSL),1)
+DOCKER=docker.exe
+DOCKER_COMPOSE=docker.exe compose
+COMPOSE_FILE=docker-compose.wsl.yml
+else
+DOCKER=docker
 DOCKER_COMPOSE=docker compose
+COMPOSE_FILE=docker-compose.yml
+endif
+
 CONDA_ENV=geist-mac
 CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
 
@@ -24,10 +35,19 @@ help:
 # Run both server and Docker services
 .PHONY: run
 run:
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
+ifeq ($(MLX_BACKEND),1)
+	@echo "MLX_BACKEND=1 uses a native Unix/Conda backend and is not supported on Windows/WSL."
+	@echo "Starting the full Docker stack instead."
+endif
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
+else
 ifeq ($(MLX_BACKEND),1)
 	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) bootstrap.py
 else
-	$(DOCKER_COMPOSE) up
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
+endif
 endif
 
 # Alias for run
@@ -45,26 +65,33 @@ debug:
 ifeq ($(MLX_BACKEND),1)
 	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
 else
-	$(DOCKER_COMPOSE) up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
 endif
 
 # Run Docker services only
 .PHONY: docker
 docker:
-	$(DOCKER_COMPOSE) up -d
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
+endif
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up -d
 
 # Stop all services
 .PHONY: stop
 stop:
-	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) down
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; skipping Unix pkill cleanup."
+else
 	@echo "Checking for running Python processes..."
 	-pkill -f "python bootstrap.py"
+endif
 
 # Clean up Docker resources
 .PHONY: clean
 clean:
-	$(DOCKER_COMPOSE) down -v --remove-orphans
-	docker system prune -f
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) down -v --remove-orphans
+	$(DOCKER) system prune -f
 
 # Initialize database
 .PHONY: init-db
@@ -74,4 +101,4 @@ init-db:
 # Build Docker images
 .PHONY: build
 build:
-	$(DOCKER_COMPOSE) build 
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) build
