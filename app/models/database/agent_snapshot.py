@@ -117,6 +117,38 @@ def get_snapshot_by_id(snapshot_id: int) -> Optional[AgentSnapshot]:
         return snapshot
 
 
+def prune_snapshots_older_than(agent_identifier: str, retention_days: int = 7) -> int:
+    """
+    Delete an agent's snapshots older than the retention window.
+
+    The most recent snapshot is always kept regardless of age — it is the
+    agent's resume point for phase_in. A retention of 0 (or negative)
+    disables pruning.
+    """
+    if not retention_days or retention_days <= 0:
+        return 0
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+    with SessionLocal() as session:
+        max_step = (
+            session.query(func.max(AgentSnapshot.step))
+            .filter(AgentSnapshot.agent_identifier == agent_identifier)
+            .scalar()
+        )
+        if max_step is None:
+            return 0
+        deleted = (
+            session.query(AgentSnapshot)
+            .filter(
+                AgentSnapshot.agent_identifier == agent_identifier,
+                AgentSnapshot.created_at < cutoff,
+                AgentSnapshot.step < max_step,
+            )
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+        return deleted
+
+
 def prune_snapshots(agent_identifier: str, keep_last: int = 100) -> int:
     """Delete all but the most recent `keep_last` snapshots for an agent."""
     with SessionLocal() as session:

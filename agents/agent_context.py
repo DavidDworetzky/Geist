@@ -14,6 +14,7 @@ from app.models.database.agent_snapshot import (
     create_snapshot,
     get_latest_snapshot,
     get_snapshot_by_id,
+    prune_snapshots_older_than,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,10 +120,24 @@ class AgentContext():
             logger.info(
                 f"Saved snapshot step={snapshot.step} reason={reason} for agent_id={self.agent_id}"
             )
-            return snapshot
         except Exception as e:
             logger.error(f"Failed to snapshot agent context for agent_id={self.agent_id}: {e}")
             return None
+
+        # Retention: expire old snapshots on write so history is bounded without
+        # a separate maintenance job. Prune failures are as harmless as snapshot
+        # failures — log and move on.
+        try:
+            retention_days = getattr(self.settings, "snapshot_retention_days", 7)
+            pruned = prune_snapshots_older_than(self.agent_id, retention_days)
+            if pruned:
+                logger.info(
+                    f"Pruned {pruned} snapshot(s) older than {retention_days} days for agent_id={self.agent_id}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to prune old snapshots for agent_id={self.agent_id}: {e}")
+
+        return snapshot
 
     def restore_snapshot(self, snapshot_id: int = None) -> bool:
         """

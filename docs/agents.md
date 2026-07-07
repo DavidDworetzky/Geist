@@ -94,8 +94,18 @@ agent.restore_state_snapshot()
 ```
 
 Snapshot writes never raise into the agent loop — failures are logged and the
-tick continues. Use `prune_snapshots(agent_identifier, keep_last=100)` to cap
-history for long-running agents.
+tick continues.
+
+### Retention
+
+Snapshot history is bounded by time-based retention applied on every write:
+snapshots older than `AgentSettings.snapshot_retention_days` (default 7) are
+deleted after each new snapshot is persisted. The most recent snapshot is
+always kept regardless of age — it is the agent's resume point for
+`phase_in()`. Set `snapshot_retention_days = 0` to disable pruning (e.g. for
+debugging). Count-based capping is also available via
+`prune_snapshots(agent_identifier, keep_last=100)`. Compaction of snapshot
+contents (e.g. summarizing old function logs) is future work.
 
 ## Structured Tool Calling
 

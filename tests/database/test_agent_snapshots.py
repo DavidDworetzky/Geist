@@ -7,11 +7,13 @@ from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.online_agent import OnlineAgent
 from app.models.database.agent_snapshot import (
+    AgentSnapshot,
     create_snapshot,
     get_latest_snapshot,
     get_snapshot_by_id,
     get_snapshots,
     prune_snapshots,
+    prune_snapshots_older_than,
 )
 from app.models.database.database import (
     Base,
@@ -102,6 +104,71 @@ class TestSnapshotModel:
 
         assert deleted == 3
         assert [snapshot.step for snapshot in get_snapshots("agent-a")] == [5, 4]
+
+
+def backdate_snapshot(snapshot_id: int, days: int) -> None:
+    import datetime
+
+    from app.models.database.database import SessionLocal
+
+    with SessionLocal() as session:
+        session.query(AgentSnapshot).filter(
+            AgentSnapshot.snapshot_id == snapshot_id
+        ).update({
+            AgentSnapshot.created_at: datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        })
+        session.commit()
+
+
+class TestSnapshotRetention:
+    def test_prunes_snapshots_past_retention(self, sqlite_database):
+        expired_one = create_snapshot("agent-a", ["old1"], [], [], reason="tick")
+        expired_two = create_snapshot("agent-a", ["old2"], [], [], reason="tick")
+        create_snapshot("agent-a", ["fresh"], [], [], reason="tick")
+        backdate_snapshot(expired_one.snapshot_id, days=8)
+        backdate_snapshot(expired_two.snapshot_id, days=30)
+
+        deleted = prune_snapshots_older_than("agent-a", retention_days=7)
+
+        assert deleted == 2
+        assert [snapshot.to_dict()["world_context"] for snapshot in get_snapshots("agent-a")] == [["fresh"]]
+
+    def test_latest_snapshot_survives_regardless_of_age(self, sqlite_database):
+        only = create_snapshot("agent-a", ["ancient"], [], [], reason="phase_out")
+        backdate_snapshot(only.snapshot_id, days=365)
+
+        assert prune_snapshots_older_than("agent-a", retention_days=7) == 0
+        assert get_latest_snapshot("agent-a").snapshot_id == only.snapshot_id
+
+    def test_zero_retention_disables_pruning(self, sqlite_database):
+        old = create_snapshot("agent-a", ["old"], [], [], reason="tick")
+        create_snapshot("agent-a", ["new"], [], [], reason="tick")
+        backdate_snapshot(old.snapshot_id, days=100)
+
+        assert prune_snapshots_older_than("agent-a", retention_days=0) == 0
+        assert len(get_snapshots("agent-a")) == 2
+
+    def test_context_snapshot_prunes_on_write(self, sqlite_database):
+        context = make_context(agent_id="retained-agent")
+        context.task_context = ["stale"]
+        stale = context.snapshot(reason="tick")
+        backdate_snapshot(stale.snapshot_id, days=8)
+
+        context.task_context = ["current"]
+        context.snapshot(reason="tick")
+
+        remaining = get_snapshots("retained-agent")
+        assert [snapshot.to_dict()["task_context"] for snapshot in remaining] == [["current"]]
+
+    def test_context_snapshot_respects_disabled_retention(self, sqlite_database):
+        context = make_context(agent_id="unbounded-agent")
+        context.settings.snapshot_retention_days = 0
+        stale = context.snapshot(reason="tick")
+        backdate_snapshot(stale.snapshot_id, days=100)
+
+        context.snapshot(reason="tick")
+
+        assert len(get_snapshots("unbounded-agent")) == 2
 
 
 class TestAgentContextSnapshots:
