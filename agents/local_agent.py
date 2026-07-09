@@ -10,6 +10,7 @@ from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
 from agents.models.llama_completion import LlamaCompletion
+from agents.tool_calling import ToolCompletion, run_prompt_tool_call
 
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,63 @@ class LocalAgent(BaseAgent):
 
         completion.chat_id = chat_history.chat_session_id
         return completion
+
+    def _complete_raw(self, prompt: str, system_prompt: str | None = None,
+                      max_tokens: int = None, temperature: float = None) -> str:
+        """
+        Single completion returning plain text, without chat-history side effects.
+        Used for tool-call loops so intermediate attempts don't pollute history.
+        """
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        gen_config = self._create_generation_config(max_tokens=max_tokens, temperature=temperature)
+        completion_result = self.runner.complete(
+            system_prompt=system_prompt or SYSTEM_PROMPT,
+            user_prompt=prompt,
+            generation_config=gen_config
+        )
+        completion = LlamaCompletion.from_dict(completion_result)
+        return next((msg.content for msg in completion.messages if msg.role == 'assistant'), "")
+
+    def complete_with_tools(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        max_tool_iterations: int = 3,
+        chat_id: int | None = None,
+    ) -> ToolCompletion:
+        """
+        Tool-augmented completion for local models via schema-grounded prompting.
+
+        Local models keep the reflection-based function visibility: adapter
+        actions are reflected into JSON schemas and rendered into the prompt.
+        Robustness comes from tolerant JSON extraction, schema validation with
+        type coercion, and validation-error feedback on retries.
+        """
+        result = run_prompt_tool_call(
+            complete_fn=lambda task, system: self._complete_raw(
+                task, system_prompt or system, max_tokens=max_tokens, temperature=temperature
+            ),
+            schemas=self._agent_context.get_tool_schemas(),
+            dispatcher=self._agent_context.get_tool_dispatcher(),
+            task_prompt=prompt,
+            max_attempts=max_tool_iterations,
+        )
+        if chat_id is not None:
+            try:
+                self._agent_context._add_to_chat_history(
+                    user_message=prompt, ai_message=result.to_content(), chat_id=chat_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to record tool completion in chat history: {e}")
+        return ToolCompletion(
+            content=result.to_content(),
+            tool_results=[result],
+            iterations=1,
+            used_native_tools=False,
+        )
 
     def stream_complete_text(
         self,
