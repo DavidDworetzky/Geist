@@ -21,9 +21,9 @@ agent_completion = {
 }
 
 
-@patch('adapters.log_adapter.LogAdapter.log')
+@patch('adapters.log_adapter.LogAdapter.log', autospec=True)
 def test_completion(log, local_agent, client):
-    log.side_effect = lambda output: print(output)
+    log.side_effect = lambda self, output: print(output)
     agent_cache[AgentType.LLAMA] = local_agent
     try:
         payload = {
@@ -60,10 +60,10 @@ def test_completion(log, local_agent, client):
 
 
 @patch('agents.local_agent.LocalAgent.complete_text')
-@patch('adapters.log_adapter.LogAdapter.log')
+@patch('adapters.log_adapter.LogAdapter.log', autospec=True)
 def test_local_tick_with_prompt(log, complete_text, local_agent, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
-    log.side_effect = lambda output: print(output)
+    log.side_effect = lambda self, output: print(output)
     agent_cache[AgentType.LLAMA] = local_agent
     try:
         payload = {
