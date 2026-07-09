@@ -44,6 +44,7 @@ jobs:
       shell: bash -l {0}
       env:
         PYTHONPATH: ${{ github.workspace }}
+        GEIST_DATABASE_PROVIDER: postgresql
         DB_HOST: localhost
         DB_PORT: 5432
         POSTGRES_DB: geist
@@ -57,6 +58,7 @@ jobs:
       env:
         HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         PYTHONPATH: ${{ github.workspace }}
+        GEIST_DATABASE_PROVIDER: postgresql
         DB_HOST: localhost
         DB_PORT: 5432
         POSTGRES_DB: geist

@@ -1,49 +1,80 @@
-# Pre-commit hooks for security and code quality
-# Install: pip install pre-commit && pre-commit install
-# Run manually: pre-commit run --all-files
-
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
 repos:
-  # General file checks
+  # Local supply-chain policy checks
+  - repo: local
+    hooks:
+      - id: dependency-supply-chain-policy
+        name: dependency supply-chain policy
+        entry: python scripts/verify_dependency_policy.py
+        language: system
+        pass_filenames: false
+        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^.*environment.*\.yml$|^scripts/verify_dependency_policy\.py$)'
+
+  # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
+      # Prevent large files from being committed
       - id: check-added-large-files
         args: ['--maxkb=1000']
-      - id: check-merge-conflict
+      # Check for files that would conflict in case-insensitive filesystems
       - id: check-case-conflict
+      # Check for merge conflicts
+      - id: check-merge-conflict
+      # Check yaml files are valid
+      - id: check-yaml
+        exclude: '^(linux_environment|mac_environment|conda).*\.yml$'
+      # Check toml files are valid
+      - id: check-toml
+      # Detect private keys
+      - id: detect-private-key
+      # Ensure files end with a newline
+      - id: end-of-file-fixer
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+      # Normalize mixed line endings
       - id: mixed-line-ending
 
-  # Python security and code quality
+  # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the linter
+      - id: ruff
+        name: ruff linting
+        args: [--fix]
+      # Run the formatter
+      - id: ruff-format
+        name: ruff formatting
+
+  # Python type checking with mypy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy type checking
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+          - types-six
+          - types-python-dateutil
+          - pydantic>=2.0
+          - sqlalchemy>=2.0
+          - fastapi>=0.100
+        exclude: '^(tests/|scripts/|migrations/)'
+        # Run mypy only on Python files that are tracked by git
+        pass_filenames: true
+        files: \.py$
+
+  # Python SAST scanning
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.0
     hooks:
       - id: bandit
         args: ['-c', 'pyproject.toml']
         additional_dependencies: ["bandit[toml]"]
-
-  # Python formatting
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
-    hooks:
-      - id: black
-        language_version: python3.11
-
-  # Python import sorting
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: ["--profile", "black"]
-
-  # Python linting
-  - repo: https://github.com/PyCQA/flake8
-    rev: 7.1.1
-    hooks:
-      - id: flake8
-        args: ['--max-line-length=100', '--extend-ignore=E203,W503']
 
   # Python dependency vulnerability scanning
   - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
@@ -64,3 +95,19 @@ repos:
     rev: v2.13.1-beta
     hooks:
       - id: hadolint-docker
+
+  # Repo-local checks that avoid adding runtime dependencies.
+  - repo: local
+    hooks:
+      - id: staged-secret-scan
+        name: staged secret scan
+        entry: python scripts/pre_commit_security_check.py
+        language: system
+        pass_filenames: false
+
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash scripts/pre_commit_frontend_lint.sh
+        language: system
+        pass_filenames: false
+        files: ^client/geist/src/.*\.(js|jsx|ts|tsx)$

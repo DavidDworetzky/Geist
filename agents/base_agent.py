@@ -85,6 +85,26 @@ class BaseAgent(ABC):
             "execution_context" : self._agent_context.execution_context
         }
 
+    def save_state_snapshot(self, reason: str = "manual"):
+        '''
+        Persist an append-only snapshot of the agent's execution state
+        (world/task/execution contexts and function log).
+        '''
+        return self._agent_context.snapshot(reason=reason)
+
+    def restore_state_snapshot(self, snapshot_id: Optional[int] = None) -> bool:
+        '''
+        Rehydrate the agent's execution state from its latest snapshot,
+        or from a specific snapshot_id. Returns True if state was restored.
+        '''
+        return self._agent_context.restore_snapshot(snapshot_id=snapshot_id)
+
+    def get_tool_schemas(self):
+        '''
+        Reflected JSON schemas for the adapter actions available to this agent.
+        '''
+        return self._agent_context.get_tool_schemas()
+
 
     @abstractmethod
     def tick_world(self):

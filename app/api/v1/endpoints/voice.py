@@ -209,15 +209,15 @@ async def voice_stream_websocket(
                 "type": "error",
                 "message": str(e)
             })
-        except:
-            pass
+        except Exception as send_error:
+            logger.debug(f"Failed to send error message to WebSocket: {send_error}")
     finally:
         if voice_service:
             voice_service.reset()
         try:
             await websocket.close()
-        except:
-            pass
+        except Exception as close_error:
+            logger.debug(f"Failed to close WebSocket: {close_error}")
 
 
 @router.post("/upload")

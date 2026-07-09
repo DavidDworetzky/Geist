@@ -73,8 +73,7 @@ class LlamaAgent(BaseAgent):
                 self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
-            user_prompt=prompt,
-            streaming=streaming
+            user_prompt=prompt
         )
         self.logger.info(f"Llama completion: {llama_completion}")
         return LlamaCompletion.from_dict(llama_completion)
@@ -181,11 +180,18 @@ class LlamaAgent(BaseAgent):
             self._agent_context.task_context.append(task)
         if self.as_subprocess:
             logging.info("Initializing agent with subprocess.")
-            # Create a subprocess that runs one tick every second
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-
-            # Set the subprocess ID in our agent context
-            self._agent_context.subprocess_id = process.pid
+            try:
+                # Create a subprocess that runs one tick every second
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                # Set the subprocess ID in our agent context
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                logging.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             logging.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
@@ -197,11 +203,15 @@ class LlamaAgent(BaseAgent):
 
         # Check if the subprocess ID is set
         if subprocess_id:
-            # Send a terminate signal to the subprocess
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
-        else:
-            raise Exception("No subprocess ID set in agent context.")
+            try:
+                # Send a terminate signal to the subprocess
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                logging.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                logging.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     @log_function_call
     def _pop_and_add_execution_tasks(self):
@@ -224,6 +234,9 @@ class LlamaAgent(BaseAgent):
             result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
             result = self._transform_completions(result)
             #get first result as function call
+            if not result:
+                logging.error(f"Empty result for task: {task}")
+                continue
             result = result[0]
             retries = 0
 
@@ -231,10 +244,13 @@ class LlamaAgent(BaseAgent):
                 retries += 1
                 result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
                 result = self._transform_completions(result)
+                if not result:
+                    logging.error(f"Empty result on retry {retries} for task: {task}")
+                    continue
                 result = result[0]
 
             if not self._is_valid_function_json(result):
-                logging.error(f'Invaild result for function call is: {result}')
+                logging.error(f'Invalid result for function call is: {result}')
                 raise Exception("Exceeded retries for valid function call JSON.")
             
             output = self._take_json_and_call_function(result)
@@ -256,7 +272,9 @@ class LlamaAgent(BaseAgent):
 
     def is_subprocess_running(self):
         # Retrieve subprocess ID from agent context
-        subprocess_id = self.agent_context.subprocess_id
+        subprocess_id = self._agent_context.subprocess_id
+        if not subprocess_id:
+            return False
         # check if subprocess is running and return value (by using psutil)
         try:
             p = psutil.Process(subprocess_id)

@@ -10,6 +10,14 @@ from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.models.agent_completion import AgentCompletion
 from agents.models.llama_completion import LlamaCompletion
+from agents.tool_calling import (
+    ToolCallError,
+    ToolCompletion,
+    parse_tool_call,
+    run_prompt_tool_call,
+    validate_tool_call,
+)
+from adapters.tool_schema import render_tool_prompt
 import json
 import subprocess
 import os
@@ -161,6 +169,63 @@ class LocalAgent(BaseAgent):
         completion.chat_id = chat_history.chat_session_id
         return completion
 
+    def _complete_raw(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = None, temperature: float = None) -> str:
+        """
+        Single completion returning plain text, without chat-history side effects.
+        Used for tool-call loops so intermediate attempts don't pollute history.
+        """
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        gen_config = self._create_generation_config(max_tokens=max_tokens, temperature=temperature)
+        completion_result = self.runner.complete(
+            system_prompt=system_prompt or SYSTEM_PROMPT,
+            user_prompt=prompt,
+            generation_config=gen_config
+        )
+        completion = LlamaCompletion.from_dict(completion_result)
+        return next((msg.content for msg in completion.messages if msg.role == 'assistant'), "")
+
+    def complete_with_tools(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        max_tool_iterations: int = 3,
+        chat_id: Optional[int] = None,
+    ) -> ToolCompletion:
+        """
+        Tool-augmented completion for local models via schema-grounded prompting.
+
+        Local models keep the reflection-based function visibility: adapter
+        actions are reflected into JSON schemas and rendered into the prompt.
+        Robustness comes from tolerant JSON extraction, schema validation with
+        type coercion, and validation-error feedback on retries.
+        """
+        result = run_prompt_tool_call(
+            complete_fn=lambda task, system: self._complete_raw(
+                task, system_prompt or system, max_tokens=max_tokens, temperature=temperature
+            ),
+            schemas=self._agent_context.get_tool_schemas(),
+            dispatcher=self._agent_context.get_tool_dispatcher(),
+            task_prompt=prompt,
+            max_attempts=max_tool_iterations,
+        )
+        if chat_id is not None:
+            try:
+                self._agent_context._add_to_chat_history(
+                    user_message=prompt, ai_message=result.to_content(), chat_id=chat_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to record tool completion in chat history: {e}")
+        return ToolCompletion(
+            content=result.to_content(),
+            tool_results=[result],
+            iterations=1,
+            used_native_tools=False,
+        )
+
     def stream_complete_text(
         self,
         prompt: str,
@@ -226,40 +291,57 @@ class LocalAgent(BaseAgent):
         """Initialize the agent with optional task."""
         if task_prompt:
             self._agent_context.task_context.append(task_prompt)
-        
+
         if self.as_subprocess:
             self.logger.info("Initializing agent with subprocess.")
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-            self._agent_context.subprocess_id = process.pid
+            try:
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                self.logger.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             self.logger.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
     
     def phase_out(self):
         """Phase out the agent and clean up resources."""
+        self.save_state_snapshot(reason="phase_out")
         self._agent_context._save()
         if self.runner:
             self.runner.cleanup()
         self.terminate_subprocess()
-    
+
     def phase_in(self):
-        """Phase in the agent and restore state."""
+        """Phase in the agent and restore state from the latest snapshot."""
         self.initialize()
+        self.restore_state_snapshot()
     
     def terminate_subprocess(self):
         """Terminate any running subprocess."""
         subprocess_id = self._agent_context.subprocess_id
         if subprocess_id:
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
+            try:
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     def tick(self):
-        """Execute one agent tick."""
+        """Execute one agent tick and snapshot the resulting state."""
         self.logger.info("LocalAgent Tick.")
         if self._agent_context.settings.include_world_processing:
             self.tick_world()
         self.tick_tasks()
         self.tick_execution()
+        self.save_state_snapshot(reason="tick")
     
     def tick_world(self):
         """Advance world state reasoning."""
@@ -280,13 +362,20 @@ class LocalAgent(BaseAgent):
         return split_result
     
     def tick_execution(self):
-        """Advance execution context reasoning."""
+        """Advance execution context reasoning with full tool visibility."""
         context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
-        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string)
+        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt())
         result = self._transform_completions(result)
         split_result = result[0].split("\\n") if result else []
         self._agent_context.execution_context = split_result
         return split_result
+
+    def _tool_visibility_prompt(self) -> str:
+        """Rendered schemas of the available tools, for prompt-based execution."""
+        schemas = self._agent_context.get_tool_schemas()
+        if not schemas:
+            return ""
+        return "\nAVAILABLE_TOOLS (JSON schemas):\n" + render_tool_prompt(schemas)
     
     def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
         """Get aggregated context string."""
@@ -316,35 +405,17 @@ class LocalAgent(BaseAgent):
             raise Exception(f"Completion failed to destructure: {completion}")
     
     def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate function call JSON format."""
+        """Validate that text contains a parseable, schema-valid tool call."""
         try:
-            function_json = function_json.replace('\\n', '')
-            parsed_json = json.loads(function_json)
-            required_keys = ["function", "parameters", "class"]
-            if all(key in parsed_json for key in required_keys):
-                if isinstance(parsed_json["parameters"], dict):
-                    return True
+            call = parse_tool_call(function_json)
+            validate_tool_call(call, self._agent_context.get_tool_schemas())
+            return True
+        except ToolCallError:
             return False
-        except json.JSONDecodeError:
-            return False
-    
+
     def _take_json_and_call_function(self, function_json: str):
-        """Execute function call from JSON specification."""
-        if not self._is_valid_function_json(function_json):
-            raise Exception(f"Invalid function call json: {function_json}")
-        
-        json_data = json.loads(function_json)
-        class_name = json_data["class"]
-        adapter_class = next(
-            (wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name),
-            None
-        )
-        
-        if not adapter_class:
-            raise Exception(f"No adapter class matching {class_name}")
-        
-        adapter_class = adapter_class.instance
-        function_to_call = getattr(adapter_class, json_data["function"])
-        parameters = json_data["parameters"]
-        
-        return function_to_call(**parameters)
+        """Parse, validate, and execute a tool call from model output."""
+        result = self._agent_context.get_tool_dispatcher().dispatch_text(function_json)
+        if not result.success:
+            raise Exception(f"Tool call failed: {result.error}")
+        return result.result
