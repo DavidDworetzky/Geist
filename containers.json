@@ -35,6 +35,7 @@
             "dockerfile": "Dockerfile"
         },
         "environment": [
+            "GEIST_DATABASE_PROVIDER=postgresql",
             "DATABASE_URI=postgresql://geist:geist@db:5432/db",
             "DEBUG=${DEBUG:-}",
             "DB_HOST=db",

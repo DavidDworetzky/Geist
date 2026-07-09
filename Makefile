@@ -1,5 +1,5 @@
 # Variables
-PYTHON=python
+UV=uv
 IS_WSL=$(shell grep -qi microsoft /proc/version 2>/dev/null && echo 1 || echo 0)
 
 ifeq ($(IS_WSL),1)
@@ -12,9 +12,6 @@ DOCKER_COMPOSE=docker compose
 COMPOSE_FILE=docker-compose.yml
 endif
 
-CONDA_ENV=geist-mac
-CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh && conda activate $(CONDA_ENV)
-
 # Default target
 .PHONY: all
 all: help
@@ -23,52 +20,69 @@ all: help
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make run         - Run both backend server and Docker services"
-	@echo "  make server      - Run Python bootstrap server only"
-	@echo "  make debug       - Run Python bootstrap server with debugger (pdb)"
-	@echo "  make docker      - Run Docker services only"
+	@echo "  make run         - Run the backend natively with uv (SQLite by default, no Docker)"
+	@echo "  make server      - Alias for run"
+	@echo "  make debug       - Run the backend natively with debugger (pdb)"
+	@echo "  make sync        - Install/refresh the uv-managed environment from uv.lock"
+	@echo "  make init-db     - Initialize the database (SQLite by default)"
+	@echo "  make run-docker  - Run the full Docker stack (backend + PostgreSQL + frontend)"
+	@echo "  make services    - Run auxiliary Docker services only (PostgreSQL + frontend)"
+	@echo "  make docker      - Alias for run-docker (detached)"
 	@echo "  make stop        - Stop all running services"
 	@echo "  make clean       - Clean up Docker resources"
-	@echo "  make init-db     - Initialize the database"
 	@echo "  make build       - Build Docker images"
 
-# Run both server and Docker services
+# Install/refresh the local environment from the lockfile
+.PHONY: sync
+sync:
+	$(UV) sync
+
+# Run the backend natively. Uses SQLite unless GEIST_DATABASE_PROVIDER says otherwise.
 .PHONY: run
 run:
 ifeq ($(IS_WSL),1)
-	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
 ifeq ($(MLX_BACKEND),1)
-	@echo "MLX_BACKEND=1 uses a native Unix/Conda backend and is not supported on Windows/WSL."
-	@echo "Starting the full Docker stack instead."
-endif
+	@echo "WSL detected; MLX_BACKEND=1 uses the Docker stack via Windows Docker Desktop."
 	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
 else
-ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) bootstrap.py
-else
-	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
+	$(UV) run python initdb.py
+	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
 endif
+else
+	$(UV) run python initdb.py
+	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
 endif
 
 # Alias for run
-.PHONY: up
+.PHONY: up server
 up: run
+server: run
 
-# Run Python server only
-.PHONY: server
-server:
-	$(CONDA_ACTIVATE) && $(PYTHON) bootstrap.py
-
-# Run Python server with debugger (pdb)
+# Run the backend natively with debugger (pdb)
 .PHONY: debug
 debug:
-ifeq ($(MLX_BACKEND),1)
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
-else
-	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up -d && $(CONDA_ACTIVATE) && PYTHONUNBUFFERED=1 $(PYTHON) -m pdb bootstrap.py
-endif
+	$(UV) run python initdb.py
+	PYTHONUNBUFFERED=1 $(UV) run python -m pdb bootstrap.py
 
-# Run Docker services only
+# Initialize database (SQLite by default; set GEIST_DATABASE_PROVIDER=postgresql for Postgres)
+.PHONY: init-db
+init-db:
+	$(UV) run python initdb.py
+
+# Run the full Docker stack (backend + PostgreSQL + frontend)
+.PHONY: run-docker
+run-docker:
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
+endif
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
+
+# Run auxiliary Docker services only (PostgreSQL + frontend), e.g. alongside a native backend
+.PHONY: services
+services:
+	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d
+
+# Run the full Docker stack detached
 .PHONY: docker
 docker:
 ifeq ($(IS_WSL),1)
@@ -92,11 +106,6 @@ endif
 clean:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) down -v --remove-orphans
 	$(DOCKER) system prune -f
-
-# Initialize database
-.PHONY: init-db
-init-db:
-	$(CONDA_ACTIVATE) && $(PYTHON) initdb.py
 
 # Build Docker images
 .PHONY: build
