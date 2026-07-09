@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional, Dict, Type
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.architectures.vllm_runner import VLLMRunner
+from agents.architectures.qwen3_runner import Qwen3Runner
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,10 @@ class OnlineModelNames(Enum):
     META_LLAMA_31_8B_LOCAL = "Meta-Llama-3.1-8B-Instruct"
     META_LLAMA_31_8B_BASE_LOCAL = "Meta-Llama-3.1-8B"
     META_LLAMA_3_8B_LOCAL = "Meta-Llama-3-8B-Instruct"
+    QWEN3_8B_LOCAL = "Qwen/Qwen3-8B"
+    QWEN3_4B_LOCAL = "Qwen/Qwen3-4B"
+    QWEN3_1_7B_LOCAL = "Qwen/Qwen3-1.7B"
+    QWEN3_0_6B_LOCAL = "Qwen/Qwen3-0.6B"
 
 @dataclass
 class OnlineModelConfig():
@@ -254,7 +259,10 @@ def register_all_runners(registry: Optional[RunnerRegistry] = None) -> None:
     
     # Register vLLM runner (placeholder)
     registry.register("vllm", VLLMRunner)
-    
+
+    # Register Qwen 3 runner
+    registry.register("qwen3", Qwen3Runner)
+
     _initialized = True
     logger.info("All runners registered successfully")
 
@@ -630,6 +638,50 @@ STATIC_MODELS: Dict[OnlineModelProviders, List[ModelInfo]] = {
             supports_function_calling=False,
             recommended=False,
             family="llama-3"
+        ),
+        ModelInfo(
+            id="Qwen/Qwen3-8B",
+            name="Qwen 3 8B (Local)",
+            provider=OnlineModelProviders.OFFLINE,
+            context_window=32768,
+            max_output_tokens=8192,
+            supports_vision=False,
+            supports_function_calling=True,
+            recommended=True,
+            family="qwen3"
+        ),
+        ModelInfo(
+            id="Qwen/Qwen3-4B",
+            name="Qwen 3 4B (Local)",
+            provider=OnlineModelProviders.OFFLINE,
+            context_window=32768,
+            max_output_tokens=8192,
+            supports_vision=False,
+            supports_function_calling=True,
+            recommended=True,
+            family="qwen3"
+        ),
+        ModelInfo(
+            id="Qwen/Qwen3-1.7B",
+            name="Qwen 3 1.7B (Local)",
+            provider=OnlineModelProviders.OFFLINE,
+            context_window=32768,
+            max_output_tokens=8192,
+            supports_vision=False,
+            supports_function_calling=False,
+            recommended=False,
+            family="qwen3"
+        ),
+        ModelInfo(
+            id="Qwen/Qwen3-0.6B",
+            name="Qwen 3 0.6B (Local)",
+            provider=OnlineModelProviders.OFFLINE,
+            context_window=32768,
+            max_output_tokens=8192,
+            supports_vision=False,
+            supports_function_calling=False,
+            recommended=False,
+            family="qwen3"
         ),
     ],
 }

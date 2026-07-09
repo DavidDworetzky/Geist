@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from agents import agent_context
 from agents.agent_settings import AgentSettings
 import os
-from app.models.database.database import Session
+from app.models.database.database import SessionLocal
 from app.models.database.agent_preset import AgentPreset  
 from agents.agent_context import AgentContext  
 from app.models.agent import Agent
@@ -224,11 +224,15 @@ def create_app():
     @agent_router.post("/phase_out")
     async def phase_out_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
+        if not agent_to_phase:
+            raise HTTPException(status_code=404, detail=f"Agent with id {agent_id} not found")
         agent_to_phase.phase_out()
 
     @agent_router.post("/phase_in")
     async def phase_in_agent(agent_id: int):
         agent_to_phase = Agent.get_agent_by_id(agent_id)
+        if not agent_to_phase:
+            raise HTTPException(status_code=404, detail=f"Agent with id {agent_id} not found")
         agent_to_phase.phase_in()
 
     # Adapter routes using adapter_router
@@ -306,11 +310,14 @@ def get_default_agent_context():
     '''
     Gets an agent context matching "Default Context" from the database
     '''
-    session = Session
-    try:
+    with SessionLocal() as session:
         # Query for the agent preset with name "Default Context"
         default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
         logging.info(f"Default agent preset: {default_preset}")
+
+        if not default_preset:
+            raise ValueError("Default Context preset not found in the database.")
+
         agent_settings = AgentSettings(
             name=default_preset.name,
             version=default_preset.version,
@@ -322,16 +329,11 @@ def get_default_agent_context():
             frequency_penalty=default_preset.frequency_penalty,
             presence_penalty=default_preset.presence_penalty,
             interactive_only=default_preset.interactive_only,
-            include_world_processing= default_preset.process_world,
+            include_world_processing=default_preset.process_world,
         )
-        if default_preset:
-            # Create an agent context with the found preset
-            context = AgentContext(settings=agent_settings, envs=get_envs())
-            return context
-        else:
-            raise ValueError("Default Context preset not found in the database.")
-    finally:
-        session.close()
+        # Create an agent context with the found preset
+        context = AgentContext(settings=agent_settings, envs=get_envs())
+        return context
 
 
 def get_speech_to_text_client():

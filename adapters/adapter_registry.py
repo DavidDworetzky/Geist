@@ -59,7 +59,10 @@ def init_adapter_class(classname: str, args: dict) -> AdapterWrapper:
                     instance = adapter_class(**valid_args)
                     wrapper = AdapterWrapper(name = classname, instance = instance)
                     return wrapper
-                except:
+                except (TypeError, ValueError) as e:
+                    # Log the error for debugging but return None to indicate failure
+                    import logging
+                    logging.warning(f"Failed to initialize adapter {classname}: {e}")
                     return None
 
     raise ValueError(f"Adapter class {classname} not found in adapters directory.")
