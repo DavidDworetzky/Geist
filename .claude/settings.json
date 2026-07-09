@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_env_access.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_env_access.py\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_dependency_installs.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review the transcript before allowing the agent to stop. If files were changed under agents/, agents/architectures/, completion logic, runner registries, BaseAgent, schemas, routes, database models that affect API behavior, or shared service interfaces, verify that relevant tests were run. Require Docker backend tests by default. Require native MLX validation for MLX_BACKEND, local inference, model loading, tokenizer, generation, or runner changes. If required tests were not run, deny stopping and ask the agent to run them or state the exact blocker."
+          }
+        ]
+      }
+    ]
+  }
+}

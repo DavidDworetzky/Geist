@@ -1,8 +1,10 @@
 import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, String
 from sqlalchemy.orm import relationship, Session
 from app.models.database.database import Base, Session
 from sqlalchemy.dialects.postgresql import insert
+
+StringList = JSON().with_variant(ARRAY(String), "postgresql")
 
 class AgentPreset(Base):
     """
@@ -105,8 +107,7 @@ class Restriction(Base):
     spending_limit = Column(Integer)
     restriction_type = Column(String)
     #allowed plugins and methods that an agent can use
-    allowed_plugins = Column(ARRAY(String))
-    allowed_methods = Column(ARRAY(String))
+    allowed_plugins = Column(StringList)
+    allowed_methods = Column(StringList)
     create_date = Column(DateTime)
     update_date = Column(DateTime)
-

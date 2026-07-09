@@ -1,11 +1,10 @@
 import os
+import re
 import time
 import json
 import glob
-import re
 import logging
 import numpy as np
-from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass, field
 from agents.models.llama_completion import strings_to_message_dict
@@ -13,7 +12,6 @@ from agents.models.llama_completion import strings_to_message_dict
 # MLX imports
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_unflatten
 
 # Tokenizer imports
 from huggingface_hub import hf_hub_download
@@ -606,11 +604,10 @@ class LlamaMLX:
 
         # Step 4: Load the weights
         logger.info(f"Loading model weights from {self.weights_dir} ...")
-        safetensors_files = glob.glob(os.path.join(self.weights_dir, "model-*.safetensors"))
-        
+        safetensors_files = sorted(glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")))
         if not safetensors_files:
             raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
-        
+
         mapped_weights: Dict[str, mx.array] = {}
         unmapped_keys = 0
         for file_path in safetensors_files:
@@ -705,13 +702,13 @@ class LlamaMLX:
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         """
-        Provide a standard "instruct" format completion. 
+        Provide a standard "instruct" format completion.
         Combines system_prompt and user_prompt into a single prompt, then calls `generate_text`.
-        
+
         Parameters:
             system_prompt (str): The system instructions for the model
             user_prompt (str): The user's query or instruction
-            
+
         Returns:
             str: The generated completion text
         """
@@ -742,7 +739,6 @@ class LlamaMLX:
             # Decode the output
             output_list = output_tokens.tolist()
             output_text = self.tokenizer.decode(output_list)
-            
             # Extract just the assistant's response (strip headers + <|eot_id|> if present).
             assistant_tag = "<|start_header_id|>assistant<|end_header_id|>"
             response_start = output_text.find(assistant_tag)
