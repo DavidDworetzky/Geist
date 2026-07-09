@@ -59,6 +59,25 @@ class AgentFactory:
         else:
             raise ValueError(f"Unknown agent type: {agent_type}. Must be 'local' or 'online'")
     
+    # Model ID prefixes that should use the qwen3 runner
+    _QWEN3_PREFIXES = ("qwen/qwen3", "qwen3")
+
+    @staticmethod
+    def _infer_runner_type(model: str) -> str:
+        """
+        Infer the appropriate runner type from a model identifier.
+
+        Args:
+            model: Model identifier string
+
+        Returns:
+            Runner type string ("qwen3" or "mlx_llama")
+        """
+        model_lower = model.lower()
+        if any(model_lower.startswith(prefix) for prefix in AgentFactory._QWEN3_PREFIXES):
+            return "qwen3"
+        return "mlx_llama"
+
     @staticmethod
     def _create_local_agent(
         agent_context: AgentContext,
@@ -67,18 +86,32 @@ class AgentFactory:
         as_subprocess: bool = False,
         **kwargs
     ):
-        """Create a LocalAgent instance."""
+        """
+        Create a LocalAgent instance.
+
+        If runner_type is not specified it is inferred from the model ID.
+        For Qwen 3 models a "weights_dir" key in device_config (passed via
+        kwargs) tells the runner where to find local safetensors / pretrained
+        weights on disk.
+        """
         try:
             from agents.local_agent import LocalAgent
-            
-            # Default to MLX Llama runner if not specified
-            if not runner_type:
-                runner_type = "mlx_llama"
-            
+
             # Default model
             if not model:
                 model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-            
+
+            # Auto-detect runner type from model ID when not explicitly set
+            if not runner_type:
+                runner_type = AgentFactory._infer_runner_type(model)
+
+            # Propagate weights_dir into device_config so the runner can
+            # load safetensors / pretrained weights from a custom path.
+            if "weights_dir" in kwargs:
+                device_config = kwargs.pop("device_config", None) or {}
+                device_config["weights_dir"] = kwargs.pop("weights_dir")
+                kwargs["device_config"] = device_config
+
             logger.info(f"Creating LocalAgent with runner: {runner_type}, model: {model}")
             return LocalAgent(
                 agent_context=agent_context,

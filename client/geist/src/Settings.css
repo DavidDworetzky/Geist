@@ -1,0 +1,169 @@
+/* Settings Page Styles */
+
+.settings-tabs {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 25px;
+  border-bottom: 2px solid #ddd;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+.settings-tabs::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.settings-tabs::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.settings-tabs::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.settings-tab {
+  padding: 12px 20px;
+  background-color: transparent;
+  color: #333;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: normal;
+  transition: all 0.2s;
+  border-radius: 5px 5px 0 0;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.settings-tab:hover {
+  background-color: #f8f9fa;
+}
+
+.settings-tab.active {
+  background-color: #007bff;
+  color: white;
+  border-bottom: 2px solid #007bff;
+  font-weight: bold;
+}
+
+/* Custom slider styling for better appearance */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #ddd;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #0056b3;
+  transform: scale(1.1);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #007bff;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease-in-out;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  background: #0056b3;
+  transform: scale(1.1);
+}
+
+/* Responsive design for mobile */
+@media (max-width: 768px) {
+  .settings-tab {
+    padding: 10px 15px;
+    font-size: 13px;
+  }
+
+  .settings-tabs {
+    gap: 3px;
+  }
+}
+
+/* Animation for status messages */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-status-message {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Smooth transitions for tab content */
+.settings-section {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Focus styles for accessibility */
+button:focus,
+input:focus,
+select:focus {
+  outline: 2px solid #007bff;
+  outline-offset: 2px;
+}
+
+/* Loading state */
+.settings-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  color: #6c757d;
+  font-size: 18px;
+}
+
+/* Error state */
+.settings-error {
+  padding: 20px;
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  border-radius: 5px;
+  margin-bottom: 20px;
+}
+

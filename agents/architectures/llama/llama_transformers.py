@@ -35,7 +35,7 @@ class LlamaTransformer:
         AutoModelForCausalLM.from_pretrained(self.model_id, cache_dir=self.weights_dir)
         AutoTokenizer.from_pretrained(self.model_id, cache_dir=self.weights_dir)
 
-    def complete(self, system_prompt: str, user_prompt: str):
+    def complete(self, system_prompt: str, user_prompt: str, streaming:bool = False):
         # Check if model exists, if not, download it
         if not os.path.exists(os.path.join(self.weights_dir, "config.json")):
             self.download_model()

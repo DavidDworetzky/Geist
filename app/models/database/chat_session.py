@@ -31,6 +31,7 @@ class ChatHistory(list):
     chat_history: List[Any]
     chat_id: int
     create_date: datetime
+    total_messages: int = 0
 
     def __post_init__(self) -> None:
         """Initialize the list with chat_history contents"""
@@ -39,6 +40,7 @@ class ChatHistory(list):
         if isinstance(self.chat_history, str):
             self.chat_history = json.loads(self.chat_history)
         self.extend(self.chat_history)
+        self.total_messages = len(self)
 
     def append(self, item: Any) -> None:
         """
@@ -70,7 +72,12 @@ def update_chat_history(new_user_message: str, new_ai_message: str, session_id: 
             chat_session = session.query(ChatSession).filter_by(chat_session_id=session_id).first()
 
         if not session_id or not chat_session:
-            chat_session = ChatSession(chat_history="[]", create_date=datetime.now(), update_date=datetime.now())
+            chat_session = ChatSession(
+                chat_session_id=session_id,  # Use the provided session_id
+                chat_history="[]",
+                create_date=datetime.now(),
+                update_date=datetime.now()
+            )
             session.add(chat_session)
         
         # Load existing history or create new
@@ -113,6 +120,50 @@ def get_chat_history(chat_session_id: int) -> ChatHistory:
             create_date=datetime.now()  # Add current timestamp for new empty histories
         )
 
+def get_paginated_chat_history(chat_session_id: int, page: int = 1, page_size: int = 20) -> ChatHistory:
+    """
+    Retrieves paginated chat history for a specific session ID.
+    Page 1 is the most recent messages.
+    
+    Args:
+        chat_session_id (int): The ID of the chat session to retrieve
+        page (int): Page number (1-indexed, 1 is latest)
+        page_size (int): Number of messages per page
+        
+    Returns:
+        ChatHistory: DTO containing partial chat history and session ID
+    """
+    with SessionLocal() as session:
+        chat_session = session.query(ChatSession).filter(ChatSession.chat_session_id == chat_session_id).first()
+        if chat_session:
+            full_history_str = chat_session.chat_history
+            full_history = json.loads(full_history_str) if full_history_str else []
+            total_count = len(full_history)
+            
+            # Calculate indices for reverse pagination (latest first)
+            end_idx = total_count - ((page - 1) * page_size)
+            start_idx = max(0, end_idx - page_size)
+            
+            if end_idx <= 0:
+                sliced_history = []
+            else:
+                sliced_history = full_history[start_idx:end_idx]
+                
+            return ChatHistory(
+                chat_history=sliced_history,
+                chat_id=chat_session_id,
+                create_date=chat_session.create_date,
+                total_messages=total_count
+            )
+            
+        # When no chat session exists
+        return ChatHistory(
+            chat_history=[],
+            chat_id=chat_session_id,
+            create_date=datetime.now(),
+            total_messages=0
+        )
+
 def get_all_chat_history() -> List[ChatHistory]:
     """
     Retrieves all chat histories from the database
@@ -122,6 +173,35 @@ def get_all_chat_history() -> List[ChatHistory]:
     """
     with SessionLocal() as session:
         chat_sessions = session.query(ChatSession).all()
+        return [
+            ChatHistory(
+                chat_history=chat_session.chat_history,
+                chat_id=chat_session.chat_session_id,
+                create_date=chat_session.create_date
+            ) 
+            for chat_session in chat_sessions
+        ]
+
+def get_paginated_chat_sessions(page: int = 1, page_size: int = 20) -> List[ChatHistory]:
+    """
+    Retrieves paginated chat sessions from the database
+    
+    Args:
+        page (int): Page number (1-indexed)
+        page_size (int): Number of sessions per page
+        
+    Returns:
+        List[ChatHistory]: List of ChatHistory DTOs containing chat histories and their session IDs
+    """
+    offset = (page - 1) * page_size
+    with SessionLocal() as session:
+        # Order by create_date desc to show newest sessions first
+        chat_sessions = session.query(ChatSession)\
+            .order_by(ChatSession.create_date.desc())\
+            .offset(offset)\
+            .limit(page_size)\
+            .all()
+            
         return [
             ChatHistory(
                 chat_history=chat_session.chat_history,

@@ -18,9 +18,22 @@ fi
 
 cd /opt/geist
 
+# Determine which environment file to use based on architecture
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ]; then
+    ENV_FILE="linux_environment.yml"
+elif [ "$ARCH" = "x86_64" ]; then
+    ENV_FILE="linux_environment_x86_x64.yml"
+else
+    echo "Error: Unsupported architecture $ARCH"
+    exit 1
+fi
+
+echo "Using environment file: $ENV_FILE for architecture: $ARCH"
+
 # Check if environment file exists
-if [ ! -f "linux_environment.yml" ]; then
-    echo "Error: linux_environment.yml not found in /opt/geist"
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Error: $ENV_FILE not found in /opt/geist"
     exit 1
 fi
 
@@ -37,8 +50,8 @@ conda clean --all --yes
 conda env remove --name geist-linux-docker --yes 2>/dev/null || true
 
 # Create environment
-echo "Creating conda environment from linux_environment.yml..."
-if conda env create -f linux_environment.yml; then
+echo "Creating conda environment from $ENV_FILE..."
+if conda env create -f "$ENV_FILE"; then
     echo "Successfully created geist-linux-docker environment"
 else
     echo "Error: Failed to create conda environment"

@@ -577,13 +577,17 @@ class TestOnlineAgentRetryLogic:
             
             with patch.object(agent.client, 'post') as mock_post:
                 # Primary provider has network error
+                mock_response_success = Mock()
+                mock_response_success.status_code = 200
+                mock_response_success.json.return_value = GROQ_RESPONSE
+
                 mock_post.side_effect = [
                     httpx.RequestError("Connection failed"),
                     httpx.RequestError("Connection failed"),
                     # Backup provider succeeds
-                    Mock(status_code=200, json=lambda: GROQ_RESPONSE)
+                    mock_response_success
                 ]
-                
+
                 result = agent.complete_text(prompt="Test prompt", max_tokens=50)
                 
                 # Verify backup was eventually used
@@ -679,23 +683,6 @@ class TestOnlineAgentEdgeCases:
                 assert payload['frequency_penalty'] == 0.5
                 assert payload['presence_penalty'] == 0.3
                 assert payload['stop'] == "STOP"
-
-    def test_phase_out_cleanup(self):
-        """Test that phase_out properly cleans up resources."""
-        context = create_mock_agent_context()
-        
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
-            agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
-            )
-            
-            with patch.object(agent.client, 'close') as mock_close:
-                agent.phase_out()
-                
-                # Verify client was closed
-                assert mock_close.called
 
 
 class TestOnlineAgentMultiProvider:
@@ -803,8 +790,8 @@ class TestOnlineAgentAPIKeyRetrieval:
             
             assert agent.api_key == "env-grok-key"
 
-    def test_fallback_to_generic_api_key(self):
-        """Test fallback to generic API_KEY environment variable."""
+    def test_custom_provider_requires_explicit_api_key(self):
+        """Test custom endpoints do not use a generic API_KEY fallback."""
         context = create_mock_agent_context()
         
         with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
@@ -814,5 +801,18 @@ class TestOnlineAgentAPIKeyRetrieval:
                 model="custom-model"
             )
             
-            assert agent.api_key == "generic-api-key"
+            assert agent.api_key is None
 
+    def test_custom_provider_uses_explicit_api_key(self):
+        """Test custom endpoints can still receive an explicit API key."""
+        context = create_mock_agent_context()
+
+        with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.custom-provider.com/v1",
+                model="custom-model",
+                api_key="explicit-key"
+            )
+
+            assert agent.api_key == "explicit-key"

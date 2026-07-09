@@ -1,6 +1,7 @@
 import requests
 from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
+from typing import Optional, Iterator
 import subprocess
 import os
 import signal
@@ -9,6 +10,7 @@ import json
 import logging
 from utils.logging import log_function_call
 from agents.models.gpt4_completion import Gpt4Completion
+from app.models.database.chat_session import get_chat_history
 
 
 
@@ -44,11 +46,13 @@ class GPT4Agent(BaseAgent):
         super().__init__(agent_context, as_subprocess)
 
     def phase_out(self):
+        self.save_state_snapshot(reason="phase_out")
         self._agent_context._save()
         self.terminate_subprocess()
 
     def phase_in(self):
         self.initialize()
+        self.restore_state_snapshot()
 
     def _is_valid_function_json(self, function_json:str):
         try:
@@ -128,7 +132,10 @@ class GPT4Agent(BaseAgent):
             raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
         return response_content
 
-    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None) -> Gpt4Completion:
+    def stream_complete_text(self, prompt: str, max_tokens: int = 16, n: int = 1, stop: Optional[str] = None, temperature: float = 1, top_p: float = 1, frequency_penalty: float = 0, presence_penalty: float = 0, echo: bool = False, best_of: Optional[int] = None, prompt_tokens: Optional[int] = None, response_format: str = "text", system_prompt: Optional[str] = None, chat_id: Optional[int] = None) -> Iterator[str]:
+        return self.complete_text(prompt, max_tokens, n, stop, temperature, top_p, frequency_penalty, presence_penalty, echo, best_of, prompt_tokens, response_format, system_prompt, chat_id, streaming=True)
+
+    def complete_text(self, prompt:str, max_tokens:int = None, n:int = None, temperature = None, top_p: int = None, frequency_penalty = None, presence_penalty = None, stop:str = None, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None, streaming:bool = False) -> Gpt4Completion:
         #set defaults for agent settings based off of settings values. If undefined,\
         max_tokens = self._agent_context.settings.max_tokens if self._agent_context.settings.max_tokens and not max_tokens else 16
         n = self._agent_context.settings.n if self._agent_context.settings.n and not n else 1
@@ -137,8 +144,27 @@ class GPT4Agent(BaseAgent):
         frequency_penalty = self._agent_context.settings.frequency_penalty if self._agent_context.settings.frequency_penalty and not frequency_penalty else 0
         presence_penalty = self._agent_context.settings.presence_penalty if self._agent_context.settings.presence_penalty and not presence_penalty else 0
         
+        # Build messages with server-side hydration of prior chat turns
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        messages.append({"role": "user", "content": user_msg})
+                    if ai_msg is not None:
+                        messages.append({"role": "assistant", "content": ai_msg})
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
+        # Append current prompt
+        messages.append({"role": "user", "content": prompt})
+
         payload = {
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "model": "gpt-4",
             "max_tokens": max_tokens,
             "n": n,
@@ -146,6 +172,7 @@ class GPT4Agent(BaseAgent):
             "top_p": top_p,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
+            "stream": streaming
         }
 
         if stop is not None:
@@ -166,11 +193,18 @@ class GPT4Agent(BaseAgent):
             self._agent_context.task_context.append(task)
         if self.as_subprocess:
             logging.info("Initializing agent with subprocess.")
-            # Create a subprocess that runs one tick every second
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-
-            # Set the subprocess ID in our agent context
-            self._agent_context.subprocess_id = process.pid
+            try:
+                # Create a subprocess that runs one tick every second
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                # Set the subprocess ID in our agent context
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                logging.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             logging.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
@@ -182,11 +216,15 @@ class GPT4Agent(BaseAgent):
 
         # Check if the subprocess ID is set
         if subprocess_id:
-            # Send a terminate signal to the subprocess
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
-        else:
-            raise Exception("No subprocess ID set in agent context.")
+            try:
+                # Send a terminate signal to the subprocess
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                logging.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                logging.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     @log_function_call
     def _pop_and_add_execution_tasks(self):
@@ -209,6 +247,9 @@ class GPT4Agent(BaseAgent):
             result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
             result = self._transform_completions(result)
             #get first result as function call
+            if not result:
+                logging.error(f"Empty result for task: {task}")
+                continue
             result = result[0]
             retries = 0
 
@@ -216,10 +257,13 @@ class GPT4Agent(BaseAgent):
                 retries += 1
                 result = self.complete_text(prompt=f"task: {task}" + EXECUTION_TICK_PROMPT + context_string)
                 result = self._transform_completions(result)
+                if not result:
+                    logging.error(f"Empty result on retry {retries} for task: {task}")
+                    continue
                 result = result[0]
 
             if not self._is_valid_function_json(result):
-                logging.error(f'Invaild result for function call is: {result}')
+                logging.error(f'Invalid result for function call is: {result}')
                 raise Exception("Exceeded retries for valid function call JSON.")
             
             output = self._take_json_and_call_function(result)
@@ -239,10 +283,13 @@ class GPT4Agent(BaseAgent):
             self.tick_world()
         self._pop_and_add_execution_tasks()
         self._clear_execution_tasks()
+        self.save_state_snapshot(reason="tick")
 
     def is_subprocess_running(self):
         # Retrieve subprocess ID from agent context
-        subprocess_id = self.agent_context.subprocess_id
+        subprocess_id = self._agent_context.subprocess_id
+        if not subprocess_id:
+            return False
         # check if subprocess is running and return value (by using psutil)
         try:
             p = psutil.Process(subprocess_id)

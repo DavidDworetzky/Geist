@@ -1,6 +1,13 @@
 import hashlib
+import logging
 import mimetypes
 from typing import Optional, List, Dict, Any
+
+try:
+    import magic
+except ImportError:
+    magic = None
+
 from app.models.database.file_upload import FileUploadModel, create_file_upload, get_file_by_hash
 
 # Configuration constants
@@ -39,9 +46,13 @@ class FileStorageService:
         
         # Detect MIME type
         try:
-            mime_type = magic.from_buffer(file_data, mime=True)
-        except:
+            if magic is not None:
+                mime_type = magic.from_buffer(file_data, mime=True)
+            else:
+                raise AttributeError("magic module not available")
+        except (AttributeError, Exception) as e:
             # Fallback to filename-based detection
+            logging.debug(f"MIME type detection via magic failed, using fallback: {e}")
             mime_type, _ = mimetypes.guess_type(filename)
             if not mime_type:
                 mime_type = 'application/octet-stream'

@@ -13,7 +13,7 @@ class UserSettingsBase(BaseModel):
     default_online_provider: str = Field(default="openai", description="Default online provider")
     default_file_archives: List[int] = Field(default=[], description="Default file archives for RAG")
     enable_rag_by_default: bool = Field(default=True, description="Enable RAG by default")
-    default_max_tokens: int = Field(default=16, description="Default max tokens")
+    default_max_tokens: int = Field(default=4096, description="Default max tokens")
     default_temperature: float = Field(default=1.0, description="Default temperature")
     default_top_p: float = Field(default=1.0, description="Default top_p")
     default_frequency_penalty: float = Field(default=0.0, description="Default frequency penalty")

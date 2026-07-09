@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 import json
+from copy import deepcopy
 
 @dataclass
 class Message:
@@ -10,7 +11,8 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        return cls(**data)
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(**valid_fields)
 
 @dataclass
 class Choice:
@@ -21,8 +23,19 @@ class Choice:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['message'] = Message.from_dict(data['message'])
-        return cls(**data)
+        # If data is already a Choice object, return it
+        if isinstance(data, cls):
+            return data
+        # If message is already a Message object, use it directly
+        if isinstance(data['message'], Message):
+            message = data['message']
+        else:
+            message = Message.from_dict(data['message'])
+
+        # Filter to only valid fields and set message
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        valid_fields['message'] = message
+        return cls(**valid_fields)
 
 @dataclass
 class TokenDetails:
@@ -45,9 +58,21 @@ class Usage:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['prompt_tokens_details'] = TokenDetails.from_dict(data['prompt_tokens_details'])
-        data['completion_tokens_details'] = TokenDetails.from_dict(data['completion_tokens_details'])
-        return cls(**data)
+        # If data is already a Usage object, return it
+        if isinstance(data, cls):
+            return data
+
+        # Filter to only valid fields
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+
+        # Convert nested objects if they're not already the correct type
+        if 'prompt_tokens_details' in valid_fields and not isinstance(valid_fields['prompt_tokens_details'], TokenDetails):
+            valid_fields['prompt_tokens_details'] = TokenDetails.from_dict(valid_fields['prompt_tokens_details'])
+
+        if 'completion_tokens_details' in valid_fields and not isinstance(valid_fields['completion_tokens_details'], TokenDetails):
+            valid_fields['completion_tokens_details'] = TokenDetails.from_dict(valid_fields['completion_tokens_details'])
+
+        return cls(**valid_fields)
 
 @dataclass
 class GenericCompletion:
@@ -62,6 +87,9 @@ class GenericCompletion:
 
     @classmethod
     def from_dict(cls, data: Dict):
-        data['choices'] = [Choice.from_dict(choice) for choice in data['choices']]
-        data['usage'] = Usage.from_dict(data['usage'])
-        return cls(**data)
+        # Filter to only valid fields
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+
+        valid_fields['choices'] = [Choice.from_dict(choice) for choice in data['choices']]
+        valid_fields['usage'] = Usage.from_dict(data['usage'])
+        return cls(**valid_fields)

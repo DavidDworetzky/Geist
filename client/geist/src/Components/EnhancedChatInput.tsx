@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
+import VoiceButton from './VoiceButton';
+import useVoiceChat from '../Hooks/useVoiceChat';
 
 interface EnhancedChatInputProps {
   value: string;
@@ -9,6 +11,8 @@ interface EnhancedChatInputProps {
   placeholder?: string;
   rows?: number;
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
+  sessionId?: number;
+  enableVoice?: boolean;
 }
 
 interface FileSuggestion extends FileItem {
@@ -22,13 +26,39 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   disabled = false,
   placeholder = "Type your message... Use @ to reference files",
   rows = 3,
-  handleKeyDown: externalHandleKeyDown
+  handleKeyDown: externalHandleKeyDown,
+  sessionId = 1,
+  enableVoice = true
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Voice chat integration
+  const {
+    isRecording,
+    isProcessing,
+    partialTranscript,
+    assistantText,
+    toggleRecording
+  } = useVoiceChat({
+    sessionId,
+    onTranscriptFinal: (text) => {
+      // When we get final transcript, add it to the input
+      onChange(text);
+    },
+    onAssistantText: (text) => {
+      // Assistant text is handled separately and added to chat history
+      // This could trigger a callback to parent component
+      console.log('Assistant text chunk:', text);
+    },
+    onError: (error) => {
+      console.error('Voice error:', error);
+      alert('Voice error: ' + error);
+    }
+  });
 
   // Handle @ symbol detection and file suggestions
   const handleInputChange = (newValue: string) => {
@@ -138,6 +168,24 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
+      {/* Partial transcript during recording */}
+      {partialTranscript && (
+        <div style={{
+          marginBottom: '8px',
+          padding: '8px 12px',
+          backgroundColor: '#e3f2fd',
+          border: '1px solid #90caf9',
+          borderRadius: '4px',
+          fontSize: '12px',
+          fontStyle: 'italic'
+        }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+            Listening...
+          </div>
+          <div>{partialTranscript}</div>
+        </div>
+      )}
+
       {/* File references info */}
       {hasFileReferences && (
         <div style={{
@@ -192,6 +240,15 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             }}
           />
           
+          {/* Voice button */}
+          {enableVoice && (
+            <VoiceButton
+              isRecording={isRecording}
+              isProcessing={isProcessing}
+              onClick={toggleRecording}
+              disabled={disabled}
+            />
+          )}
 
           <button
             type="button"

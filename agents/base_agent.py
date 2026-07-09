@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from agents.agent_context import AgentContext
 import logging
+from typing import Iterator, Optional
 
 class BaseAgent(ABC):
 
@@ -10,6 +11,38 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def complete_text(self, prompt, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
+        pass
+    
+    @abstractmethod
+    def stream_complete_text(self, prompt: str, max_tokens: int = 16, n: int = 1, stop: Optional[str] = None, temperature: float = 1.0, top_p: float = 1, frequency_penalty: float = 0, presence_penalty: float = 0, echo: bool = False, best_of: Optional[int] = None, prompt_tokens: Optional[int] = None, response_format: str = "text", system_prompt: Optional[str] = None, chat_id: Optional[int] = None) -> Iterator[str]:
+        """
+        Stream text completion token by token or in chunks.
+        
+        This is an optional method that agents can override to provide streaming support.
+        By default, it raises NotImplementedError.
+        
+        Args:
+            prompt: The input prompt
+            max_tokens: Maximum tokens to generate
+            n: Number of completions (typically 1 for streaming)
+            stop: Stop sequences
+            temperature: Sampling temperature
+            top_p: Nucleus sampling parameter
+            frequency_penalty: Frequency penalty
+            presence_penalty: Presence penalty
+            echo: Whether to echo the prompt
+            best_of: Number of completions to generate server-side
+            prompt_tokens: Number of prompt tokens
+            response_format: Response format
+            system_prompt: System prompt
+            chat_id: Chat session ID
+            
+        Yields:
+            str: Text chunks/tokens as they are generated
+            
+        Raises:
+            NotImplementedError: If streaming is not supported by this agent
+        """
         pass
 
     @abstractmethod
@@ -51,6 +84,26 @@ class BaseAgent(ABC):
             "task_context" : self._agent_context.task_context,
             "execution_context" : self._agent_context.execution_context
         }
+
+    def save_state_snapshot(self, reason: str = "manual"):
+        '''
+        Persist an append-only snapshot of the agent's execution state
+        (world/task/execution contexts and function log).
+        '''
+        return self._agent_context.snapshot(reason=reason)
+
+    def restore_state_snapshot(self, snapshot_id: Optional[int] = None) -> bool:
+        '''
+        Rehydrate the agent's execution state from its latest snapshot,
+        or from a specific snapshot_id. Returns True if state was restored.
+        '''
+        return self._agent_context.restore_snapshot(snapshot_id=snapshot_id)
+
+    def get_tool_schemas(self):
+        '''
+        Reflected JSON schemas for the adapter actions available to this agent.
+        '''
+        return self._agent_context.get_tool_schemas()
 
 
     @abstractmethod

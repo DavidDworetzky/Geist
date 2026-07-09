@@ -45,15 +45,35 @@ flowchart LR
 ```
 
 # Versioning and Setup
-## Install Postgresql
-1. Version 16.2 on Mac or Windows
 
-## Install Miniconda
-1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml
+## Quickstart (uv, no Docker)
+
+The default local setup uses [uv](https://docs.astral.sh/uv/) with the committed `uv.lock` and a local SQLite database — no Docker, conda, or PostgreSQL required:
+
+```bash
+# install uv (one time): https://docs.astral.sh/uv/getting-started/installation/
+make sync    # create the environment from uv.lock (uv manages Python 3.11 for you)
+make run     # initialize the SQLite database (data/geist.sqlite3) and start the backend
+```
+
+Optional extras:
+
+```bash
+uv sync --extra postgres   # psycopg2 driver, for GEIST_DATABASE_PROVIDER=postgresql
+uv sync --extra voice      # sounddevice/sphn for the voice client tooling
+```
+
+Note for Linux CPU runs: the `mlx` CPU backend JIT-compiles kernels with the system compiler and can fail on some gcc versions. If local MLX inference aborts, set `MLX_DISABLE_COMPILE=1`. (MLX inference is primarily intended for Apple silicon.)
+
+## Install PostgreSQL (optional)
+SQLite is the default database provider. To use PostgreSQL instead, install version 16.2 (or use the Docker compose stack, which provides it) and set `GEIST_DATABASE_PROVIDER=postgresql`.
+
+## Install Miniconda (legacy/Docker path)
+1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml. The Docker image still uses the conda environment files; native development should prefer the uv setup above.
 
 ## Setting up your environment
 1. Make sure that your .env file is initialized - the following values are included but you may not need to set all of these depending on agent utilization and DEV/PROD settings:
-    - OPENAI_TOKEN = TOKEN
+    - OPENAI_API_KEY = TOKEN
     - POSTGRES_PWD = PASSWORD
     - POSTGRES_DB = geist
     - TWILIO_SID = ACCOUNT_SIDE
@@ -64,6 +84,25 @@ flowchart LR
     - HUGGING_FACE_HUB_TOKEN = TOKEN_VALUE
     - LOCAL_WEIGHTS_DIR = WHERE_YOUR_WEIGHTS_ARE (non docker mount)
 
+### Database provider configuration
+
+Select the SQLAlchemy provider with `GEIST_DATABASE_PROVIDER`. SQLite is the default and stores its database at `data/geist.sqlite3` unless overridden:
+
+```bash
+GEIST_DATABASE_PROVIDER=sqlite          # default; may be omitted
+SQLITE_DATABASE_PATH=/absolute/path/to/geist.sqlite3
+```
+
+To use PostgreSQL instead (the Docker compose stack sets this automatically), select it explicitly; it uses the existing `POSTGRES_*`, `DB_HOST`, and `DB_PORT` settings:
+
+```bash
+GEIST_DATABASE_PROVIDER=postgresql
+```
+
+`SQLITE_DATABASE_URL` can be used instead of `SQLITE_DATABASE_PATH`. `SQLALCHEMY_DATABASE_URL` overrides provider-specific URL construction when its URL scheme matches the selected provider.
+
+Tests and alternate application entry points can inject `DatabaseConfig(provider=..., database_url=...)` directly into `configure_database()` without changing environment variables.
+
 2. Copy any model weights into app/models/weights/MODEL_NAME.
     - Currently supported Models: llama_3_1
     - This can be run from python scripts/download_models.py 
@@ -73,18 +112,74 @@ flowchart LR
 client/geist/.env settings:
     - REACT_APP_API_BASE_URL = http://localhost:3000
 
-## Starting the solution
-1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` 
-2. Run `python bootstrap.py`
+## Dependency supply-chain policy
 
+Use lockfile-based installs and exact pins. Avoid ad hoc install commands that resolve new dependency versions without review.
+
+### Frontend dependencies
+
+Install the committed frontend lockfile without running package lifecycle scripts:
+
+```bash
+cd client/geist
+npm ci --ignore-scripts --audit=false --fund=false
+```
+
+When adding or updating a frontend package, pin the exact version and update only the manifest and lockfile first:
+
+```bash
+cd client/geist
+npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION
+npm audit --package-lock-only
+```
+
+Review both `package.json` and `package-lock.json` before committing. Do not use bare `npm install` or `npm i` for project setup.
+
+### Backend dependencies
+
+Native backend dependencies are declared with exact `==` pins in `pyproject.toml` and frozen in `uv.lock`. To add or update a package:
+
+```bash
+uv add PACKAGE==VERSION   # updates pyproject.toml and uv.lock together
+```
+
+Review the `pyproject.toml` and `uv.lock` diff before committing.
+
+The Docker image still installs from the conda environment files. When changing dependencies used inside the container, keep the conda files in sync:
+
+```bash
+docker exec backend /bin/bash
+pip install --only-binary=:all: PACKAGE==VERSION
+conda env export > linux_environment.yml
+```
+
+After changing backend dependencies, audit the pinned pip section and review the environment file diff before committing.
+
+### Hooks
+
+Install hooks after creating the environment:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+The dependency policy hook rejects npm version ranges, unsafe frontend Docker installs, missing npm lockfile integrity entries, and unpinned Python environment dependencies.
+
+## Starting the solution
+1. Run `make run` (SQLite by default; initializes the database and starts the backend natively via uv)
+
+To run against PostgreSQL natively instead:
+1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` (or `make services` to get the Docker Postgres + frontend)
+2. Run `GEIST_DATABASE_PROVIDER=postgresql make run`
 
 ## Starting the solution with docker compose (no mlx support)
-1. Run `docker compose up`
+1. Run `make run-docker` (or `docker compose up`). The compose stack uses PostgreSQL.
 
-## Starting the solution with docker compose but backend with mlx support
-1. Run `make run MLX_BACKEND=1`
+## Starting the frontend + Postgres in Docker with a native backend (mlx support on Mac)
+1. Run `make services` then `make run`
 2. If you encounter port binding issues, make sure to disable airplay on mac. 
-3. You might need to switch local DB configs to DB_HOST = localhost, DB_PORT = 5433 based off of external mappings in docker compose.
+3. When using the Docker Postgres, set GEIST_DATABASE_PROVIDER=postgresql, DB_HOST = localhost, DB_PORT = 5433 based off of external mappings in docker compose.
 
 
 ## Supported Environments
@@ -94,10 +189,3 @@ client/geist/.env settings:
 ## Scripts 
 1. scripts/download_models.py - download models from huggingface.
 2. scripts/copy_weights.py - copy weights from desktop to /app/models/weights/. Used for weights that are not hosted on huggingface. 
-
-
-
-
-
-
-
