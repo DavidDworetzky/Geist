@@ -109,10 +109,10 @@ def test_assert_prompt_invariants():
 
 
 @patch('agents.online_agent.OnlineAgent._make_request')
-@patch('adapters.log_adapter.LogAdapter.log')
+@patch('adapters.log_adapter.LogAdapter.log', autospec=True)
 def test_completion(log, make_request, online_agent, client):
     make_request.return_value = HAIKU_COMPLETION
-    log.side_effect = lambda output: print(output)
+    log.side_effect = lambda self, output: print(output)
     agent_cache[AgentType.GPT4AGENT] = online_agent
     try:
         # prepare the request payload for the completion
@@ -152,10 +152,10 @@ def test_completion(log, make_request, online_agent, client):
 
 
 @patch('agents.online_agent.OnlineAgent.complete_text')
-@patch('adapters.log_adapter.LogAdapter.log')
+@patch('adapters.log_adapter.LogAdapter.log', autospec=True)
 def test_tick_with_prompt_and_world_processing(log, complete_text, online_agent, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
-    log.side_effect = lambda output: print(output)
+    log.side_effect = lambda self, output: print(output)
     agent_cache[AgentType.GPT4AGENT] = online_agent
     try:
         payload = {
@@ -182,10 +182,10 @@ def test_tick_with_prompt_and_world_processing(log, complete_text, online_agent,
 
 
 @patch('agents.online_agent.OnlineAgent.complete_text')
-@patch('adapters.log_adapter.LogAdapter.log')
+@patch('adapters.log_adapter.LogAdapter.log', autospec=True)
 def test_tick_with_prompt_without_world_processing(log, complete_text, process_world_variation_online_agents, client):
     complete_text.side_effect = lambda prompt: completions_generator(prompt=prompt)
-    log.side_effect = lambda output: print(output)
+    log.side_effect = lambda self, output: print(output)
     no_world_agent = next(
         agent for agent in process_world_variation_online_agents
         if not agent._agent_context.settings.include_world_processing)
