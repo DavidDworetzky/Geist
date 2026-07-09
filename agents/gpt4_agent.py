@@ -46,11 +46,13 @@ class GPT4Agent(BaseAgent):
         super().__init__(agent_context, as_subprocess)
 
     def phase_out(self):
+        self.save_state_snapshot(reason="phase_out")
         self._agent_context._save()
         self.terminate_subprocess()
 
     def phase_in(self):
         self.initialize()
+        self.restore_state_snapshot()
 
     def _is_valid_function_json(self, function_json:str):
         try:
@@ -281,6 +283,7 @@ class GPT4Agent(BaseAgent):
             self.tick_world()
         self._pop_and_add_execution_tasks()
         self._clear_execution_tasks()
+        self.save_state_snapshot(reason="tick")
 
     def is_subprocess_running(self):
         # Retrieve subprocess ID from agent context
