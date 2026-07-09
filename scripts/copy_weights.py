@@ -22,7 +22,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 load_dotenv()
 
 models = {
-    "llama_3_1" : "llama_3_1"
+    "llama_3_1" : "llama_3_1",
+    "qwen3" : "qwen3"
 }
 
 def delete_weights(weights_dir: Union[str, Path] = None) -> Tuple[bool, str]:

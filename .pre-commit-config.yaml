@@ -1,6 +1,16 @@
 # Pre-commit hooks configuration
 # See https://pre-commit.com for more information
 repos:
+  # Local supply-chain policy checks
+  - repo: local
+    hooks:
+      - id: dependency-supply-chain-policy
+        name: dependency supply-chain policy
+        entry: python scripts/verify_dependency_policy.py
+        language: system
+        pass_filenames: false
+        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^.*environment.*\.yml$|^scripts/verify_dependency_policy\.py$)'
+
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -55,3 +65,19 @@ repos:
         # Run mypy only on Python files that are tracked by git
         pass_filenames: true
         files: \.py$
+
+  # Repo-local checks that avoid adding runtime dependencies.
+  - repo: local
+    hooks:
+      - id: staged-secret-scan
+        name: staged secret scan
+        entry: python scripts/pre_commit_security_check.py
+        language: system
+        pass_filenames: false
+
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash scripts/pre_commit_frontend_lint.sh
+        language: system
+        pass_filenames: false
+        files: ^client/geist/src/.*\.(js|jsx|ts|tsx)$

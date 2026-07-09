@@ -73,8 +73,7 @@ class LlamaAgent(BaseAgent):
                 self.llama = LlamaTransformer(max_new_tokens=self._agent_context.settings.max_tokens)
         llama_completion = self.llama.complete(
             system_prompt=system_prompt,
-            user_prompt=prompt,
-            streaming=streaming
+            user_prompt=prompt
         )
         self.logger.info(f"Llama completion: {llama_completion}")
         return LlamaCompletion.from_dict(llama_completion)
