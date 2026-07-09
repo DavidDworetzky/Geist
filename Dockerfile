@@ -27,19 +27,19 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Copy project files
-COPY pyproject.toml uv.lock ./
-COPY . .
-
-# Make scripts executable
-RUN chmod +x *.sh
-
-# Install Python dependencies using uv
-RUN ./uv-install.sh
+# Copy only the files needed to build the Python environment, so source code
+# changes do not invalidate this expensive layer
+COPY pyproject.toml uv.lock uv-install.sh ./
+RUN chmod +x uv-install.sh && ./uv-install.sh
 
 # Set up PATH to use the uv-managed virtual environment
 ENV PATH="/opt/geist/.venv/bin:${PATH}"
 ENV VIRTUAL_ENV="/opt/geist/.venv"
+
+# Copy the rest of the source tree
+COPY . .
+
+RUN chmod +x *.sh
 
 VOLUME /rest
 
