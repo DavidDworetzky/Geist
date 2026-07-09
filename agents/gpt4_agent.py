@@ -196,7 +196,7 @@ class GPT4Agent(AgentResponseMixin, BaseAgent):
         # Make one inference call to GPT-4 to advance world state reasoning, tasks and then execute.
         # reason about the world, then.
         # pop elements of agent context tasks for execution
-        if self._agent_context.settings.include_world_processing:
+        if self._agent_context.include_world_processing:
             self.tick_world()
         self._pop_and_add_execution_tasks()
         self._clear_execution_tasks()
