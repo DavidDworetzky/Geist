@@ -31,7 +31,15 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dic
         # Mock get user implementation for testing
         # Token format: "test_token_{user_id}"
         if token.startswith("test_token_"):
-            user_id = int(token.split("_")[-1])  # Extract user_id from token
+            # Extract user_id safely with proper validation
+            parts = token.split("_")
+            # Ensure exact format: ["test", "token", "{user_id}"]
+            if len(parts) != 3 or parts[0] != "test" or parts[1] != "token":
+                raise ValueError("Invalid test token format - expected 'test_token_{user_id}'")
+            try:
+                user_id = int(parts[2])
+            except ValueError:
+                raise ValueError(f"Invalid user_id in token: {parts[2]}")
             logger.info(f"Authenticated test user with ID: {user_id}")
             return {
                 "user_id": user_id,

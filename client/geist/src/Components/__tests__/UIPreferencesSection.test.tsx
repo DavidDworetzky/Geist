@@ -3,9 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import UIPreferencesSection from '../UIPreferencesSection';
 
 describe('UIPreferencesSection', () => {
-  it('updates theme and toggles via callback', () => {
+  it('updates font size and toggles via callback', () => {
     const onChange = jest.fn();
-    const prefs = { theme: 'light', enableNotifications: true };
+    const prefs = { fontSize: 'medium', enableNotifications: true };
 
     render(
       <UIPreferencesSection
@@ -14,10 +14,10 @@ describe('UIPreferencesSection', () => {
       />
     );
 
-    // change theme select
-    const select = screen.getByLabelText(/Theme/i) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'dark' } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark' }));
+    // change font size select
+    const select = screen.getByLabelText(/Font Size/i) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'large' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fontSize: 'large' }));
 
     // toggle notifications
     fireEvent.click(screen.getByText(/Enable Notifications/i).parentElement!.nextSibling!);

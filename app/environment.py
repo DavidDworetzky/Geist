@@ -13,7 +13,7 @@ class EnvironmentConfig:
     voice_tts_provider: str
 
 def LoadEnvironment() -> EnvironmentConfig:
-    openai_key = os.getenv("OPENAI_TOKEN")
+    openai_key = os.getenv("OPENAI_API_KEY")
     twilio_key = os.getenv("TWILIO_TOKEN")
     twilio_sid = os.getenv("TWILIO_SID")
     twilio_source = os.getenv("TWILIO_SOURCE")

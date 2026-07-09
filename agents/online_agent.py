@@ -12,6 +12,16 @@ from agents.base_agent import BaseAgent
 from agents.agent_context import AgentContext
 from agents.models.generic_completion import GenericCompletion
 from agents.models.agent_completion import AgentCompletion
+from agents.tool_calling import (
+    ToolCall,
+    ToolCallError,
+    ToolCompletion,
+    ToolResult,
+    parse_tool_call,
+    run_prompt_tool_call,
+    validate_tool_call,
+)
+from adapters.tool_schema import render_tool_prompt
 from app.models.database.chat_session import get_chat_history
 
 logger = logging.getLogger(__name__)
@@ -88,7 +98,7 @@ class OnlineAgent(BaseAgent):
             self.headers["Authorization"] = f"Bearer {self.api_key}"
     
     def _get_api_key_from_env(self) -> Optional[str]:
-        """Get API key from environment variables based on the endpoint."""
+        """Get provider-specific API key from environment variables based on the endpoint."""
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
         elif "anthropic" in self.base_url:
@@ -97,9 +107,7 @@ class OnlineAgent(BaseAgent):
             return os.getenv("GROQ_API_KEY")
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
-        else:
-            # Fallback to generic API key
-            return os.getenv("API_KEY")
+        return None
     
     def _make_request(
         self,
@@ -244,9 +252,11 @@ class OnlineAgent(BaseAgent):
         
         # Convert to GenericCompletion
         completion = GenericCompletion.from_dict(response_data)
-        
-        # Add to chat history
-        ai_message = completion.choices[0].message.content
+
+        # Add to chat history with None check
+        ai_message = None
+        if completion.choices and len(completion.choices) > 0:
+            ai_message = completion.choices[0].message.content
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
@@ -366,6 +376,147 @@ class OnlineAgent(BaseAgent):
             self.logger.error(f"Streaming error: {e}")
             raise
     
+    def _complete_raw(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = None, temperature: float = None) -> str:
+        """
+        Single completion returning plain text, without chat-history side effects.
+        Used for tool-call loops so intermediate attempts don't pollute history.
+        """
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        payload = {
+            "messages": messages,
+            "model": self.model,
+            "max_tokens": max_tokens or self._agent_context.settings.max_tokens or 16,
+            "temperature": temperature if temperature is not None else (self._agent_context.settings.temperature or 1.0),
+        }
+        response = self._make_request(payload)
+        choices = response.get("choices") or []
+        if not choices:
+            return ""
+        return (choices[0].get("message") or {}).get("content") or ""
+
+    def complete_with_tools(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        max_tool_iterations: int = 4,
+        chat_id: Optional[int] = None,
+    ) -> ToolCompletion:
+        """
+        Tool-augmented completion using the provider's native function calling.
+
+        Adapter actions are exposed via the OpenAI-compatible `tools` parameter;
+        returned tool_calls are validated against the reflected schemas and
+        dispatched, with results fed back as `tool` messages until the model
+        produces a final text answer or the iteration cap is reached. If the
+        endpoint rejects the tools payload, falls back to schema-grounded
+        prompt-based tool calling.
+        """
+        schemas = self._agent_context.get_tool_schemas()
+        dispatcher = self._agent_context.get_tool_dispatcher()
+
+        if not schemas:
+            content = self._complete_raw(prompt, system_prompt, max_tokens, temperature)
+            return ToolCompletion(content=content, tool_results=[], iterations=1)
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        tools_payload = [schema.to_openai_tool() for schema in schemas]
+
+        tool_results: List[ToolResult] = []
+        content: Optional[str] = None
+        iteration = 0
+
+        for iteration in range(1, max_tool_iterations + 1):
+            payload = {
+                "messages": messages,
+                "model": self.model,
+                "max_tokens": max_tokens or self._agent_context.settings.max_tokens or 16,
+                "temperature": temperature if temperature is not None else (self._agent_context.settings.temperature or 1.0),
+                "tools": tools_payload,
+            }
+            try:
+                response = self._make_request(payload)
+            except Exception as e:
+                if iteration == 1:
+                    self.logger.warning(
+                        f"Native tool calling failed ({e}); falling back to prompt-based tool calling"
+                    )
+                    return self._prompt_based_tool_completion(prompt, chat_id=chat_id)
+                raise
+
+            choices = response.get("choices") or []
+            if not choices:
+                break
+            message = choices[0].get("message") or {}
+            tool_calls = message.get("tool_calls")
+
+            if not tool_calls:
+                content = message.get("content")
+                break
+
+            messages.append(message)
+            for tool_call in tool_calls:
+                result = self._dispatch_native_tool_call(tool_call, dispatcher)
+                tool_results.append(result)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id", ""),
+                    "content": result.to_content(),
+                })
+
+        if chat_id is not None:
+            try:
+                self._agent_context._add_to_chat_history(
+                    user_message=prompt, ai_message=content, chat_id=chat_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to record tool completion in chat history: {e}")
+
+        return ToolCompletion(
+            content=content,
+            tool_results=tool_results,
+            iterations=iteration,
+            used_native_tools=True,
+        )
+
+    def _dispatch_native_tool_call(self, tool_call: Dict[str, Any], dispatcher) -> ToolResult:
+        """Convert a provider tool_call entry into a validated, dispatched ToolCall."""
+        function = tool_call.get("function") or {}
+        name = function.get("name") or ""
+        raw_arguments = function.get("arguments") or "{}"
+        try:
+            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+            if not isinstance(arguments, dict):
+                raise ToolCallError("tool call arguments must decode to a JSON object")
+            call = ToolCall.from_qualified_name(name, arguments, raw=str(raw_arguments))
+        except (json.JSONDecodeError, ToolCallError) as e:
+            self.logger.warning(f"Malformed native tool call '{name}': {e}")
+            return ToolResult(call=None, success=False, error=f"Malformed tool call '{name}': {e}")
+        return dispatcher.dispatch(call)
+
+    def _prompt_based_tool_completion(self, prompt: str, chat_id: Optional[int] = None) -> ToolCompletion:
+        """Schema-grounded prompt fallback when native tool calling is unavailable."""
+        result = run_prompt_tool_call(
+            complete_fn=lambda task, system: self._complete_raw(task, system),
+            schemas=self._agent_context.get_tool_schemas(),
+            dispatcher=self._agent_context.get_tool_dispatcher(),
+            task_prompt=prompt,
+        )
+        return ToolCompletion(
+            content=result.to_content(),
+            tool_results=[result],
+            iterations=1,
+            used_native_tools=False,
+        )
+
     def complete_audio(
         self,
         audio_file,
@@ -437,40 +588,65 @@ class OnlineAgent(BaseAgent):
         """Initialize the agent with optional task."""
         if task_prompt:
             self._agent_context.task_context.append(task_prompt)
-        
+
         if self.as_subprocess:
             self.logger.info("Initializing agent with subprocess.")
-            process = subprocess.Popen(['python3', '-u', 'tick.py'], stdout=subprocess.PIPE)
-            self._agent_context.subprocess_id = process.pid
+            try:
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                self.logger.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
         else:
             self.logger.info("Initializing agent without subprocess.")
             self._agent_context.subprocess_id = None
     
+    def __del__(self):
+        """Clean up HTTP client on destruction."""
+        if hasattr(self, 'client') and self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+
     def phase_out(self):
         """Phase out the agent and clean up resources."""
+        self.save_state_snapshot(reason="phase_out")
         self._agent_context._save()
         if hasattr(self, 'client'):
             self.client.close()
         self.terminate_subprocess()
-    
+
     def phase_in(self):
-        """Phase in the agent and restore state."""
+        """Phase in the agent and restore state from the latest snapshot."""
         self.initialize()
+        self.restore_state_snapshot()
     
     def terminate_subprocess(self):
         """Terminate any running subprocess."""
         subprocess_id = self._agent_context.subprocess_id
         if subprocess_id:
-            os.kill(subprocess_id, signal.SIGTERM)
-            self._agent_context.subprocess_id = None
+            try:
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
     
     def tick(self):
-        """Execute one agent tick."""
+        """Execute one agent tick and snapshot the resulting state."""
         self.logger.info("OnlineAgent Tick.")
         if self._agent_context.settings.include_world_processing:
             self.tick_world()
         self.tick_tasks()
         self.tick_execution()
+        self.save_state_snapshot(reason="tick")
     
     def tick_world(self):
         """Advance world state reasoning."""
@@ -491,13 +667,20 @@ class OnlineAgent(BaseAgent):
         return split_result
     
     def tick_execution(self):
-        """Advance execution context reasoning."""
+        """Advance execution context reasoning with full tool visibility."""
         context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
-        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string)
+        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt())
         result = self._transform_completions(result)
         split_result = result[0].split("\\n") if result else []
         self._agent_context.execution_context = split_result
         return split_result
+
+    def _tool_visibility_prompt(self) -> str:
+        """Rendered schemas of the available tools, for prompt-based execution."""
+        schemas = self._agent_context.get_tool_schemas()
+        if not schemas:
+            return ""
+        return "\nAVAILABLE_TOOLS (JSON schemas):\n" + render_tool_prompt(schemas)
     
     def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
         """Get aggregated context string."""
@@ -524,35 +707,17 @@ class OnlineAgent(BaseAgent):
             raise Exception(f"Completion failed to destructure: {completion}")
     
     def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate function call JSON format."""
+        """Validate that text contains a parseable, schema-valid tool call."""
         try:
-            function_json = function_json.replace('\\n', '')
-            parsed_json = json.loads(function_json)
-            required_keys = ["function", "parameters", "class"]
-            if all(key in parsed_json for key in required_keys):
-                if isinstance(parsed_json["parameters"], dict):
-                    return True
+            call = parse_tool_call(function_json)
+            validate_tool_call(call, self._agent_context.get_tool_schemas())
+            return True
+        except ToolCallError:
             return False
-        except json.JSONDecodeError:
-            return False
-    
+
     def _take_json_and_call_function(self, function_json: str):
-        """Execute function call from JSON specification."""
-        if not self._is_valid_function_json(function_json):
-            raise Exception(f"Invalid function call json: {function_json}")
-        
-        json_data = json.loads(function_json)
-        class_name = json_data["class"]
-        adapter_class = next(
-            (wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name),
-            None
-        )
-        
-        if not adapter_class:
-            raise Exception(f"No adapter class matching {class_name}")
-        
-        adapter_class = adapter_class.instance
-        function_to_call = getattr(adapter_class, json_data["function"])
-        parameters = json_data["parameters"]
-        
-        return function_to_call(**parameters)
+        """Parse, validate, and execute a tool call from model output."""
+        result = self._agent_context.get_tool_dispatcher().dispatch_text(function_json)
+        if not result.success:
+            raise Exception(f"Tool call failed: {result.error}")
+        return result.result

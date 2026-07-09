@@ -153,12 +153,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "command",
-        choices=["copy"],
-        help="Command to execute"
-    )
-
-    parser.add_argument(
         "--source",
         type=str,
         help="Source environment file (defaults to linux_environment.yml)"
@@ -172,12 +166,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.command == "copy":
-        source = Path(args.source) if args.source else None
-        dest = Path(args.dest) if args.dest else None
-        success, message = copy_environment(source, dest)
-        print(message)
-        exit(0 if success else 1)
-
-    else:
-        parser.print_help()
+    source = Path(args.source) if args.source else None
+    dest = Path(args.dest) if args.dest else None
+    success, message = copy_environment(source, dest)
+    print(message)
+    exit(0 if success else 1)

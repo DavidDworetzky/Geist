@@ -106,8 +106,9 @@ async def voice_stream_websocket(
       - {"type": "done"}
       - {"type": "error", "message": "..."}
     """
+    logger.info(f"Voice WebSocket connection attempt: session_id={session_id}, agent_type={agent_type}, stt={stt_provider}, tts={tts_provider}")
     await websocket.accept()
-    logger.info(f"Voice WebSocket connected: session_id={session_id}, agent_type={agent_type}")
+    logger.info(f"Voice WebSocket accepted: session_id={session_id}, agent_type={agent_type}")
     
     voice_service: Optional[VoiceSessionService] = None
     stop_requested: bool = False
@@ -208,15 +209,15 @@ async def voice_stream_websocket(
                 "type": "error",
                 "message": str(e)
             })
-        except:
-            pass
+        except Exception as send_error:
+            logger.debug(f"Failed to send error message to WebSocket: {send_error}")
     finally:
         if voice_service:
             voice_service.reset()
         try:
             await websocket.close()
-        except:
-            pass
+        except Exception as close_error:
+            logger.debug(f"Failed to close WebSocket: {close_error}")
 
 
 @router.post("/upload")

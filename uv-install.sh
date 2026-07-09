@@ -13,8 +13,8 @@ echo "Installing Python dependencies using uv..."
 
 # Sync dependencies from lock file
 # --frozen: Use the lock file as-is, don't update it
-# --no-dev: Don't install dev dependencies (use --all-groups to include them)
-if uv sync --frozen; then
+# --extra postgres: the containerized backend runs against PostgreSQL
+if uv sync --frozen --extra postgres; then
     echo "Successfully installed dependencies"
 else
     echo "Error: Failed to sync dependencies"

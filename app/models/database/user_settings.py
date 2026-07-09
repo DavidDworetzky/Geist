@@ -28,7 +28,7 @@ class UserSettings(Base):
     enable_rag_by_default = Column(Boolean, default=True)
     
     # Model generation settings
-    default_max_tokens = Column(Integer, default=16)
+    default_max_tokens = Column(Integer, default=4096)
     default_temperature = Column(Float, default=1.0)
     default_top_p = Column(Float, default=1.0)
     default_frequency_penalty = Column(Float, default=0.0)
@@ -123,7 +123,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_online_provider='openai',
             default_file_archives=[],
             enable_rag_by_default=True,
-            default_max_tokens=16,
+            default_max_tokens=4096,
             default_temperature=1.0,
             default_top_p=1.0,
             default_frequency_penalty=0.0,

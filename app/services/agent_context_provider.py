@@ -1,7 +1,7 @@
 import logging
 from typing import Dict
 
-from app.models.database.database import Session
+from app.models.database.database import SessionLocal
 from app.models.database.agent_preset import AgentPreset
 from agents.agent_settings import AgentSettings
 from agents.agent_context import AgentContext
@@ -30,8 +30,7 @@ def get_default_agent_context() -> AgentContext:
     Raises:
         ValueError: If the default preset is not found.
     """
-    session = Session
-    try:
+    with SessionLocal() as session:
         default_preset = session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
         logger.info(f"Default agent preset: {default_preset}")
 
@@ -54,7 +53,5 @@ def get_default_agent_context() -> AgentContext:
 
         context = AgentContext(settings=agent_settings, envs=_get_envs())
         return context
-    finally:
-        session.close()
 
 
