@@ -77,6 +77,9 @@ jobs:
         POSTGRES_DB: geist
         POSTGRES_USER: geist
         POSTGRES_PASSWORD: geist
+        # mlx-cpu 0.31.x JIT-compiles kernels with the system compiler, which
+        # aborts under the runner's gcc; interpret mode avoids the crash.
+        MLX_DISABLE_COMPILE: "1"
       run: |
         uv run pytest tests/
 
