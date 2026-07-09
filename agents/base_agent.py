@@ -9,8 +9,10 @@ from typing import Iterator, List, Optional
 
 import psutil
 
+from adapters.tool_schema import render_tool_prompt
 from agents.agent_context import AgentContext
 from agents.exceptions import AgentError, CompletionFormatError, FunctionCallError
+from agents.tool_calling import ToolCallError, parse_tool_call, validate_tool_call
 from app.models.database.chat_session import get_chat_history
 
 
@@ -182,13 +184,15 @@ class BaseAgent(ABC):
 
     def phase_out(self):
         """Persist agent state, release provider resources, and stop any subprocess."""
+        self.save_state_snapshot(reason="phase_out")
         self._agent_context._save()
         self._cleanup_resources()
         self.terminate_subprocess()
 
     def phase_in(self):
-        """Restart the agent and rehydrate its state."""
+        """Restart the agent and rehydrate its state from the latest snapshot."""
         self.initialize()
+        self.restore_state_snapshot()
 
     def _cleanup_resources(self):
         """Release provider-specific resources (HTTP clients, model runners). Override as needed."""
@@ -234,6 +238,27 @@ class BaseAgent(ABC):
             self.tick_world()
         self.tick_tasks()
         self.tick_execution()
+        self.save_state_snapshot(reason="tick")
+
+    def save_state_snapshot(self, reason: str = "manual"):
+        """
+        Persist an append-only snapshot of the agent's execution state
+        (world/task/execution contexts and function log).
+        """
+        return self._agent_context.snapshot(reason=reason)
+
+    def restore_state_snapshot(self, snapshot_id: Optional[int] = None) -> bool:
+        """
+        Rehydrate the agent's execution state from its latest snapshot,
+        or from a specific snapshot_id. Returns True if state was restored.
+        """
+        return self._agent_context.restore_snapshot(snapshot_id=snapshot_id)
+
+    def get_tool_schemas(self):
+        """
+        Reflected JSON schemas for the adapter actions available to this agent.
+        """
+        return self._agent_context.get_tool_schemas()
 
     def tick_world(self):
         """Advance world-state reasoning and replace the world context."""
@@ -269,9 +294,16 @@ class BaseAgent(ABC):
         self._agent_context.execution_context = []
         return results
 
+    def _tool_visibility_prompt(self) -> str:
+        """Rendered schemas of the available tools, for prompt-based execution."""
+        schemas = self._agent_context.get_tool_schemas()
+        if not schemas:
+            return ""
+        return "\nAVAILABLE_TOOLS (JSON schemas):\n" + render_tool_prompt(schemas)
+
     def _request_function_json(self, task: str, context_string: str) -> Optional[str]:
         """Ask the model for a valid function-call JSON, retrying on malformed output."""
-        prompt = f"task: {task}" + EXECUTION_TICK_PROMPT + context_string
+        prompt = f"task: {task}" + EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt()
         candidate = None
         for attempt in range(MAX_FUNCTION_JSON_RETRIES + 1):
             completions = self._transform_completions(self.complete_text(prompt=prompt))
@@ -323,36 +355,17 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate the model-produced function call JSON structure."""
+        """Validate that text contains a parseable, schema-valid tool call."""
         try:
-            parsed_json = json.loads(function_json.replace('\n', ''))
-        except json.JSONDecodeError:
+            call = parse_tool_call(function_json)
+            validate_tool_call(call, self._agent_context.get_tool_schemas())
+            return True
+        except ToolCallError:
             return False
-        required_keys = ["function", "parameters", "class"]
-        return (all(key in parsed_json for key in required_keys)
-                and isinstance(parsed_json["parameters"], dict))
 
     def _take_json_and_call_function(self, function_json: str):
-        """Dispatch a validated function-call JSON to the matching adapter instance."""
-        if not self._is_valid_function_json(function_json):
-            raise FunctionCallError(f"Invalid function call json: {function_json}")
-
-        json_data = json.loads(function_json.replace('\n', ''))
-        class_name = json_data["class"]
-        function_name = json_data["function"]
-
-        wrapper = next(
-            (wrapper for wrapper in self._agent_context.initialized_classes if wrapper.name == class_name),
-            None
-        )
-        if not wrapper:
-            raise FunctionCallError(f"No adapter class matching {class_name}")
-
-        # Only public adapter methods are callable from model output.
-        if function_name.startswith("_"):
-            raise FunctionCallError(f"Refusing to call non-public adapter method: {function_name}")
-        function_to_call = getattr(wrapper.instance, function_name, None)
-        if not callable(function_to_call):
-            raise FunctionCallError(f"Adapter {class_name} has no callable function {function_name}")
-
-        return function_to_call(**json_data["parameters"])
+        """Parse, validate, and execute a tool call through the schema-validating dispatcher."""
+        result = self._agent_context.get_tool_dispatcher().dispatch_text(function_json)
+        if not result.success:
+            raise FunctionCallError(f"Tool call failed: {result.error}")
+        return result.result

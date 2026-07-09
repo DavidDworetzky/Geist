@@ -9,7 +9,7 @@ from sqlalchemy.engine import make_url
 
 
 DEFAULT_SQLITE_DATABASE_PATH = "data/geist.sqlite3"
-DEFAULT_DATABASE_PROVIDER = "postgresql"
+DEFAULT_DATABASE_PROVIDER = "sqlite"
 
 
 @dataclass(frozen=True)
