@@ -10,15 +10,18 @@ schema-grounded prompt path for LocalAgent.
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
+from adapters.async_tool import is_async_tool
 from adapters.tool_schema import (
     QUALIFIED_NAME_SEPARATOR,
     ToolSchema,
     enumerate_tool_schemas,
     render_tool_prompt,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +42,11 @@ class ToolCall:
     """A parsed request to invoke one adapter action."""
     adapter: str
     function: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
+    arguments: dict[str, Any] = field(default_factory=dict)
     raw: str = ""
 
     @classmethod
-    def from_qualified_name(cls, name: str, arguments: Dict[str, Any], raw: str = "") -> "ToolCall":
+    def from_qualified_name(cls, name: str, arguments: dict[str, Any], raw: str = "") -> "ToolCall":
         adapter, separator, function = name.partition(QUALIFIED_NAME_SEPARATOR)
         if not separator or not adapter or not function:
             raise ToolCallError(
@@ -55,10 +58,10 @@ class ToolCall:
 @dataclass
 class ToolResult:
     """Outcome of dispatching a single tool call."""
-    call: Optional[ToolCall]
+    call: ToolCall | None
     success: bool
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_content(self) -> str:
         """Serialize for feeding back to a model as a tool message."""
@@ -73,7 +76,7 @@ class ToolResult:
             payload["error"] = self.error
         return json.dumps(payload)
 
-    def to_log_entry(self) -> Dict[str, Any]:
+    def to_log_entry(self) -> dict[str, Any]:
         entry = {
             "adapter": self.call.adapter if self.call else None,
             "function": self.call.function if self.call else None,
@@ -90,8 +93,8 @@ class ToolResult:
 @dataclass
 class ToolCompletion:
     """Result of a tool-augmented completion loop."""
-    content: Optional[str]
-    tool_results: List[ToolResult] = field(default_factory=list)
+    content: str | None
+    tool_results: list[ToolResult] = field(default_factory=list)
     iterations: int = 0
     used_native_tools: bool = False
 
@@ -99,13 +102,13 @@ class ToolCompletion:
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
-def extract_json_candidates(text: str) -> List[str]:
+def extract_json_candidates(text: str) -> list[str]:
     """
     Extract candidate JSON object strings from model output.
 
     Handles markdown fences and balanced top-level objects embedded in prose.
     """
-    candidates: List[str] = []
+    candidates: list[str] = []
     for fenced in _JSON_FENCE_RE.findall(text):
         if fenced.startswith("{"):
             candidates.append(fenced)
@@ -157,7 +160,7 @@ def parse_tool_call(text: str) -> ToolCall:
     if not text or not text.strip():
         raise ToolCallError("Empty completion; expected a JSON tool call object.")
 
-    errors: List[str] = []
+    errors: list[str] = []
     for candidate in extract_json_candidates(text):
         try:
             data = json.loads(candidate)
@@ -233,7 +236,7 @@ def _coerce_value(value: Any, expected_type: str) -> Any:
     raise ValueError(f"expected {expected_type}, got {type(value).__name__}")
 
 
-def find_schema(call: ToolCall, schemas: List[ToolSchema]) -> Optional[ToolSchema]:
+def find_schema(call: ToolCall, schemas: list[ToolSchema]) -> ToolSchema | None:
     """Find the schema matching a call, tolerating case mismatches."""
     for schema in schemas:
         if schema.adapter == call.adapter and schema.action == call.function:
@@ -245,7 +248,7 @@ def find_schema(call: ToolCall, schemas: List[ToolSchema]) -> Optional[ToolSchem
     return None
 
 
-def validate_tool_call(call: ToolCall, schemas: List[ToolSchema]) -> ToolCall:
+def validate_tool_call(call: ToolCall, schemas: list[ToolSchema]) -> ToolCall:
     """
     Validate a parsed call against the available tool schemas.
 
@@ -262,8 +265,8 @@ def validate_tool_call(call: ToolCall, schemas: List[ToolSchema]) -> ToolCall:
 
     properties = schema.parameters.get("properties", {})
     required = schema.parameters.get("required", [])
-    errors: List[str] = []
-    normalized: Dict[str, Any] = {}
+    errors: list[str] = []
+    normalized: dict[str, Any] = {}
 
     for name, value in call.arguments.items():
         if name not in properties:
@@ -306,8 +309,8 @@ class ToolDispatcher:
     journaled to the provided function log.
     """
 
-    def __init__(self, adapter_wrappers: List[Any], schemas: Optional[List[ToolSchema]] = None,
-                 function_log: Optional[List[Any]] = None):
+    def __init__(self, adapter_wrappers: list[Any], schemas: list[ToolSchema] | None = None,
+                 function_log: list[Any] | None = None):
         self._instances = {wrapper.name: wrapper.instance for wrapper in adapter_wrappers}
         if schemas is None:
             schemas = []
@@ -334,8 +337,15 @@ class ToolDispatcher:
             self._log(result)
             return result
 
+        method = getattr(instance, call.function)
+
+        if is_async_tool(method):
+            result = self._dispatch_async(call)
+            self._log(result)
+            return result
+
         try:
-            output = getattr(instance, call.function)(**call.arguments)
+            output = method(**call.arguments)
             result = ToolResult(call=call, success=True, result=output)
         except Exception as exc:
             logger.exception("Tool %s.%s raised", call.adapter, call.function)
@@ -346,6 +356,44 @@ class ToolDispatcher:
             )
         self._log(result)
         return result
+
+    def _dispatch_async(self, call: ToolCall) -> ToolResult:
+        """
+        Queue an @async_tool action as a background job and return a handle.
+
+        The agent receives the job_id immediately and checks completion with
+        JobStatusAdapter.check_async_tool(job_id=...) on a later tick instead
+        of blocking on slow work (image generation, long API calls, ...).
+        """
+        # Imported lazily: agents must stay importable without app services.
+        from app.services.job_queue import enqueue
+
+        try:
+            job = enqueue(
+                "tool.call",
+                payload={
+                    "adapter": call.adapter,
+                    "function": call.function,
+                    "arguments": call.arguments,
+                },
+            )
+        except Exception as exc:
+            logger.exception("Failed to enqueue async tool %s.%s", call.adapter, call.function)
+            return ToolResult(
+                call=call,
+                success=False,
+                error=f"Failed to queue async tool call: {type(exc).__name__}: {exc}",
+            )
+        return ToolResult(
+            call=call,
+            success=True,
+            result={
+                "async": True,
+                "job_id": job.job_id,
+                "status": "queued",
+                "check_with": f"JobStatusAdapter{QUALIFIED_NAME_SEPARATOR}check_async_tool",
+            },
+        )
 
     def dispatch_text(self, text: str) -> ToolResult:
         """Parse model output and dispatch it, capturing parse failures as results."""
@@ -366,7 +414,7 @@ class ToolDispatcher:
 
 def run_prompt_tool_call(
     complete_fn: Callable[[str, str], str],
-    schemas: List[ToolSchema],
+    schemas: list[ToolSchema],
     dispatcher: ToolDispatcher,
     task_prompt: str,
     max_attempts: int = 3,
