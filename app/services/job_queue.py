@@ -158,6 +158,41 @@ def stop_worker() -> None:
         _worker = None
 
 
+@job_handler("tool.call")
+def _run_tool_call_job(payload: dict[str, Any]) -> Any:
+    """
+    Execute an @async_tool adapter action in the background.
+
+    Payload: {"adapter": str, "function": str, "arguments": dict}, enqueued
+    exclusively by ToolDispatcher._dispatch_async after schema validation.
+    The adapter is re-initialized in the worker from the environment, and
+    only public actions marked @async_tool are executed.
+    """
+    # Imported here to keep module import light and avoid circular imports.
+    from adapters.adapter_registry import init_adapter_class
+    from adapters.async_tool import is_async_tool
+    from app.environment import LoadEnvironmentDictionary
+
+    adapter_name = payload["adapter"]
+    function_name = payload["function"]
+    arguments = payload.get("arguments") or {}
+
+    if function_name.startswith("_"):
+        raise ValueError(f"Refusing to run non-public adapter action '{function_name}'")
+
+    wrapper = init_adapter_class(adapter_name, LoadEnvironmentDictionary())
+    if wrapper is None:
+        raise ValueError(f"Adapter '{adapter_name}' could not be initialized in the worker")
+
+    method = getattr(wrapper.instance, function_name, None)
+    if not callable(method):
+        raise ValueError(f"Adapter '{adapter_name}' has no callable action '{function_name}'")
+    if not is_async_tool(method):
+        raise ValueError(f"Adapter action '{adapter_name}.{function_name}' is not an @async_tool")
+
+    return method(**arguments)
+
+
 @job_handler("workflow.run")
 def _run_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
     """
