@@ -41,21 +41,27 @@ checks for completion on a later tick.
 This abstraction is generic: any future slow tool (video, long scrapes,
 batch embedding) becomes async by adding one decorator.
 
-### 2) Image generation adapter (`adapters/image_gen_adapter.py`)
+### 2) Image generation adapters (split by provider and mode)
 
-- `generate_image(prompt, mode="online"|"offline")`, marked `@async_tool`.
-- **Online**: Gemini image generation API via httpx (already a dependency).
-  Config: `GEMINI_API_KEY` (also injected via `app/environment.py` for
-  adapter initialization), `GEMINI_BASE_URL`, `GEMINI_IMAGE_MODEL`,
-  `IMAGE_GEN_TIMEOUT_SECONDS`.
-- **Offline**: extension point rather than bundled diffusion dependencies.
-  `IMAGE_GEN_OFFLINE_BACKEND` names a module exposing
-  `generate(prompt) -> list[bytes]` (e.g. a FLUX.1-schnell shim); without it,
-  offline mode fails with a clear message. This keeps the default install
-  lean per repo preference (no diffusers/torch pipeline additions).
-- Artifacts are written under `output/images/<date>-<id>/image_N.png`
-  (`IMAGE_GEN_OUTPUT_DIR` overrides the root) and their paths returned in
-  the job result.
+- `adapters/tool_modes.py` — `@online_tool` / `@offline_tool` decorators
+  declare an action's execution mode as metadata (read with `tool_mode()`);
+  they compose with `@async_tool` and are reusable on any adapter action.
+- `adapters/image_gen_base.py` — `BaseImageGenAdapter` holds the shared run
+  template (`_generate(prompt) -> list[bytes]` -> persist artifacts ->
+  result payload) plus output configuration (`IMAGE_GEN_OUTPUT_DIR`,
+  `IMAGE_GEN_TIMEOUT_SECONDS`). Abstract; excluded from adapter discovery.
+- `adapters/gemini_image_adapter.py` — `GeminiImageAdapter.generate_image`,
+  decorated `@async_tool @online_tool`: Gemini image generation API via
+  httpx (already a dependency). Config: `GEMINI_API_KEY` (also injected via
+  `app/environment.py`), `GEMINI_BASE_URL`, `GEMINI_IMAGE_MODEL`.
+- `adapters/flux_image_adapter.py` — `FluxImageAdapter.generate_image`,
+  decorated `@async_tool @offline_tool`: local generation extension point
+  rather than bundled diffusion dependencies. `IMAGE_GEN_OFFLINE_BACKEND`
+  names a module exposing `generate(prompt) -> list[bytes]` (e.g. a
+  FLUX.1-schnell shim); without it, it fails with a clear message. This
+  keeps the default install lean per repo preference.
+- Artifacts are written under `output/images/<date>-<id>/image_N.png` and
+  their paths returned in the job result.
 
 ### 3) Agent flow
 
@@ -83,7 +89,9 @@ existing `/api/v1/jobs` endpoints and executed by the existing worker.
   execute inline; the `tool.call` handler runs the real action through the
   worker; `JobStatusAdapter` reports queued → succeeded/failed transitions;
   non-`@async_tool` actions are refused by the handler.
-- `tests/adapters/test_image_gen_adapter.py`: online mode calls Gemini with
-  the prompt and writes returned images to disk (httpx mocked); missing API
-  key and missing offline backend produce clear errors; artifacts land under
-  the configured output directory.
+- `tests/adapters/test_image_gen_adapters.py`: mode decorators and async
+  markers on both adapters; discovery includes both concrete adapters and
+  excludes the abstract base; Gemini calls carry the prompt and API key and
+  write returned images to disk (httpx mocked); FLUX runs through a
+  configured backend module and errors clearly without one; missing API
+  key / empty outputs produce clear errors.
