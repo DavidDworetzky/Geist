@@ -46,12 +46,18 @@ single-writer database so the plain transaction is already safe.
 
 ### API (`app/api/v1/endpoints/jobs.py` + `app/schemas/job.py`)
 
-- `POST /api/v1/jobs` — enqueue (400 on unregistered kind).
+Enqueueing is internal-only: feature code calls
+`app.services.job_queue.enqueue` after enforcing its own authorization.
+There is deliberately no generic enqueue endpoint — one would let API callers
+queue arbitrary kinds/payloads and sidestep domain checks (e.g. workflow
+ownership). The HTTP surface is read-only observability plus per-feature
+async options:
+
 - `GET /api/v1/jobs/{job_id}` — status/result polling.
 - `GET /api/v1/jobs` — list, optional status filter.
-- `POST /api/v1/workflows/{id}/run?background=true` — enqueue instead of
-  executing inline; response carries `job_id` with `status: queued`.
-  Default behavior is unchanged (synchronous).
+- `POST /api/v1/workflows/{id}/run?background=true` — validates ownership,
+  then enqueues instead of executing inline; response carries `job_id` with
+  `status: queued`. Default behavior is unchanged (synchronous).
 
 ### Wiring
 
