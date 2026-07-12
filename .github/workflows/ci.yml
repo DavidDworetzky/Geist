@@ -188,7 +188,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Run Trivy vulnerability scanner on Dockerfiles
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
         scan-type: 'config'
         scan-ref: '.'
@@ -232,7 +232,7 @@ jobs:
         cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
     - name: Run Trivy vulnerability scanner on ${{ matrix.image }} image
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@v0.36.0
       continue-on-error: true
       with:
         scan-type: 'image'
