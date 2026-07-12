@@ -155,28 +155,45 @@ async def delete_workflow(
 async def run_workflow(
     workflow_id: int,
     input_data: Dict[str, Any] = None,
+    background: bool = False,
     db: Session = Depends(get_db),
     current_user: Dict = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    """Execute a workflow synchronously."""
+    """Execute a workflow synchronously, or queue it with background=true."""
     # First check if the user owns this workflow
     workflow = db.query(Workflow).options(selectinload(Workflow.steps)).filter(
         Workflow.workflow_id == workflow_id,
         Workflow.user_id == current_user["user_id"]
     ).first()
-    
+
     if not workflow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found"
         )
-    
+
     if not workflow.steps:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workflow has no steps to execute"
         )
-    
+
+    if background:
+        from app.services.job_queue import enqueue
+        job = enqueue(
+            "workflow.run",
+            payload={
+                "workflow_id": workflow_id,
+                "user_id": current_user["user_id"],
+                "input_data": input_data or {},
+            },
+        )
+        return {
+            "job_id": job.job_id,
+            "workflow_id": workflow_id,
+            "status": "queued",
+        }
+
     try:
         # Initialize the workflow executor
         executor = WorkflowExecutor()

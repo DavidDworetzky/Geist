@@ -6,3 +6,4 @@ from app.models.database.file_upload import FileUpload
 from app.models.database.workflow import Workflow, WorkflowStep, WorkflowRun, WorkflowStepResult
 from app.models.database.user_settings import UserSettings
 from app.models.database.agent_snapshot import AgentSnapshot
+from app.models.database.job import Job
