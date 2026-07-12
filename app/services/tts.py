@@ -3,16 +3,19 @@ Text-to-Speech (TTS) service abstraction and implementations.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any
+
+import numpy as np
 import torch
 import torchaudio
-import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 
-SUPPORTED_TTS_PROVIDERS: List[Dict[str, Any]] = [
+SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
     {
         "provider": "sesame",
         "display_name": "Sesame CSM",
@@ -141,14 +144,39 @@ SUPPORTED_TTS_PROVIDERS: List[Dict[str, Any]] = [
 ]
 
 
-def get_supported_tts_providers() -> List[Dict[str, Any]]:
+def get_supported_tts_providers() -> list[dict[str, Any]]:
     """Return frontend-consumable metadata for supported TTS providers."""
     return SUPPORTED_TTS_PROVIDERS
 
 
+def allowed_models_for_provider(provider_type: str) -> list[str]:
+    """Published model ids for a provider, from SUPPORTED_TTS_PROVIDERS."""
+    for entry in SUPPORTED_TTS_PROVIDERS:
+        if entry["provider"] == provider_type:
+            return [model["id"] for model in entry.get("models", [])]
+    return []
+
+
+def _validate_tts_model(provider_type: str, model: str) -> str:
+    """
+    Reject model ids that are not in the provider's published list.
+
+    The model string is client-controlled and reaches model loaders
+    (e.g. from_pretrained), so it must never be an arbitrary repo id or
+    filesystem path.
+    """
+    allowed = allowed_models_for_provider(provider_type)
+    if allowed and model not in allowed:
+        raise ValueError(
+            f"Model '{model}' is not a supported {provider_type} TTS model. "
+            f"Supported models: {allowed}"
+        )
+    return model
+
+
 class TTSProvider(ABC):
     """Abstract base class for TTS providers."""
-    
+
     @abstractmethod
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
@@ -162,7 +190,7 @@ class TTSProvider(ABC):
             torch.Tensor: Audio tensor (1D, mono)
         """
         pass
-    
+
     @abstractmethod
     def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
         """
@@ -177,7 +205,7 @@ class TTSProvider(ABC):
             bytes: Audio chunks as PCM bytes
         """
         pass
-    
+
     @property
     @abstractmethod
     def sample_rate(self) -> int:
@@ -187,7 +215,7 @@ class TTSProvider(ABC):
 
 class SesameTTSProvider(TTSProvider):
     """TTS provider using Sesame CSM model."""
-    
+
     def __init__(self, device: str = "cuda"):
         """
         Initialize Sesame TTS provider.
@@ -199,7 +227,7 @@ class SesameTTSProvider(TTSProvider):
         self._generator = None
         self._sample_rate = 24000  # Sesame default
         self.logger = logging.getLogger(__name__)
-    
+
     def _ensure_initialized(self):
         """Lazy initialization of the generator."""
         if self._generator is None:
@@ -207,7 +235,7 @@ class SesameTTSProvider(TTSProvider):
             self.logger.info(f"Initializing Sesame CSM TTS on {self.device}")
             self._generator = load_csm_1b(device=self.device)
             self._sample_rate = self._generator.sample_rate
-    
+
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
         Synthesize speech from text using Sesame CSM.
@@ -220,7 +248,7 @@ class SesameTTSProvider(TTSProvider):
             torch.Tensor: Audio tensor (1D, mono, 24kHz)
         """
         self._ensure_initialized()
-        
+
         try:
             audio = self._generator.generate(
                 text=text,
@@ -234,7 +262,7 @@ class SesameTTSProvider(TTSProvider):
         except Exception as e:
             self.logger.error(f"Sesame TTS synthesis failed: {e}")
             raise
-    
+
     def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
         """
         Synthesize speech and yield as audio chunks.
@@ -252,21 +280,21 @@ class SesameTTSProvider(TTSProvider):
         """
         # Generate full audio
         audio_tensor = self.synthesize(text, speaker)
-        
+
         # Convert to numpy and then bytes
         audio_np = audio_tensor.cpu().numpy()
-        
+
         # Convert float32 to int16 PCM
         audio_int16 = (audio_np * 32767).astype(np.int16)
-        
+
         # Calculate chunk size in samples
         chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
-        
+
         # Yield chunks
         for i in range(0, len(audio_int16), chunk_samples):
             chunk = audio_int16[i:i + chunk_samples]
             yield chunk.tobytes()
-    
+
     @property
     def sample_rate(self) -> int:
         """Get the sample rate (24kHz for Sesame)."""
@@ -275,7 +303,7 @@ class SesameTTSProvider(TTSProvider):
 
 class OpenAITTSProvider(TTSProvider):
     """TTS provider using OpenAI's TTS API."""
-    
+
     def __init__(self, api_key: str, model: str = "gpt-4o-mini-tts", voice: str = "alloy"):
         """
         Initialize OpenAI TTS provider.
@@ -290,10 +318,10 @@ class OpenAITTSProvider(TTSProvider):
         self.voice = voice
         self._sample_rate = 24000  # OpenAI TTS default
         self.logger = logging.getLogger(__name__)
-        
+
         import httpx
         self.client = httpx.Client(timeout=30.0)
-    
+
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
         Synthesize speech using OpenAI TTS API.
@@ -306,7 +334,7 @@ class OpenAITTSProvider(TTSProvider):
             torch.Tensor: Audio tensor
         """
         import io
-        
+
         url = "https://api.openai.com/v1/audio/speech"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -318,24 +346,24 @@ class OpenAITTSProvider(TTSProvider):
             "voice": self.voice,
             "response_format": "wav"
         }
-        
+
         response = self.client.post(url, json=payload, headers=headers)
-        
+
         if response.status_code != 200:
             raise Exception(f"OpenAI TTS failed: {response.status_code} - {response.text}")
-        
+
         # Load audio from response bytes
         audio_bytes = io.BytesIO(response.content)
         waveform, sample_rate = torchaudio.load(audio_bytes)
-        
+
         # Convert to mono if stereo
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0)
         else:
             waveform = waveform.squeeze(0)
-        
+
         return waveform
-    
+
     def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
         """
         Synthesize and stream audio chunks.
@@ -345,13 +373,13 @@ class OpenAITTSProvider(TTSProvider):
         audio_tensor = self.synthesize(text, speaker)
         audio_np = audio_tensor.cpu().numpy()
         audio_int16 = (audio_np * 32767).astype(np.int16)
-        
+
         chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
-        
+
         for i in range(0, len(audio_int16), chunk_samples):
             chunk = audio_int16[i:i + chunk_samples]
             yield chunk.tobytes()
-    
+
     @property
     def sample_rate(self) -> int:
         """Get sample rate."""
@@ -366,9 +394,9 @@ class Qwen3TTSProvider(TTSProvider):
         model: str = DEFAULT_QWEN3_TTS_MODEL,
         voice: str = "Cherry",
         language: str = "en",
-        instruct: Optional[str] = None,
+        instruct: str | None = None,
         speed: float = 1.0,
-        device: Optional[str] = None,
+        device: str | None = None,
         sample_rate: int = 24000,
     ):
         self.model = model
@@ -386,7 +414,17 @@ class Qwen3TTSProvider(TTSProvider):
         if self._engine is not None:
             return
 
-        from qwen_tts import QwenTTS
+        try:
+            from qwen_tts import QwenTTS
+        except ImportError as e:
+            # Covers both a missing package and a mismatched API surface
+            # (e.g. the class name changing) - this provider is experimental
+            # and the qwen_tts integration has not been validated end-to-end.
+            raise RuntimeError(
+                "The qwen3 TTS provider requires the optional 'qwen_tts' package "
+                "and is experimental. Install/verify qwen_tts or select another "
+                f"tts_provider. Import failed with: {e}"
+            ) from e
 
         self.logger.info(f"Initializing Qwen3 TTS via qwen_tts: {self.model}")
         if hasattr(QwenTTS, "from_pretrained"):
@@ -394,8 +432,8 @@ class Qwen3TTSProvider(TTSProvider):
         else:
             self._engine = QwenTTS(model=self.model, device=self.device)
 
-    def _build_kwargs(self, text: str) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {
+    def _build_kwargs(self, text: str) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
             "text": text,
             "voice": self.voice,
             "language": self.language,
@@ -411,7 +449,7 @@ class Qwen3TTSProvider(TTSProvider):
             return True
         return any(method_name in getattr(cls, "__dict__", {}) for cls in type(obj).__mro__)
 
-    def _generate_with_qwen_tts(self, text: str) -> Tuple[torch.Tensor, int]:
+    def _generate_with_qwen_tts(self, text: str) -> tuple[torch.Tensor, int]:
         kwargs = self._build_kwargs(text)
         engine = self._engine
 
@@ -424,7 +462,7 @@ class Qwen3TTSProvider(TTSProvider):
 
         raise RuntimeError("Loaded qwen_tts engine does not expose synthesize, generate, or infer.")
 
-    def _coerce_audio_result(self, result: Any) -> Tuple[torch.Tensor, int]:
+    def _coerce_audio_result(self, result: Any) -> tuple[torch.Tensor, int]:
         sample_rate = self._sample_rate
         audio = result
 
@@ -470,7 +508,7 @@ class Qwen3TTSProvider(TTSProvider):
         audio_int16 = (audio_np * 32767).astype(np.int16)
         return audio_int16.tobytes()
 
-    def _stream_native(self, text: str) -> Optional[Iterator[bytes]]:
+    def _stream_native(self, text: str) -> Iterator[bytes] | None:
         self._ensure_initialized()
         engine = self._engine
         if engine is None:
@@ -542,12 +580,12 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
         api_key = kwargs.get("api_key")
         if not api_key:
             raise ValueError("api_key required for OpenAI TTS provider")
-        model = kwargs.get("model", "gpt-4o-mini-tts")
+        model = _validate_tts_model("openai", kwargs.get("model", "gpt-4o-mini-tts"))
         voice = kwargs.get("voice", "alloy")
         return OpenAITTSProvider(api_key=api_key, model=model, voice=voice)
     elif provider_type.lower() in {"qwen", "qwen3"}:
         return Qwen3TTSProvider(
-            model=kwargs.get("model", DEFAULT_QWEN3_TTS_MODEL),
+            model=_validate_tts_model("qwen3", kwargs.get("model", DEFAULT_QWEN3_TTS_MODEL)),
             voice=kwargs.get("voice", "Cherry"),
             language=kwargs.get("language", "en"),
             instruct=kwargs.get("instruct"),

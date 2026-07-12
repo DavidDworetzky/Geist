@@ -80,3 +80,35 @@ def test_qwen3_provider_uses_native_streaming_when_available():
     assert len(chunks) == 2
     assert len(chunks[0]) == 200
     assert chunks[1] == b"pcm"
+
+
+def test_create_tts_provider_rejects_unlisted_qwen3_model():
+    import pytest
+
+    with pytest.raises(ValueError, match="not a supported qwen3 TTS model"):
+        create_tts_provider("qwen3", model="attacker/arbitrary-hf-repo")
+
+
+def test_create_tts_provider_rejects_unlisted_openai_model():
+    import pytest
+
+    with pytest.raises(ValueError, match="not a supported openai TTS model"):
+        create_tts_provider("openai", api_key="k", model="../local/path")
+
+
+def test_qwen3_missing_package_raises_friendly_error(monkeypatch):
+    import builtins
+
+    import pytest
+
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "qwen_tts":
+            raise ImportError("No module named 'qwen_tts'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    provider = Qwen3TTSProvider(model=DEFAULT_QWEN3_TTS_MODEL)
+    with pytest.raises(RuntimeError, match="experimental"):
+        provider._ensure_initialized()
