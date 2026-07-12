@@ -216,10 +216,8 @@ class OnlineAgent(BaseAgent):
         # Convert to GenericCompletion
         completion = GenericCompletion.from_dict(response_data)
 
-        # Add to chat history with None check
-        ai_message = None
-        if completion.choices and len(completion.choices) > 0:
-            ai_message = completion.choices[0].message.content
+        # Add to chat history using the None-safe extraction method
+        ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,

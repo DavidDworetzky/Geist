@@ -17,17 +17,20 @@ class AgentCompletion:
     @classmethod
     def from_completion(cls, completion: Union['LlamaCompletion', 'GenericCompletion']):
         if isinstance(completion, GenericCompletion):
+            content = completion.get_assistant_content()
+            if content is None:
+                raise ValueError("No choices found in GenericCompletion")
             return cls(
-                message=[completion.choices[0].message.content],
+                message=[content],
                 id=completion.id,
                 chat_id=completion.chat_id
             )
         elif isinstance(completion, LlamaCompletion):
-            assistant_message = next((gen for gen in completion.messages if gen.role == 'assistant'), None)
-            if assistant_message is None:
+            content = completion.get_assistant_content()
+            if content is None:
                 raise ValueError("No assistant message found in LlamaCompletion")
             return cls(
-                message=[assistant_message.content],
+                message=[content],
                 id=str(uuid.uuid4()),
                 chat_id=completion.chat_id
             )
