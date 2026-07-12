@@ -92,7 +92,7 @@ class GenericCompletion:
         valid_fields['usage'] = Usage.from_dict(data['usage'])
         return cls(**valid_fields)
 
-    def get_assistant_content(self) -> Optional[str]:
+    def get_assistant_content(self) -> str | None:
         """The first choice's assistant message content, or None if empty."""
         if self.choices:
             return self.choices[0].message.content
