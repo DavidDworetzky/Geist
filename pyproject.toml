@@ -209,6 +209,3 @@ exclude_dirs = [
 # B101: assert_used - often used in tests
 # B601: paramiko_calls - if you use paramiko
 skips = ["B101"]
-
-[tool.bandit.assert_used]
-exclude = ["*/test_*.py", "*/tests/*"]

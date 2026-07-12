@@ -22,7 +22,7 @@ pip install pre-commit
 
 # Install other security tools
 echo "📦 Installing security tools..."
-pip install bandit safety black isort flake8 yamllint
+pip install bandit yamllint
 
 # Install hadolint (Dockerfile linter)
 echo "📦 Installing hadolint..."
@@ -65,8 +65,7 @@ echo "   4. Review .pre-commit-config.yaml to customize checks"
 echo ""
 echo "🔒 Security checks enabled:"
 echo "   ✓ Python security scanning (bandit)"
-echo "   ✓ Dependency vulnerability scanning (safety)"
-echo "   ✓ Code formatting (black, isort)"
-echo "   ✓ Linting (flake8, yamllint)"
+echo "   ✓ Secret scanning (staged-secret-scan)"
+echo "   ✓ Code formatting and linting (ruff, yamllint)"
 echo "   ✓ Dockerfile linting (hadolint)"
 echo ""

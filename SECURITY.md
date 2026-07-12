@@ -28,9 +28,8 @@ pre-commit install
 #### Included Checks
 
 - **Python SAST** (bandit): Static analysis security testing for Python code
-- **Dependency Scanning** (safety): Checks Python dependencies for known vulnerabilities
-- **Code Formatting** (black, isort): Ensures consistent code style
-- **Linting** (flake8, yamllint): Code quality and syntax checking
+- **Secret Scanning** (staged-secret-scan): Repo-local staged secret detection
+- **Code Formatting & Linting** (ruff, yamllint): Consistent style and syntax checking
 - **Dockerfile Linting** (hadolint): Best practices for Dockerfiles
 - **General Checks**: Trailing whitespace, merge conflicts, large files
 
@@ -47,7 +46,7 @@ pre-commit run
 
 # Run specific hook
 pre-commit run bandit
-pre-commit run gitleaks
+pre-commit run staged-secret-scan
 ```
 
 #### Bypassing Hooks (Not Recommended)
@@ -90,7 +89,7 @@ After successful builds:
 
 - `.pre-commit-config.yaml`: Pre-commit hooks configuration
 - `.yamllint`: YAML linting rules
-- `pyproject.toml`: Bandit, black, and isort configuration
+- `pyproject.toml`: Bandit, ruff, and mypy configuration
 
 ## Severity Levels and Failure Conditions
 

@@ -12,7 +12,7 @@ Quick start guide for setting up security checks in your Geist development envir
 
 This script will:
 - Install pre-commit framework
-- Install all security tools (gitleaks, bandit, safety, hadolint)
+- Install the security tools (bandit, yamllint, hadolint)
 - Configure git hooks
 - Optionally run initial checks
 
@@ -23,7 +23,7 @@ This script will:
 pip install pre-commit
 
 # Install security tools
-pip install bandit safety black isort flake8 yamllint
+pip install bandit yamllint
 
 # Install hadolint (Linux)
 wget https://github.com/hadolint/hadolint/releases/download/v2.13.1-beta/hadolint-Linux-x86_64 -O hadolint
@@ -106,8 +106,8 @@ Some hooks may fail on the first run after installation due to existing code:
 
 ```bash
 # Fix formatting issues automatically
-black .
-isort .
+ruff check --fix .
+ruff format .
 
 # Re-run checks
 pre-commit run --all-files
@@ -176,14 +176,14 @@ pre-commit install --install-hooks
 ### Update Security Tools
 
 ```bash
-pip install --upgrade bandit safety black isort flake8 yamllint pre-commit
+pip install --upgrade bandit yamllint pre-commit
 ```
 
 ## Configuration Files
 
 - `.pre-commit-config.yaml`: Pre-commit hook configuration
 - `.yamllint`: YAML linting rules
-- `pyproject.toml`: Python tool configuration (bandit, black, isort)
+- `pyproject.toml`: Python tool configuration (bandit, ruff, mypy)
 
 ## Need Help?
 

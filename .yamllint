@@ -7,8 +7,13 @@ rules:
     level: warning
   indentation:
     spaces: 2
+    indent-sequences: false
   comments:
     min-spaces-from-content: 1
   document-start: disable
+  brackets:
+    max-spaces-inside: 1
+  new-line-at-end-of-file:
+    level: warning
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']

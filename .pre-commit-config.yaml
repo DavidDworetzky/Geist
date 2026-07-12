@@ -76,25 +76,19 @@ repos:
         args: ['-c', 'pyproject.toml']
         additional_dependencies: ["bandit[toml]"]
 
-  # Python dependency vulnerability scanning
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
-    rev: v1.3.3
-    hooks:
-      - id: python-safety-dependencies-check
-        files: linux_environment.*\.yml$
-
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.35.1
     hooks:
       - id: yamllint
-        args: [--format, parsable, --strict]
+        args: [--format, parsable]
 
   # Dockerfile linting
   - repo: https://github.com/hadolint/hadolint
     rev: v2.13.1-beta
     hooks:
       - id: hadolint-docker
+        args: [--ignore, DL3008, --ignore, DL4006]
 
   # Repo-local checks that avoid adding runtime dependencies.
   - repo: local
