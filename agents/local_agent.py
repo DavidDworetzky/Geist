@@ -132,7 +132,7 @@ class LocalAgent(BaseAgent):
         completion = LlamaCompletion.from_dict(completion_result)
 
         # Add to chat history
-        ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
+        ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
