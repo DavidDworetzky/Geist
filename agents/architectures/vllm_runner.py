@@ -35,6 +35,11 @@ class VLLMRunner(BaseRunner):
 
     def load(self, model_id: str, device_config: Optional[Dict[str, Any]] = None) -> None:
         """Load a model for inference from local files or HuggingFace Hub."""
+        logger.warning(
+            "The 'vllm' runner is a Transformers-based shim, not a real vLLM engine "
+            "(no paged attention or continuous batching); loading %s via Transformers",
+            model_id,
+        )
         device_config = device_config or {}
         self.model_id = model_id
 
