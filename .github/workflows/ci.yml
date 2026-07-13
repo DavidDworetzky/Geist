@@ -34,26 +34,21 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Conda
-      uses: conda-incubator/setup-miniconda@v3.1.1
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        activate-environment: geist-linux-docker
 
-    - name: Cache Conda environment
-      uses: actions/cache@v4
-      id: conda-cache
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       with:
-        path: ${{ env.CONDA }}/envs/geist-linux-docker
-        key: conda-env-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('linux_environment_x86_x64.yml') }}
+        version: "0.9.5"
+        enable-cache: true
 
-    - name: Install Conda environment
-      if: steps.conda-cache.outputs.cache-hit != 'true'
-      shell: bash -l {0}
-      run: conda env update -n geist-linux-docker -f linux_environment_x86_x64.yml
+    - name: Install dependencies
+      run: uv sync --frozen --extra postgres
 
     - name: Initialize database
-      shell: bash -l {0}
       env:
         PYTHONPATH: ${{ github.workspace }}
         GEIST_DATABASE_PROVIDER: postgresql
@@ -63,10 +58,9 @@ jobs:
         POSTGRES_USER: geist
         POSTGRES_PASSWORD: geist
       run: |
-        python initdb.py
+        uv run python initdb.py
 
     - name: Run tests
-      shell: bash -l {0}
       env:
         HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         PYTHONPATH: ${{ github.workspace }}
@@ -76,8 +70,13 @@ jobs:
         POSTGRES_DB: geist
         POSTGRES_USER: geist
         POSTGRES_PASSWORD: geist
+        # mlx-cpu 0.31.x JIT-compiles kernels with the system compiler, which
+        # aborts under the runner's gcc; interpret mode avoids the crash.
+        MLX_DISABLE_COMPILE: "1"
+        # Moshi's Torch compiler is not portable across runner architectures.
+        NO_TORCH_COMPILE: "1"
       run: |
-        pytest tests/
+        uv run pytest tests/
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -96,7 +95,7 @@ jobs:
     - name: Install dependencies
       run: |
         cd client/geist
-        npm ci
+        npm ci --ignore-scripts --audit=false --fund=false
 
     - name: Run frontend tests
       run: |
@@ -113,6 +112,12 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        version: "0.9.5"
+        enable-cache: true
 
     - name: Install security tools
       run: |
@@ -136,18 +141,7 @@ jobs:
 
     - name: Run Safety (Python Dependency Vulnerability Scan)
       run: |
-        # Extract pip packages from conda environment file
-        python -c "
-        import yaml
-        import sys
-        with open('linux_environment_x86_x64.yml', 'r') as f:
-            env = yaml.safe_load(f)
-            pip_deps = env.get('dependencies', [])
-            for dep in pip_deps:
-                if isinstance(dep, dict) and 'pip' in dep:
-                    for pkg in dep['pip']:
-                        print(pkg)
-        " > requirements-check.txt
+        uv export --frozen --no-dev --all-extras --no-hashes --output-file requirements-check.txt
 
         safety check --file requirements-check.txt --output json > safety-report.json || true
         if [ -f safety-report.json ]; then

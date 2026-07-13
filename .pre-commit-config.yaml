@@ -9,7 +9,7 @@ repos:
         entry: python scripts/verify_dependency_policy.py
         language: system
         pass_filenames: false
-        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^.*environment.*\.yml$|^scripts/verify_dependency_policy\.py$)'
+        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^pyproject\.toml$|^uv\.lock$|^scripts/verify_dependency_policy\.py$)'
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -24,7 +24,6 @@ repos:
       - id: check-merge-conflict
       # Check yaml files are valid
       - id: check-yaml
-        exclude: '^(linux_environment|mac_environment|conda).*\.yml$'
       # Check toml files are valid
       - id: check-toml
       # Detect private keys

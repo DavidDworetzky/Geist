@@ -8,23 +8,16 @@ Pre-commit hooks automatically run checks on your code before each commit. This 
 - **Ruff**: Fast Python linter and code formatter (replaces black, isort, flake8, and more)
 - **mypy**: Python static type checking
 - **Standard pre-commit hooks**: File checks, YAML validation, etc.
-- **Dependency policy checks**: Supply-chain guardrails for npm, Docker, and Python environment files
+- **Dependency policy checks**: Supply-chain guardrails for npm, Docker, and uv-managed Python dependencies
 
 ## Installation
 
-### 1. Update your conda environment
+### 1. Sync the uv environment
 
-If you haven't already updated your conda environment with the latest dependencies:
+Create or refresh the environment from the committed lockfile:
 
 ```bash
-# For Linux (ARM)
-conda env update -f linux_environment.yml
-
-# For Linux (x86_64)
-conda env update -f linux_environment_x86_x64.yml
-
-# For macOS (ARM)
-conda env update -f mac_environment_arm.yml
+uv sync --frozen
 ```
 
 ### 2. Install pre-commit hooks
@@ -158,22 +151,22 @@ To customize rules, edit `[tool.ruff.lint]` in `pyproject.toml`
 ### Other Checks
 - Large file detection (max 1MB)
 - Merge conflict detection
-- YAML syntax validation (excluding conda environment files)
+- YAML syntax validation
 - TOML syntax validation
 - Private key detection
 - Trailing whitespace removal
 - End-of-file newline enforcement
 
 ### Dependency Supply-Chain Policy
-- Runs on: npm manifests, frontend Dockerfile, conda environment files, and the policy script
+- Runs on: npm manifests, frontend Dockerfile, `pyproject.toml`, `uv.lock`, and the policy script
 - Purpose: Blocks dependency drift that increases supply-chain risk
 - Checks:
   - Frontend direct dependencies use exact versions, not ranges like `^` or `~`
   - `package-lock.json` root dependencies match `package.json`
   - Registry packages in `package-lock.json` include integrity hashes
   - Frontend Docker builds use `npm ci --ignore-scripts`
-  - Pip dependencies in environment files use exact `==` pins
-  - Conda dependencies in environment files use at least exact `name=version` pins
+  - Direct Python dependencies and optional/development groups in `pyproject.toml` use exact `==` pins
+  - A parseable `uv.lock` is committed
 
 When adding frontend packages:
 
@@ -183,23 +176,22 @@ npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION
 npm audit --package-lock-only
 ```
 
-When adding backend pip packages:
+When adding backend packages:
 
 ```bash
-docker exec backend /bin/bash
-pip install --only-binary=:all: PACKAGE==VERSION
-conda env export > linux_environment.yml
+uv add PACKAGE==VERSION
 ```
 
-Review dependency diffs before committing.
+Run a Python dependency audit and review both `pyproject.toml` and `uv.lock` before committing.
 
 ## Troubleshooting
 
 ### "command not found: pre-commit"
 
-Make sure you've activated the conda environment:
+Make sure the uv-managed environment exists and run the tool through uv:
 ```bash
-conda activate geist-linux-docker  # or your environment name
+uv sync --frozen
+uv run pre-commit install
 ```
 
 ### Type checking errors on third-party libraries

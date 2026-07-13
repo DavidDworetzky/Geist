@@ -7,3 +7,6 @@
 .mypy_cache
 .ruff_cache
 output
+.venv
+.env
+data

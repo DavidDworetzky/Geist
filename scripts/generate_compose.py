@@ -156,7 +156,7 @@ def generate_compose_dict(
         "privileged", "read_only", "security_opt", "stdin_open", "stop_grace_period",
         "stop_signal", "sysctls", "tmpfs", "tty", "ulimits", "networks"
         # Note: 'networks' needs special handling below.
-        # Keys like 'name' and 'conda' are specific to containers.json and handled separately.
+        # Keys like 'name' are specific to containers.json and handled separately.
     ]
 
     processed_configs = set() # Keep track of configs used
@@ -325,4 +325,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        

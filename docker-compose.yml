@@ -9,7 +9,6 @@ services:
       - SQLITE_DATABASE_PATH=data/geist.sqlite3
       - DEBUG=${DEBUG:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
-      - CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
     env_file:
       - path: .env
         required: false
