@@ -21,7 +21,7 @@ Run the setup script to install all security tools and hooks:
 Or install manually:
 
 ```bash
-pip install pre-commit
+python3 -m pip install --only-binary=:all: pre-commit==4.0.1
 pre-commit install
 ```
 
@@ -153,10 +153,10 @@ Update pre-commit hooks:
 pre-commit autoupdate
 ```
 
-Update security tools:
+Reinstall the pinned pre-commit runner after changing its approved version:
 
 ```bash
-pip install --upgrade bandit safety pre-commit
+python3 -m pip install --only-binary=:all: pre-commit==4.0.1
 ```
 
 ### Security Scan Schedule

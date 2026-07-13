@@ -116,7 +116,10 @@ jobs:
 
     - name: Install security tools
       run: |
-        pip install bandit safety pyyaml
+        python -m pip install --only-binary=:all: \
+          bandit==1.9.4 \
+          safety==3.8.1 \
+          PyYAML==6.0.3
 
     - name: Run Bandit (Python SAST)
       run: |
@@ -160,7 +163,7 @@ jobs:
     - name: NPM Audit (Frontend Dependencies)
       run: |
         cd client/geist
-        npm install
+        npm ci --ignore-scripts --audit=false --fund=false
         npm audit --json > npm-audit-report.json || true
         echo "📦 NPM Audit Report:"
         cat npm-audit-report.json

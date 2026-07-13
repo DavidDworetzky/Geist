@@ -16,31 +16,10 @@ fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
 echo "✓ Found Python $PYTHON_VERSION"
 
-# Install pre-commit
+# Install only the pinned hook runner. Pre-commit provisions Bandit, Yamllint,
+# and Hadolint from the pinned revisions in .pre-commit-config.yaml.
 echo "📦 Installing pre-commit..."
-pip install pre-commit
-
-# Install other security tools
-echo "📦 Installing security tools..."
-pip install bandit yamllint
-
-# Install hadolint (Dockerfile linter)
-echo "📦 Installing hadolint..."
-if ! command -v hadolint &> /dev/null; then
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        wget -q https://github.com/hadolint/hadolint/releases/download/v2.13.1-beta/hadolint-Linux-x86_64 -O hadolint
-        sudo mv hadolint /usr/local/bin/ || mv hadolint ~/bin/
-        chmod +x /usr/local/bin/hadolint 2>/dev/null || chmod +x ~/bin/hadolint
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        if command -v brew &> /dev/null; then
-            brew install hadolint
-        else
-            echo "⚠️  Please manually install hadolint from https://github.com/hadolint/hadolint/releases"
-        fi
-    fi
-else
-    echo "✓ Hadolint already installed"
-fi
+python3 -m pip install --only-binary=:all: pre-commit==4.0.1
 
 # Install pre-commit hooks
 echo "🔧 Installing pre-commit hooks..."

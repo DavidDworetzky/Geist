@@ -12,7 +12,8 @@ Quick start guide for setting up security checks in your Geist development envir
 
 This script will:
 - Install pre-commit framework
-- Install the security tools (bandit, yamllint, hadolint)
+- Install the pinned pre-commit runner; pre-commit provisions Bandit, Yamllint,
+  and Hadolint from the pinned hook revisions
 - Configure git hooks
 - Optionally run initial checks
 
@@ -20,18 +21,7 @@ This script will:
 
 ```bash
 # Install pre-commit
-pip install pre-commit
-
-# Install security tools
-pip install bandit yamllint
-
-# Install hadolint (Linux)
-wget https://github.com/hadolint/hadolint/releases/download/v2.13.1-beta/hadolint-Linux-x86_64 -O hadolint
-sudo mv hadolint /usr/local/bin/
-chmod +x /usr/local/bin/hadolint
-
-# Install hadolint (macOS)
-brew install hadolint
+python3 -m pip install --only-binary=:all: pre-commit==4.0.1
 
 # Install pre-commit hooks
 pre-commit install
@@ -43,10 +33,8 @@ pre-commit install
 # Check pre-commit is installed
 pre-commit --version
 
-# Check other tools
-bandit --version
-safety --version
-hadolint --version
+# Validate the pinned hook configuration
+pre-commit validate-config
 ```
 
 ## Testing the Setup
@@ -57,7 +45,8 @@ pre-commit run --all-files
 
 # Run specific security checks
 pre-commit run bandit --all-files
-pre-commit run python-safety-dependencies-check --all-files
+pre-commit run yamllint --all-files
+pre-commit run hadolint-docker --all-files
 ```
 
 ## Daily Workflow
@@ -173,10 +162,10 @@ pre-commit autoupdate
 pre-commit install --install-hooks
 ```
 
-### Update Security Tools
+### Update the Pre-commit Runner
 
 ```bash
-pip install --upgrade bandit yamllint pre-commit
+python3 -m pip install --only-binary=:all: pre-commit==4.0.1
 ```
 
 ## Configuration Files
