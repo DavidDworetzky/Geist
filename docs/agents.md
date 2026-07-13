@@ -441,7 +441,7 @@ python scripts/sync_models.py -p openai  # Unclear (what is -p?)
 The `scripts/` directory contains:
 
 - **Model Management**: `download_models.py`, `copy_weights.py`, `sync_models.py`, `list_hf_open_models.py`
-- **Environment Setup**: `copy_environment.py`, `generate_compose.py`
+- **Environment Setup**: `generate_compose.py`
 - **Database Setup**: `insert_presets.py`, `insert_default_user.py`
 - **Utilities**: `test_arch_availability.py`, `model_filter_config.py`
 

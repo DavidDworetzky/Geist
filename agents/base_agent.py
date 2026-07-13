@@ -41,6 +41,7 @@ MAX_FUNCTION_JSON_RETRIES = 3
 @dataclass
 class GenerationParams:
     """Resolved generation parameters after merging caller values with agent settings."""
+
     max_tokens: int
     n: int
     temperature: float
@@ -69,30 +70,63 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def complete_text(self, prompt: str, max_tokens: int | None = None, n: int | None = None,
-                      temperature: float | None = None, top_p: float | None = None,
-                      frequency_penalty: float | None = None, presence_penalty: float | None = None,
-                      stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
-                      prompt_tokens: list[int] | None = None, response_format: str = "text",
-                      system_prompt: str | None = None, chat_id: int | None = None):
+    def complete_text(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
+        echo: bool = False,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
+        response_format: str = "text",
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
+    ):
         """Generate a completion for the given prompt."""
 
     @abstractmethod
-    def stream_complete_text(self, prompt: str, max_tokens: int | None = None, n: int | None = None,
-                             temperature: float | None = None, top_p: float | None = None,
-                             frequency_penalty: float | None = None, presence_penalty: float | None = None,
-                             stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
-                             prompt_tokens: list[int] | None = None, response_format: str = "text",
-                             system_prompt: str | None = None, chat_id: int | None = None) -> Iterator[str]:
+    def stream_complete_text(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
+        echo: bool = False,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
+        response_format: str = "text",
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
+    ) -> Iterator[str]:
         """Stream a completion for the given prompt, yielding text chunks."""
 
     @abstractmethod
-    def complete_audio(self, audio_file, max_tokens: int | None = None, n: int | None = None,
-                       temperature: float | None = None, top_p: float | None = None,
-                       frequency_penalty: float | None = None, presence_penalty: float | None = None,
-                       stop: str | list[str] | None = None, echo: bool = False, best_of: int | None = None,
-                       prompt_tokens: list[int] | None = None, response_format: str = "text",
-                       system_prompt: str | None = None, chat_id: int | None = None):
+    def complete_audio(
+        self,
+        audio_file,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
+        echo: bool = False,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
+        response_format: str = "text",
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
+    ):
         """Generate a completion from an audio input."""
 
     @abstractmethod
@@ -103,10 +137,15 @@ class BaseAgent(ABC):
     # Generation parameter resolution
     # ------------------------------------------------------------------
 
-    def _resolve_generation_params(self, max_tokens: int | None = None, n: int | None = None,
-                                   temperature: float | None = None, top_p: float | None = None,
-                                   frequency_penalty: float | None = None,
-                                   presence_penalty: float | None = None) -> GenerationParams:
+    def _resolve_generation_params(
+        self,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+    ) -> GenerationParams:
         """
         Merge explicit caller values with agent settings and hard defaults.
 
@@ -135,8 +174,9 @@ class BaseAgent(ABC):
     # Chat history
     # ------------------------------------------------------------------
 
-    def _build_messages(self, prompt: str, system_prompt: str | None = None,
-                        chat_id: int | None = None) -> list[dict]:
+    def _build_messages(
+        self, prompt: str, system_prompt: str | None = None, chat_id: int | None = None
+    ) -> list[dict]:
         """Build a chat message list, hydrating prior turns from the stored session."""
         messages = []
         if system_prompt:
@@ -169,9 +209,7 @@ class BaseAgent(ABC):
             self.logger.info("Initializing agent with subprocess.")
             try:
                 process = subprocess.Popen(
-                    ['python3', '-u', 'tick.py'],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    ["python3", "-u", "tick.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
                 self._agent_context.subprocess_id = process.pid
             except Exception as e:
@@ -203,7 +241,9 @@ class BaseAgent(ABC):
             try:
                 os.kill(subprocess_id, signal.SIGTERM)
             except ProcessLookupError:
-                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+                self.logger.warning(
+                    f"Process {subprocess_id} not found, may have already terminated"
+                )
             except OSError as e:
                 self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
             finally:
@@ -214,7 +254,7 @@ class BaseAgent(ABC):
         if not subprocess_id:
             return False
         try:
-            return psutil.Process(subprocess_id).is_running()
+            return bool(psutil.Process(subprocess_id).is_running())
         except psutil.NoSuchProcess:
             return False
 
@@ -223,7 +263,7 @@ class BaseAgent(ABC):
         return {
             "world_context": self._agent_context.world_context,
             "task_context": self._agent_context.task_context,
-            "execution_context": self._agent_context.execution_context
+            "execution_context": self._agent_context.execution_context,
         }
 
     # ------------------------------------------------------------------
@@ -261,7 +301,9 @@ class BaseAgent(ABC):
 
     def tick_world(self):
         """Advance world-state reasoning and replace the world context."""
-        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
+        context_string = self._aggregated_context(
+            world_context=True, task_context=True, execution_context=False
+        )
         result = self.complete_text(prompt=WORLD_TICK_PROMPT + context_string)
         split_result = self._transform_completions(result)
         self._agent_context.world_context = split_result
@@ -273,10 +315,11 @@ class BaseAgent(ABC):
             raise AgentError("No tasks available in task context for execution.")
         task_to_execute = self._agent_context.task_context.pop(0)
         prompt = f"executing task: {task_to_execute}" + self._aggregated_context(
-            world_context=True, task_context=True, execution_context=True)
+            world_context=True, task_context=True, execution_context=True
+        )
         result = self.complete_text(prompt=TASK_TICK_PROMPT + prompt)
         completions = self._transform_completions(result)
-        subtasks = [task.strip() for completion in completions for task in completion.split('|')]
+        subtasks = [task.strip() for completion in completions for task in completion.split("|")]
         self._agent_context.execution_context = subtasks
         return subtasks
 
@@ -284,7 +327,9 @@ class BaseAgent(ABC):
         """Resolve each pending execution subtask into an adapter function call and run it."""
         results = []
         for task in self._agent_context.execution_context:
-            context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+            context_string = self._aggregated_context(
+                world_context=True, task_context=True, execution_context=True
+            )
             function_json = self._request_function_json(task, context_string)
             if function_json is None:
                 continue
@@ -302,7 +347,12 @@ class BaseAgent(ABC):
 
     def _request_function_json(self, task: str, context_string: str) -> str | None:
         """Ask the model for a valid function-call JSON, retrying on malformed output."""
-        prompt = f"task: {task}" + EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt()
+        prompt = (
+            f"task: {task}"
+            + EXECUTION_TICK_PROMPT
+            + context_string
+            + self._tool_visibility_prompt()
+        )
         candidate = None
         for attempt in range(MAX_FUNCTION_JSON_RETRIES + 1):
             completions = self._transform_completions(self.complete_text(prompt=prompt))
@@ -316,13 +366,16 @@ class BaseAgent(ABC):
             self.logger.error(f"No completion produced for task: {task}")
             return None
         raise FunctionCallError(
-            f"Exceeded retries for valid function call JSON; last result: {candidate}")
+            f"Exceeded retries for valid function call JSON; last result: {candidate}"
+        )
 
     # ------------------------------------------------------------------
     # Context aggregation and completion parsing
     # ------------------------------------------------------------------
 
-    def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
+    def _aggregated_context(
+        self, world_context: bool, task_context: bool, execution_context: bool
+    ) -> str:
         """Aggregate the requested context sections into a single prompt string."""
         context_string = ""
         if world_context and self._agent_context.settings.include_world_processing:
@@ -330,24 +383,27 @@ class BaseAgent(ABC):
         if task_context:
             context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
         if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
+            context_string += "EXECUTION_CONTEXT:" + "\n".join(
+                self._agent_context.execution_context
+            )
         return context_string
 
     def _transform_completions(self, completion) -> list[str]:
         """Extract assistant message contents from any supported completion shape."""
         try:
-            if hasattr(completion, 'choices') and completion.choices:
+            if hasattr(completion, "choices") and completion.choices:
                 return [choice.message.content for choice in completion.choices]
-            if hasattr(completion, 'messages'):
-                return [msg.content for msg in completion.messages if msg.role == 'assistant']
-            if isinstance(completion, dict) and 'choices' in completion:
-                return [choice['message']['content'] for choice in completion['choices']]
+            if hasattr(completion, "messages"):
+                return [msg.content for msg in completion.messages if msg.role == "assistant"]
+            if isinstance(completion, dict) and "choices" in completion:
+                return [choice["message"]["content"] for choice in completion["choices"]]
             return [str(completion)]
         except Exception as e:
             self.logger.error(f"Failed to transform completion: {completion}, exception: {e}")
             raise CompletionFormatError(
                 f"Completion failed to destructure: {completion}. "
-                "Is your LLM protocol returning the correct format?") from e
+                "Is your LLM protocol returning the correct format?"
+            ) from e
 
     # ------------------------------------------------------------------
     # Adapter function dispatch

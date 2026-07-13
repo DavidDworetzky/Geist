@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 
 from adapters.mms_adapter import MMSAdapter
+from agents.agent_context import AgentContext
+from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
@@ -15,20 +17,23 @@ from agents.models.agent_completion import AgentCompletion
 from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS
 from app.api.v1.endpoints.files import router as files_router
+from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
 from app.models.completion import CompleteTextParams, InitializeAgentParams
+from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
     get_all_chat_history,
     get_chat_history,
     get_paginated_chat_history,
     get_paginated_chat_sessions,
 )
+from app.models.database.database import SessionLocal
 from app.models.user_settings import AgentFactoryConfig
-from app.services.agent_context_provider import get_default_agent_context
+from app.services.job_queue import start_worker, stop_worker
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -43,15 +48,15 @@ DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
-#in memory agent cache
+# in memory agent cache
 agent_cache = {
-    AgentType.LLAMA : None,
-    AgentType.GPT4AGENT : None,
-    AgentType.HTTPAGENT : None,
-    AgentType.LOCALAGENT : None
+    AgentType.LLAMA: None,
+    AgentType.GPT4AGENT: None,
+    AgentType.HTTPAGENT: None,
+    AgentType.LOCALAGENT: None,
 }
 
-#mapping from public AgentType values to the agent factory's "local"/"online" types
+# mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
     AgentType.LLAMA: "local",
     AgentType.LOCALAGENT: "local",
@@ -59,24 +64,21 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
     AgentType.HTTPAGENT: "online",
 }
 
-#constants
+# constants
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 
 if enhanced_logging:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_envs() -> dict[str,str]:
+
+def get_envs() -> dict[str, str]:
     return load_environment_dictionary()
 
-def _resolve_agent_type(agent_type: AgentType | str | None) -> AgentType:
-    if agent_type is None:
-        return default_agent_type
-    if isinstance(agent_type, AgentType):
-        return agent_type
-    return AgentType[agent_type.upper()]
 
 def get_or_create_agent(agent_type: AgentType):
     if agent_cache[agent_type] is None:
@@ -84,13 +86,14 @@ def get_or_create_agent(agent_type: AgentType):
         logger.info(f"Created new {agent_type} agent")
     return agent_cache[agent_type]
 
+
 # App factory function
 def create_app():
     app = FastAPI()
 
-    #agent routes, for agentic flows.
+    # agent routes, for agentic flows.
     agent_router = APIRouter()
-    #adapter routes, includes routes that address direct adapter calls.
+    # adapter routes, includes routes that address direct adapter calls.
     adapter_router = APIRouter()
 
     # Agent routes using agent_router
@@ -101,12 +104,14 @@ def create_app():
 
         # Create agent config overrides from params
         overrides = AgentConfigRequest(
-            agent_type=AGENT_TYPE_TO_FACTORY_TYPE.get(params.agent_type) if params.agent_type else None,
+            agent_type=AGENT_TYPE_TO_FACTORY_TYPE.get(params.agent_type)
+            if params.agent_type
+            else None,
             max_tokens=params.max_tokens,
             temperature=params.temperature,
             top_p=params.top_p,
             frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty
+            presence_penalty=params.presence_penalty,
         )
 
         # Get default agent context
@@ -129,7 +134,7 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT
+            system_prompt=DEFAULT_PROMPT,
         )
 
         if completions:
@@ -140,7 +145,8 @@ def create_app():
 
     @agent_router.post("/complete_text")
     async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
-        agent_type = _resolve_agent_type(params.agent_type)
+        # if params.agent_type is an AgentType, use it.
+        agent_type = params.agent_type or default_agent_type
 
         agent = get_active_agent(agent_type)
 
@@ -157,7 +163,7 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= DEFAULT_PROMPT
+            system_prompt=DEFAULT_PROMPT,
         )
 
         if completions:
@@ -168,7 +174,8 @@ def create_app():
 
     @agent_router.post("/complete_text/{session_id}")
     async def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
-        agent_type = _resolve_agent_type(params.agent_type)
+        # if params.agent_type is an AgentType, use it.
+        agent_type = params.agent_type or default_agent_type
 
         agent = get_active_agent(agent_type)
 
@@ -185,8 +192,8 @@ def create_app():
             best_of=params.best_of,
             prompt_tokens=params.prompt_tokens,
             response_format=params.response_format,
-            system_prompt= DEFAULT_PROMPT,
-            chat_id=session_id
+            system_prompt=DEFAULT_PROMPT,
+            chat_id=session_id,
         )
 
         if completions:
@@ -216,7 +223,11 @@ def create_app():
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
-        agent_type = agent_type = AgentType[task_prompt.agent_type.upper()] if task_prompt.agent_type else default_agent_type
+        agent_type = agent_type = (
+            AgentType[task_prompt.agent_type.upper()]
+            if task_prompt.agent_type
+            else default_agent_type
+        )
         agent = get_active_agent(agent_type)
 
         agent.initialize(task_prompt.prompt)
@@ -236,7 +247,9 @@ def create_app():
 
     # Adapter routes using adapter_router
     @adapter_router.post("/speech_to_text")
-    async def create_upload_file(file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)):
+    async def create_upload_file(
+        file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)
+    ):
         return adapter.transcribe(file)
 
     # Register routers
@@ -247,18 +260,29 @@ def create_app():
     app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
+    app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
 
-    @app.get('/')
+    @app.on_event("startup")
+    def start_job_worker():
+        start_worker()
+
+    @app.on_event("shutdown")
+    def stop_job_worker():
+        stop_worker()
+
+    @app.get("/")
     def version():
         return {"Version": f"{api_version}"}
 
     return app
 
+
 def _parse_agent_type(agent_type: str) -> AgentType:
     try:
         return AgentType[agent_type.upper()]
-    except KeyError:
-        raise HTTPException(status_code=422, detail=f"Unknown agent type: {agent_type}") from None
+    except KeyError as error:
+        raise HTTPException(status_code=422, detail=f"Unknown agent type: {agent_type}") from error
+
 
 def _get_cached_agent_or_404(agent_type: str):
     parsed_type = _parse_agent_type(agent_type)
@@ -267,23 +291,23 @@ def _get_cached_agent_or_404(agent_type: str):
         raise HTTPException(status_code=404, detail=f"No active agent of type {parsed_type.value}")
     return agent
 
+
 def get_gpt4_client():
-    '''
+    """
     Legacy GPT4AGENT type: an OnlineAgent pinned to the OpenAI gpt-4 endpoint.
-    '''
+    """
     agent_context = get_default_agent_context()
     return OnlineAgent(
-        agent_context=agent_context,
-        base_url=DEFAULT_API_URL,
-        model="gpt-4",
-        api_key=openai_key
+        agent_context=agent_context, base_url=DEFAULT_API_URL, model="gpt-4", api_key=openai_key
     )
 
+
 def get_llama_agent():
-    '''
+    """
     Legacy LLAMA type: a LocalAgent running the default local model.
-    '''
+    """
     return get_local_agent()
+
 
 def get_local_agent():
     agent_context = get_default_agent_context()
@@ -291,6 +315,7 @@ def get_local_agent():
     settings = UserSettingsService.get_default_user_settings()
     model_id = settings.default_local_model or DEFAULT_LOCAL_MODEL
     return LocalAgent(agent_context=agent_context, model_id=model_id, runner_type="mlx_llama")
+
 
 def get_online_agent():
     agent_context = get_default_agent_context()
@@ -314,21 +339,59 @@ def get_online_agent():
         agent_context=agent_context,
         base_url=factory_config.endpoint or DEFAULT_API_URL,
         model=factory_config.model,
-        api_key=api_key
+        api_key=api_key,
     )
 
+
 agent_mappings = {
-    AgentType.GPT4AGENT : get_gpt4_client,
-    AgentType.LLAMA : get_llama_agent,
-    AgentType.LOCALAGENT : get_local_agent,
-    AgentType.HTTPAGENT : get_online_agent
+    AgentType.GPT4AGENT: get_gpt4_client,
+    AgentType.LLAMA: get_llama_agent,
+    AgentType.LOCALAGENT: get_local_agent,
+    AgentType.HTTPAGENT: get_online_agent,
 }
+
 
 def get_active_agent(type: AgentType):
     return get_or_create_agent(type)
 
+
+def get_default_agent_context():
+    """
+    Gets an agent context matching "Default Context" from the database
+    """
+    with SessionLocal() as session:
+        # Query for the agent preset with name "Default Context"
+        default_preset = (
+            session.query(AgentPreset).filter(AgentPreset.name == "Default Preset").first()
+        )
+        logging.info(f"Default agent preset: {default_preset}")
+
+        if not default_preset:
+            raise ValueError("Default Context preset not found in the database.")
+
+        agent_settings = AgentSettings(
+            name=default_preset.name or "Default Preset",
+            version=default_preset.version or "1.0",
+            description=default_preset.description or "",
+            max_tokens=int(default_preset.max_tokens or 16),
+            n=int(default_preset.n or 1),
+            temperature=float(
+                default_preset.temperature if default_preset.temperature is not None else 1.0
+            ),
+            top_p=float(default_preset.top_p if default_preset.top_p is not None else 1.0),
+            frequency_penalty=float(default_preset.frequency_penalty or 0),
+            presence_penalty=float(default_preset.presence_penalty or 0),
+            interactive_only=bool(default_preset.interactive_only),
+            include_world_processing=bool(default_preset.process_world),
+        )
+        # Create an agent context with the found preset
+        context = AgentContext(settings=agent_settings, envs=get_envs())
+        return context
+
+
 def get_speech_to_text_client():
     return MMSAdapter()
+
 
 # Initialize and run the app
 app = create_app()
@@ -336,5 +399,5 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000, # 1MB (1024 * 1024 bytes)
+        port=8000,  # 1MB (1024 * 1024 bytes)
     )

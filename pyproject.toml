@@ -17,6 +17,8 @@ dependencies = [
     # Config / models
     "pydantic==2.10.6",
     "python-dotenv==1.0.1",
+    # Torch's CPU compiler imports setuptools at runtime.
+    "setuptools==78.1.1",
     # HTTP clients and adapters
     "requests==2.32.3",
     "httpx==0.28.1",
@@ -227,3 +229,20 @@ indent-style = "space"
 
 # Use `\n` line endings for all files
 line-ending = "lf"
+
+# Bandit security configuration
+[tool.bandit]
+exclude_dirs = [
+    "/tests/",
+    "*/tests/*",
+    "*/test_*.py",
+    ".venv",
+    "venv",
+    "build",
+    "dist"
+]
+
+# Skip specific tests if needed
+# B101: assert_used - often used in tests
+# B601: paramiko_calls - if you use paramiko
+skips = ["B101"]

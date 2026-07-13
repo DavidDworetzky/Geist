@@ -1,11 +1,10 @@
 [
     {
-       "name": "adapter",
-       "image": "geist-adapter",
-       "conda" : "linux_environment_x86_x64.yml",
-       "mem_limit": "32G",
-       "depends_on": [
-        "db"
+        "name": "adapter",
+        "image": "geist-adapter",
+        "mem_limit": "32G",
+        "depends_on": [
+            "db"
         ],
         "env_file": [
             ".env"
@@ -14,7 +13,6 @@
     {
         "name": "llm",
         "image": "geist-llm",
-        "conda" : "linux_environment_x86_x64.yml",
         "ports": [
             "5001:5000"
         ]
@@ -22,7 +20,6 @@
     {
         "name": "voice",
         "image": "geist-voice",
-        "conda": "linux_environment_x86_x64.yml",
         "ports": [
             "5002:5000"
         ]

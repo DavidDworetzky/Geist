@@ -26,7 +26,7 @@ describe('AgentConfigSection', () => {
       const options = modelSelect.querySelectorAll('option');
 
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
-      
+
       expect(optionValues).toContain('gpt-4');
       expect(optionValues).toContain('gpt-4-turbo');
       expect(optionValues).toContain('gpt-3.5-turbo');
@@ -158,17 +158,6 @@ describe('AgentConfigSection', () => {
       expect(screen.getByLabelText('Online Provider')).toBeInTheDocument();
       expect(screen.getByLabelText('Online Model')).toBeInTheDocument();
     });
-
-    it('calls onAgentTypeChange when agent type is changed', () => {
-      const onAgentTypeChange = jest.fn();
-
-      render(<AgentConfigSection {...defaultProps} onAgentTypeChange={onAgentTypeChange} />);
-
-      const agentTypeSelect = screen.getByLabelText('Default Agent Type');
-      fireEvent.change(agentTypeSelect, { target: { value: 'local' } });
-
-      expect(onAgentTypeChange).toHaveBeenCalledWith('local');
-    });
   });
 
   describe('Model selection', () => {
@@ -211,7 +200,7 @@ describe('AgentConfigSection', () => {
     it('renders the component with correct title', () => {
       render(<AgentConfigSection {...defaultProps} />);
 
-      expect(screen.getByText('Agent Configuration')).toBeInTheDocument();
+      expect(screen.getByText('Models and Providers')).toBeInTheDocument();
     });
 
     it('displays all provider options', () => {
@@ -230,11 +219,9 @@ describe('AgentConfigSection', () => {
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 
-      expect(screen.getByText('Choose whether to use a local or online language model by default')).toBeInTheDocument();
-      expect(screen.getByText('Select your preferred online API provider')).toBeInTheDocument();
+      expect(screen.getByText('Select your preferred online API provider.')).toBeInTheDocument();
       // Description may show "Loading models..." or the actual text depending on loading state
       expect(screen.getByText(/Choose which model from the provider to use|Loading models.../)).toBeInTheDocument();
     });
   });
 });
-

@@ -4,9 +4,8 @@
 `make run MLX_BACKEND=1` to run the solution with MLX_BACKEND instead of
 `make empty` to run an empty container to install dependencies
 #package installs
-`docker exec backend /bin/bash` to enter the backend container
-`pip install --only-binary=:all: PACKAGE==VERSION` to install pinned binary dependencies when possible
-When installing packages, `conda env export > linux_environment.yml` after installing to freeze installs.
+`uv add PACKAGE==VERSION` to add pinned dependencies and update `pyproject.toml` and `uv.lock` together.
+The Docker image installs from the same lockfile, so no separate environment export is needed.
 Run a Python dependency audit before committing dependency changes.
 #frontend package installs
 `cd client/geist && npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION`

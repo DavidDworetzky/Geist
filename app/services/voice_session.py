@@ -1,6 +1,7 @@
 """
 Voice session service for handling real-time audio streaming, STT, LLM, and TTS.
 """
+
 import logging
 from collections import deque
 from collections.abc import AsyncIterator
@@ -37,7 +38,7 @@ class VoiceSessionService:
         vad_threshold: float = 0.01,
         silence_duration_ms: int = 800,
         chunk_duration_ms: int = 100,
-        **provider_kwargs
+        **provider_kwargs,
     ):
         """
         Initialize voice session service.
@@ -45,7 +46,7 @@ class VoiceSessionService:
         Args:
             agent: Agent to use for text completion
             stt_provider: STT provider ("mms" or "whisper")
-            tts_provider: TTS provider ("sesame" or "openai")
+            tts_provider: TTS provider ("sesame", "openai", or "qwen3")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
@@ -81,12 +82,12 @@ class VoiceSessionService:
 
     def _calculate_rms(self, audio_chunk: np.ndarray) -> float:
         """Calculate RMS (root mean square) of audio chunk."""
-        return float(np.sqrt(np.mean(audio_chunk ** 2)))
+        return float(np.sqrt(np.mean(audio_chunk**2)))
 
     def _detect_speech(self, audio_chunk: np.ndarray) -> bool:
         """Simple VAD using RMS threshold."""
         rms = self._calculate_rms(audio_chunk)
-        return bool(rms > self.vad_threshold)
+        return rms > self.vad_threshold
 
     def add_audio_chunk(self, audio_chunk: bytes) -> str | None:
         """
@@ -165,7 +166,7 @@ class VoiceSessionService:
         transcript: str,
         chat_id: int | None = None,
         system_prompt: str | None = None,
-        use_streaming: bool = True
+        use_streaming: bool = True,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Process transcript with agent and yield responses.
@@ -192,9 +193,7 @@ class VoiceSessionService:
 
                     full_text = ""
                     for chunk in self.agent.stream_complete_text(
-                        prompt=transcript,
-                        chat_id=chat_id,
-                        system_prompt=system_prompt
+                        prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
                     ):
                         full_text += chunk
                         yield {"type": "text_chunk", "text": chunk}
@@ -215,18 +214,15 @@ class VoiceSessionService:
             if not use_streaming:
                 # Non-streaming path
                 completion = self.agent.complete_text(
-                    prompt=transcript,
-                    chat_id=chat_id,
-                    system_prompt=system_prompt
+                    prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
                 )
 
                 # Extract text from completion
-                if hasattr(completion, 'choices') and completion.choices:
+                if hasattr(completion, "choices") and completion.choices:
                     response_text = completion.choices[0].message.content
-                elif hasattr(completion, 'messages'):
+                elif hasattr(completion, "messages"):
                     response_text = next(
-                        (msg.content for msg in completion.messages if msg.role == 'assistant'),
-                        ""
+                        (msg.content for msg in completion.messages if msg.role == "assistant"), ""
                     )
                 else:
                     response_text = str(completion)
@@ -241,6 +237,16 @@ class VoiceSessionService:
 
                 yield {"type": "audio_complete"}
 
+        except ModuleNotFoundError as e:
+            if e.name == "qwen_tts":
+                message = (
+                    "Qwen3 TTS provider requires the qwen_tts package. "
+                    "Install qwen_tts before selecting tts_provider=qwen3."
+                )
+            else:
+                message = str(e)
+            self.logger.error(f"Agent processing failed: {message}")
+            yield {"type": "error", "message": message}
         except Exception as e:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
@@ -251,4 +257,3 @@ class VoiceSessionService:
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.logger.info("Voice session reset")
-

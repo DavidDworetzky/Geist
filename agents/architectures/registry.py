@@ -1,6 +1,7 @@
 """
 Initialize and register all available runners.
 """
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +20,7 @@ _registry_instance = None
 
 class OnlineModelProviders(Enum):
     """Enum for online model providers."""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GROQ = "groq"
@@ -26,8 +28,10 @@ class OnlineModelProviders(Enum):
     HUGGINGFACE = "huggingface"
     OFFLINE = "offline"
 
+
 class OnlineModelNames(Enum):
     """Enum for online model names."""
+
     # OpenAI models
     GPT4 = "gpt-4"
     GPT4_TURBO = "gpt-4-turbo"
@@ -71,9 +75,11 @@ class OnlineModelNames(Enum):
     QWEN3_1_7B_LOCAL = "Qwen/Qwen3-1.7B"
     QWEN3_0_6B_LOCAL = "Qwen/Qwen3-0.6B"
 
+
 @dataclass
 class OnlineModelConfig:
     """Config for online model."""
+
     provider: OnlineModelProviders
     model: OnlineModelNames
     reasoning: bool = False
@@ -89,6 +95,7 @@ class OnlineModelConfig:
     best_of: int | None = None
     prompt_tokens: int | None = None
     response_format: str | None = None
+
 
 OnlineModelDefaults = [
     OnlineModelConfig(
@@ -106,7 +113,7 @@ OnlineModelDefaults = [
         echo=False,
         best_of=None,
         prompt_tokens=None,
-        response_format=None
+        response_format=None,
     ),
     OnlineModelConfig(
         provider=OnlineModelProviders.ANTHROPIC,
@@ -123,7 +130,7 @@ OnlineModelDefaults = [
         echo=False,
         best_of=None,
         prompt_tokens=None,
-        response_format=None
+        response_format=None,
     ),
     OnlineModelConfig(
         provider=OnlineModelProviders.ANTHROPIC,
@@ -140,7 +147,7 @@ OnlineModelDefaults = [
         echo=False,
         best_of=None,
         prompt_tokens=None,
-        response_format=None
+        response_format=None,
     ),
     OnlineModelConfig(
         provider=OnlineModelProviders.XAI,
@@ -157,8 +164,8 @@ OnlineModelDefaults = [
         echo=False,
         best_of=None,
         prompt_tokens=None,
-        response_format=None
-    )
+        response_format=None,
+    ),
 ]
 
 
@@ -229,6 +236,7 @@ class RunnerRegistry:
         """
         return name in self._registry
 
+
 def get_registry() -> RunnerRegistry:
     """
     Get the global runner registry instance.
@@ -259,7 +267,7 @@ def register_all_runners(registry: RunnerRegistry | None = None) -> None:
     # Register MLX Llama runner
     registry.register("mlx_llama", MLXLlamaRunner)
 
-    # Register vLLM runner (placeholder)
+    # Register vLLM runner (Transformers-based shim shared with Qwen3Runner)
     registry.register("vllm", VLLMRunner)
 
     # Register Qwen 3 runner
@@ -320,19 +328,21 @@ def clear_registry() -> None:
 # Model Registry - Available models with metadata
 # ============================================================================
 
+
 @dataclass
 class ModelInfo:
     """Information about an available model with full metadata."""
-    id: str                              # Model identifier (e.g., "gpt-4")
-    name: str                            # Display name (e.g., "GPT-4")
-    provider: OnlineModelProviders       # Provider enum
-    context_window: int | None = None # Max context tokens
+
+    id: str  # Model identifier (e.g., "gpt-4")
+    name: str  # Display name (e.g., "GPT-4")
+    provider: OnlineModelProviders  # Provider enum
+    context_window: int | None = None  # Max context tokens
     max_output_tokens: int | None = None  # Max output tokens
-    supports_vision: bool = False        # Multimodal support
+    supports_vision: bool = False  # Multimodal support
     supports_function_calling: bool = False
     supports_streaming: bool = True
-    recommended: bool = False            # Highlight recommended models
-    family: str | None = None         # Model family (e.g., "gpt-4", "claude-3")
+    recommended: bool = False  # Highlight recommended models
+    family: str | None = None  # Model family (e.g., "gpt-4", "claude-3")
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -346,7 +356,7 @@ class ModelInfo:
             "supports_function_calling": self.supports_function_calling,
             "supports_streaming": self.supports_streaming,
             "recommended": self.recommended,
-            "family": self.family
+            "family": self.family,
         }
 
 
@@ -362,7 +372,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=False,
-            family="gpt-4"
+            family="gpt-4",
         ),
         ModelInfo(
             id="gpt-4-turbo",
@@ -373,7 +383,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="gpt-4"
+            family="gpt-4",
         ),
         ModelInfo(
             id="gpt-4o",
@@ -384,7 +394,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="gpt-4o"
+            family="gpt-4o",
         ),
         ModelInfo(
             id="gpt-4o-mini",
@@ -395,7 +405,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="gpt-4o"
+            family="gpt-4o",
         ),
         ModelInfo(
             id="gpt-3.5-turbo",
@@ -406,7 +416,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=False,
-            family="gpt-3.5"
+            family="gpt-3.5",
         ),
         ModelInfo(
             id="o1",
@@ -417,7 +427,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="o1"
+            family="o1",
         ),
         ModelInfo(
             id="o1-mini",
@@ -428,7 +438,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="o1"
+            family="o1",
         ),
         ModelInfo(
             id="o3-mini",
@@ -439,7 +449,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="o3"
+            family="o3",
         ),
     ],
     OnlineModelProviders.ANTHROPIC: [
@@ -452,7 +462,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="claude-3"
+            family="claude-3",
         ),
         ModelInfo(
             id="claude-3-sonnet-20240229",
@@ -463,7 +473,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="claude-3"
+            family="claude-3",
         ),
         ModelInfo(
             id="claude-3-haiku-20240307",
@@ -474,7 +484,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="claude-3"
+            family="claude-3",
         ),
         ModelInfo(
             id="claude-3-5-sonnet-20241022",
@@ -485,7 +495,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="claude-3.5"
+            family="claude-3.5",
         ),
         ModelInfo(
             id="claude-3-5-haiku-20241022",
@@ -496,7 +506,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="claude-3.5"
+            family="claude-3.5",
         ),
     ],
     OnlineModelProviders.XAI: [
@@ -509,7 +519,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="grok"
+            family="grok",
         ),
         ModelInfo(
             id="grok-2-vision",
@@ -520,7 +530,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=True,
             supports_function_calling=True,
             recommended=True,
-            family="grok"
+            family="grok",
         ),
         ModelInfo(
             id="grok-3",
@@ -531,7 +541,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="grok"
+            family="grok",
         ),
     ],
     OnlineModelProviders.GROQ: [
@@ -544,7 +554,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="llama-3.1-8b-instant",
@@ -555,7 +565,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="mixtral-8x7b-32768",
@@ -566,7 +576,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=False,
-            family="mixtral"
+            family="mixtral",
         ),
     ],
     OnlineModelProviders.HUGGINGFACE: [
@@ -579,7 +589,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=True,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="Qwen/Qwen2.5-72B-Instruct",
@@ -590,7 +600,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="qwen"
+            family="qwen",
         ),
         ModelInfo(
             id="mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -601,7 +611,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=True,
-            family="mixtral"
+            family="mixtral",
         ),
     ],
     OnlineModelProviders.OFFLINE: [
@@ -614,7 +624,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=True,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="Meta-Llama-3.1-8B",
@@ -625,7 +635,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=False,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="Meta-Llama-3-8B-Instruct",
@@ -636,7 +646,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=False,
-            family="llama-3"
+            family="llama-3",
         ),
         ModelInfo(
             id="Qwen/Qwen3-8B",
@@ -647,7 +657,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="qwen3"
+            family="qwen3",
         ),
         ModelInfo(
             id="Qwen/Qwen3-4B",
@@ -658,7 +668,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=True,
             recommended=True,
-            family="qwen3"
+            family="qwen3",
         ),
         ModelInfo(
             id="Qwen/Qwen3-1.7B",
@@ -669,7 +679,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=False,
-            family="qwen3"
+            family="qwen3",
         ),
         ModelInfo(
             id="Qwen/Qwen3-0.6B",
@@ -680,7 +690,7 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
             supports_vision=False,
             supports_function_calling=False,
             recommended=False,
-            family="qwen3"
+            family="qwen3",
         ),
     ],
 }

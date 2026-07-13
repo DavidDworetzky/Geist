@@ -32,7 +32,7 @@ def find_adapter_classes():
         absolute_module_path = _get_class_module(module_name)
         module = importlib.import_module(absolute_module_path)
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            if issubclass(obj, BaseAdapter) and obj is not BaseAdapter:
+            if issubclass(obj, BaseAdapter) and obj is not BaseAdapter and not inspect.isabstract(obj):
                 class_methods = [method[0] for method in inspect.getmembers(obj, inspect.isfunction)]
                 adapter_classes.append((name, class_methods))
     return adapter_classes

@@ -79,9 +79,9 @@ def _mock_model():
 class TestQwen3RunnerLoadHub:
     """Loading from HuggingFace Hub (no local files)."""
 
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.os.path.exists", return_value=False)
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
     def test_load_from_hub(self, mock_exists, mock_tok_cls, mock_model_cls):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -97,10 +97,10 @@ class TestQwen3RunnerLoadHub:
         assert runner.model is not None
         assert runner.tokenizer is not None
 
-    @patch("agents.architectures.qwen3_runner.login")
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.os.path.exists", return_value=False)
+    @patch("agents.architectures.vllm_runner.login")
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
     def test_hub_login_with_token(self, mock_exists, mock_tok_cls, mock_model_cls, mock_login):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -113,10 +113,10 @@ class TestQwen3RunnerLoadHub:
 
         mock_login.assert_called_once_with(token="hf_test_token")
 
-    @patch("agents.architectures.qwen3_runner.login")
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.os.path.exists", return_value=False)
+    @patch("agents.architectures.vllm_runner.login")
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
     def test_hub_no_login_without_token(self, mock_exists, mock_tok_cls, mock_model_cls, mock_login):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -141,8 +141,8 @@ class TestQwen3RunnerLoadLocal:
             return path in (config_path, hf_index_path)
         return _side
 
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
     def test_load_from_local_pretrained(self, mock_tok_cls, mock_model_cls):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -151,7 +151,7 @@ class TestQwen3RunnerLoadLocal:
 
         weights_dir = "app/model_weights/Qwen_Qwen3-8B"
 
-        with patch("agents.architectures.qwen3_runner.os.path.exists",
+        with patch("agents.architectures.vllm_runner.os.path.exists",
                     side_effect=self._exists_side_effect(weights_dir)):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B")
@@ -165,11 +165,11 @@ class TestQwen3RunnerLoadLocal:
 class TestQwen3RunnerLoadSafetensors:
     """Loading from raw safetensors files (config.json + *.safetensors)."""
 
-    @patch("agents.architectures.qwen3_runner.safetensors.torch.load_file")
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoConfig")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.glob.glob")
+    @patch("agents.architectures.vllm_runner.safetensors.torch.load_file")
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoConfig")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.glob.glob")
     def test_load_from_safetensors(self, mock_glob, mock_tok_cls, mock_config_cls,
                                     mock_model_cls, mock_load_file):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -196,13 +196,13 @@ class TestQwen3RunnerLoadSafetensors:
 
         config_data = {"torch_dtype": "bfloat16", "model_type": "qwen3"}
 
-        with patch("agents.architectures.qwen3_runner.os.path.exists", side_effect=_exists), \
+        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
              patch("builtins.open", create=True) as mock_open:
             mock_open.return_value.__enter__ = lambda s: s
             mock_open.return_value.__exit__ = Mock(return_value=False)
             mock_open.return_value.read = Mock(return_value=json.dumps(config_data))
             # json.load needs a file object
-            with patch("agents.architectures.qwen3_runner.json.load", return_value=config_data):
+            with patch("agents.architectures.vllm_runner.json.load", return_value=config_data):
                 runner = Qwen3Runner()
                 runner.load("Qwen/Qwen3-8B", device_config={"weights_dir": weights_dir})
 
@@ -214,11 +214,11 @@ class TestQwen3RunnerLoadSafetensors:
         assert mock_load_file.call_count == 2
         mock_model.load_state_dict.assert_called_once()
 
-    @patch("agents.architectures.qwen3_runner.safetensors.torch.load_file")
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoConfig")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.glob.glob")
+    @patch("agents.architectures.vllm_runner.safetensors.torch.load_file")
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoConfig")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.glob.glob")
     def test_safetensors_tokenizer_fallback_to_hub(self, mock_glob, mock_tok_cls,
                                                     mock_config_cls, mock_model_cls,
                                                     mock_load_file):
@@ -242,9 +242,9 @@ class TestQwen3RunnerLoadSafetensors:
         mock_file.__enter__ = Mock(return_value=mock_file)
         mock_file.__exit__ = Mock(return_value=False)
 
-        with patch("agents.architectures.qwen3_runner.os.path.exists", side_effect=_exists), \
+        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
              patch("builtins.open", return_value=mock_file), \
-             patch("agents.architectures.qwen3_runner.json.load", return_value={}):
+             patch("agents.architectures.vllm_runner.json.load", return_value={}):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B", device_config={"weights_dir": weights_dir})
 
@@ -258,9 +258,9 @@ class TestQwen3RunnerLoadSafetensors:
 
 class TestQwen3RunnerDevice:
 
-    @patch("agents.architectures.qwen3_runner.AutoModelForCausalLM")
-    @patch("agents.architectures.qwen3_runner.AutoTokenizer")
-    @patch("agents.architectures.qwen3_runner.os.path.exists", return_value=False)
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
     def test_explicit_device_config(self, mock_exists, mock_tok_cls, mock_model_cls):
         import torch
 
@@ -292,7 +292,7 @@ class TestQwen3RunnerInference:
         runner.model_id = "Qwen/Qwen3-8B"
         return runner
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_complete_with_chat_template(self, mock_pipeline_fn):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
@@ -318,7 +318,7 @@ class TestQwen3RunnerInference:
         assert result[1]["role"] == "assistant"
         assert result[1]["content"] == "Hello world!"
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_complete_without_system_prompt(self, mock_pipeline_fn):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
@@ -335,7 +335,7 @@ class TestQwen3RunnerInference:
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_complete_strips_chat_markers(self, mock_pipeline_fn):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
@@ -350,7 +350,7 @@ class TestQwen3RunnerInference:
         result = runner.complete("", "test", config)
         assert result[1]["content"] == "Clean response"
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_generate_delegates_to_complete(self, mock_pipeline_fn):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
@@ -384,7 +384,7 @@ class TestQwen3RunnerInference:
         with pytest.raises(RuntimeError, match="Model not loaded"):
             runner.complete("sys", "usr", config)
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_complete_respects_temperature_zero(self, mock_pipeline_fn):
         """Temperature 0 should set do_sample=False and temperature=None."""
         runner = self._create_loaded_runner()
@@ -410,7 +410,7 @@ class TestQwen3RunnerInference:
 
 class TestQwen3RunnerPipelineCaching:
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_pipeline_created_once(self, mock_pipeline_fn):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -471,7 +471,7 @@ class TestQwen3RunnerCleanup:
 
 class TestQwen3RunnerChatMLFallback:
 
-    @patch("agents.architectures.qwen3_runner.transformers.pipeline")
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_fallback_chatml_format(self, mock_pipeline_fn):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -664,3 +664,25 @@ class TestFactoryCreateFromConfig:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestRunnerConsolidation:
+    """The qwen3 and vllm keys must resolve to the same shared implementation."""
+
+    def test_qwen3_is_a_vllm_runner_subclass(self):
+        from agents.architectures.qwen3_runner import Qwen3Runner
+        from agents.architectures.vllm_runner import VLLMRunner
+
+        assert issubclass(Qwen3Runner, VLLMRunner)
+        # The old module-globals sync hack is gone; patching vllm_runner is
+        # the single source of truth for both runner keys.
+        assert not hasattr(Qwen3Runner, "_sync_shared_symbols")
+
+    def test_both_keys_registered(self):
+        from agents.architectures.qwen3_runner import Qwen3Runner
+        from agents.architectures.registry import ensure_runners_registered, get_runner
+        from agents.architectures.vllm_runner import VLLMRunner
+
+        ensure_runners_registered()
+        assert get_runner("vllm") is VLLMRunner
+        assert get_runner("qwen3") is Qwen3Runner

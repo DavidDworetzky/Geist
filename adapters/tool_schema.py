@@ -9,6 +9,7 @@ grounded prompts for local models).
 import inspect
 import json
 from dataclasses import dataclass, field
+from types import UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from adapters.base_adapter import BaseAdapter
@@ -71,7 +72,7 @@ def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
         return dict(_PRIMITIVE_TYPE_MAP[annotation])
 
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin in (Union, UnionType):
         non_null = [arg for arg in get_args(annotation) if arg is not type(None)]
         if len(non_null) == 1:
             return _annotation_to_schema(non_null[0])
