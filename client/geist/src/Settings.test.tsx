@@ -67,10 +67,12 @@ describe('Settings page', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Settings')).toBeInTheDocument();
-      expect(screen.getByText('Agent Config')).toBeInTheDocument();
-      expect(screen.getByText('Generation')).toBeInTheDocument();
-      expect(screen.getByText('RAG & Files')).toBeInTheDocument();
-      expect(screen.getByText('UI Preferences')).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Models and Providers' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Files and RAG' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Developer' })).toBeInTheDocument();
     });
   });
 
@@ -85,7 +87,7 @@ describe('Settings page', () => {
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
-      expect(screen.getByText('Generation')).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
     });
 
     // go to Generation tab
@@ -113,7 +115,7 @@ describe('Settings page', () => {
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
-      expect(screen.getByText('Generation')).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('Generation'));
@@ -188,12 +190,14 @@ describe('Settings page', () => {
       render(<Settings />);
 
       await waitFor(() => {
-        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
 
       // Switch to online agent type first to see the provider dropdown
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
       fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
       // Change the online provider
       const providerSelect = screen.getByLabelText('Online Provider');
@@ -226,12 +230,14 @@ describe('Settings page', () => {
       render(<Settings />);
 
       await waitFor(() => {
-        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
 
       // Switch to online agent type to see the model dropdown
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
       fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
       // Change the online model
       const modelSelect = screen.getByLabelText('Online Model');
@@ -265,12 +271,14 @@ describe('Settings page', () => {
       render(<Settings />);
 
       await waitFor(() => {
-        expect(screen.getByText('Agent Config')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
 
       // Switch to local agent type
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
       fireEvent.change(agentTypeSelect, { target: { value: 'local' } });
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
       // Change the local model
       const modelSelect = screen.getByLabelText('Local Model');

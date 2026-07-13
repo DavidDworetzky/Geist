@@ -1,6 +1,6 @@
+FROM ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7 AS uv
 FROM python:3.11
 
-ARG TARGETARCH
 ENV GEIST_HOME=/opt/geist
 WORKDIR $GEIST_HOME
 
@@ -23,9 +23,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 # Add cargo to the PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+# Install the pinned uv binary for the active Docker architecture.
+COPY --from=uv /uv /uvx /bin/
 
 # Copy only the files needed to build the Python environment, so source code
 # changes do not invalidate this expensive layer

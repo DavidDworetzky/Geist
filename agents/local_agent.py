@@ -2,57 +2,26 @@
 LocalAgent implementation for running local inference models.
 """
 import logging
-from typing import Optional, Dict, Any
-from agents.base_agent import BaseAgent
+from typing import Any, Dict, Optional
+
 from agents.agent_context import AgentContext
 from agents.architectures import get_runner
 from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
-from agents.models.agent_completion import AgentCompletion
+from agents.base_agent import BaseAgent
 from agents.models.llama_completion import LlamaCompletion
-from agents.tool_calling import (
-    ToolCallError,
-    ToolCompletion,
-    parse_tool_call,
-    run_prompt_tool_call,
-    validate_tool_call,
-)
-from adapters.tool_schema import render_tool_prompt
-import json
-import subprocess
-import os
-import signal
-import psutil
+from agents.tool_calling import ToolCompletion, run_prompt_tool_call
 
 logger = logging.getLogger(__name__)
 
-# Constants for agent prompting
-WORLD_TICK_PROMPT = """You are a world class executive. Your plans are direct, and detailed only if necessary. 
-Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider. 
-Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
-
-TASK_TICK_PROMPT = "You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
-
-FUNCTION_CALL_JSON = """
-{
-    "class" : "class_name",
-    "function": "function_name",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    }
-}
-"""
-
-EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
-
 SYSTEM_PROMPT = "You are an agent looking to complete tasks for individuals. You will be given context about the world, the task and functions you can call. Take the most direct and thorough way of satisfying these constraints."
+
 
 class LocalAgent(BaseAgent):
     """
     Local agent implementation that uses pluggable runners for inference.
     """
-    
+
     def __init__(
         self,
         agent_context: AgentContext,
@@ -63,7 +32,7 @@ class LocalAgent(BaseAgent):
     ):
         """
         Initialize LocalAgent with specified runner.
-        
+
         Args:
             agent_context: Agent context object
             model_id: Model identifier to load
@@ -72,29 +41,28 @@ class LocalAgent(BaseAgent):
             as_subprocess: Whether to run as subprocess
         """
         super().__init__(agent_context, as_subprocess)
-        
-        self.logger = logging.getLogger(__name__)
+
         self.model_id = model_id
         self.runner_type = runner_type
         self.device_config = device_config or {}
         self.runner = None
-        
+
         # Initialize the runner
         self._initialize_runner()
-    
+
     def _initialize_runner(self) -> None:
         """Initialize the specified runner."""
         # Ensure runners are registered before trying to use them
         ensure_runners_registered()
-        
+
         runner_class = get_runner(self.runner_type)
         if not runner_class:
             raise ValueError(f"Unknown runner type: {self.runner_type}")
-        
+
         self.logger.info(f"Initializing {self.runner_type} runner with model: {self.model_id}")
         self.runner = runner_class()
         self.runner.load(self.model_id, self.device_config)
-    
+
     def _create_generation_config(
         self,
         max_tokens: int = None,
@@ -105,12 +73,15 @@ class LocalAgent(BaseAgent):
         stop: str = None
     ) -> GenerationConfig:
         """Create generation config with defaults from agent context."""
+        params = self._resolve_generation_params(
+            max_tokens=max_tokens, temperature=temperature, top_p=top_p,
+            frequency_penalty=frequency_penalty, presence_penalty=presence_penalty)
         return GenerationConfig(
-            max_tokens=max_tokens or self._agent_context.settings.max_tokens or 16,
-            temperature=temperature or self._agent_context.settings.temperature or 1.0,
-            top_p=top_p or self._agent_context.settings.top_p or 1.0,
-            frequency_penalty=frequency_penalty or self._agent_context.settings.frequency_penalty or 0.0,
-            presence_penalty=presence_penalty or self._agent_context.settings.presence_penalty or 0.0,
+            max_tokens=params.max_tokens,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
             stop=stop
         )
 
@@ -134,10 +105,10 @@ class LocalAgent(BaseAgent):
         """Complete text using the local runner."""
         if not self.runner:
             raise RuntimeError("Runner not initialized")
-        
+
         if not system_prompt:
             system_prompt = SYSTEM_PROMPT
-        
+
         # Create generation config
         gen_config = self._create_generation_config(
             max_tokens=max_tokens,
@@ -147,25 +118,25 @@ class LocalAgent(BaseAgent):
             presence_penalty=presence_penalty,
             stop=stop
         )
-        
+
         # Generate completion using runner
         completion_result = self.runner.complete(
             system_prompt=system_prompt,
             user_prompt=prompt,
             generation_config=gen_config
         )
-        
+
         # Convert to LlamaCompletion format for compatibility
         completion = LlamaCompletion.from_dict(completion_result)
-        
+
         # Add to chat history
-        ai_message = next((gen.content for gen in completion.messages if gen.role == 'assistant'), None)
+        ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
             user_message=prompt,
             ai_message=ai_message,
             chat_id=chat_id
         )
-        
+
         completion.chat_id = chat_history.chat_session_id
         return completion
 
@@ -281,141 +252,13 @@ class LocalAgent(BaseAgent):
         """Audio completion not implemented for LocalAgent."""
         self.logger.warning("Audio completion not implemented for LocalAgent")
         raise NotImplementedError("Audio completion not supported for LocalAgent")
-    
+
     def connect_realtime_audio(self):
         """Real-time audio not implemented for LocalAgent."""
         self.logger.warning("Real-time audio not implemented for LocalAgent")
         raise NotImplementedError("Real-time audio not supported for LocalAgent")
-    
-    def initialize(self, task_prompt: str = None):
-        """Initialize the agent with optional task."""
-        if task_prompt:
-            self._agent_context.task_context.append(task_prompt)
 
-        if self.as_subprocess:
-            self.logger.info("Initializing agent with subprocess.")
-            try:
-                process = subprocess.Popen(
-                    ['python3', '-u', 'tick.py'],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                self._agent_context.subprocess_id = process.pid
-            except Exception as e:
-                self.logger.error(f"Failed to start subprocess: {e}")
-                self._agent_context.subprocess_id = None
-        else:
-            self.logger.info("Initializing agent without subprocess.")
-            self._agent_context.subprocess_id = None
-    
-    def phase_out(self):
-        """Phase out the agent and clean up resources."""
-        self.save_state_snapshot(reason="phase_out")
-        self._agent_context._save()
+    def _cleanup_resources(self):
+        """Release the model runner."""
         if self.runner:
             self.runner.cleanup()
-        self.terminate_subprocess()
-
-    def phase_in(self):
-        """Phase in the agent and restore state from the latest snapshot."""
-        self.initialize()
-        self.restore_state_snapshot()
-    
-    def terminate_subprocess(self):
-        """Terminate any running subprocess."""
-        subprocess_id = self._agent_context.subprocess_id
-        if subprocess_id:
-            try:
-                os.kill(subprocess_id, signal.SIGTERM)
-            except ProcessLookupError:
-                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
-            except OSError as e:
-                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
-            finally:
-                self._agent_context.subprocess_id = None
-    
-    def tick(self):
-        """Execute one agent tick and snapshot the resulting state."""
-        self.logger.info("LocalAgent Tick.")
-        if self._agent_context.settings.include_world_processing:
-            self.tick_world()
-        self.tick_tasks()
-        self.tick_execution()
-        self.save_state_snapshot(reason="tick")
-    
-    def tick_world(self):
-        """Advance world state reasoning."""
-        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
-        input_prompt = WORLD_TICK_PROMPT + context_string
-        result = self.complete_text(prompt=input_prompt)
-        split_result = self._transform_completions(result)
-        self._agent_context.world_context = split_result
-        return split_result
-    
-    def tick_tasks(self):
-        """Advance task context reasoning."""
-        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
-        result = self.complete_text(prompt=TASK_TICK_PROMPT + context_string)
-        result = self._transform_completions(result)
-        split_result = result[0].split("\\n") if result else []
-        self._agent_context.task_context = split_result
-        return split_result
-    
-    def tick_execution(self):
-        """Advance execution context reasoning with full tool visibility."""
-        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
-        result = self.complete_text(prompt=EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt())
-        result = self._transform_completions(result)
-        split_result = result[0].split("\\n") if result else []
-        self._agent_context.execution_context = split_result
-        return split_result
-
-    def _tool_visibility_prompt(self) -> str:
-        """Rendered schemas of the available tools, for prompt-based execution."""
-        schemas = self._agent_context.get_tool_schemas()
-        if not schemas:
-            return ""
-        return "\nAVAILABLE_TOOLS (JSON schemas):\n" + render_tool_prompt(schemas)
-    
-    def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
-        """Get aggregated context string."""
-        context_string = ""
-        if world_context:
-            context_string += "WORLD_CONTEXT:" + "\\n".join(self._agent_context.world_context)
-        if task_context:
-            context_string += "TASK_CONTEXT:" + "\\n".join(self._agent_context.task_context)
-        if execution_context:
-            context_string += "EXECUTION_CONTEXT:" + "\\n".join(self._agent_context.execution_context)
-        return context_string
-    
-    def _transform_completions(self, completion):
-        """Transform completion to list of content strings."""
-        try:
-            if hasattr(completion, 'messages'):
-                # LlamaCompletion format
-                return [msg.content for msg in completion.messages if msg.role == 'assistant']
-            elif isinstance(completion, dict) and 'choices' in completion:
-                # GPT-style format
-                return [choice['message']['content'] for choice in completion['choices']]
-            else:
-                # Fallback
-                return [str(completion)]
-        except Exception as e:
-            self.logger.error(f"Failed to transform completion: {completion}, exception: {e}")
-            raise Exception(f"Completion failed to destructure: {completion}")
-    
-    def _is_valid_function_json(self, function_json: str) -> bool:
-        """Validate that text contains a parseable, schema-valid tool call."""
-        try:
-            call = parse_tool_call(function_json)
-            validate_tool_call(call, self._agent_context.get_tool_schemas())
-            return True
-        except ToolCallError:
-            return False
-
-    def _take_json_and_call_function(self, function_json: str):
-        """Parse, validate, and execute a tool call from model output."""
-        result = self._agent_context.get_tool_dispatcher().dispatch_text(function_json)
-        if not result.success:
-            raise Exception(f"Tool call failed: {result.error}")
-        return result.result

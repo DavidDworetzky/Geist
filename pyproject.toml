@@ -192,3 +192,20 @@ indent-style = "space"
 
 # Use `\n` line endings for all files
 line-ending = "lf"
+
+# Bandit security configuration
+[tool.bandit]
+exclude_dirs = [
+    "/tests/",
+    "*/tests/*",
+    "*/test_*.py",
+    ".venv",
+    "venv",
+    "build",
+    "dist"
+]
+
+# Skip specific tests if needed
+# B101: assert_used - often used in tests
+# B601: paramiko_calls - if you use paramiko
+skips = ["B101"]

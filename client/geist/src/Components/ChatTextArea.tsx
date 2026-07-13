@@ -1,35 +1,36 @@
 import React, { forwardRef } from 'react';
 
 export interface ChatPair {
-    user: string;
-    ai: string;
-};
+  user: string;
+  ai: string;
+}
 
 export interface ChatHistory {
-    chatHistory: ChatPair[];
+  chatHistory: ChatPair[];
 }
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatHistory>((props, ref) => {
-    return (
-        <div ref={ref} style={{
-            border: '1px solid #ccc',
-            borderRadius: '4px',
-            padding: '12px',
-            flex: 1,
-            width: '100%',
-            backgroundColor: 'white',
-            overflowY: 'auto',
-            fontFamily: 'inherit',
-            boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.1)'
-        }}>
-            {props.chatHistory.map((element, index) => (
-                <div key={index}>
-                    <p style={{color: 'blue'}}>User: {element.user}</p>
-                    <p style={{color: 'purple'}}>AI: {element.ai}</p>
-                </div>
-            ))}
+  const isEmpty = props.chatHistory.length === 0;
+
+  return (
+    <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
+      {isEmpty && (
+        <div className="chat-empty-state">Start a conversation with Geist.</div>
+      )}
+      {props.chatHistory.map((element, index) => (
+        <div key={index} className="chat-turn">
+          <div className="chat-message chat-message-user">
+            <span className="chat-speaker">User</span>
+            {element.user}
+          </div>
+          <div className="chat-message chat-message-ai">
+            <span className="chat-speaker">Geist</span>
+            {element.ai}
+          </div>
         </div>
-    );
+      ))}
+    </div>
+  );
 });
 
-export default ChatTextArea;;
+export default ChatTextArea;

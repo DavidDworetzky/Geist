@@ -40,20 +40,13 @@ jobs:
         python-version: '3.11'
 
     - name: Install uv
-      run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-    - name: Cache uv environment
-      uses: actions/cache@v4
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       with:
-        path: |
-          ~/.cache/uv
-          .venv
-        key: uv-env-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+        version: "0.9.5"
+        enable-cache: true
 
     - name: Install dependencies
-      run: |
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-        uv sync --frozen --extra postgres
+      run: uv sync --frozen --extra postgres
 
     - name: Initialize database
       env:
@@ -100,12 +93,108 @@ jobs:
     - name: Install dependencies
       run: |
         cd client/geist
-        npm ci
+        npm ci --ignore-scripts --audit=false --fund=false
 
     - name: Run frontend tests
       run: |
         cd client/geist
         npm test -- --watchAll=false --passWithNoTests
+
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        version: "0.9.5"
+        enable-cache: true
+
+    - name: Install security tools
+      run: |
+        python -m pip install --only-binary=:all: \
+          bandit==1.9.4 \
+          safety==3.8.1 \
+          PyYAML==6.0.3
+
+    - name: Run Bandit (Python SAST)
+      run: |
+        bandit -r . -f json -o bandit-report.json -c pyproject.toml || true
+        if [ -f bandit-report.json ]; then
+          echo "📊 Bandit Security Report:"
+          python -m json.tool bandit-report.json || cat bandit-report.json
+          # Report high severity issues but don't fail
+          HIGH_SEVERITY=$(python -c "import json; data=json.load(open('bandit-report.json')); print(len([x for x in data.get('results', []) if x.get('issue_severity') == 'HIGH']))" 2>/dev/null || echo "0")
+          if [ "$HIGH_SEVERITY" -gt "0" ]; then
+            echo "⚠️ Found $HIGH_SEVERITY high severity security issues!"
+          fi
+        fi
+
+    - name: Run Safety (Python Dependency Vulnerability Scan)
+      run: |
+        uv export --frozen --no-dev --all-extras --no-hashes --output-file requirements-check.txt
+
+        safety check --file requirements-check.txt --output json > safety-report.json || true
+        if [ -f safety-report.json ]; then
+          echo "🔒 Safety Vulnerability Report:"
+          cat safety-report.json
+        fi
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: NPM Audit (Frontend Dependencies)
+      run: |
+        cd client/geist
+        npm ci --ignore-scripts --audit=false --fund=false
+        npm audit --json > npm-audit-report.json || true
+        echo "📦 NPM Audit Report:"
+        cat npm-audit-report.json
+        # Report vulnerabilities but don't fail
+        CRITICAL=$(cat npm-audit-report.json | grep -o '"critical":[0-9]*' | cut -d':' -f2 || echo "0")
+        if [ "$CRITICAL" != "0" ] && [ ! -z "$CRITICAL" ]; then
+          echo "⚠️ Found $CRITICAL critical npm vulnerabilities!"
+          npm audit || true
+        fi
+
+    - name: Upload Security Reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+          client/geist/npm-audit-report.json
+
+  container-security:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner on Dockerfiles
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        scan-type: 'config'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
 
   build:
     runs-on: ubuntu-latest
@@ -133,5 +222,16 @@ jobs:
         file: ${{ matrix.dockerfile }}
         tags: geist-${{ matrix.image }}
         push: false
+        load: true
         cache-from: type=gha,scope=${{ matrix.image }}
         cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+    - name: Run Trivy vulnerability scanner on ${{ matrix.image }} image
+      uses: aquasecurity/trivy-action@v0.36.0
+      continue-on-error: true
+      with:
+        scan-type: 'image'
+        image-ref: 'geist-${{ matrix.image }}'
+        format: 'table'
+        exit-code: '0'
+        severity: 'CRITICAL,HIGH'

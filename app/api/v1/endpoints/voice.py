@@ -19,6 +19,7 @@ from app.models.user_settings import AgentConfigRequest
 from app.services.user_settings_service import UserSettingsService
 from app.services.voice_session import VoiceSessionService
 from app.services.agent_context_provider import get_default_agent_context
+from app.services.tts import get_supported_tts_providers
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -59,13 +60,26 @@ async def get_agent_for_session(
     return agent
 
 
-def _build_provider_kwargs(stt_provider: str, tts_provider: str) -> Dict[str, Any]:
+def _build_provider_kwargs(
+    stt_provider: str,
+    tts_provider: str,
+    tts_model: Optional[str] = None,
+    tts_voice: Optional[str] = None,
+    tts_language: Optional[str] = None,
+    tts_instruct: Optional[str] = None,
+    tts_speed: Optional[float] = None,
+) -> Dict[str, Any]:
     """
     Build provider-specific keyword arguments for STT and TTS providers.
 
     Args:
         stt_provider: Selected STT provider name.
         tts_provider: Selected TTS provider name.
+        tts_model: Optional TTS model override.
+        tts_voice: Optional TTS voice override.
+        tts_language: Optional language code override.
+        tts_instruct: Optional style/instruction prompt for capable providers.
+        tts_speed: Optional speech speed multiplier.
 
     Returns:
         Dict[str, Any]: Keyword arguments to pass into `VoiceSessionService`.
@@ -77,9 +91,28 @@ def _build_provider_kwargs(stt_provider: str, tts_provider: str) -> Dict[str, An
 
     if tts_provider == "openai":
         provider_kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
-    # For "sesame" we rely on the TTS factory to determine the device; no local import needed.
+
+    if tts_model:
+        provider_kwargs["model"] = tts_model
+    if tts_voice:
+        provider_kwargs["voice"] = tts_voice
+    if tts_language:
+        provider_kwargs["language"] = tts_language
+    if tts_instruct:
+        provider_kwargs["instruct"] = tts_instruct
+    if tts_speed is not None:
+        provider_kwargs["speed"] = tts_speed
 
     return provider_kwargs
+
+
+@router.get("/models")
+async def list_voice_models():
+    """Return supported voice/TTS providers and model options for frontend selection."""
+    return {
+        "default_provider": "sesame",
+        "providers": get_supported_tts_providers(),
+    }
 
 
 @router.websocket("/stream")
@@ -88,7 +121,12 @@ async def voice_stream_websocket(
     session_id: int = Query(..., description="Chat session ID"),
     agent_type: str = Query("online", description="Agent type (online or local)"),
     stt_provider: str = Query("mms", description="STT provider (mms or whisper)"),
-    tts_provider: str = Query("sesame", description="TTS provider (sesame or openai)")
+    tts_provider: str = Query("sesame", description="TTS provider (sesame, openai, or qwen3)"),
+    tts_model: Optional[str] = Query(None, description="TTS model ID override"),
+    tts_voice: Optional[str] = Query(None, description="TTS voice override"),
+    tts_language: Optional[str] = Query(None, description="TTS language code override"),
+    tts_instruct: Optional[str] = Query(None, description="TTS style/instruction prompt"),
+    tts_speed: Optional[float] = Query(None, description="TTS speed multiplier")
 ):
     """
     WebSocket endpoint for real-time voice streaming.
@@ -106,7 +144,11 @@ async def voice_stream_websocket(
       - {"type": "done"}
       - {"type": "error", "message": "..."}
     """
-    logger.info(f"Voice WebSocket connection attempt: session_id={session_id}, agent_type={agent_type}, stt={stt_provider}, tts={tts_provider}")
+    logger.info(
+        "Voice WebSocket connection attempt: "
+        f"session_id={session_id}, agent_type={agent_type}, stt={stt_provider}, "
+        f"tts={tts_provider}, tts_model={tts_model}, tts_voice={tts_voice}"
+    )
     await websocket.accept()
     logger.info(f"Voice WebSocket accepted: session_id={session_id}, agent_type={agent_type}")
     
@@ -122,7 +164,15 @@ async def voice_stream_websocket(
         )
 
         # Create voice service with provider-specific kwargs
-        provider_kwargs = _build_provider_kwargs(stt_provider=stt_provider, tts_provider=tts_provider)
+        provider_kwargs = _build_provider_kwargs(
+            stt_provider=stt_provider,
+            tts_provider=tts_provider,
+            tts_model=tts_model,
+            tts_voice=tts_voice,
+            tts_language=tts_language,
+            tts_instruct=tts_instruct,
+            tts_speed=tts_speed,
+        )
         voice_service = VoiceSessionService(
             agent=agent,
             stt_provider=stt_provider,
@@ -226,7 +276,12 @@ async def voice_upload(
     session_id: int = Query(...),
     agent_type: str = Query("online"),
     stt_provider: str = Query("mms"),
-    tts_provider: str = Query("sesame")
+    tts_provider: str = Query("sesame"),
+    tts_model: Optional[str] = Query(None),
+    tts_voice: Optional[str] = Query(None),
+    tts_language: Optional[str] = Query(None),
+    tts_instruct: Optional[str] = Query(None),
+    tts_speed: Optional[float] = Query(None)
 ):
     """
     HTTP fallback endpoint for voice interaction.
@@ -239,7 +294,15 @@ async def voice_upload(
         agent = await get_agent_for_session(agent_type, agent_context)
         
         # Setup provider kwargs
-        provider_kwargs = _build_provider_kwargs(stt_provider=stt_provider, tts_provider=tts_provider)
+        provider_kwargs = _build_provider_kwargs(
+            stt_provider=stt_provider,
+            tts_provider=tts_provider,
+            tts_model=tts_model,
+            tts_voice=tts_voice,
+            tts_language=tts_language,
+            tts_instruct=tts_instruct,
+            tts_speed=tts_speed,
+        )
         
         # Create voice service
         voice_service = VoiceSessionService(
@@ -287,4 +350,3 @@ async def voice_upload(
         return {
             "error": str(e)
         }
-
