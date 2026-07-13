@@ -1,12 +1,10 @@
 """Tests for reflection-based tool schema generation."""
-from typing import Dict, List, Optional
 
 import pytest
 
 from adapters.base_adapter import BaseAdapter
 from adapters.markdown_file_adapter import MarkdownFileAdapter
 from adapters.tool_schema import (
-    ToolSchema,
     build_action_schema,
     enumerate_tool_schemas,
     render_tool_prompt,
@@ -20,7 +18,7 @@ class TypedAdapter(BaseAdapter):
         return ["typed_action", "untyped_action"]
 
     def typed_action(self, name: str, count: int, ratio: float, enabled: bool,
-                     tags: List[str], config: Dict[str, str], limit: Optional[int] = None,
+                     tags: list[str], config: dict[str, str], limit: int | None = None,
                      **kwargs) -> str:
         """Do a typed thing.
 

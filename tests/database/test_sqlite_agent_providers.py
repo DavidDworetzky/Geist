@@ -6,8 +6,8 @@ import pytest
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from app.models.database.database import (
-    Base,
     DATABASE_CONFIG,
+    Base,
     Session,
     SessionLocal,
     configure_database,

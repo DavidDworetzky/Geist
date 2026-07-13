@@ -1,21 +1,23 @@
-from typing import List, Union
-from dataclasses import dataclass
 import logging
-from agents.models.llama_completion import LlamaCompletion
-from agents.models.generic_completion import GenericCompletion
 import uuid
+from dataclasses import dataclass
+from typing import Union
+
+from agents.models.generic_completion import GenericCompletion
+from agents.models.llama_completion import LlamaCompletion
+
 
 # Create logger
 logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentCompletion:
-    message: List[str]
+    message: list[str]
     id: str
-    chat_id: int
+    chat_id: int | None
 
     @classmethod
-    def from_completion(cls, completion: Union['LlamaCompletion', 'GenericCompletion']):
+    def from_completion(cls, completion: Union['LlamaCompletion', 'GenericCompletion']) -> 'AgentCompletion':
         if isinstance(completion, GenericCompletion):
             content = completion.get_assistant_content()
             if content is None:

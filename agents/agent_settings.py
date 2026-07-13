@@ -1,6 +1,7 @@
 #import dataclass
 from dataclasses import dataclass
 
+
 @dataclass
 class AgentSettings:
     name: str

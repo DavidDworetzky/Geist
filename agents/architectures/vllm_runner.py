@@ -4,18 +4,23 @@ Unified runner implementation used by vLLM and Qwen3 runner entry points.
 This implementation currently uses HuggingFace Transformers for inference while
 keeping the vLLM runner interface stable.
 """
-from typing import Dict, Any, Optional, List
-import logging
-import os
+
 import glob
 import json
+import logging
+import os
+from typing import Any
+
+import safetensors.torch
 import torch
 import transformers
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from huggingface_hub import login
-import safetensors.torch
-from .base_runner import BaseRunner, GenerationConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
 from agents.models.llama_completion import strings_to_message_dict
+
+from .base_runner import BaseRunner, GenerationConfig
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +31,14 @@ class VLLMRunner(BaseRunner):
     """Runner for vLLM/Qwen3-style model inference via Transformers."""
 
     def __init__(self):
-        self.model = None
-        self.tokenizer = None
-        self._pipeline = None
-        self.model_id = None
-        self.weights_dir = None
-        self.device = None
+        self.model: Any = None
+        self.tokenizer: Any = None
+        self._pipeline: Any = None
+        self.model_id: str | None = None
+        self.weights_dir: str | None = None
+        self.device: Any = None
 
-    def load(self, model_id: str, device_config: Optional[Dict[str, Any]] = None) -> None:
+    def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """Load a model for inference from local files or HuggingFace Hub."""
         logger.warning(
             "The 'vllm' runner is a Transformers-based shim, not a real vLLM engine "
@@ -43,10 +48,12 @@ class VLLMRunner(BaseRunner):
         device_config = device_config or {}
         self.model_id = model_id
 
-        self.weights_dir = device_config.get(
-            "weights_dir",
-            os.path.join("app/model_weights", model_id.replace("/", "_"))
+        weights_dir = device_config.get(
+            "weights_dir", os.path.join("app/model_weights", model_id.replace("/", "_"))
         )
+        if not isinstance(weights_dir, str):
+            raise TypeError("weights_dir must be a string path")
+        self.weights_dir = weights_dir
 
         if "device" in device_config:
             self.device = torch.device(device_config["device"])
@@ -63,14 +70,12 @@ class VLLMRunner(BaseRunner):
         config_path = os.path.join(self.weights_dir, "config.json")
         has_config = os.path.exists(config_path)
         safetensors_files = self._find_safetensors_files(self.weights_dir) if has_config else []
-        has_hf_index = (
-            os.path.exists(os.path.join(self.weights_dir, "model.safetensors.index.json"))
-            or os.path.exists(os.path.join(self.weights_dir, "model.safetensors"))
-        )
-        has_bin = (
-            os.path.exists(os.path.join(self.weights_dir, "pytorch_model.bin"))
-            or os.path.exists(os.path.join(self.weights_dir, "pytorch_model.bin.index.json"))
-        )
+        has_hf_index = os.path.exists(
+            os.path.join(self.weights_dir, "model.safetensors.index.json")
+        ) or os.path.exists(os.path.join(self.weights_dir, "model.safetensors"))
+        has_bin = os.path.exists(
+            os.path.join(self.weights_dir, "pytorch_model.bin")
+        ) or os.path.exists(os.path.join(self.weights_dir, "pytorch_model.bin.index.json"))
 
         if has_config and (has_hf_index or has_bin):
             logger.info(f"Loading model from HF pretrained directory: {self.weights_dir}")
@@ -91,7 +96,7 @@ class VLLMRunner(BaseRunner):
         logger.info(f"Runner loaded for model: {model_id}")
 
     @staticmethod
-    def _find_safetensors_files(directory: str) -> List[str]:
+    def _find_safetensors_files(directory: str) -> list[str]:
         return sorted(glob.glob(os.path.join(directory, "*.safetensors")))
 
     def _load_from_local(self) -> None:
@@ -103,25 +108,28 @@ class VLLMRunner(BaseRunner):
         self.model = self.model.to(self.device)
         logger.info(f"Model loaded from local weights. Parameters: {self.model.num_parameters()}")
 
-    def _load_from_safetensors(self, safetensors_files: List[str]) -> None:
+    def _load_from_safetensors(self, safetensors_files: list[str]) -> None:
+        weights_dir = self.weights_dir
+        if weights_dir is None:
+            raise RuntimeError("Runner weights directory is not configured")
         tokenizer_files = [
-            os.path.join(self.weights_dir, f)
+            os.path.join(weights_dir, f)
             for f in ("tokenizer.json", "tokenizer_config.json", "tokenizer.model")
         ]
         if any(os.path.exists(f) for f in tokenizer_files):
-            self.tokenizer = AutoTokenizer.from_pretrained(self.weights_dir)
+            self.tokenizer = AutoTokenizer.from_pretrained(weights_dir)
         else:
             logger.info("Tokenizer not found locally, loading from hub")
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
 
-        config_path = os.path.join(self.weights_dir, "config.json")
-        with open(config_path, "r") as f:
+        config_path = os.path.join(weights_dir, "config.json")
+        with open(config_path) as f:
             config_json = json.load(f)
 
         torch_dtype_str = str(config_json.get("torch_dtype", "")).lower()
         load_dtype = torch.bfloat16 if "bfloat16" in torch_dtype_str else torch.float16
 
-        config = AutoConfig.from_pretrained(self.weights_dir)
+        config = AutoConfig.from_pretrained(weights_dir)
         self.model = AutoModelForCausalLM.from_config(config)
         self.model = self.model.to(load_dtype)
 
@@ -153,13 +161,15 @@ class VLLMRunner(BaseRunner):
         self.model = self.model.to(self.device)
         logger.info(f"Model loaded from HuggingFace hub. Parameters: {self.model.num_parameters()}")
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> Dict[str, Any]:
+    def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load() first.")
 
         return self.complete("", prompt, generation_config)
 
-    def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig) -> Dict[str, Any]:
+    def complete(
+        self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig
+    ) -> list[dict[str, str]]:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load() first.")
 
@@ -198,12 +208,16 @@ class VLLMRunner(BaseRunner):
             prompt_text,
             max_new_tokens=generation_config.max_tokens,
             do_sample=generation_config.temperature > 0,
-            temperature=generation_config.temperature if generation_config.temperature > 0 else None,
+            temperature=generation_config.temperature
+            if generation_config.temperature > 0
+            else None,
             top_p=generation_config.top_p,
         )
 
         output_text = outputs[0]["generated_text"]
-        response_text = output_text[len(prompt_text):] if output_text.startswith(prompt_text) else output_text
+        response_text = (
+            output_text[len(prompt_text) :] if output_text.startswith(prompt_text) else output_text
+        )
 
         for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]:
             idx = response_text.find(marker)

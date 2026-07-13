@@ -1,11 +1,12 @@
 import datetime
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, func
 
 from app.models.database.database import Base, SessionLocal
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class AgentSnapshot(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     @staticmethod
-    def _loads(serialized: Optional[str]) -> List[Any]:
+    def _loads(serialized: str | None) -> list[Any]:
         if not serialized:
             return []
         try:
@@ -40,7 +41,7 @@ class AgentSnapshot(Base):
             logger.warning("Failed to deserialize snapshot column; returning empty list")
             return []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,
             "agent_identifier": self.agent_identifier,
@@ -56,10 +57,10 @@ class AgentSnapshot(Base):
 
 def create_snapshot(
     agent_identifier: str,
-    world_context: List[Any],
-    task_context: List[Any],
-    execution_context: List[Any],
-    function_log: Optional[List[Any]] = None,
+    world_context: list[Any],
+    task_context: list[Any],
+    execution_context: list[Any],
+    function_log: list[Any] | None = None,
     reason: str = "manual",
 ) -> AgentSnapshot:
     """Persist a new snapshot with the next step number for the agent."""
@@ -85,7 +86,7 @@ def create_snapshot(
         return snapshot
 
 
-def get_snapshots(agent_identifier: str, limit: int = 50) -> List[AgentSnapshot]:
+def get_snapshots(agent_identifier: str, limit: int = 50) -> list[AgentSnapshot]:
     """Return snapshots for an agent, most recent step first."""
     with SessionLocal() as session:
         snapshots = (
@@ -100,12 +101,12 @@ def get_snapshots(agent_identifier: str, limit: int = 50) -> List[AgentSnapshot]
         return snapshots
 
 
-def get_latest_snapshot(agent_identifier: str) -> Optional[AgentSnapshot]:
+def get_latest_snapshot(agent_identifier: str) -> AgentSnapshot | None:
     snapshots = get_snapshots(agent_identifier, limit=1)
     return snapshots[0] if snapshots else None
 
 
-def get_snapshot_by_id(snapshot_id: int) -> Optional[AgentSnapshot]:
+def get_snapshot_by_id(snapshot_id: int) -> AgentSnapshot | None:
     with SessionLocal() as session:
         snapshot = (
             session.query(AgentSnapshot)

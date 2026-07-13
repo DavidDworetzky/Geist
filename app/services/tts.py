@@ -1,14 +1,19 @@
 """
 Text-to-Speech (TTS) service abstraction and implementations.
 """
+
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
 import torchaudio
+
+
+if TYPE_CHECKING:
+    from agents.architectures.sesame.generator import Generator
 
 
 logger = logging.getLogger(__name__)
@@ -181,26 +186,28 @@ class TTSProvider(ABC):
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
         Synthesize speech from text.
-        
+
         Args:
             text: Text to synthesize
             speaker: Speaker ID (if multi-speaker model)
-            
+
         Returns:
             torch.Tensor: Audio tensor (1D, mono)
         """
         pass
 
     @abstractmethod
-    def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
+    def synthesize_streaming(
+        self, text: str, speaker: int = 0, chunk_size_ms: int = 100
+    ) -> Iterator[bytes]:
         """
         Synthesize speech from text in streaming fashion.
-        
+
         Args:
             text: Text to synthesize
             speaker: Speaker ID
             chunk_size_ms: Size of audio chunks in milliseconds
-            
+
         Yields:
             bytes: Audio chunks as PCM bytes
         """
@@ -219,12 +226,12 @@ class SesameTTSProvider(TTSProvider):
     def __init__(self, device: str = "cuda"):
         """
         Initialize Sesame TTS provider.
-        
+
         Args:
             device: Device to run model on ("cuda" or "cpu")
         """
         self.device = device
-        self._generator = None
+        self._generator: Generator | None = None
         self._sample_rate = 24000  # Sesame default
         self.logger = logging.getLogger(__name__)
 
@@ -232,6 +239,7 @@ class SesameTTSProvider(TTSProvider):
         """Lazy initialization of the generator."""
         if self._generator is None:
             from agents.architectures.sesame.generator import load_csm_1b
+
             self.logger.info(f"Initializing Sesame CSM TTS on {self.device}")
             self._generator = load_csm_1b(device=self.device)
             self._sample_rate = self._generator.sample_rate
@@ -239,42 +247,47 @@ class SesameTTSProvider(TTSProvider):
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
         Synthesize speech from text using Sesame CSM.
-        
+
         Args:
             text: Text to synthesize
             speaker: Speaker ID (0 for default)
-            
+
         Returns:
             torch.Tensor: Audio tensor (1D, mono, 24kHz)
         """
         self._ensure_initialized()
+        generator = self._generator
+        if generator is None:
+            raise RuntimeError("Sesame TTS generator failed to initialize")
 
         try:
-            audio = self._generator.generate(
+            audio = generator.generate(
                 text=text,
                 speaker=speaker,
                 context=[],
                 max_audio_length_ms=10000,
                 temperature=0.9,
-                topk=50
+                topk=50,
             )
             return audio
         except Exception as e:
             self.logger.error(f"Sesame TTS synthesis failed: {e}")
             raise
 
-    def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
+    def synthesize_streaming(
+        self, text: str, speaker: int = 0, chunk_size_ms: int = 100
+    ) -> Iterator[bytes]:
         """
         Synthesize speech and yield as audio chunks.
-        
+
         Note: Sesame doesn't support true streaming generation, so we generate the full
         audio and chunk it for streaming playback.
-        
+
         Args:
             text: Text to synthesize
             speaker: Speaker ID
             chunk_size_ms: Size of audio chunks in milliseconds
-            
+
         Yields:
             bytes: PCM audio chunks (16-bit signed integers, mono)
         """
@@ -292,7 +305,7 @@ class SesameTTSProvider(TTSProvider):
 
         # Yield chunks
         for i in range(0, len(audio_int16), chunk_samples):
-            chunk = audio_int16[i:i + chunk_samples]
+            chunk = audio_int16[i : i + chunk_samples]
             yield chunk.tobytes()
 
     @property
@@ -307,7 +320,7 @@ class OpenAITTSProvider(TTSProvider):
     def __init__(self, api_key: str, model: str = "gpt-4o-mini-tts", voice: str = "alloy"):
         """
         Initialize OpenAI TTS provider.
-        
+
         Args:
             api_key: OpenAI API key
             model: TTS model to use
@@ -320,31 +333,29 @@ class OpenAITTSProvider(TTSProvider):
         self.logger = logging.getLogger(__name__)
 
         import httpx
+
         self.client = httpx.Client(timeout=30.0)
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         """
         Synthesize speech using OpenAI TTS API.
-        
+
         Args:
             text: Text to synthesize
             speaker: Ignored for OpenAI (use voice parameter instead)
-            
+
         Returns:
             torch.Tensor: Audio tensor
         """
         import io
 
         url = "https://api.openai.com/v1/audio/speech"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
             "model": self.model,
             "input": text,
             "voice": self.voice,
-            "response_format": "wav"
+            "response_format": "wav",
         }
 
         response = self.client.post(url, json=payload, headers=headers)
@@ -357,17 +368,16 @@ class OpenAITTSProvider(TTSProvider):
         waveform, sample_rate = torchaudio.load(audio_bytes)
 
         # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0)
-        else:
-            waveform = waveform.squeeze(0)
+        waveform = torch.mean(waveform, dim=0) if waveform.shape[0] > 1 else waveform.squeeze(0)
 
-        return waveform
+        return cast(torch.Tensor, waveform)
 
-    def synthesize_streaming(self, text: str, speaker: int = 0, chunk_size_ms: int = 100) -> Iterator[bytes]:
+    def synthesize_streaming(
+        self, text: str, speaker: int = 0, chunk_size_ms: int = 100
+    ) -> Iterator[bytes]:
         """
         Synthesize and stream audio chunks.
-        
+
         Note: OpenAI TTS doesn't support streaming, so we generate and chunk.
         """
         audio_tensor = self.synthesize(text, speaker)
@@ -377,7 +387,7 @@ class OpenAITTSProvider(TTSProvider):
         chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
 
         for i in range(0, len(audio_int16), chunk_samples):
-            chunk = audio_int16[i:i + chunk_samples]
+            chunk = audio_int16[i : i + chunk_samples]
             yield chunk.tobytes()
 
     @property
@@ -519,8 +529,8 @@ class Qwen3TTSProvider(TTSProvider):
             if method is None or not self._has_real_method(engine, method_name):
                 continue
 
-            def _iter_chunks():
-                for chunk in method(**self._build_kwargs(text)):
+            def _iter_chunks(stream_method=method):
+                for chunk in stream_method(**self._build_kwargs(text)):
                     if isinstance(chunk, bytes):
                         yield chunk
                         continue
@@ -554,7 +564,7 @@ class Qwen3TTSProvider(TTSProvider):
         chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
 
         for i in range(0, len(audio_int16), chunk_samples):
-            chunk = audio_int16[i:i + chunk_samples]
+            chunk = audio_int16[i : i + chunk_samples]
             yield chunk.tobytes()
 
     @property
@@ -565,11 +575,11 @@ class Qwen3TTSProvider(TTSProvider):
 def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
     """
     Factory function to create TTS provider.
-    
+
     Args:
         provider_type: Type of provider ("sesame", "openai", or "qwen3")
         **kwargs: Provider-specific arguments
-        
+
     Returns:
         TTSProvider: Initialized TTS provider
     """

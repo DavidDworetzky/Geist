@@ -1,16 +1,14 @@
 from dataclasses import dataclass
-from typing import List, Optional, Dict
-import json
-from copy import deepcopy
+
 
 @dataclass
 class Message:
     role: str
     content: str
-    refusal: Optional[str] = None
+    refusal: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict):
+    def from_dict(cls, data: dict) -> 'Message':
         valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**valid_fields)
 
@@ -18,11 +16,11 @@ class Message:
 class Choice:
     index: int
     message: Message
-    logprobs: Optional[object] = None
-    finish_reason: Optional[str] = None
+    logprobs: object | None = None
+    finish_reason: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict):
+    def from_dict(cls, data: dict) -> 'Choice':
         # If data is already a Choice object, return it
         if isinstance(data, cls):
             return data
@@ -44,7 +42,7 @@ class TokenDetails:
     audio_tokens: int = 0
 
     @classmethod
-    def from_dict(cls, data: Dict):
+    def from_dict(cls, data: dict) -> 'TokenDetails':
         valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**valid_fields)
 
@@ -57,7 +55,7 @@ class Usage:
     completion_tokens_details: TokenDetails
 
     @classmethod
-    def from_dict(cls, data: Dict):
+    def from_dict(cls, data: dict) -> 'Usage':
         # If data is already a Usage object, return it
         if isinstance(data, cls):
             return data
@@ -80,13 +78,13 @@ class GenericCompletion:
     object: str
     created: int
     model: str
-    choices: List[Choice]
+    choices: list[Choice]
     usage: Usage
-    system_fingerprint: Optional[str] = None
-    chat_id: Optional[int] = None
+    system_fingerprint: str | None = None
+    chat_id: int | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict):
+    def from_dict(cls, data: dict) -> 'GenericCompletion':
         # Filter to only valid fields
         valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
 
@@ -94,7 +92,7 @@ class GenericCompletion:
         valid_fields['usage'] = Usage.from_dict(data['usage'])
         return cls(**valid_fields)
 
-    def get_assistant_content(self) -> Optional[str]:
+    def get_assistant_content(self) -> str | None:
         """The first choice's assistant message content, or None if empty."""
         if self.choices:
             return self.choices[0].message.content

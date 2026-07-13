@@ -9,13 +9,6 @@ Covers:
 - Factory auto-detection of Qwen 3 models
 - Factory weights_dir propagation
 """
-import sys
-import os
-import json
-import types
-import pytest
-from unittest.mock import Mock, MagicMock, patch, call
-
 # ---------------------------------------------------------------------------
 # Mock out MLX before any project imports — MLX is Apple-Silicon-only and the
 # agents.architectures package transitively imports it via the llama runner.
@@ -26,6 +19,14 @@ from unittest.mock import Mock, MagicMock, patch, call
 # 3. Attributes accessed at import time (mx.array, nn.Module, etc.) must not crash
 # ---------------------------------------------------------------------------
 import importlib
+import json
+import os
+import sys
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+
+
 _MLX_SUBMODULES = ("mlx", "mlx.core", "mlx.core.random", "mlx.nn", "mlx.utils")
 for _mod_name in _MLX_SUBMODULES:
     if _mod_name not in sys.modules:
@@ -38,7 +39,7 @@ for _mod_name in _MLX_SUBMODULES:
         sys.modules[_mod_name] = _mock
 
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
-from agents.architectures.registry import register_runner, get_runner, clear_registry
+from agents.architectures.registry import clear_registry, get_runner
 from agents.factory import AgentFactory
 
 
@@ -47,7 +48,7 @@ from agents.factory import AgentFactory
 # ---------------------------------------------------------------------------
 
 def _make_generation_config(**overrides):
-    defaults = dict(max_tokens=64, temperature=0.7, top_p=0.9)
+    defaults = {"max_tokens": 64, "temperature": 0.7, "top_p": 0.9}
     defaults.update(overrides)
     return GenerationConfig(**defaults)
 
@@ -261,8 +262,9 @@ class TestQwen3RunnerDevice:
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
     def test_explicit_device_config(self, mock_exists, mock_tok_cls, mock_model_cls):
-        from agents.architectures.qwen3_runner import Qwen3Runner
         import torch
+
+        from agents.architectures.qwen3_runner import Qwen3Runner
 
         mock_tok_cls.from_pretrained.return_value = _mock_tokenizer()
         mock_model_cls.from_pretrained.return_value = _mock_model()

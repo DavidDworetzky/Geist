@@ -1,7 +1,8 @@
-from unittest.mock import patch
-from fastapi.testclient import TestClient
 import copy
-from app.main import agent_cache, AgentType
+from unittest.mock import patch
+
+from app.main import AgentType, agent_cache
+
 
 ASSISTANT_REPLY_1 = "First reply from assistant"
 

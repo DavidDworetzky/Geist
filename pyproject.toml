@@ -82,6 +82,9 @@ environments = [
 # Python version to target
 python_version = "3.11"
 
+# Understand old-style SQLAlchemy Column attributes on ORM models
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
 # Enable warnings for untyped code
 warn_return_any = true
 warn_unused_configs = true
@@ -136,6 +139,25 @@ ignore_errors = true
 module = "scripts.*"
 ignore_errors = true
 
+# RATCHET: old-style SQLAlchemy models predate typed Mapped[] declarations.
+# Remove this override when models migrate to SQLAlchemy 2.0 typed mappings.
+[[tool.mypy.overrides]]
+module = "app.models.database.*"
+ignore_errors = true
+
+# Vendored/adapted third-party model code — typed upstream, kept close to source
+[[tool.mypy.overrides]]
+module = "agents.architectures.moshi.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "agents.architectures.sesame.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "agents.architectures.llama.*"
+ignore_errors = true
+
 [tool.ruff]
 # Target Python 3.11
 target-version = "py311"
@@ -153,6 +175,12 @@ exclude = [
     "dist",
     "migrations",
     "__pycache__",
+    # Vendored/adapted third-party model code — linted upstream, kept close to source
+    "agents/architectures/moshi",
+    "agents/architectures/sesame",
+    "agents/architectures/llama/generation.py",
+    "agents/architectures/llama/tokenizer.py",
+    "agents/architectures/llama/llama_transformers.py",
 ]
 
 [tool.ruff.lint]
@@ -171,6 +199,9 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
 ignore = [
     "E501",  # Line too long (handled by formatter)
     "B008",  # Do not perform function calls in argument defaults (common in FastAPI)
+    "N806",  # Uppercase locals are conventional in ML code (weights W, matrices Q/K/V)
+    "N812",  # Lowercase-imported-as-non-lowercase (torch.nn.functional as F convention)
+    "N999",  # Repository root directory is 'Geist'; module path casing is not fixable here
 ]
 
 # Allow autofix for all enabled rules
@@ -179,6 +210,10 @@ unfixable = []
 
 # Allow unused variables when underscore-prefixed
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]  # Re-exports
+"tests/**" = ["E402"]  # pytest.importorskip before imports is the canonical pattern
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "agents", "adapters", "utils"]

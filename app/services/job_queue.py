@@ -11,6 +11,7 @@ No broker, no new dependencies: SQLite gets a safe single-writer queue, and
 PostgreSQL claiming uses FOR UPDATE SKIP LOCKED so several workers can share
 one queue if ever needed.
 """
+
 import logging
 import os
 import threading
@@ -42,9 +43,11 @@ def register_job_handler(kind: str, handler: JobHandler) -> None:
 
 def job_handler(kind: str) -> Callable[[JobHandler], JobHandler]:
     """Decorator form of register_job_handler."""
+
     def decorator(handler: JobHandler) -> JobHandler:
         register_job_handler(kind, handler)
         return handler
+
     return decorator
 
 
@@ -60,7 +63,9 @@ def enqueue(
     delay_seconds: int = 0,
 ) -> Job:
     """Queue one job for background execution."""
-    return enqueue_job(kind, payload=payload, max_attempts=max_attempts, delay_seconds=delay_seconds)
+    return enqueue_job(
+        kind, payload=payload, max_attempts=max_attempts, delay_seconds=delay_seconds
+    )
 
 
 class JobWorker:
@@ -78,12 +83,17 @@ class JobWorker:
         if job is None:
             return False
 
-        handler = _handlers.get(job.kind)
+        if job.job_id is None or job.kind is None:
+            raise RuntimeError("Claimed job is missing its persisted id or kind")
+        job_id = int(job.job_id)
+        kind = str(job.kind)
+
+        handler = _handlers.get(kind)
         if handler is None:
-            logger.error(f"No handler registered for job kind '{job.kind}' (job_id={job.job_id})")
+            logger.error(f"No handler registered for job kind '{kind}' (job_id={job_id})")
             mark_job_failed(
-                job.job_id,
-                f"No handler registered for kind '{job.kind}'",
+                job_id,
+                f"No handler registered for kind '{kind}'",
                 retry_backoff_seconds=self.retry_backoff_seconds,
             )
             return True
@@ -91,12 +101,12 @@ class JobWorker:
         try:
             result = handler(job.to_dict()["payload"])
         except Exception as e:
-            logger.exception(f"Job {job.job_id} ({job.kind}) failed on attempt {job.attempts}")
-            mark_job_failed(job.job_id, str(e), retry_backoff_seconds=self.retry_backoff_seconds)
+            logger.exception(f"Job {job_id} ({kind}) failed on attempt {job.attempts}")
+            mark_job_failed(job_id, str(e), retry_backoff_seconds=self.retry_backoff_seconds)
             return True
 
-        mark_job_succeeded(job.job_id, result)
-        logger.info(f"Job {job.job_id} ({job.kind}) succeeded on attempt {job.attempts}")
+        mark_job_succeeded(job_id, result)
+        logger.info(f"Job {job_id} ({kind}) succeeded on attempt {job.attempts}")
         return True
 
     def _run_loop(self) -> None:
@@ -136,7 +146,11 @@ def start_worker() -> JobWorker | None:
     GEIST_JOB_POLL_INTERVAL (seconds, default 1.0).
     """
     global _worker
-    enabled = os.getenv("GEIST_JOB_WORKER_ENABLED", "true").strip().lower() not in ("false", "0", "no")
+    enabled = os.getenv("GEIST_JOB_WORKER_ENABLED", "true").strip().lower() not in (
+        "false",
+        "0",
+        "no",
+    )
     if not enabled:
         logger.info("Job worker disabled via GEIST_JOB_WORKER_ENABLED")
         return None
@@ -171,7 +185,7 @@ def _run_tool_call_job(payload: dict[str, Any]) -> Any:
     # Imported here to keep module import light and avoid circular imports.
     from adapters.adapter_registry import init_adapter_class
     from adapters.async_tool import is_async_tool
-    from app.environment import LoadEnvironmentDictionary
+    from app.environment import load_environment_dictionary
 
     adapter_name = payload["adapter"]
     function_name = payload["function"]
@@ -180,7 +194,7 @@ def _run_tool_call_job(payload: dict[str, Any]) -> Any:
     if function_name.startswith("_"):
         raise ValueError(f"Refusing to run non-public adapter action '{function_name}'")
 
-    wrapper = init_adapter_class(adapter_name, LoadEnvironmentDictionary())
+    wrapper = init_adapter_class(adapter_name, load_environment_dictionary())
     if wrapper is None:
         raise ValueError(f"Adapter '{adapter_name}' could not be initialized in the worker")
 
@@ -223,7 +237,9 @@ def _run_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Workflow {workflow_id} not found for user {user_id}")
         session.expunge_all()
 
-    run = WorkflowExecutor().execute_workflow(workflow=workflow, user_id=user_id, input_data=input_data)
+    run = WorkflowExecutor().execute_workflow(
+        workflow=workflow, user_id=user_id, input_data=input_data
+    )
     return {
         "run_id": run.run_id,
         "workflow_id": workflow_id,

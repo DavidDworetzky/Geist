@@ -1,8 +1,8 @@
-import datetime
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, ForeignKey, Integer, JSON, LargeBinary, String
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy import ARRAY, JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
 from app.models.database.database import Base, Session
-from sqlalchemy.dialects.postgresql import insert
+
 
 StringList = JSON().with_variant(ARRAY(String), "postgresql")
 
@@ -47,7 +47,7 @@ class AgentPreset(Base):
         try:
             # Query for existing AgentPreset
             existing_preset = session.query(cls).filter_by(name=name, version=version).first()
-            
+
             # If exists, update
             if existing_preset:
                 existing_preset.description = description

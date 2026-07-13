@@ -6,6 +6,7 @@ that need to patch model-loading internals should patch them on
 agents.architectures.vllm_runner, where the implementation actually resolves
 its symbols.
 """
+
 from .vllm_runner import DEFAULT_QWEN3_MODEL_ID, VLLMRunner
 
 

@@ -48,6 +48,18 @@ jobs:
     - name: Install dependencies
       run: uv sync --frozen --extra postgres
 
+    - name: Lint (ruff)
+      shell: bash -l {0}
+      run: |
+        uv run ruff check .
+
+    - name: Type check (mypy)
+      shell: bash -l {0}
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        uv run mypy .
+
     - name: Initialize database
       env:
         PYTHONPATH: ${{ github.workspace }}

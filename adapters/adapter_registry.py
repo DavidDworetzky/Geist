@@ -38,7 +38,7 @@ def find_adapter_classes():
     return adapter_classes
 
 
-def init_adapter_class(classname: str, args: dict) -> AdapterWrapper:
+def init_adapter_class(classname: str, args: dict) -> AdapterWrapper | None:
     '''
     Dynamically initializes an adapter class by name with the provided kwargs,
     only using the kwargs that are valid for the class's constructor.

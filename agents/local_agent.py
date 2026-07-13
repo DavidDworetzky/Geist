@@ -1,16 +1,18 @@
 """
 LocalAgent implementation for running local inference models.
 """
+
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.architectures import get_runner
-from agents.architectures.base_runner import GenerationConfig
+from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
 from agents.models.llama_completion import LlamaCompletion
 from agents.tool_calling import ToolCompletion, run_prompt_tool_call
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,8 @@ class LocalAgent(BaseAgent):
         agent_context: AgentContext,
         model_id: str,
         runner_type: str = "mlx_llama",
-        device_config: Optional[Dict[str, Any]] = None,
-        as_subprocess: bool = False
+        device_config: dict[str, Any] | None = None,
+        as_subprocess: bool = False,
     ):
         """
         Initialize LocalAgent with specified runner.
@@ -45,7 +47,7 @@ class LocalAgent(BaseAgent):
         self.model_id = model_id
         self.runner_type = runner_type
         self.device_config = device_config or {}
-        self.runner = None
+        self.runner: BaseRunner | None = None
 
         # Initialize the runner
         self._initialize_runner()
@@ -60,47 +62,52 @@ class LocalAgent(BaseAgent):
             raise ValueError(f"Unknown runner type: {self.runner_type}")
 
         self.logger.info(f"Initializing {self.runner_type} runner with model: {self.model_id}")
-        self.runner = runner_class()
-        self.runner.load(self.model_id, self.device_config)
+        runner = runner_class()
+        runner.load(self.model_id, self.device_config)
+        self.runner = runner
 
     def _create_generation_config(
         self,
-        max_tokens: int = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
-        stop: str = None
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
     ) -> GenerationConfig:
         """Create generation config with defaults from agent context."""
         params = self._resolve_generation_params(
-            max_tokens=max_tokens, temperature=temperature, top_p=top_p,
-            frequency_penalty=frequency_penalty, presence_penalty=presence_penalty)
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+        )
         return GenerationConfig(
             max_tokens=params.max_tokens,
             temperature=params.temperature,
             top_p=params.top_p,
             frequency_penalty=params.frequency_penalty,
             presence_penalty=params.presence_penalty,
-            stop=stop
+            stop=stop,
         )
 
     def complete_text(
         self,
         prompt: str,
-        max_tokens: int = None,
-        n: int = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
-        stop: str = None,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: str = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
     ):
         """Complete text using the local runner."""
         if not self.runner:
@@ -116,14 +123,12 @@ class LocalAgent(BaseAgent):
             top_p=top_p,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
-            stop=stop
+            stop=stop,
         )
 
         # Generate completion using runner
         completion_result = self.runner.complete(
-            system_prompt=system_prompt,
-            user_prompt=prompt,
-            generation_config=gen_config
+            system_prompt=system_prompt, user_prompt=prompt, generation_config=gen_config
         )
 
         # Convert to LlamaCompletion format for compatibility
@@ -132,16 +137,19 @@ class LocalAgent(BaseAgent):
         # Add to chat history
         ai_message = completion.get_assistant_content()
         chat_history = self._agent_context._add_to_chat_history(
-            user_message=prompt,
-            ai_message=ai_message,
-            chat_id=chat_id
+            user_message=prompt, ai_message=ai_message, chat_id=chat_id
         )
 
         completion.chat_id = chat_history.chat_session_id
         return completion
 
-    def _complete_raw(self, prompt: str, system_prompt: Optional[str] = None,
-                      max_tokens: int = None, temperature: float = None) -> str:
+    def _complete_raw(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
         """
         Single completion returning plain text, without chat-history side effects.
         Used for tool-call loops so intermediate attempts don't pollute history.
@@ -152,19 +160,19 @@ class LocalAgent(BaseAgent):
         completion_result = self.runner.complete(
             system_prompt=system_prompt or SYSTEM_PROMPT,
             user_prompt=prompt,
-            generation_config=gen_config
+            generation_config=gen_config,
         )
         completion = LlamaCompletion.from_dict(completion_result)
-        return next((msg.content for msg in completion.messages if msg.role == 'assistant'), "")
+        return next((msg.content for msg in completion.messages if msg.role == "assistant"), "")
 
     def complete_with_tools(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        max_tokens: int = None,
-        temperature: float = None,
+        system_prompt: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
         max_tool_iterations: int = 3,
-        chat_id: Optional[int] = None,
+        chat_id: int | None = None,
     ) -> ToolCompletion:
         """
         Tool-augmented completion for local models via schema-grounded prompting.
@@ -200,19 +208,19 @@ class LocalAgent(BaseAgent):
     def stream_complete_text(
         self,
         prompt: str,
-        max_tokens: int = None,
-        n: int = None,
-        stop: Optional[str] = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
+        max_tokens: int | None = None,
+        n: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: Optional[str] = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
     ):
         """Stream text completion - delegates to complete_text for now."""
         return self.complete_text(
@@ -229,25 +237,25 @@ class LocalAgent(BaseAgent):
             prompt_tokens=prompt_tokens,
             response_format=response_format,
             system_prompt=system_prompt,
-            chat_id=chat_id
+            chat_id=chat_id,
         )
 
     def complete_audio(
         self,
         audio_file,
-        max_tokens: int = 16,
-        n: int = 1,
-        stop: Optional[str] = None,
-        temperature: float = 1.0,
-        top_p: float = 1,
-        frequency_penalty: float = 0,
-        presence_penalty: float = 0,
+        max_tokens: int | None = 16,
+        n: int | None = 1,
+        temperature: float | None = 1.0,
+        top_p: float | None = 1,
+        frequency_penalty: float | None = 0,
+        presence_penalty: float | None = 0,
+        stop: str | list[str] | None = None,
         echo: bool = False,
-        best_of: Optional[int] = None,
-        prompt_tokens: Optional[int] = None,
+        best_of: int | None = None,
+        prompt_tokens: list[int] | None = None,
         response_format: str = "text",
-        system_prompt: Optional[str] = None,
-        chat_id: Optional[int] = None
+        system_prompt: str | None = None,
+        chat_id: int | None = None,
     ):
         """Audio completion not implemented for LocalAgent."""
         self.logger.warning("Audio completion not implemented for LocalAgent")

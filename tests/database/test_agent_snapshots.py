@@ -16,8 +16,8 @@ from app.models.database.agent_snapshot import (
     prune_snapshots_older_than,
 )
 from app.models.database.database import (
-    Base,
     DATABASE_CONFIG,
+    Base,
     Session,
     configure_database,
 )

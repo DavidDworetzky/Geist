@@ -81,11 +81,7 @@ def _payload_mentions_local_env(payload: dict[str, object]) -> bool:
     if isinstance(command, str) and _command_mentions_local_env(command):
         return True
 
-    for candidate in _candidate_strings(tool_input):
-        if _is_local_env_path(candidate):
-            return True
-
-    return False
+    return any(_is_local_env_path(candidate) for candidate in _candidate_strings(tool_input))
 
 
 def main() -> int:

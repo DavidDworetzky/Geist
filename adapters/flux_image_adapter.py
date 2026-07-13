@@ -8,6 +8,7 @@ IMAGE_GEN_OFFLINE_BACKEND names a module exposing
 generate(prompt) -> list[bytes] (e.g. a FLUX.1-schnell shim), which is
 imported lazily inside the worker.
 """
+
 import importlib
 import logging
 import os
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class FluxImageAdapter(BaseImageGenAdapter):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.backend_module = os.getenv("IMAGE_GEN_OFFLINE_BACKEND")
@@ -49,4 +49,6 @@ class FluxImageAdapter(BaseImageGenAdapter):
         images = backend.generate(prompt)
         if not images:
             raise RuntimeError(f"Offline backend produced no images for prompt: {prompt!r}")
+        if not isinstance(images, list) or not all(isinstance(image, bytes) for image in images):
+            raise TypeError("Offline backend must return list[bytes]")
         return images

@@ -1,29 +1,32 @@
 """
 Agent factory for instantiating LocalAgent and OnlineAgent instances.
 """
-from typing import Dict, Any, Optional, Union
 import logging
+from typing import Any
+
 from agents.agent_context import AgentContext
+from agents.base_agent import BaseAgent
+
 
 logger = logging.getLogger(__name__)
 
 class AgentFactory:
     """Factory class for creating agent instances."""
-    
+
     @staticmethod
     def create_agent(
         agent_type: str,
         agent_context: AgentContext,
-        model: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
-        runner_type: Optional[str] = None,
+        model: str | None = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        runner_type: str | None = None,
         as_subprocess: bool = False,
         **kwargs
-    ):
+    ) -> BaseAgent:
         """
         Create an agent instance based on the specified type and configuration.
-        
+
         Args:
             agent_type: Type of agent to create ('local' or 'online')
             agent_context: Agent context object
@@ -33,12 +36,12 @@ class AgentFactory:
             runner_type: Type of runner for local agents
             as_subprocess: Whether to run as subprocess
             **kwargs: Additional arguments for agent initialization
-            
+
         Returns:
             Agent instance
         """
         agent_type = agent_type.lower()
-        
+
         if agent_type == "local":
             return AgentFactory._create_local_agent(
                 agent_context=agent_context,
@@ -58,7 +61,7 @@ class AgentFactory:
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}. Must be 'local' or 'online'")
-    
+
     # Model ID prefixes that should use the qwen3 runner
     _QWEN3_PREFIXES = ("qwen/qwen3", "qwen3")
 
@@ -81,11 +84,11 @@ class AgentFactory:
     @staticmethod
     def _create_local_agent(
         agent_context: AgentContext,
-        model: Optional[str] = None,
-        runner_type: Optional[str] = None,
+        model: str | None = None,
+        runner_type: str | None = None,
         as_subprocess: bool = False,
         **kwargs
-    ):
+    ) -> BaseAgent:
         """
         Create a LocalAgent instance.
 
@@ -123,26 +126,26 @@ class AgentFactory:
         except ImportError as e:
             logger.error(f"Failed to import LocalAgent: {e}")
             raise
-    
+
     @staticmethod
     def _create_online_agent(
         agent_context: AgentContext,
-        model: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
+        model: str | None = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
         as_subprocess: bool = False,
         **kwargs
-    ):
+    ) -> BaseAgent:
         """Create an OnlineAgent instance."""
         try:
             from agents.online_agent import OnlineAgent
-            
+
             # Default values
             if not endpoint:
                 endpoint = "https://api.openai.com/v1/chat/completions"
             if not model:
                 model = "gpt-4"
-            
+
             logger.info(f"Creating OnlineAgent with endpoint: {endpoint}, model: {model}")
             return OnlineAgent(
                 agent_context=agent_context,
@@ -155,16 +158,16 @@ class AgentFactory:
         except ImportError as e:
             logger.error(f"Failed to import OnlineAgent: {e}")
             raise
-    
+
     @staticmethod
-    def create_from_config(config: Dict[str, Any], agent_context: AgentContext):
+    def create_from_config(config: dict[str, Any], agent_context: AgentContext) -> BaseAgent:
         """
         Create an agent instance from a configuration dictionary.
-        
+
         Args:
             config: Configuration dictionary containing agent parameters
             agent_context: Agent context object
-            
+
         Returns:
             Agent instance
         """
@@ -172,7 +175,7 @@ class AgentFactory:
         for field in required_fields:
             if field not in config:
                 raise ValueError(f"Missing required config field: {field}")
-        
+
         return AgentFactory.create_agent(
             agent_type=config["agent_type"],
             agent_context=agent_context,

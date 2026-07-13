@@ -7,8 +7,8 @@ function dispatch) via /agent/initialize_task_and_tick.
 """
 from unittest.mock import patch
 
-from agents.base_agent import WORLD_TICK_PROMPT, TASK_TICK_PROMPT, EXECUTION_TICK_PROMPT
-from app.main import agent_cache, AgentType
+from agents.base_agent import EXECUTION_TICK_PROMPT, TASK_TICK_PROMPT, WORLD_TICK_PROMPT
+from app.main import AgentType, agent_cache
 
 
 HAIKU_COMPLETION = {
@@ -78,13 +78,13 @@ def completions_generator(prompt: str) -> dict:
     function_completion = {
         "choices":
         [
-            {"message": {'content': f"""{{
+            {"message": {'content': """{
     \"class\" : \"LogAdapter\",
     \"function\": \"log\",
-    \"parameters\": {{
+    \"parameters\": {
         \"output\": \"logging a haiku!\"
-    }}
-}}"""}}
+    }
+}"""}}
         ]
     }
     if is_function_prompt_flag:

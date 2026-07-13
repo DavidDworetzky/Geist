@@ -6,11 +6,12 @@ runner (registered in conftest) so no model weights are loaded.
 """
 from unittest.mock import patch
 
-from app.main import agent_cache, AgentType
+from app.main import AgentType, agent_cache
 from tests.agents.test_online_agent_routes import (
     completions_generator,
     expected_world_context,
 )
+
 
 #by convention, if EXISTS is set for a key, existence is checked but not equivalence
 agent_completion = {

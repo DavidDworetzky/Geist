@@ -8,11 +8,12 @@ grounded prompts for local models).
 """
 import inspect
 import json
-import typing
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union, get_args, get_origin, get_type_hints
+from types import UnionType
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from adapters.base_adapter import BaseAdapter
+
 
 _PRIMITIVE_TYPE_MAP = {
     str: {"type": "string"},
@@ -36,13 +37,13 @@ class ToolSchema:
     adapter: str
     action: str
     description: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     @property
     def qualified_name(self) -> str:
         return f"{self.adapter}{QUALIFIED_NAME_SEPARATOR}{self.action}"
 
-    def to_openai_tool(self) -> Dict[str, Any]:
+    def to_openai_tool(self) -> dict[str, Any]:
         """Render as an OpenAI-compatible `tools` array entry."""
         return {
             "type": "function",
@@ -53,7 +54,7 @@ class ToolSchema:
             },
         }
 
-    def to_prompt_dict(self) -> Dict[str, Any]:
+    def to_prompt_dict(self) -> dict[str, Any]:
         """Render in the class/function shape used by prompt-based tool calling."""
         return {
             "class": self.adapter,
@@ -63,7 +64,7 @@ class ToolSchema:
         }
 
 
-def _annotation_to_schema(annotation: Any) -> Dict[str, Any]:
+def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
     """Map a Python type annotation to a JSON schema fragment."""
     if annotation is inspect.Parameter.empty or annotation is Any:
         return {}
@@ -71,7 +72,7 @@ def _annotation_to_schema(annotation: Any) -> Dict[str, Any]:
         return dict(_PRIMITIVE_TYPE_MAP[annotation])
 
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin in (Union, UnionType):
         non_null = [arg for arg in get_args(annotation) if arg is not type(None)]
         if len(non_null) == 1:
             return _annotation_to_schema(non_null[0])
@@ -80,7 +81,7 @@ def _annotation_to_schema(annotation: Any) -> Dict[str, Any]:
         return {"anyOf": fragments} if fragments else {}
     if origin in (list, tuple, set, frozenset):
         args = get_args(annotation)
-        schema: Dict[str, Any] = {"type": "array"}
+        schema: dict[str, Any] = {"type": "array"}
         if args:
             items = _annotation_to_schema(args[0])
             if items:
@@ -117,8 +118,8 @@ def build_action_schema(adapter_cls: type, action_name: str) -> ToolSchema:
         hints = getattr(method, "__annotations__", {}) or {}
 
     signature = inspect.signature(method)
-    properties: Dict[str, Any] = {}
-    required: List[str] = []
+    properties: dict[str, Any] = {}
+    required: list[str] = []
     for name, parameter in signature.parameters.items():
         if name == "self":
             continue
@@ -129,7 +130,7 @@ def build_action_schema(adapter_cls: type, action_name: str) -> ToolSchema:
         if parameter.default is inspect.Parameter.empty:
             required.append(name)
 
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": properties,
         "additionalProperties": False,
@@ -145,7 +146,7 @@ def build_action_schema(adapter_cls: type, action_name: str) -> ToolSchema:
     )
 
 
-def _visible_actions(adapter: Union[BaseAdapter, type]) -> List[str]:
+def _visible_actions(adapter: BaseAdapter | type) -> list[str]:
     """
     Determine which actions an adapter exposes.
 
@@ -168,7 +169,7 @@ def _visible_actions(adapter: Union[BaseAdapter, type]) -> List[str]:
     ]
 
 
-def enumerate_tool_schemas(adapter: Union[BaseAdapter, type]) -> List[ToolSchema]:
+def enumerate_tool_schemas(adapter: BaseAdapter | type) -> list[ToolSchema]:
     """Build ToolSchemas for every visible action of an adapter instance or class."""
     adapter_cls = adapter if inspect.isclass(adapter) else type(adapter)
     schemas = []
@@ -181,6 +182,6 @@ def enumerate_tool_schemas(adapter: Union[BaseAdapter, type]) -> List[ToolSchema
     return schemas
 
 
-def render_tool_prompt(schemas: List[ToolSchema]) -> str:
+def render_tool_prompt(schemas: list[ToolSchema]) -> str:
     """Render tool schemas as a compact JSON listing for prompt-based tool calling."""
     return "\n".join(json.dumps(schema.to_prompt_dict(), separators=(", ", ": ")) for schema in schemas)

@@ -17,15 +17,15 @@ Usage:
     python scripts/sync_models.py --provider openai --verbose
 """
 
-import os
-import sys
 import argparse
 import json
 import logging
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
+import os
+import sys
+from dataclasses import asdict, dataclass
 
 from dotenv import load_dotenv
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,13 +33,15 @@ load_dotenv()
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import requests
-from scripts.model_filter_config import (
-    should_include_model,
-    get_model_metadata,
-    generate_display_name,
+import requests  # noqa: E402
+
+from scripts.model_filter_config import (  # noqa: E402
     HUGGINGFACE_MODELS,
+    generate_display_name,
+    get_model_metadata,
+    should_include_model,
 )
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -54,16 +56,16 @@ class DiscoveredModel:
     id: str
     name: str
     provider: str
-    context_window: Optional[int] = None
-    max_output_tokens: Optional[int] = None
+    context_window: int | None = None
+    max_output_tokens: int | None = None
     supports_vision: bool = False
     supports_function_calling: bool = False
     supports_streaming: bool = True
     recommended: bool = False
-    family: Optional[str] = None
+    family: str | None = None
 
 
-def fetch_openai_models(api_key: str) -> List[DiscoveredModel]:
+def fetch_openai_models(api_key: str) -> list[DiscoveredModel]:
     """
     Fetch available models from OpenAI API.
 
@@ -114,7 +116,7 @@ def fetch_openai_models(api_key: str) -> List[DiscoveredModel]:
         return []
 
 
-def fetch_anthropic_models(api_key: str) -> List[DiscoveredModel]:
+def fetch_anthropic_models(api_key: str) -> list[DiscoveredModel]:
     """
     Fetch available models from Anthropic API.
 
@@ -167,7 +169,7 @@ def fetch_anthropic_models(api_key: str) -> List[DiscoveredModel]:
         return []
 
 
-def fetch_huggingface_models(api_key: Optional[str] = None) -> List[DiscoveredModel]:
+def fetch_huggingface_models(api_key: str | None = None) -> list[DiscoveredModel]:
     """
     Fetch recommended models from HuggingFace.
 
@@ -192,7 +194,7 @@ def fetch_huggingface_models(api_key: Optional[str] = None) -> List[DiscoveredMo
             )
 
             if response.status_code == 200:
-                data = response.json()
+                response.json()
 
                 # Generate display name
                 name_parts = model_id.split("/")
@@ -220,7 +222,7 @@ def fetch_huggingface_models(api_key: Optional[str] = None) -> List[DiscoveredMo
     return models
 
 
-def generate_model_registry_code(models_by_provider: Dict[str, List[DiscoveredModel]]) -> str:
+def generate_model_registry_code(models_by_provider: dict[str, list[DiscoveredModel]]) -> str:
     """
     Generate Python code for DISCOVERED_MODELS.
 
@@ -253,7 +255,7 @@ def generate_model_registry_code(models_by_provider: Dict[str, List[DiscoveredMo
         lines.append(f"    {provider_enum}: [")
 
         for model in models:
-            lines.append(f"        ModelInfo(")
+            lines.append("        ModelInfo(")
             lines.append(f'            id="{model.id}",')
             lines.append(f'            name="{model.name}",')
             lines.append(f"            provider={provider_enum},")
@@ -267,7 +269,7 @@ def generate_model_registry_code(models_by_provider: Dict[str, List[DiscoveredMo
             lines.append(f"            recommended={model.recommended},")
             if model.family:
                 lines.append(f'            family="{model.family}",')
-            lines.append(f"        ),")
+            lines.append("        ),")
 
         lines.append("    ],")
 
@@ -277,7 +279,7 @@ def generate_model_registry_code(models_by_provider: Dict[str, List[DiscoveredMo
     return "\n".join(lines)
 
 
-def update_backend_registry(models_by_provider: Dict[str, List[DiscoveredModel]], dry_run: bool = False) -> None:
+def update_backend_registry(models_by_provider: dict[str, list[DiscoveredModel]], dry_run: bool = False) -> None:
     """
     Update agents/architectures/registry.py with discovered models.
 
@@ -299,7 +301,7 @@ def update_backend_registry(models_by_provider: Dict[str, List[DiscoveredModel]]
         return
 
     # Read existing file
-    with open(registry_path, "r") as f:
+    with open(registry_path) as f:
         content = f.read()
 
     # Find and replace DISCOVERED_MODELS section
@@ -318,7 +320,7 @@ def update_backend_registry(models_by_provider: Dict[str, List[DiscoveredModel]]
         logger.warning("Could not find DISCOVERED_MODELS section to update")
 
 
-def print_model_summary(models_by_provider: Dict[str, List[DiscoveredModel]], verbose: bool = False) -> None:
+def print_model_summary(models_by_provider: dict[str, list[DiscoveredModel]], verbose: bool = False) -> None:
     """
     Print a summary of discovered models.
 
@@ -340,15 +342,15 @@ def print_model_summary(models_by_provider: Dict[str, List[DiscoveredModel]], ve
                 if model.context_window:
                     print(f"    Context: {model.context_window:,}")
                 if model.supports_vision:
-                    print(f"    Vision: Yes")
+                    print("    Vision: Yes")
                 if model.recommended:
-                    print(f"    Recommended: Yes")
+                    print("    Recommended: Yes")
             print()
 
     print(f"\nTotal: {total} models\n")
 
 
-def check_missing_api_keys(provider: str = "all") -> List[str]:
+def check_missing_api_keys(provider: str = "all") -> list[str]:
     """
     Check for missing API keys for online providers.
 
@@ -378,7 +380,7 @@ def check_missing_api_keys(provider: str = "all") -> List[str]:
     return missing_keys
 
 
-def print_missing_keys_warning(missing_keys: List[str]) -> None:
+def print_missing_keys_warning(missing_keys: list[str]) -> None:
     """
     Print a prominent warning about missing API keys.
 
@@ -460,7 +462,7 @@ def main():
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     huggingface_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
 
-    models_by_provider: Dict[str, List[DiscoveredModel]] = {}
+    models_by_provider: dict[str, list[DiscoveredModel]] = {}
 
     # Fetch models based on provider selection
     if args.provider in ["openai", "all"]:
