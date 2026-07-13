@@ -44,7 +44,10 @@ ENV VIRTUAL_ENV="/opt/venv"
 # Copy the rest of the source tree
 COPY . .
 
-RUN chmod +x *.sh
+RUN chmod +x *.sh && \
+    groupadd --system geist && \
+    useradd --system --gid geist --home-dir /opt/geist --no-create-home geist && \
+    chown -R geist:geist /opt/geist /opt/venv
 
 VOLUME /rest
 
@@ -52,4 +55,8 @@ EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl --fail --silent http://localhost:5001/docs >/dev/null || exit 1
+
+USER geist
 ENTRYPOINT ["./entrypoint.sh"]
