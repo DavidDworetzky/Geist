@@ -36,25 +36,26 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN which conda && conda --version
-RUN conda init bash
-
-# Copy both environment files so the install script can choose the right one
-COPY linux_environment*.yml ./
-COPY . .
-
-RUN chmod +x *.sh
-
-VOLUME /rest
 
 # Set up conda environment activation
 RUN conda init bash && \
     echo "conda activate geist-linux-docker" >> ~/.bashrc
 SHELL ["/bin/bash", "--login", "-c"]
 
+# Copy only the files needed to build the conda environment, so source code
+# changes do not invalidate this expensive layer
+COPY linux_environment*.yml conda-install.sh ./
+RUN chmod +x conda-install.sh && ./conda-install.sh
+
+# Copy the rest of the source tree
+COPY . .
+
+RUN chmod +x *.sh
+
+VOLUME /rest
+
 EXPOSE 5000
 EXPOSE 5678
 EXPOSE 8000
-
-RUN ./conda-install.sh
 
 ENTRYPOINT ["./entrypoint.sh"]

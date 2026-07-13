@@ -1,22 +1,4 @@
-version: "3"
-
 services:
-
-  db:
-    image: postgres:14.9
-    restart: always
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_DB=geist
-      - POSTGRES_USER=geist
-      - POSTGRES_PASSWORD=geist
-      - CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
-    networks:
-      - test_net
-
   frontend:
     build:
       context: .
@@ -35,6 +17,3 @@ services:
 
 networks:
   test_net:
-
-volumes:
-  postgres_data:

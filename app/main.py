@@ -24,6 +24,8 @@ from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.jobs import router as jobs_router
+from app.services.job_queue import start_worker, stop_worker
 from agents.local_agent import LocalAgent
 from app.services.user_settings_service import UserSettingsService
 from app.models.user_settings import AgentFactoryConfig
@@ -246,6 +248,15 @@ def create_app():
     app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
+    app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
+
+    @app.on_event("startup")
+    def start_job_worker():
+        start_worker()
+
+    @app.on_event("shutdown")
+    def stop_job_worker():
+        stop_worker()
 
     @app.get('/')
     def version():

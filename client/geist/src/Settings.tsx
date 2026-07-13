@@ -5,12 +5,18 @@ import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
+import SettingsSelect from './Components/SettingsSelect';
 
-type Tab = 'agent' | 'generation' | 'rag' | 'providers' | 'ui';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer';
+
+const agentTypeOptions = [
+  { value: 'local', label: 'Local Model' },
+  { value: 'online', label: 'Online Model' }
+];
 
 const Settings: React.FC = () => {
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
-  const [activeTab, setActiveTab] = useState<Tab>('agent');
+  const [activeTab, setActiveTab] = useState<Tab>('general');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -57,8 +63,8 @@ const Settings: React.FC = () => {
       await updateSettings(updates);
       setHasUnsavedChanges(false);
       setSaveStatus('success');
-      setStatusMessage('Settings saved successfully!');
-      
+      setStatusMessage('Settings saved successfully.');
+
       setTimeout(() => {
         setSaveStatus('idle');
         setStatusMessage('');
@@ -89,8 +95,8 @@ const Settings: React.FC = () => {
       await resetSettings();
       setHasUnsavedChanges(false);
       setSaveStatus('success');
-      setStatusMessage('Settings reset to defaults successfully!');
-      
+      setStatusMessage('Settings reset to defaults successfully.');
+
       setTimeout(() => {
         setSaveStatus('idle');
         setStatusMessage('');
@@ -102,49 +108,27 @@ const Settings: React.FC = () => {
   };
 
   const tabs = [
-    { id: 'agent' as Tab, label: 'Agent Config', icon: '🤖' },
-    { id: 'generation' as Tab, label: 'Generation', icon: '⚙️' },
-    { id: 'rag' as Tab, label: 'RAG & Files', icon: '📁' },
-    { id: 'ui' as Tab, label: 'UI Preferences', icon: '🎨' }
+    { id: 'general' as Tab, label: 'General' },
+    { id: 'models' as Tab, label: 'Models and Providers' },
+    { id: 'generation' as Tab, label: 'Generation' },
+    { id: 'rag' as Tab, label: 'Files and RAG' },
+    { id: 'ui' as Tab, label: 'Appearance' },
+    { id: 'developer' as Tab, label: 'Developer' }
   ];
 
   if (loading && !localSettings) {
     return (
-      <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', textAlign: 'center' }}>
-        <h1 style={{ marginBottom: '20px', color: '#333' }}>Settings</h1>
-        <div style={{ padding: '60px', color: '#6c757d', fontSize: '18px' }}>
-          Loading settings...
-        </div>
+      <div className="settings-page page-surface page-surface-centered">
+        <div className="empty-state">Loading settings...</div>
       </div>
     );
   }
 
   if (error && !localSettings) {
     return (
-      <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-        <h1 style={{ marginBottom: '20px', color: '#333' }}>Settings</h1>
-        <div style={{
-          padding: '20px',
-          backgroundColor: '#f8d7da',
-          color: '#721c24',
-          border: '1px solid #f5c6cb',
-          borderRadius: '5px'
-        }}>
-          Error loading settings: {error}
-        </div>
-        <button
-          onClick={() => refetch()}
-          style={{
-            marginTop: '15px',
-            padding: '10px 20px',
-            backgroundColor: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
-        >
+      <div className="settings-page page-surface">
+        <div className="notice notice-error">Error loading settings: {error}</div>
+        <button className="button" onClick={() => refetch()}>
           Retry
         </button>
       </div>
@@ -156,114 +140,76 @@ const Settings: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '30px' 
-      }}>
-        <h1 style={{ margin: '0', color: '#333' }}>Settings</h1>
-        {hasUnsavedChanges && (
-          <span style={{
-            padding: '6px 12px',
-            backgroundColor: '#ffc107',
-            color: '#000',
-            borderRadius: '4px',
-            fontSize: '12px',
-            fontWeight: 'bold'
-          }}>
-            Unsaved Changes
-          </span>
-        )}
-      </div>
+    <div className="settings-page page-surface">
+      <header className="settings-header">
+        <div>
+          <p className="section-eyebrow">Workspace</p>
+          <h1>Settings</h1>
+        </div>
+        {hasUnsavedChanges && <span className="unsaved-pill">Unsaved Changes</span>}
+      </header>
 
       {statusMessage && (
-        <div style={{
-          padding: '12px',
-          marginBottom: '20px',
-          backgroundColor: saveStatus === 'success' ? '#d4edda' : '#f8d7da',
-          color: saveStatus === 'success' ? '#155724' : '#721c24',
-          border: `1px solid ${saveStatus === 'success' ? '#c3e6cb' : '#f5c6cb'}`,
-          borderRadius: '5px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
+        <div className={`notice ${saveStatus === 'success' ? 'notice-success' : 'notice-error'} settings-status-message`}>
           <span>{statusMessage}</span>
-          <button
-            onClick={() => setStatusMessage('')}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '18px',
-              cursor: 'pointer',
-              padding: '0 5px',
-              color: saveStatus === 'success' ? '#155724' : '#721c24'
-            }}
-          >
-            ×
+          <button className="icon-action" type="button" onClick={() => setStatusMessage('')} aria-label="Dismiss status">
+            X
           </button>
         </div>
       )}
 
-      <div className="settings-tabs" style={{
-        display: 'flex',
-        gap: '5px',
-        marginBottom: '25px',
-        borderBottom: '2px solid #ddd',
-        overflowX: 'auto'
-      }}>
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            type="button"
             onClick={() => setActiveTab(tab.id)}
             className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-            style={{
-              padding: '12px 20px',
-              backgroundColor: activeTab === tab.id ? '#007bff' : 'transparent',
-              color: activeTab === tab.id ? 'white' : '#333',
-              border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid #007bff' : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: activeTab === tab.id ? 'bold' : 'normal',
-              transition: 'all 0.2s',
-              borderRadius: '5px 5px 0 0',
-              whiteSpace: 'nowrap'
-            }}
+            role="tab"
+            aria-selected={activeTab === tab.id}
           >
-            <span style={{ marginRight: '8px' }}>{tab.icon}</span>
             {tab.label}
           </button>
         ))}
       </div>
 
-      <div style={{ minHeight: '400px' }}>
-        {activeTab === 'agent' && (
+      <div className="settings-tab-panel">
+        {activeTab === 'general' && (
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <h3>General</h3>
+              <p>Choose the default runtime mode for new conversations.</p>
+            </header>
+            <SettingsSelect
+              label="Default Agent Type"
+              value={localSettings.default_agent_type}
+              options={agentTypeOptions}
+              onChange={(value) => updateLocalSetting('default_agent_type', value)}
+              description="Choose whether to use a local or online language model by default."
+            />
+          </section>
+        )}
+
+        {activeTab === 'models' && (
           <AgentConfigSection
             agentType={localSettings.default_agent_type}
             localModel={localSettings.default_local_model}
             onlineProvider={localSettings.default_online_provider}
             onlineModel={localSettings.default_online_model}
-            onAgentTypeChange={(value) => updateLocalSetting('default_agent_type', value)}
             onLocalModelChange={(value) => {
               updateLocalSetting('default_local_model', value);
-              // Auto-sync agent_type to local when selecting a local model
               if (localSettings.default_agent_type !== 'local') {
                 updateLocalSetting('default_agent_type', 'local');
               }
             }}
             onOnlineProviderChange={(value) => {
               updateLocalSetting('default_online_provider', value);
-              // Auto-sync agent_type to online when selecting an online provider
               if (localSettings.default_agent_type !== 'online') {
                 updateLocalSetting('default_agent_type', 'online');
               }
             }}
             onOnlineModelChange={(value) => {
               updateLocalSetting('default_online_model', value);
-              // Auto-sync agent_type to online when selecting an online model
               if (localSettings.default_agent_type !== 'online') {
                 updateLocalSetting('default_agent_type', 'online');
               }
@@ -301,73 +247,40 @@ const Settings: React.FC = () => {
             onUiPreferencesChange={(value) => updateLocalSetting('ui_preferences', value)}
           />
         )}
+
+        {activeTab === 'developer' && (
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <h3>Developer</h3>
+              <p>Inspect host branding and runtime integration defaults.</p>
+            </header>
+            <div className="settings-readonly-grid">
+              <div className="settings-readonly-item">
+                <span className="settings-label">Branding Source</span>
+                <span className="settings-description">Host override with neutral fallback</span>
+              </div>
+              <div className="settings-readonly-item">
+                <span className="settings-label">Theme Contract</span>
+                <span className="settings-description">Semantic CSS variables</span>
+              </div>
+            </div>
+          </section>
+        )}
       </div>
 
-      <div style={{
-        display: 'flex',
-        gap: '10px',
-        justifyContent: 'flex-end',
-        marginTop: '30px',
-        paddingTop: '20px',
-        borderTop: '2px solid #ddd'
-      }}>
-        <button
-          onClick={handleReset}
-          disabled={saveStatus === 'saving'}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: saveStatus === 'saving' ? 'not-allowed' : 'pointer',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            opacity: saveStatus === 'saving' ? 0.6 : 1
-          }}
-        >
+      <footer className="settings-actions">
+        <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
           Reset to Defaults
         </button>
-        
-        <button
-          onClick={handleCancel}
-          disabled={!hasUnsavedChanges || saveStatus === 'saving'}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#6c757d',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: !hasUnsavedChanges || saveStatus === 'saving' ? 'not-allowed' : 'pointer',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            opacity: !hasUnsavedChanges || saveStatus === 'saving' ? 0.6 : 1
-          }}
-        >
+        <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
           Cancel
         </button>
-        
-        <button
-          onClick={handleSave}
-          disabled={!hasUnsavedChanges || saveStatus === 'saving'}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: !hasUnsavedChanges || saveStatus === 'saving' ? 'not-allowed' : 'pointer',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            opacity: !hasUnsavedChanges || saveStatus === 'saving' ? 0.6 : 1
-          }}
-        >
+        <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
           {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
         </button>
-      </div>
+      </footer>
     </div>
   );
 };
 
 export default Settings;
-

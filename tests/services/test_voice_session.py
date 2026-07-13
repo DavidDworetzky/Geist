@@ -207,6 +207,24 @@ class TestVoiceSessionService:
         error_response = next(r for r in responses if r["type"] == "error")
         assert "Test error" in error_response["message"]
 
+    @pytest.mark.asyncio
+    async def test_missing_qwen_tts_dependency_returns_contract_error(self, voice_service, mock_tts):
+        """Test missing Qwen runtime dependency returns a legible voice contract error."""
+        mock_tts.synthesize_streaming.side_effect = ModuleNotFoundError(
+            "No module named 'qwen_tts'",
+            name="qwen_tts",
+        )
+
+        responses = []
+        async for response in voice_service.process_with_agent(
+            transcript="test",
+            use_streaming=True
+        ):
+            responses.append(response)
+
+        error_response = next(r for r in responses if r["type"] == "error")
+        assert "requires the qwen_tts package" in error_response["message"]
+
 
 class TestVoiceSessionServiceIntegration:
     """Integration tests for voice session workflow."""
@@ -233,4 +251,3 @@ class TestVoiceSessionServiceIntegration:
         # Get final transcript
         transcript = voice_service.get_final_transcript()
         assert transcript == "test transcript"
-
