@@ -2,6 +2,11 @@ FROM ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40e
 FROM python:3.11
 
 ENV GEIST_HOME=/opt/geist
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+# Avoid runtime compiler dependencies in the cross-platform container. Both
+# settings can be overridden explicitly on supported accelerator hosts.
+ENV MLX_DISABLE_COMPILE=1
+ENV NO_TORCH_COMPILE=1
 WORKDIR $GEIST_HOME
 
 # Install system dependencies
@@ -31,9 +36,10 @@ COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock uv-install.sh ./
 RUN chmod +x uv-install.sh && ./uv-install.sh
 
-# Set up PATH to use the uv-managed virtual environment
-ENV PATH="/opt/geist/.venv/bin:${PATH}"
-ENV VIRTUAL_ENV="/opt/geist/.venv"
+# Keep the environment outside /opt/geist because Docker Compose bind-mounts
+# the source tree over that path during development.
+ENV PATH="/opt/venv/bin:${PATH}"
+ENV VIRTUAL_ENV="/opt/venv"
 
 # Copy the rest of the source tree
 COPY . .

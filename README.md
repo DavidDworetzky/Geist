@@ -63,7 +63,7 @@ uv sync --extra postgres   # psycopg2 driver, for GEIST_DATABASE_PROVIDER=postgr
 uv sync --extra voice      # sounddevice/sphn for the voice client tooling
 ```
 
-Note for Linux CPU runs: the `mlx` CPU backend JIT-compiles kernels with the system compiler and can fail on some gcc versions. If local MLX inference aborts, set `MLX_DISABLE_COMPILE=1`. (MLX inference is primarily intended for Apple silicon.)
+Note for Linux CPU runs: MLX and Moshi can JIT-compile kernels with the system compiler and fail on some compiler/architecture combinations. Docker defaults to portable interpreted paths with `MLX_DISABLE_COMPILE=1` and `NO_TORCH_COMPILE=1`; native runs can set the same values when needed. (MLX inference is primarily intended for Apple silicon.)
 
 ## Install PostgreSQL (optional)
 SQLite is the default database provider, including in Docker Compose. To use PostgreSQL instead, install version 16.2, configure its connection values, and set `GEIST_DATABASE_PROVIDER=postgresql`.

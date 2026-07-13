@@ -58,14 +58,20 @@ def check_frontend(errors: list[str]) -> None:
     scripts = package.get("scripts", {})
     for lifecycle in ("preinstall", "install", "postinstall", "prepare"):
         if lifecycle in scripts:
-            fail(f"{package_json.relative_to(ROOT)} must not define lifecycle script {lifecycle!r}", errors)
+            fail(
+                f"{package_json.relative_to(ROOT)} must not define lifecycle script {lifecycle!r}",
+                errors,
+            )
 
     for package_path, metadata in lock.get("packages", {}).items():
         if package_path == "":
             continue
         resolved = metadata.get("resolved", "")
         if resolved.startswith("https://registry.npmjs.org/") and "integrity" not in metadata:
-            fail(f"{package_lock.relative_to(ROOT)} package {package_path} is missing integrity", errors)
+            fail(
+                f"{package_lock.relative_to(ROOT)} package {package_path} is missing integrity",
+                errors,
+            )
 
     dockerfile = FRONTEND / "Dockerfile"
     docker_text = dockerfile.read_text(encoding="utf-8")
