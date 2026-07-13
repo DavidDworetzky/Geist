@@ -33,6 +33,8 @@ repos:
       - id: end-of-file-fixer
       # Remove trailing whitespace
       - id: trailing-whitespace
+      # Normalize mixed line endings
+      - id: mixed-line-ending
 
   # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -65,6 +67,28 @@ repos:
         # Run mypy only on Python files that are tracked by git
         pass_filenames: true
         files: \.py$
+
+  # Python SAST scanning
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ["bandit[toml]"]
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [--format, parsable]
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.13.1-beta
+    hooks:
+      - id: hadolint-docker
+        args: [--ignore, DL3008, --ignore, DL4006]
 
   # Repo-local checks that avoid adding runtime dependencies.
   - repo: local
