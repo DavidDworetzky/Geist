@@ -1,0 +1,380 @@
+/* Geist motion is quiet by design: state first, movement second. */
+
+.brand-lockup,
+.primary-nav-link,
+.nav-icon,
+.button,
+.icon-action,
+.chat-icon-plain,
+.chat-session-edit-button,
+.stage-panel-open-button,
+.chat-search,
+.settings-tab,
+.settings-file-option,
+.file-option-card,
+.file-card,
+.metric-card,
+.provider-panel,
+.model-table-row,
+.capability-pill,
+.status-badge,
+.suggestion-item,
+.react-flow__controls-button,
+.workflow-step-node {
+  transition:
+    color var(--geist-motion-fast) var(--geist-ease-standard),
+    background-color var(--geist-motion-standard) var(--geist-ease-standard),
+    border-color var(--geist-motion-standard) var(--geist-ease-standard),
+    box-shadow var(--geist-motion-standard) var(--geist-ease-standard),
+    opacity var(--geist-motion-fast) var(--geist-ease-standard),
+    transform var(--geist-motion-standard) var(--geist-ease-emphasized);
+}
+
+.button:not(:disabled):hover,
+.icon-action:hover,
+.chat-icon-plain:hover,
+.chat-session-edit-button:hover,
+.stage-panel-open-button:hover {
+  transform: translateY(-1px);
+}
+
+.button:not(:disabled):active,
+.icon-action:active,
+.chat-icon-plain:active,
+.chat-session-edit-button:active,
+.stage-panel-open-button:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.primary-nav-link:hover {
+  transform: translateX(2px);
+}
+
+.primary-nav-link .nav-icon,
+.brand-lockup .brand-mark-svg,
+.brand-lockup .brand-mark-image {
+  transition: transform var(--geist-motion-standard) var(--geist-ease-emphasized);
+}
+
+.primary-nav-link:hover .nav-icon,
+.primary-nav-link.active .nav-icon {
+  transform: scale(1.04);
+}
+
+.brand-lockup:hover .brand-mark-svg,
+.brand-lockup:hover .brand-mark-image {
+  transform: scale(1.035);
+}
+
+.workspace-content > * {
+  animation: geist-page-enter var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.runtime-chip,
+.runtime-model {
+  animation: geist-chip-enter var(--geist-motion-standard) var(--geist-ease-emphasized) both;
+}
+
+.runtime-summary > :nth-child(2) {
+  animation-delay: 30ms;
+}
+
+.runtime-summary > :nth-child(3) {
+  animation-delay: 60ms;
+}
+
+.model-summary-grid > *,
+.provider-stack > *,
+.file-list > *,
+.settings-section,
+.settings-readonly-item,
+.result-item {
+  animation: geist-item-enter var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.model-summary-grid > :nth-child(2),
+.file-list > :nth-child(2),
+.settings-readonly-grid > :nth-child(2) {
+  animation-delay: 35ms;
+}
+
+.model-summary-grid > :nth-child(3),
+.file-list > :nth-child(3) {
+  animation-delay: 70ms;
+}
+
+.file-list > :nth-child(n + 4) {
+  animation-delay: 100ms;
+}
+
+.file-card:hover,
+.metric-card:hover,
+.provider-panel:hover {
+  border-color: var(--geist-color-border-strong);
+  transform: translateY(-1px);
+}
+
+.chat-turn {
+  animation: geist-message-enter var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.chat-empty-state {
+  animation: geist-soft-enter 420ms var(--geist-ease-emphasized) both;
+}
+
+.chat-message {
+  transition:
+    background-color var(--geist-motion-standard) var(--geist-ease-standard),
+    border-color var(--geist-motion-standard) var(--geist-ease-standard),
+    box-shadow var(--geist-motion-standard) var(--geist-ease-standard);
+}
+
+.stage-panel-content {
+  animation: geist-panel-content-enter var(--geist-motion-standard) var(--geist-ease-emphasized) 70ms both;
+}
+
+.stage-panel-compact-controls {
+  animation: geist-compact-controls-enter var(--geist-motion-standard) var(--geist-ease-emphasized) 70ms both;
+}
+
+.suggestion-menu {
+  transform-origin: top center;
+  animation: geist-popover-enter var(--geist-motion-standard) var(--geist-ease-emphasized) both;
+}
+
+.notice,
+.input-banner,
+.unsaved-pill,
+.settings-status-message,
+.file-upload-panel,
+.file-preview-panel {
+  animation: geist-notice-enter var(--geist-motion-standard) var(--geist-ease-emphasized) both;
+}
+
+.modal-backdrop,
+.node-editor-overlay,
+.run-dialog-overlay {
+  animation: geist-backdrop-enter var(--geist-motion-standard) var(--geist-ease-standard) both;
+}
+
+.modal-panel,
+.file-selection-modal,
+.node-editor,
+.run-dialog {
+  transform-origin: center;
+  animation: geist-dialog-enter var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.run-results {
+  animation: geist-results-enter var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.settings-toggle,
+.settings-toggle-thumb,
+.settings-slider::-webkit-slider-thumb,
+.settings-slider::-moz-range-thumb,
+.settings-checkbox,
+.progress-fill {
+  transition:
+    left var(--geist-motion-standard) var(--geist-ease-emphasized),
+    width var(--geist-motion-standard) var(--geist-ease-standard),
+    color var(--geist-motion-fast) var(--geist-ease-standard),
+    background-color var(--geist-motion-standard) var(--geist-ease-standard),
+    border-color var(--geist-motion-standard) var(--geist-ease-standard),
+    box-shadow var(--geist-motion-standard) var(--geist-ease-standard),
+    transform var(--geist-motion-standard) var(--geist-ease-emphasized);
+}
+
+.settings-toggle:hover .settings-toggle-thumb {
+  transform: scale(1.06);
+}
+
+.settings-slider:hover::-webkit-slider-thumb,
+.settings-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+
+.settings-slider:hover::-moz-range-thumb,
+.settings-slider:focus-visible::-moz-range-thumb {
+  transform: scale(1.08);
+}
+
+.file-dropzone,
+.file-upload-status-label {
+  transition:
+    color var(--geist-motion-fast) var(--geist-ease-standard),
+    background-color var(--geist-motion-standard) var(--geist-ease-standard),
+    border-color var(--geist-motion-standard) var(--geist-ease-standard),
+    box-shadow var(--geist-motion-standard) var(--geist-ease-standard),
+    transform var(--geist-motion-standard) var(--geist-ease-emphasized);
+}
+
+.file-dropzone:hover,
+.file-dropzone.drag-active {
+  transform: translateY(-1px);
+}
+
+.file-option-card:hover,
+.settings-file-option:hover {
+  transform: translateX(2px);
+}
+
+.workflow-step-node:hover {
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+.workflow-step-node.selected {
+  animation: geist-selection-settle var(--geist-motion-slow) var(--geist-ease-emphasized) both;
+}
+
+.status.running {
+  animation: geist-status-breathe 1.8s var(--geist-ease-standard) infinite;
+}
+
+@keyframes geist-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes geist-chip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes geist-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes geist-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes geist-soft-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes geist-panel-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes geist-compact-controls-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes geist-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes geist-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes geist-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes geist-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes geist-results-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes geist-selection-settle {
+  0% { box-shadow: var(--geist-shadow-panel); }
+  55% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--workflow-node-accent) 18%, transparent), var(--geist-shadow-panel); }
+  100% { box-shadow: var(--geist-shadow-panel); }
+}
+
+@keyframes geist-status-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.68; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
