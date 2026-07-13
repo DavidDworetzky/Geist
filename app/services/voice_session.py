@@ -43,7 +43,7 @@ class VoiceSessionService:
         Args:
             agent: Agent to use for text completion
             stt_provider: STT provider ("mms" or "whisper")
-            tts_provider: TTS provider ("sesame" or "openai")
+            tts_provider: TTS provider ("sesame", "openai", or "qwen3")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
@@ -238,6 +238,16 @@ class VoiceSessionService:
                 
                 yield {"type": "audio_complete"}
                 
+        except ModuleNotFoundError as e:
+            if e.name == "qwen_tts":
+                message = (
+                    "Qwen3 TTS provider requires the qwen_tts package. "
+                    "Install qwen_tts before selecting tts_provider=qwen3."
+                )
+            else:
+                message = str(e)
+            self.logger.error(f"Agent processing failed: {message}")
+            yield {"type": "error", "message": message}
         except Exception as e:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
@@ -248,4 +258,3 @@ class VoiceSessionService:
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.logger.info("Voice session reset")
-
