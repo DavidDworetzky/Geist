@@ -29,6 +29,10 @@ class LlamaCompletion:
             #chat id is assigned after construction
             chat_id=None
         )
+
+    def get_assistant_content(self) -> Optional[str]:
+        """The first assistant message's content, or None if there is none."""
+        return next((message.content for message in self.messages if message.role == 'assistant'), None)
     
 
 def strings_to_message_dict(prompt: str, response: str):

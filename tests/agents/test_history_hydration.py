@@ -37,25 +37,22 @@ MOCK_COMPLETION_RESPONSE = {
 }
 
 
-@patch('app.main.GPT4Agent')
-@patch('agents.gpt4_agent.GPT4Agent._complete_text')
-def test_server_side_history_hydration_in_completion(mock__complete_text, mock_gpt4_ctor, gpt4agent, client):
+@patch('agents.online_agent.OnlineAgent._make_request')
+def test_server_side_history_hydration_in_completion(mock_make_request, online_agent, client):
     """
     Verify that when calling /agent/complete_text/{session_id} twice,
     the second call's payload includes the prior user/assistant turns.
     """
-    # Clear the agent cache to ensure we use the newly mocked agent
-    agent_cache[AgentType.GPT4AGENT] = None
+    # Use the fixture agent so the request payload is fully deterministic
+    agent_cache[AgentType.GPT4AGENT] = online_agent
 
     captured_payloads = []
 
-    def capture_payload(url, payload, headers):
+    def capture_payload(payload, use_backup=False, backup_index=0):
         captured_payloads.append(payload)
         return copy.deepcopy(MOCK_COMPLETION_RESPONSE)
 
-    mock__complete_text.side_effect = capture_payload
-    # Set the mock constructor to return the real agent fixture with mocked _complete_text
-    mock_gpt4_ctor.return_value = gpt4agent
+    mock_make_request.side_effect = capture_payload
 
     session_id = 4321
 

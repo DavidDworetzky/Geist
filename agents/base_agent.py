@@ -1,119 +1,371 @@
-from abc import ABC, abstractmethod
-from agents.agent_context import AgentContext
+import json
 import logging
-from typing import Iterator, Optional
+import os
+import signal
+import subprocess
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Iterator, List, Optional
+
+import psutil
+
+from adapters.tool_schema import render_tool_prompt
+from agents.agent_context import AgentContext
+from agents.exceptions import AgentError, CompletionFormatError, FunctionCallError
+from agents.tool_calling import ToolCallError, parse_tool_call, validate_tool_call
+from app.models.database.chat_session import get_chat_history
+
+
+# Shared prompts for the OODA tick loop.
+WORLD_TICK_PROMPT = """You are a world class executive. Your plans are direct, and detailed only if necessary.
+Given what you know about the world today, and the main task that you need to complete, consider if there are any additional facts that you should add to the list of things you consider.
+Do not add anything that doesn't need to be added, consolidate anything that is worth consolidating with simpler statements."""
+
+TASK_TICK_PROMPT = "You are a focused individual. Given the main task that you wish to complete, and current working subtasks, create a specific list of actionable tasks that will complete your problem. Delimit these as plain english separated by the | character. Do not use function calls yet - only plain english."
+
+FUNCTION_CALL_JSON = """
+{
+    "class" : "class_name",
+    "function": "function_name",
+    "parameters": {
+        "param1": "value1",
+        "param2": "value2"
+    }
+}
+"""
+
+EXECUTION_TICK_PROMPT = f"You are given a list of tasks and list of function calls that you can make. Given the state of the world, and classes available to you - formulate a function call that will help you complete your task. You should formulate the function call as {FUNCTION_CALL_JSON}. Only call functions that are listed in our adapter list."
+
+MAX_FUNCTION_JSON_RETRIES = 3
+
+
+@dataclass
+class GenerationParams:
+    """Resolved generation parameters after merging caller values with agent settings."""
+    max_tokens: int
+    n: int
+    temperature: float
+    top_p: float
+    frequency_penalty: float
+    presence_penalty: float
+
 
 class BaseAgent(ABC):
+    """
+    Base class for all agents.
 
-    def __init__(self, agent_context: AgentContext, as_subprocess = False):
+    Subclasses implement the completion methods (`complete_text`,
+    `stream_complete_text`, `complete_audio`, `connect_realtime_audio`).
+    The OODA tick loop, adapter function dispatch, chat-history hydration,
+    and subprocess lifecycle are shared here.
+    """
+
+    def __init__(self, agent_context: AgentContext, as_subprocess: bool = False):
         self._agent_context = agent_context
         self.as_subprocess = as_subprocess
+        self.logger = logging.getLogger(type(self).__module__)
+
+    # ------------------------------------------------------------------
+    # Completion interface (provider-specific)
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    def complete_text(self, prompt, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
-        pass
-    
-    @abstractmethod
-    def stream_complete_text(self, prompt: str, max_tokens: int = 16, n: int = 1, stop: Optional[str] = None, temperature: float = 1.0, top_p: float = 1, frequency_penalty: float = 0, presence_penalty: float = 0, echo: bool = False, best_of: Optional[int] = None, prompt_tokens: Optional[int] = None, response_format: str = "text", system_prompt: Optional[str] = None, chat_id: Optional[int] = None) -> Iterator[str]:
-        """
-        Stream text completion token by token or in chunks.
-        
-        This is an optional method that agents can override to provide streaming support.
-        By default, it raises NotImplementedError.
-        
-        Args:
-            prompt: The input prompt
-            max_tokens: Maximum tokens to generate
-            n: Number of completions (typically 1 for streaming)
-            stop: Stop sequences
-            temperature: Sampling temperature
-            top_p: Nucleus sampling parameter
-            frequency_penalty: Frequency penalty
-            presence_penalty: Presence penalty
-            echo: Whether to echo the prompt
-            best_of: Number of completions to generate server-side
-            prompt_tokens: Number of prompt tokens
-            response_format: Response format
-            system_prompt: System prompt
-            chat_id: Chat session ID
-            
-        Yields:
-            str: Text chunks/tokens as they are generated
-            
-        Raises:
-            NotImplementedError: If streaming is not supported by this agent
-        """
-        pass
+    def complete_text(self, prompt: str, max_tokens: Optional[int] = None, n: Optional[int] = None,
+                      temperature: Optional[float] = None, top_p: Optional[float] = None,
+                      frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
+                      stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
+                      prompt_tokens: Optional[int] = None, response_format: str = "text",
+                      system_prompt: Optional[str] = None, chat_id: Optional[int] = None):
+        """Generate a completion for the given prompt."""
 
     @abstractmethod
-    def complete_audio(self, audio_file, max_tokens=16, n=1, stop=None, temperature=1.0, top_p=1, frequency_penalty=0, presence_penalty=0, echo=False, best_of=None, prompt_tokens=None, response_format="text", system_prompt:str = None, chat_id:int = None):
-        pass
+    def stream_complete_text(self, prompt: str, max_tokens: Optional[int] = None, n: Optional[int] = None,
+                             temperature: Optional[float] = None, top_p: Optional[float] = None,
+                             frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
+                             stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
+                             prompt_tokens: Optional[int] = None, response_format: str = "text",
+                             system_prompt: Optional[str] = None, chat_id: Optional[int] = None) -> Iterator[str]:
+        """Stream a completion for the given prompt, yielding text chunks."""
+
+    @abstractmethod
+    def complete_audio(self, audio_file, max_tokens: Optional[int] = None, n: Optional[int] = None,
+                       temperature: Optional[float] = None, top_p: Optional[float] = None,
+                       frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None,
+                       stop: Optional[str] = None, echo: bool = False, best_of: Optional[int] = None,
+                       prompt_tokens: Optional[int] = None, response_format: str = "text",
+                       system_prompt: Optional[str] = None, chat_id: Optional[int] = None):
+        """Generate a completion from an audio input."""
 
     @abstractmethod
     def connect_realtime_audio(self):
-        pass
+        """Connect to a realtime audio stream."""
 
-    @abstractmethod
-    def initialize(self, task_prompt):
-        pass
+    # ------------------------------------------------------------------
+    # Generation parameter resolution
+    # ------------------------------------------------------------------
 
-    @abstractmethod
+    def _resolve_generation_params(self, max_tokens: Optional[int] = None, n: Optional[int] = None,
+                                   temperature: Optional[float] = None, top_p: Optional[float] = None,
+                                   frequency_penalty: Optional[float] = None,
+                                   presence_penalty: Optional[float] = None) -> GenerationParams:
+        """
+        Merge explicit caller values with agent settings and hard defaults.
+
+        Explicit values always win; `is None` checks keep falsy-but-valid
+        values (temperature=0, penalties=0) intact.
+        """
+        settings = self._agent_context.settings
+
+        def pick(value, setting, default):
+            if value is not None:
+                return value
+            if setting is not None:
+                return setting
+            return default
+
+        return GenerationParams(
+            max_tokens=pick(max_tokens, settings.max_tokens, 16),
+            n=pick(n, settings.n, 1),
+            temperature=pick(temperature, settings.temperature, 1.0),
+            top_p=pick(top_p, settings.top_p, 1.0),
+            frequency_penalty=pick(frequency_penalty, settings.frequency_penalty, 0.0),
+            presence_penalty=pick(presence_penalty, settings.presence_penalty, 0.0),
+        )
+
+    # ------------------------------------------------------------------
+    # Chat history
+    # ------------------------------------------------------------------
+
+    def _build_messages(self, prompt: str, system_prompt: Optional[str] = None,
+                        chat_id: Optional[int] = None) -> List[dict]:
+        """Build a chat message list, hydrating prior turns from the stored session."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if chat_id is not None:
+            try:
+                history = get_chat_history(chat_id)
+                for pair in history.chat_history:
+                    user_msg = pair.get("user")
+                    ai_msg = pair.get("ai")
+                    if user_msg is not None:
+                        messages.append({"role": "user", "content": user_msg})
+                    if ai_msg is not None:
+                        messages.append({"role": "assistant", "content": ai_msg})
+            except Exception as e:
+                self.logger.warning(f"Failed to hydrate chat history for chat_id={chat_id}: {e}")
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    # ------------------------------------------------------------------
+    # Agent lifecycle
+    # ------------------------------------------------------------------
+
+    def initialize(self, task_prompt: Optional[str] = None):
+        """Initialize the agent, optionally pushing a task and starting the tick subprocess."""
+        if task_prompt:
+            self._agent_context.task_context.append(task_prompt)
+
+        if self.as_subprocess:
+            self.logger.info("Initializing agent with subprocess.")
+            try:
+                process = subprocess.Popen(
+                    ['python3', '-u', 'tick.py'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self._agent_context.subprocess_id = process.pid
+            except Exception as e:
+                self.logger.error(f"Failed to start subprocess: {e}")
+                self._agent_context.subprocess_id = None
+        else:
+            self.logger.info("Initializing agent without subprocess.")
+            self._agent_context.subprocess_id = None
+
     def phase_out(self):
-        '''
-        Phase out an agent's state and stop it (aka, stop subprocess, save state)
-        '''
-        pass
+        """Persist agent state, release provider resources, and stop any subprocess."""
+        self.save_state_snapshot(reason="phase_out")
+        self._agent_context._save()
+        self._cleanup_resources()
+        self.terminate_subprocess()
 
-    @abstractmethod
     def phase_in(self):
-        '''
-        Restart an agent's subprocess and rehydrate it (phase in)
-        '''
+        """Restart the agent and rehydrate its state from the latest snapshot."""
+        self.initialize()
+        self.restore_state_snapshot()
 
-    @abstractmethod
-    def tick(self):
-        if self._agent_context.settings.include_world_processing:
-            self.tick_world()
-        self.tick_tasks()
-        self.tick_execution()
+    def _cleanup_resources(self):
+        """Release provider-specific resources (HTTP clients, model runners). Override as needed."""
+
+    def terminate_subprocess(self):
+        """Terminate the agent's tick subprocess if one is running."""
+        subprocess_id = self._agent_context.subprocess_id
+        if subprocess_id:
+            try:
+                os.kill(subprocess_id, signal.SIGTERM)
+            except ProcessLookupError:
+                self.logger.warning(f"Process {subprocess_id} not found, may have already terminated")
+            except OSError as e:
+                self.logger.error(f"Error terminating subprocess {subprocess_id}: {e}")
+            finally:
+                self._agent_context.subprocess_id = None
+
+    def is_subprocess_running(self) -> bool:
+        subprocess_id = self._agent_context.subprocess_id
+        if not subprocess_id:
+            return False
+        try:
+            return psutil.Process(subprocess_id).is_running()
+        except psutil.NoSuchProcess:
+            return False
 
     def state(self):
         logging.info("getting agent state.")
         return {
-            "world_context" : self._agent_context.world_context,
-            "task_context" : self._agent_context.task_context,
-            "execution_context" : self._agent_context.execution_context
+            "world_context": self._agent_context.world_context,
+            "task_context": self._agent_context.task_context,
+            "execution_context": self._agent_context.execution_context
         }
 
+    # ------------------------------------------------------------------
+    # OODA tick loop
+    # ------------------------------------------------------------------
+
+    def tick(self):
+        """Run one observe/orient/decide/act cycle: world reasoning, task expansion, execution."""
+        self.logger.info("Agent tick.")
+        if self._agent_context.settings.include_world_processing:
+            self.tick_world()
+        self.tick_tasks()
+        self.tick_execution()
+        self.save_state_snapshot(reason="tick")
+
     def save_state_snapshot(self, reason: str = "manual"):
-        '''
+        """
         Persist an append-only snapshot of the agent's execution state
         (world/task/execution contexts and function log).
-        '''
+        """
         return self._agent_context.snapshot(reason=reason)
 
     def restore_state_snapshot(self, snapshot_id: Optional[int] = None) -> bool:
-        '''
+        """
         Rehydrate the agent's execution state from its latest snapshot,
         or from a specific snapshot_id. Returns True if state was restored.
-        '''
+        """
         return self._agent_context.restore_snapshot(snapshot_id=snapshot_id)
 
     def get_tool_schemas(self):
-        '''
+        """
         Reflected JSON schemas for the adapter actions available to this agent.
-        '''
+        """
         return self._agent_context.get_tool_schemas()
 
-
-    @abstractmethod
     def tick_world(self):
-        pass
+        """Advance world-state reasoning and replace the world context."""
+        context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=False)
+        result = self.complete_text(prompt=WORLD_TICK_PROMPT + context_string)
+        split_result = self._transform_completions(result)
+        self._agent_context.world_context = split_result
+        return split_result
 
-    @abstractmethod
     def tick_tasks(self):
-        pass
-    
-    @abstractmethod
+        """Pop the next task and expand it into '|'-delimited execution subtasks."""
+        if not self._agent_context.task_context:
+            raise AgentError("No tasks available in task context for execution.")
+        task_to_execute = self._agent_context.task_context.pop(0)
+        prompt = f"executing task: {task_to_execute}" + self._aggregated_context(
+            world_context=True, task_context=True, execution_context=True)
+        result = self.complete_text(prompt=TASK_TICK_PROMPT + prompt)
+        completions = self._transform_completions(result)
+        subtasks = [task.strip() for completion in completions for task in completion.split('|')]
+        self._agent_context.execution_context = subtasks
+        return subtasks
+
     def tick_execution(self):
-        pass
+        """Resolve each pending execution subtask into an adapter function call and run it."""
+        results = []
+        for task in self._agent_context.execution_context:
+            context_string = self._aggregated_context(world_context=True, task_context=True, execution_context=True)
+            function_json = self._request_function_json(task, context_string)
+            if function_json is None:
+                continue
+            results.append(self._take_json_and_call_function(function_json))
+
+        self._agent_context.execution_context = []
+        return results
+
+    def _tool_visibility_prompt(self) -> str:
+        """Rendered schemas of the available tools, for prompt-based execution."""
+        schemas = self._agent_context.get_tool_schemas()
+        if not schemas:
+            return ""
+        return "\nAVAILABLE_TOOLS (JSON schemas):\n" + render_tool_prompt(schemas)
+
+    def _request_function_json(self, task: str, context_string: str) -> Optional[str]:
+        """Ask the model for a valid function-call JSON, retrying on malformed output."""
+        prompt = f"task: {task}" + EXECUTION_TICK_PROMPT + context_string + self._tool_visibility_prompt()
+        candidate = None
+        for attempt in range(MAX_FUNCTION_JSON_RETRIES + 1):
+            completions = self._transform_completions(self.complete_text(prompt=prompt))
+            if not completions:
+                self.logger.error(f"Empty completion on attempt {attempt + 1} for task: {task}")
+                continue
+            candidate = completions[0]
+            if self._is_valid_function_json(candidate):
+                return candidate
+        if candidate is None:
+            self.logger.error(f"No completion produced for task: {task}")
+            return None
+        raise FunctionCallError(
+            f"Exceeded retries for valid function call JSON; last result: {candidate}")
+
+    # ------------------------------------------------------------------
+    # Context aggregation and completion parsing
+    # ------------------------------------------------------------------
+
+    def _aggregated_context(self, world_context: bool, task_context: bool, execution_context: bool) -> str:
+        """Aggregate the requested context sections into a single prompt string."""
+        context_string = ""
+        if world_context and self._agent_context.settings.include_world_processing:
+            context_string += "WORLD_CONTEXT:" + "\n".join(self._agent_context.world_context)
+        if task_context:
+            context_string += "TASK_CONTEXT:" + "\n".join(self._agent_context.task_context)
+        if execution_context:
+            context_string += "EXECUTION_CONTEXT:" + "\n".join(self._agent_context.execution_context)
+        return context_string
+
+    def _transform_completions(self, completion) -> List[str]:
+        """Extract assistant message contents from any supported completion shape."""
+        try:
+            if hasattr(completion, 'choices') and completion.choices:
+                return [choice.message.content for choice in completion.choices]
+            if hasattr(completion, 'messages'):
+                return [msg.content for msg in completion.messages if msg.role == 'assistant']
+            if isinstance(completion, dict) and 'choices' in completion:
+                return [choice['message']['content'] for choice in completion['choices']]
+            return [str(completion)]
+        except Exception as e:
+            self.logger.error(f"Failed to transform completion: {completion}, exception: {e}")
+            raise CompletionFormatError(
+                f"Completion failed to destructure: {completion}. "
+                "Is your LLM protocol returning the correct format?") from e
+
+    # ------------------------------------------------------------------
+    # Adapter function dispatch
+    # ------------------------------------------------------------------
+
+    def _is_valid_function_json(self, function_json: str) -> bool:
+        """Validate that text contains a parseable, schema-valid tool call."""
+        try:
+            call = parse_tool_call(function_json)
+            validate_tool_call(call, self._agent_context.get_tool_schemas())
+            return True
+        except ToolCallError:
+            return False
+
+    def _take_json_and_call_function(self, function_json: str):
+        """Parse, validate, and execute a tool call through the schema-validating dispatcher."""
+        result = self._agent_context.get_tool_dispatcher().dispatch_text(function_json)
+        if not result.success:
+            raise FunctionCallError(f"Tool call failed: {result.error}")
+        return result.result
