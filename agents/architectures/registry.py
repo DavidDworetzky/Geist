@@ -257,7 +257,7 @@ def register_all_runners(registry: Optional[RunnerRegistry] = None) -> None:
     # Register MLX Llama runner
     registry.register("mlx_llama", MLXLlamaRunner)
     
-    # Register vLLM runner (placeholder)
+    # Register vLLM runner (Transformers-based shim shared with Qwen3Runner)
     registry.register("vllm", VLLMRunner)
 
     # Register Qwen 3 runner
