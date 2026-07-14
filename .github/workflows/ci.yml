@@ -192,6 +192,11 @@ jobs:
 
   container-security:
     runs-on: ubuntu-latest
+    # The SARIF upload writes to the Security tab; the default workflow token
+    # is read-only, so this job needs the security-events scope explicitly.
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
     - uses: actions/checkout@v4
