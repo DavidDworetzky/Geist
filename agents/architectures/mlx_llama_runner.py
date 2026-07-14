@@ -2,12 +2,22 @@
 
 import logging
 import os
-from typing import Any
+from typing import Any, Protocol
 
 from .base_runner import BaseRunner, GenerationConfig
 
 
 logger = logging.getLogger(__name__)
+
+
+class _MLXBackend(Protocol):
+    """Shared runtime contract implemented by both MLX backends."""
+
+    max_new_tokens: int
+    temperature: float
+    top_p: float
+
+    def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]: ...
 
 
 class MLXLlamaRunner(BaseRunner):
@@ -16,15 +26,17 @@ class MLXLlamaRunner(BaseRunner):
     IMPLEMENTATIONS = {"manual", "mlx_lm"}
 
     def __init__(self):
-        self.llama = None
-        self.model_id = None
-        self.weights_dir = None
-        self.implementation = None
+        self.llama: _MLXBackend | None = None
+        self.model_id: str | None = None
+        self.weights_dir: str | None = None
+        self.implementation: str | None = None
 
     @staticmethod
     def _resolve_weights_dir(device_config: dict[str, Any]) -> str | None:
         configured = device_config.get("weights_dir")
-        if configured:
+        if configured is not None:
+            if not isinstance(configured, str):
+                raise TypeError("weights_dir must be a string")
             return os.path.expanduser(configured)
 
         local_root = os.environ.get("LOCAL_WEIGHTS_DIR")
@@ -45,6 +57,8 @@ class MLXLlamaRunner(BaseRunner):
             "implementation",
             os.environ.get("GEIST_MLX_IMPLEMENTATION", "manual"),
         )
+        if not isinstance(requested, str):
+            raise TypeError("MLX implementation must be a string")
         self.implementation = requested.strip().lower().replace("-", "_")
         if self.implementation not in self.IMPLEMENTATIONS:
             choices = ", ".join(sorted(self.IMPLEMENTATIONS))
@@ -53,19 +67,22 @@ class MLXLlamaRunner(BaseRunner):
             )
 
         self.weights_dir = self._resolve_weights_dir(device_config)
-        backend_args = {
-            "max_new_tokens": 16,
-            "model_id": model_id,
-            "weights_dir": self.weights_dir,
-        }
         if self.implementation == "manual":
             from agents.architectures.llama.llama_mlx import LlamaMLX
 
-            self.llama = LlamaMLX(**backend_args)
+            self.llama = LlamaMLX(
+                max_new_tokens=16,
+                model_id=model_id,
+                weights_dir=self.weights_dir,
+            )
         else:
             from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
 
-            self.llama = MLXLMBackend(**backend_args)
+            self.llama = MLXLMBackend(
+                max_new_tokens=16,
+                model_id=model_id,
+                weights_dir=self.weights_dir,
+            )
 
         logger.info(
             "MLX Llama runner loaded implementation=%s model=%s weights=%s",
@@ -74,14 +91,20 @@ class MLXLlamaRunner(BaseRunner):
             self.weights_dir or "Hugging Face",
         )
 
-    def _apply_generation_config(self, generation_config: GenerationConfig) -> None:
-        if not self.llama:
+    def _apply_generation_config(self, generation_config: GenerationConfig) -> _MLXBackend:
+        backend = self.llama
+        if backend is None:
             raise RuntimeError("Model not loaded. Call load() first.")
-        self.llama.max_new_tokens = generation_config.max_tokens
-        self.llama.temperature = generation_config.temperature
-        self.llama.top_p = generation_config.top_p
+        backend.max_new_tokens = generation_config.max_tokens
+        backend.temperature = generation_config.temperature
+        backend.top_p = generation_config.top_p
+        return backend
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> dict[str, Any]:
+    def generate(
+        self,
+        prompt: str,
+        generation_config: GenerationConfig,
+    ) -> list[dict[str, str]]:
         return self.complete("", prompt, generation_config)
 
     def complete(
@@ -89,9 +112,9 @@ class MLXLlamaRunner(BaseRunner):
         system_prompt: str,
         user_prompt: str,
         generation_config: GenerationConfig,
-    ) -> dict[str, Any]:
-        self._apply_generation_config(generation_config)
-        return self.llama.complete(
+    ) -> list[dict[str, str]]:
+        backend = self._apply_generation_config(generation_config)
+        return backend.complete(
             system_prompt=system_prompt or "You are a helpful assistant.",
             user_prompt=user_prompt,
         )

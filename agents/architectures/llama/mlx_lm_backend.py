@@ -74,6 +74,6 @@ class MLXLMBackend:
                 "elapsed_seconds": elapsed,
             }
 
-    def complete(self, system_prompt: str, user_prompt: str):
+    def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
         response = "".join(self.stream_text(system_prompt, user_prompt)).strip()
         return strings_to_message_dict(user_prompt, response)
