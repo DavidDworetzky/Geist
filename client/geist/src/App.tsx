@@ -44,7 +44,7 @@ function App() {
         href="https://github.com/DavidDworetzky/Geist"
         target="_blank"
         rel="noopener noreferrer">
-          Welcome to Geist!, an open source LLM Workbench!
+          Welcome to Geist!, an open source host for private local LLMs!
       </a>
       <Navigation navigationElements={links}/>
       </aside>
