@@ -3,9 +3,17 @@ import pytest
 
 
 mlx = pytest.importorskip("mlx")
-import mlx.core as mx
+import mlx.core as mx  # noqa: E402
 
-from agents.architectures.llama.llama_mlx import Attention, Llama, Llama3RoPE, LlamaMLX, ModelConfig
+from agents.architectures.llama.llama_mlx import (  # noqa: E402
+    Attention,
+    KVCache,
+    Llama,
+    Llama3RoPE,
+    LlamaMLX,
+    ModelConfig,
+    sample_logits,
+)
 
 
 def _make_llama_mlx_stub():
@@ -30,20 +38,32 @@ def test_attention_cache_shapes():
     attn = Attention(cfg)
     x = mx.zeros((1, 3, 16))
 
-    out, cache = attn(x, mask=None, cache=None)
+    cache = KVCache()
+    out, returned_cache = attn(x, mask=None, cache=cache)
     assert out.shape == (1, 3, 16)
+    assert returned_cache is cache
 
-    k, v = cache
+    k, v = cache.keys[..., :cache.offset, :], cache.values[..., :cache.offset, :]
     assert k.shape == (1, 2, 3, 4)
     assert v.shape == (1, 2, 3, 4)
+    assert cache.keys.shape[2] == 256
 
     x2 = mx.zeros((1, 1, 16))
     out2, cache2 = attn(x2, mask=None, cache=cache)
     assert out2.shape == (1, 1, 16)
+    assert cache2 is cache
 
-    k2, v2 = cache2
+    k2 = cache2.keys[..., :cache2.offset, :]
+    v2 = cache2.values[..., :cache2.offset, :]
     assert k2.shape == (1, 2, 4, 4)
     assert v2.shape == (1, 2, 4, 4)
+    assert cache2.keys.shape[2] == 256
+
+
+def test_device_sampler_greedy():
+    token = sample_logits(mx.array([0.0, 2.0, 1.0]), temperature=0.0, top_p=1.0)
+    mx.eval(token)
+    assert int(token.item()) == 1
 
 
 def test_apply_hf_config_mapping():

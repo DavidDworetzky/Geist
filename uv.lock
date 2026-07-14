@@ -355,6 +355,7 @@ dependencies = [
     { name = "huggingface-hub", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "mlx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or sys_platform == 'linux'" },
     { name = "mlx", extra = ["cpu"], marker = "sys_platform == 'linux'" },
+    { name = "mlx-lm", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "openpyxl", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "psutil", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -411,6 +412,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = "==0.28.1" },
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = "==0.31.2" },
     { name = "mlx", extras = ["cpu"], marker = "sys_platform == 'linux'", specifier = "==0.31.2" },
+    { name = "mlx-lm", specifier = "==0.29.1" },
     { name = "numpy", specifier = "==2.2.3" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "psutil", specifier = "==6.1.1" },
@@ -694,6 +696,24 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/a3/5e62e9d4ebec89f1805b10dad74863815335f3048d5afd4b2640d474d809/mlx_cpu-0.31.2-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:0bfd8292d1d88ff1e5ea0a3202510a2cb61e0f212a69a364cee50aea4a175000", size = 8678191, upload-time = "2026-04-22T01:12:15.982Z" },
     { url = "https://files.pythonhosted.org/packages/5c/5b/4a0cfe9f7e25bf4a9d7fee9d03be8f56d4aa5949deedda0d8e1437d8b6f2/mlx_cpu-0.31.2-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:32bd40b8e7351b64b15921db5c24305726f97673e2fc512b1d5dc6727bb2f414", size = 10252297, upload-time = "2026-04-22T01:12:18.478Z" },
+]
+
+[[package]]
+name = "mlx-lm"
+version = "0.29.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
+    { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "protobuf", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "sentencepiece", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "transformers", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/62/f46e1355256a114808517947f8e83ad6be310c7288c551db0fa678f47923/mlx_lm-0.29.1.tar.gz", hash = "sha256:b99180d8f33d33a077b814e550bfb2d8a59ae003d668fd1f4b3fff62a381d34b", size = 232302, upload-time = "2025-12-16T16:58:27.959Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/53/913099c91d384e115ea078325efd9a0bc1ea3eb3458c694b4596cbd267f2/mlx_lm-0.29.1-py3-none-any.whl", hash = "sha256:440941b3054c2a2216e97615de584cc90fa1ea874782e20699b9895721fad8dc", size = 324884, upload-time = "2025-12-16T16:58:26.36Z" },
 ]
 
 [[package]]
