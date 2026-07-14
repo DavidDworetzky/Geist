@@ -82,10 +82,25 @@ class AgentContext:
             logger.error(f"Failed to save agent context: {e}")
 
     def _add_to_chat_history(
-        self, user_message: str, ai_message: str | None, chat_id: int | None = None
+        self,
+        user_message: str,
+        ai_message: str | None,
+        chat_id: int | None = None,
+        tool_calls: list[Any] | None = None,
+        artifacts: list[Any] | None = None,
+        transcript: list[dict[str, Any]] | None = None,
+        user_id: int | None = None,
+        run_id: str | None = None,
     ) -> ChatSession:
         return update_chat_history(
-            session_id=chat_id, new_user_message=user_message, new_ai_message=ai_message
+            session_id=chat_id,
+            new_user_message=user_message,
+            new_ai_message=ai_message,
+            tool_calls=tool_calls,
+            artifacts=artifacts,
+            transcript=transcript,
+            user_id=user_id,
+            run_id=run_id,
         )
 
     def get_tool_schemas(self) -> list[ToolSchema]:

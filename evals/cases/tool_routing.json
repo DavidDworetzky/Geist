@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "tax_return_document_search",
+      "prompt": "Find my latest tax return in my uploaded documents.",
+      "actual_output": "I will search your uploaded documents for the tax return.",
+      "called_tools": [
+        {
+          "name": "documents.search",
+          "arguments": {
+            "query": "latest tax return"
+          }
+        }
+      ],
+      "expected_tools": [
+        {
+          "name": "documents.search",
+          "arguments": {
+            "query": "latest tax return"
+          }
+        }
+      ],
+      "forbidden_tools": [
+        "web.search"
+      ]
+    },
+    {
+      "id": "todays_news_web_search",
+      "prompt": "What are today's top news stories?",
+      "actual_output": "I will search the public web for today's top news stories.",
+      "called_tools": [
+        {
+          "name": "web.search",
+          "arguments": {
+            "query": "today's top news stories"
+          }
+        }
+      ],
+      "expected_tools": [
+        {
+          "name": "web.search",
+          "arguments": {
+            "query": "today's top news stories"
+          }
+        }
+      ],
+      "forbidden_tools": [
+        "documents.search"
+      ]
+    }
+  ]
+}

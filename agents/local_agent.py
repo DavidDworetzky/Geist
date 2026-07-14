@@ -3,6 +3,7 @@ LocalAgent implementation for running local inference models.
 """
 
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 from agents.agent_context import AgentContext
@@ -11,6 +12,13 @@ from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
 from agents.models.llama_completion import LlamaCompletion
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
 from agents.tool_calling import ToolCompletion, run_prompt_tool_call
 
 
@@ -23,6 +31,10 @@ class LocalAgent(BaseAgent):
     """
     Local agent implementation that uses pluggable runners for inference.
     """
+
+    # Local runners have different chat templates. Until a runner explicitly
+    # implements native tools, the orchestrator deliberately advertises none.
+    supports_native_tool_calling = False
 
     def __init__(
         self,
@@ -239,6 +251,53 @@ class LocalAgent(BaseAgent):
             system_prompt=system_prompt,
             chat_id=chat_id,
         )
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Run a persistence-free local text turn and fail closed on tool schemas."""
+        if tools:
+            raise ValueError(f"Runner {self.runner_type} does not support native tool calling")
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+
+        system_prompt = (
+            "\n\n".join(message.content or "" for message in messages if message.role == "system")
+            or SYSTEM_PROMPT
+        )
+        conversation = []
+        for message in messages:
+            if message.role == "system":
+                continue
+            label = "Assistant" if message.role == "assistant" else "User"
+            if message.role == "tool":
+                label = f"Tool {message.name or ''}".strip()
+            conversation.append(f"{label}: {message.content or ''}")
+
+        generation_config = GenerationConfig(
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            frequency_penalty=config.frequency_penalty,
+            presence_penalty=config.presence_penalty,
+            stop=config.stop[0] if config.stop else None,
+        )
+        result = self.runner.complete(
+            system_prompt=system_prompt,
+            user_prompt="\n".join(conversation),
+            generation_config=generation_config,
+        )
+        completion = LlamaCompletion.from_dict(result)
+        text = next(
+            (message.content for message in completion.messages if message.role == "assistant"),
+            "",
+        )
+        if text:
+            yield ModelEvent.text_delta(text)
+        yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
 
     def complete_audio(
         self,
