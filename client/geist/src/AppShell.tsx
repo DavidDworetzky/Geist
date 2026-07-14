@@ -127,7 +127,7 @@ export default function AppShell({ children }: ShellProps): JSX.Element {
           <BrandMark />
           <span className="brand-text">
             <span className="brand-name">{productName}</span>
-            <span className="brand-subtitle">Local AI workbench</span>
+            <span className="brand-subtitle">Private Local AI workbench</span>
           </span>
         </NavLink>
 
