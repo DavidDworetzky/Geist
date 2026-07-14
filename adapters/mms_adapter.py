@@ -1,8 +1,9 @@
-from abc import ABC, abstractmethod
-from adapters.inert_adapter import InertAdapter
-from typing import List
-from transformers import Wav2Vec2ForCTC, AutoProcessor
+
 import torch
+from transformers import AutoProcessor, Wav2Vec2ForCTC
+
+from adapters.inert_adapter import InertAdapter
+
 
 class MMSAdapter(InertAdapter):
     '''
@@ -13,10 +14,10 @@ class MMSAdapter(InertAdapter):
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = Wav2Vec2ForCTC.from_pretrained(self.model_id)
 
-    def enumerate_actions(self) -> List[str]:
+    def enumerate_actions(self) -> list[str]:
         return ["transcribe"]
-    
-    def transcribe(self, audio_data, language: str = "en"):
+
+    def transcribe(self, audio_data, language: str = "en") -> str:
         inputs = self.processor(audio_data, sampling_rate=16_000, return_tensors="pt")
 
         with torch.no_grad():
@@ -24,4 +25,4 @@ class MMSAdapter(InertAdapter):
 
         ids = torch.argmax(outputs, dim=-1)[0]
         transcription = self.processor.decode(ids)
-        return transcription
+        return str(transcription)

@@ -1,32 +1,34 @@
+import { NavLink } from 'react-router-dom';
+
 function Navigation(props: NavigationProps): JSX.Element {
-    const innerElements = props.navigationElements.map((ele, index) => {
-        return (
-            <li key={index} className="relative nav-item">
-                <a href={ele.link} className="flex items-center text-lg py-4 px-12 h-20 overflow-hidden text-black-700 text-ellipsis whitespace-nowrap rounded hover:text-gray-900 hover:bg-gray-100 transition duration-300 ease-in-out" data-mdb-ripple="true" data-mdb-ripple-color="dark">
-                    <svg aria-hidden="true" focusable="false" data-prefix="fas" className="w-3 h-3 mr-3" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-                        <path fill="currentColor" d={ele.svg}></path>
-                    </svg>
-                    <span>{ele.name}</span>
-                </a>
-            </li>
-        )
-    })
-    return (
-        <div>
-            <ul className="relative">
-                {innerElements}
-            </ul>
-        </div>)
+  const innerElements = props.navigationElements.map((ele, index) => (
+    <li key={`${ele.link}-${index}`}>
+      <NavLink to={ele.link} className="list-link">
+        <span className="nav-icon" aria-hidden="true">
+          <svg focusable="false" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+            <path fill="currentColor" d={ele.svg}></path>
+          </svg>
+        </span>
+        <span>{ele.name}</span>
+      </NavLink>
+    </li>
+  ));
+
+  return (
+    <nav className="LinkList" aria-label="Navigation">
+      <ul>{innerElements}</ul>
+    </nav>
+  );
 }
 
 interface NavigationProps {
-    navigationElements: NavigationElement[];
+  navigationElements: NavigationElement[];
 }
 
 interface NavigationElement {
-    name: string;
-    link: string;
-    svg: string;
+  name: string;
+  link: string;
+  svg: string;
 }
 
-export default Navigation
+export default Navigation;

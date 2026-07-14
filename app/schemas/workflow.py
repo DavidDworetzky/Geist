@@ -1,16 +1,17 @@
+
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+
 from app.models.database.workflow import WorkflowStepType
+
 
 class WorkflowStepBase(BaseModel):
     """Base schema for workflow step data."""
     step_name: str = Field(..., description="Name of the workflow step")
-    step_description: Optional[str] = Field(None, description="Description of the workflow step")
-    step_status: Optional[str] = Field(None, description="Current status of the step")
-    display_x: Optional[int] = Field(None, description="X coordinate for workflow editor")
-    display_y: Optional[int] = Field(None, description="Y coordinate for workflow editor")
-    command_str: Optional[str] = Field(None, description="Command string for workflow step")
+    step_description: str | None = Field(None, description="Description of the workflow step")
+    step_status: str | None = Field(None, description="Current status of the step")
+    display_x: int | None = Field(None, description="X coordinate for workflow editor")
+    display_y: int | None = Field(None, description="Y coordinate for workflow editor")
+    command_str: str | None = Field(None, description="Command string for workflow step")
     step_type: WorkflowStepType = Field(..., description="Type of the workflow step")
 
 class WorkflowStepCreate(WorkflowStepBase):
@@ -31,18 +32,18 @@ class WorkflowBase(BaseModel):
 
 class WorkflowCreate(WorkflowBase):
     """Schema for creating a new workflow."""
-    steps: Optional[List[WorkflowStepCreate]] = Field(default=[], description="List of steps in the workflow")
+    steps: list[WorkflowStepCreate] | None = Field(default=[], description="List of steps in the workflow")
 
 class WorkflowResponse(WorkflowBase):
     """Schema for workflow response."""
     workflow_id: int
     user_id: int
-    steps: List[WorkflowStepResponse]
+    steps: list[WorkflowStepResponse]
 
     class Config:
         from_attributes = True
 
 class WorkflowUpdate(BaseModel):
     """Schema for updating a workflow."""
-    name: Optional[str] = Field(None, description="New name for the workflow")
-    steps: Optional[List[WorkflowStepCreate]] = Field(None, description="Updated list of steps") 
+    name: str | None = Field(None, description="New name for the workflow")
+    steps: list[WorkflowStepCreate] | None = Field(None, description="Updated list of steps")

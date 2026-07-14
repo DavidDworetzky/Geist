@@ -11,6 +11,11 @@ interface UseVoiceChatProps {
   agentType?: string;
   sttProvider?: string;
   ttsProvider?: string;
+  ttsModel?: string;
+  ttsVoice?: string;
+  ttsLanguage?: string;
+  ttsInstruct?: string;
+  ttsSpeed?: number;
   onTranscriptPartial?: (text: string) => void;
   onTranscriptFinal?: (text: string) => void;
   onAssistantText?: (text: string) => void;
@@ -22,6 +27,11 @@ const useVoiceChat = ({
   agentType = 'online',
   sttProvider = 'mms',
   ttsProvider = 'sesame',
+  ttsModel,
+  ttsVoice,
+  ttsLanguage,
+  ttsInstruct,
+  ttsSpeed,
   onTranscriptPartial,
   onTranscriptFinal,
   onAssistantText,
@@ -42,7 +52,30 @@ const useVoiceChat = ({
   // WebSocket setup
   const connectWebSocket = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/voice/stream?session_id=${sessionId}&agent_type=${agentType}&stt_provider=${sttProvider}&tts_provider=${ttsProvider}`;
+    const params = new URLSearchParams({
+      session_id: String(sessionId),
+      agent_type: agentType,
+      stt_provider: sttProvider,
+      tts_provider: ttsProvider
+    });
+
+    if (ttsModel) {
+      params.set('tts_model', ttsModel);
+    }
+    if (ttsVoice) {
+      params.set('tts_voice', ttsVoice);
+    }
+    if (ttsLanguage) {
+      params.set('tts_language', ttsLanguage);
+    }
+    if (ttsInstruct) {
+      params.set('tts_instruct', ttsInstruct);
+    }
+    if (ttsSpeed !== undefined) {
+      params.set('tts_speed', String(ttsSpeed));
+    }
+
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/voice/stream?${params.toString()}`;
     
     console.log('Voice WebSocket connecting to:', wsUrl);
     
@@ -120,7 +153,21 @@ const useVoiceChat = ({
     
     wsRef.current = ws;
     return ws;
-  }, [sessionId, agentType, sttProvider, ttsProvider, onTranscriptPartial, onTranscriptFinal, onAssistantText, onError]);
+  }, [
+    sessionId,
+    agentType,
+    sttProvider,
+    ttsProvider,
+    ttsModel,
+    ttsVoice,
+    ttsLanguage,
+    ttsInstruct,
+    ttsSpeed,
+    onTranscriptPartial,
+    onTranscriptFinal,
+    onAssistantText,
+    onError
+  ]);
 
   // Audio playback
   const playAudioQueue = useCallback(async () => {
@@ -258,4 +305,3 @@ const useVoiceChat = ({
 };
 
 export default useVoiceChat;
-

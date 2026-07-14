@@ -1,0 +1,56 @@
+name: Auto-request Codex review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request-codex-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Codex review
+        uses: actions/github-script@v7
+        env:
+          CODEX_REVIEWER_LOGIN: ${{ vars.CODEX_REVIEWER_LOGIN }}
+          CODEX_REVIEWER_TEAM: ${{ vars.CODEX_REVIEWER_TEAM }}
+        with:
+          script: |
+            const reviewerLogin = process.env.CODEX_REVIEWER_LOGIN?.trim();
+            const reviewerTeam = process.env.CODEX_REVIEWER_TEAM?.trim();
+
+            if (!reviewerLogin && !reviewerTeam) {
+              core.warning('No CODEX_REVIEWER_LOGIN or CODEX_REVIEWER_TEAM repository variable is set. Skipping review request.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const reviewers = reviewerLogin ? [reviewerLogin] : [];
+            const team_reviewers = reviewerTeam ? [reviewerTeam] : [];
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number,
+                reviewers,
+                team_reviewers,
+              });
+              core.info(`Requested review from ${[...reviewers, ...team_reviewers].join(', ')} on PR #${pull_number}.`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.warning(`GitHub API returned 422 (already requested, invalid reviewer, or insufficient scope): ${error.message}`);
+                return;
+              }
+              throw error;
+            }

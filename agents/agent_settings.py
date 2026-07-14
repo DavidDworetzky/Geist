@@ -1,6 +1,7 @@
 #import dataclass
 from dataclasses import dataclass
 
+
 @dataclass
 class AgentSettings:
     name: str
@@ -17,3 +18,5 @@ class AgentSettings:
     interactive_only: bool = False
     #optional processiung for agents
     include_world_processing: bool = False
+    #days of state snapshots to retain; the latest snapshot is always kept. 0 disables pruning.
+    snapshot_retention_days: int = 7

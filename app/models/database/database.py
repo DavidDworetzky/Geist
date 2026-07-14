@@ -1,24 +1,51 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
-import os
+from sqlalchemy.engine import Engine as SqlAlchemyEngine
+from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
+
+from app.models.database.database_config import (
+    DEFAULT_DATABASE_PROVIDERS,
+    DatabaseConfig,
+    DatabaseProviderRegistry,
+    create_database_engine,
+    load_database_config,
+)
+
 
 load_dotenv()
 
-# Use environment variables set in docker-compose.yml
-DB_NAME = os.getenv("POSTGRES_DB", "geist")
-DB_USER = os.getenv("POSTGRES_USER", "geist")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "geist")
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_PORT = os.getenv("DB_PORT", "5432")
+DATABASE_CONFIG = load_database_config()
+SQLALCHEMY_DATABASE_URL = DATABASE_CONFIG.database_url
+DATABASE_PROVIDER = DATABASE_CONFIG.provider
+DATABASE_BACKEND = DATABASE_PROVIDER
 
-# Construct the database URL
-SQLALCHEMY_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
-# Instantiate database engine and session
-Engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=Engine)
-Session = SessionLocal()
+Engine = create_database_engine(DATABASE_CONFIG)
+_session_factory = sessionmaker(autocommit=False, autoflush=False, bind=Engine)
+SessionLocal = _session_factory
+Session = scoped_session(_session_factory)
 
 Base = declarative_base()
+
+
+def configure_database(
+    config: DatabaseConfig,
+    registry: DatabaseProviderRegistry = DEFAULT_DATABASE_PROVIDERS,
+) -> SqlAlchemyEngine:
+    """
+    Rebind the process-wide SQLAlchemy session factory.
+
+    This is primarily used by tests and alternate storage configurations. Keeping
+    the same session factory lets existing model modules continue using their
+    imported SessionLocal object after the engine changes.
+    """
+    global DATABASE_CONFIG, SQLALCHEMY_DATABASE_URL, DATABASE_PROVIDER, DATABASE_BACKEND, Engine
+
+    Session.remove()
+    Engine.dispose()
+
+    DATABASE_CONFIG = config
+    SQLALCHEMY_DATABASE_URL = config.database_url
+    DATABASE_PROVIDER = config.provider
+    DATABASE_BACKEND = DATABASE_PROVIDER
+    Engine = create_database_engine(config, registry=registry)
+    _session_factory.configure(bind=Engine)
+    return Engine

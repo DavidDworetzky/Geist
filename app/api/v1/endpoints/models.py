@@ -1,20 +1,21 @@
 """
 API endpoints for model discovery and listing.
 """
-from fastapi import APIRouter, HTTPException
-from typing import Optional, List
-from pydantic import BaseModel
-from datetime import datetime
 import logging
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from agents.architectures.registry import (
     OnlineModelProviders,
-    get_models_for_provider,
     get_all_models,
-    get_model_by_id,
     get_last_model_sync_time,
+    get_model_by_id,
+    get_models_for_provider,
     provider_from_string,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +27,20 @@ class ModelResponse(BaseModel):
     id: str
     name: str
     provider: str
-    context_window: Optional[int]
-    max_output_tokens: Optional[int]
+    context_window: int | None
+    max_output_tokens: int | None
     supports_vision: bool
     supports_function_calling: bool
     supports_streaming: bool
     #recommended models can be filtered to the top in the UI.
     recommended: bool
-    family: Optional[str]
+    family: str | None
 
 
 class ModelsListResponse(BaseModel):
     """Response model for list of models grouped by provider."""
-    providers: dict[str, List[ModelResponse]]
-    last_updated: Optional[datetime]
+    providers: dict[str, list[ModelResponse]]
+    last_updated: datetime | None
 
 
 @router.get("/", response_model=ModelsListResponse)
@@ -65,10 +66,10 @@ async def get_available_models():
         )
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.get("/provider/{provider}", response_model=List[ModelResponse])
+@router.get("/provider/{provider}", response_model=list[ModelResponse])
 async def get_models_by_provider(provider: str):
     """
     Get available models for a specific provider.
@@ -93,7 +94,7 @@ async def get_models_by_provider(provider: str):
         raise
     except Exception as e:
         logger.error(f"Error getting models for provider {provider}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/model/{model_id:path}", response_model=ModelResponse)
@@ -117,10 +118,10 @@ async def get_model(model_id: str):
         raise
     except Exception as e:
         logger.error(f"Error getting model {model_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.get("/providers", response_model=List[str])
+@router.get("/providers", response_model=list[str])
 async def get_providers():
     """
     Get list of available providers.

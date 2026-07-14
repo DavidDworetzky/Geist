@@ -1,38 +1,38 @@
 """
 Service layer for user settings management.
 """
-from typing import Optional, Dict, Any
 import logging
-from app.models.database.user_settings import (
-    get_user_settings,
-    create_default_user_settings,
-    update_user_settings,
-    get_or_create_user_settings,
-    UserSettingsModel
-)
+
+from agents.agent_context import AgentContext
+from agents.base_agent import BaseAgent
+from agents.factory import AgentFactory
 from app.models.database.geist_user import get_default_user
+from app.models.database.user_settings import (
+    get_or_create_user_settings,
+    get_user_settings,
+    update_user_settings,
+)
 from app.models.user_settings import (
+    AgentConfigRequest,
+    AgentFactoryConfig,
     UserSettingsResponse,
     UserSettingsUpdate,
-    AgentConfigRequest,
-    AgentFactoryConfig
 )
-from agents.factory import AgentFactory
-from agents.agent_context import AgentContext
+
 
 logger = logging.getLogger(__name__)
 
 class UserSettingsService:
     """Service for managing user settings and agent configuration."""
-    
+
     @staticmethod
-    def get_user_settings_by_id(user_id: int) -> Optional[UserSettingsResponse]:
+    def get_user_settings_by_id(user_id: int) -> UserSettingsResponse | None:
         """
         Get user settings by user ID.
-        
+
         Args:
             user_id: User ID
-            
+
         Returns:
             UserSettingsResponse if found, None otherwise
         """
@@ -58,15 +58,15 @@ class UserSettingsService:
                 update_date=settings_model.update_date
             )
         return None
-    
+
     @staticmethod
     def get_or_create_user_settings_by_id(user_id: int) -> UserSettingsResponse:
         """
         Get user settings by user ID, creating default ones if they don't exist.
-        
+
         Args:
             user_id: User ID
-            
+
         Returns:
             UserSettingsResponse
         """
@@ -90,9 +90,9 @@ class UserSettingsService:
             create_date=settings_model.create_date,
             update_date=settings_model.update_date
         )
-    
+
     @staticmethod
-    def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> Optional[UserSettingsResponse]:
+    def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> UserSettingsResponse | None:
         """
         Update user settings.
 
@@ -115,11 +115,11 @@ class UserSettingsService:
                 # Only set to online if provider is not 'offline'
                 if provider != 'offline':
                     update_dict['default_agent_type'] = 'online'
-                    logger.info(f"Auto-inferred agent_type='online' based on online model/provider update")
+                    logger.info("Auto-inferred agent_type='online' based on online model/provider update")
             # If local model is being set, infer agent_type as 'local'
             elif 'default_local_model' in update_dict:
                 update_dict['default_agent_type'] = 'local'
-                logger.info(f"Auto-inferred agent_type='local' based on local model update")
+                logger.info("Auto-inferred agent_type='local' based on local model update")
 
         settings_model = update_user_settings(user_id, update_dict)
         if settings_model:
@@ -143,43 +143,43 @@ class UserSettingsService:
                 update_date=settings_model.update_date
             )
         return None
-    
+
     @staticmethod
     def get_default_user_settings() -> UserSettingsResponse:
         """
         Get default user settings (for the default user).
-        
+
         Returns:
             UserSettingsResponse for default user
         """
         default_user = get_default_user()
         return UserSettingsService.get_or_create_user_settings_by_id(default_user.user_id)
-    
+
     @staticmethod
     def create_agent_from_user_settings(
         user_id: int,
         agent_context: AgentContext,
-        overrides: Optional[AgentConfigRequest] = None
-    ):
+        overrides: AgentConfigRequest | None = None
+    ) -> BaseAgent:
         """
         Create an agent instance based on user settings and optional overrides.
-        
+
         Args:
             user_id: User ID to get settings for
             agent_context: Agent context object
             overrides: Optional configuration overrides
-            
+
         Returns:
             Agent instance
         """
         # Get user settings
         settings = UserSettingsService.get_or_create_user_settings_by_id(user_id)
-        
+
         # Create agent factory config
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
-        
+
         logger.info(f"Creating agent with config: {factory_config}")
-        
+
         # Create agent using factory
         agent = AgentFactory.create_agent(
             agent_type=factory_config.agent_type,
@@ -191,21 +191,21 @@ class UserSettingsService:
             backup_providers=[provider.dict() for provider in factory_config.backup_providers],
             **factory_config.generation_config
         )
-        
+
         return agent
-    
+
     @staticmethod
     def create_agent_from_default_user(
         agent_context: AgentContext,
-        overrides: Optional[AgentConfigRequest] = None
-    ):
+        overrides: AgentConfigRequest | None = None
+    ) -> BaseAgent:
         """
         Create an agent instance for the default user.
-        
+
         Args:
             agent_context: Agent context object
             overrides: Optional configuration overrides
-            
+
         Returns:
             Agent instance
         """

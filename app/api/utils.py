@@ -1,21 +1,22 @@
+import logging
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from typing import Dict, Optional
-import logging
+
 
 logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
-async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dict:
+async def get_current_user(token: str | None = Depends(oauth2_scheme)) -> dict:
     """Get the current authenticated user from the token.
-    
+
     Args:
         token (str): The OAuth2 token from the request
-        
+
     Returns:
         Dict: User information including user_id and email
-        
+
     Raises:
         HTTPException: If token is invalid or user not found
     """
@@ -26,7 +27,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dic
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        
+
     try:
         # Mock get user implementation for testing
         # Token format: "test_token_{user_id}"
@@ -39,7 +40,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dic
             try:
                 user_id = int(parts[2])
             except ValueError:
-                raise ValueError(f"Invalid user_id in token: {parts[2]}")
+                raise ValueError(f"Invalid user_id in token: {parts[2]}") from None
             logger.info(f"Authenticated test user with ID: {user_id}")
             return {
                 "user_id": user_id,
@@ -54,4 +55,4 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dic
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        ) 
+        ) from e

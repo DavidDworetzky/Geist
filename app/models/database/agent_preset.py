@@ -1,8 +1,10 @@
-import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy import ARRAY, JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
 from app.models.database.database import Base, Session
-from sqlalchemy.dialects.postgresql import insert
+
+
+StringList = JSON().with_variant(ARRAY(String), "postgresql")
 
 class AgentPreset(Base):
     """
@@ -45,7 +47,7 @@ class AgentPreset(Base):
         try:
             # Query for existing AgentPreset
             existing_preset = session.query(cls).filter_by(name=name, version=version).first()
-            
+
             # If exists, update
             if existing_preset:
                 existing_preset.description = description
@@ -105,8 +107,7 @@ class Restriction(Base):
     spending_limit = Column(Integer)
     restriction_type = Column(String)
     #allowed plugins and methods that an agent can use
-    allowed_plugins = Column(ARRAY(String))
-    allowed_methods = Column(ARRAY(String))
+    allowed_plugins = Column(StringList)
+    allowed_methods = Column(StringList)
     create_date = Column(DateTime)
     update_date = Column(DateTime)
-

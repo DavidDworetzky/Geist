@@ -1,17 +1,18 @@
-import os
-import inspect
 import importlib
-from typing import List, Any
-from adapters.base_adapter import BaseAdapter
 import inspect
+import os
 from dataclasses import dataclass
+from typing import Any
+
+from adapters.base_adapter import BaseAdapter
+
 
 @dataclass
 class AdapterWrapper:
     name: str
     instance: Any
 
-def _get_adapter_files() -> List[str]:
+def _get_adapter_files() -> list[str]:
     directory = os.path.dirname(__file__)
     adapter_classes = [filename for filename in os.listdir(directory) if filename.endswith('.py') and not filename.startswith('__')]
     return adapter_classes
@@ -31,13 +32,13 @@ def find_adapter_classes():
         absolute_module_path = _get_class_module(module_name)
         module = importlib.import_module(absolute_module_path)
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            if issubclass(obj, BaseAdapter) and obj is not BaseAdapter:
+            if issubclass(obj, BaseAdapter) and obj is not BaseAdapter and not inspect.isabstract(obj):
                 class_methods = [method[0] for method in inspect.getmembers(obj, inspect.isfunction)]
                 adapter_classes.append((name, class_methods))
     return adapter_classes
 
 
-def init_adapter_class(classname: str, args: dict) -> AdapterWrapper:
+def init_adapter_class(classname: str, args: dict) -> AdapterWrapper | None:
     '''
     Dynamically initializes an adapter class by name with the provided kwargs,
     only using the kwargs that are valid for the class's constructor.

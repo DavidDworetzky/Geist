@@ -1,7 +1,5 @@
-import pytest
 from app.models.database.workflow import WorkflowStepType
-from app.schemas.workflow import WorkflowStepCreate, WorkflowCreate
-from pydantic import ValidationError
+from app.schemas.workflow import WorkflowCreate, WorkflowStepCreate
 
 
 def test_workflow_step_types():
@@ -18,10 +16,10 @@ def test_workflow_step_types():
         WorkflowStepType.AGENT,
         WorkflowStepType.ADAPTER,
     ]
-    
+
     for step_type in valid_types:
         assert step_type.value in [
-            "trigger", "map", "filter", "reduce", 
+            "trigger", "map", "filter", "reduce",
             "expand", "custom", "llm", "agent", "adapter"
         ]
 
@@ -34,7 +32,7 @@ def test_create_trigger_step():
         step_type=WorkflowStepType.TRIGGER,
         command_str="webhook:post:/api/webhook/start"
     )
-    
+
     assert trigger_step.step_name == "HTTP Webhook Trigger"
     assert trigger_step.step_type == WorkflowStepType.TRIGGER
 
@@ -47,7 +45,7 @@ def test_create_adapter_step():
         step_type=WorkflowStepType.ADAPTER,
         command_str="email:send:recipient@example.com"
     )
-    
+
     assert adapter_step.step_name == "Email Adapter"
     assert adapter_step.step_type == WorkflowStepType.ADAPTER
 
@@ -80,8 +78,8 @@ def test_workflow_with_trigger_and_adapter():
             )
         ]
     )
-    
+
     assert workflow.name == "Data Processing Pipeline"
     assert len(workflow.steps) == 3
     assert workflow.steps[0].step_type == WorkflowStepType.TRIGGER
-    assert workflow.steps[2].step_type == WorkflowStepType.ADAPTER 
+    assert workflow.steps[2].step_type == WorkflowStepType.ADAPTER

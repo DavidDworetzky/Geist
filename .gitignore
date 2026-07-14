@@ -67,6 +67,10 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Local SQLite database (default provider)
+data/*.sqlite3
+data/*.sqlite3-journal
+
 # Flask stuff:
 instance/
 .webassets-cache
@@ -139,3 +143,12 @@ dmypy.json
 
 #model weights
 app/model_weights/*
+
+# Security and pre-commit
+.pre-commit-cache/
+*-report.json
+bandit-report.json
+safety-report.json
+npm-audit-report.json
+trivy-results.sarif
+requirements-check.txt

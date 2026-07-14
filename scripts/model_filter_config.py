@@ -4,10 +4,10 @@ Model Filter Configuration
 Configures which models to include/exclude when syncing from provider APIs.
 """
 import re
-from typing import Dict, List, Optional
+
 
 # Models to always include regardless of API response
-ALWAYS_INCLUDE: List[str] = [
+ALWAYS_INCLUDE: list[str] = [
     # OpenAI
     "gpt-4",
     "gpt-4-turbo",
@@ -26,7 +26,7 @@ ALWAYS_INCLUDE: List[str] = [
 ]
 
 # Patterns to exclude (regex)
-EXCLUDE_PATTERNS: List[str] = [
+EXCLUDE_PATTERNS: list[str] = [
     r".*-instruct$",       # Exclude instruct variants for some providers
     r".*-vision-preview$", # Exclude preview versions
     r"ft:.*",              # Exclude fine-tuned models
@@ -46,7 +46,7 @@ EXCLUDE_PATTERNS: List[str] = [
 ]
 
 # Chat model prefixes to include
-CHAT_MODEL_PREFIXES: List[str] = [
+CHAT_MODEL_PREFIXES: list[str] = [
     "gpt-4",
     "gpt-3.5",
     "o1",
@@ -59,7 +59,7 @@ CHAT_MODEL_PREFIXES: List[str] = [
 ]
 
 # Model metadata overrides - used to enhance API-provided data
-MODEL_METADATA: Dict[str, Dict] = {
+MODEL_METADATA: dict[str, dict] = {
     # OpenAI models
     "gpt-4": {
         "name": "GPT-4",
@@ -210,7 +210,7 @@ MODEL_METADATA: Dict[str, Dict] = {
 }
 
 # HuggingFace model families to search for
-HUGGINGFACE_MODEL_FAMILIES: List[str] = [
+HUGGINGFACE_MODEL_FAMILIES: list[str] = [
     "meta-llama",
     "Qwen",
     "mistralai",
@@ -223,7 +223,7 @@ HUGGINGFACE_MODEL_FAMILIES: List[str] = [
 ]
 
 # Specific HuggingFace models to include
-HUGGINGFACE_MODELS: List[str] = [
+HUGGINGFACE_MODELS: list[str] = [
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
     "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama/Llama-3.3-70B-Instruct",
@@ -279,7 +279,7 @@ def should_include_model(model_id: str) -> bool:
     return is_chat_model(model_id)
 
 
-def get_model_metadata(model_id: str) -> Optional[Dict]:
+def get_model_metadata(model_id: str) -> dict | None:
     """
     Get metadata overrides for a model.
 

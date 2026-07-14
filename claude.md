@@ -36,11 +36,13 @@ python scripts/download_models.py meta-llama/Meta-Llama-3.1-8B-Instruct  # Bad
 When creating new scripts, always use `argparse.ArgumentParser()` and define parameters with descriptive help text.
 
 #package installs
-`docker exec backend /bin/bash` to enter the backend container
-`pip install PACKAGE` to install dependencies
-When installing packages, `conda env export >> linux_environment.yml` after installing to freeze installs. 
+`uv add PACKAGE==VERSION` to add pinned dependencies (updates pyproject.toml and uv.lock together)
+The Docker image installs from the same pyproject.toml/uv.lock, so no separate freeze step is needed.
+Run a Python dependency audit before committing dependency changes.
 #frontend package installs
-`cd client & npm i PACKAGE`
+`cd client/geist && npm install --package-lock-only --ignore-scripts --save-exact PACKAGE@VERSION`
+Use `npm ci --ignore-scripts --audit=false --fund=false` for frontend installs from the committed lockfile.
+Run `npm audit --package-lock-only` before committing frontend dependency changes.
 #running tests
 `cd /opt/geist && PYTHONPATH=/opt/geist pytest` in the backend container
 
@@ -102,4 +104,4 @@ prefer minimal inline implementations over extra dependency imports. Core librar
 
 
 #Plan Files
-Good plan file formats should look like /plans/144-SETTINGS-UI.md. They should be concise, should feature what of an implementation already exists, and what needs to be added. They should feature component level descriptions of what should be implemented in a solution. 
+Good plan file formats should look like /plans/144-SETTINGS-UI.md. They should be concise, should feature what of an implementation already exists, and what needs to be added. They should feature component level descriptions of what should be implemented in a solution.

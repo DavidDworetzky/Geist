@@ -11,9 +11,11 @@ private models. You can customize filters and optionally save JSON output.
 import argparse
 import json
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from huggingface_hub import list_models, ModelFilter, ModelInfo
+from typing import Any
+
+from huggingface_hub import ModelFilter, ModelInfo, list_models
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ logging.basicConfig(
 
 
 # A conservative set of permissive/open licenses commonly used for open models
-OPEN_LICENSES: Tuple[str, ...] = (
+OPEN_LICENSES: tuple[str, ...] = (
     "apache-2.0",
     "mit",
     "bsd-2-clause",
@@ -43,16 +45,16 @@ OPEN_LICENSES: Tuple[str, ...] = (
 class ModelSummary:
     """Serializable summary of a model entry from Hugging Face Hub."""
     model_id: str
-    likes: Optional[int]
-    downloads: Optional[int]
-    license: Optional[str]
-    tasks: List[str]
-    library_name: Optional[str]
-    gated: Optional[bool]
-    private: Optional[bool]
+    likes: int | None
+    downloads: int | None
+    license: str | None
+    tasks: list[str]
+    library_name: str | None
+    gated: bool | None
+    private: bool | None
 
 
-def _extract_tags(info: ModelInfo) -> Tuple[List[str], Optional[str]]:
+def _extract_tags(info: ModelInfo) -> tuple[list[str], str | None]:
     """
     Extract task tags and primary library from a ModelInfo's tags.
 
@@ -70,13 +72,13 @@ def _extract_tags(info: ModelInfo) -> Tuple[List[str], Optional[str]]:
 
 
 def enumerate_open_models(
-    task: Optional[str] = "text-generation",
-    library: Optional[str] = "vllm",
+    task: str | None = "text-generation",
+    library: str | None = "vllm",
     limit: int = 200,
     open_licenses_only: bool = True,
     include_gated: bool = False,
     include_private: bool = False,
-) -> List[ModelSummary]:
+) -> list[ModelSummary]:
     """
     Query Hugging Face Hub for models and return filtered summaries.
 
@@ -91,7 +93,7 @@ def enumerate_open_models(
     Returns:
         A list of ModelSummary entries.
     """
-    filters: List[Any] = []
+    filters: list[Any] = []
 
     if task:
         filters.append(ModelFilter(task=task))
@@ -115,7 +117,7 @@ def enumerate_open_models(
         limit=limit,
     )
 
-    summaries: List[ModelSummary] = []
+    summaries: list[ModelSummary] = []
     for info in results:
         tasks, primary_lib = _extract_tags(info)
         license_str = getattr(info, "license", None)
@@ -229,7 +231,7 @@ def main() -> None:
     # Optional JSON output
     if args.json_out:
         try:
-            payload: List[Dict[str, Any]] = [asdict(s) for s in summaries]
+            payload: list[dict[str, Any]] = [asdict(s) for s in summaries]
             with open(args.json_out, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
             logger.info("Wrote JSON output to %s", args.json_out)

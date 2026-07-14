@@ -1,8 +1,8 @@
-from abc import ABC, abstractmethod
-from adapters.base_adapter import BaseAdapter
-from typing import List
-from datetime import datetime
+
 from twilio.rest import Client
+
+from adapters.base_adapter import BaseAdapter
+
 
 class SMSAdapter(BaseAdapter):
     '''
@@ -13,15 +13,15 @@ class SMSAdapter(BaseAdapter):
         self.account_sid = twilio_sid
         self.source_number = twilio_source
         self.client = Client(twilio_sid, twilio_key)
-        
 
-    def enumerate_actions(self) -> List[str]:
+
+    def enumerate_actions(self) -> list[str]:
         return ["send_text"]
-    
+
     def send_text(self, message: str, number: str):
-        message = self.client.messages.create(
+        created = self.client.messages.create(
             body=message,
-            from_=self.source_number,  
+            from_=self.source_number,
             to=number
         )
-        return message.sid
+        return created.sid

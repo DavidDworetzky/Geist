@@ -1,24 +1,25 @@
+import glob
+import json
+import logging
 import os
 import re
 import time
-import json
-import glob
-import logging
-import numpy as np
-from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass, field
-from agents.models.llama_completion import strings_to_message_dict
 
 # MLX imports
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
+import safetensors
+import safetensors.torch
+import torch
 
 # Tokenizer imports
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
-import safetensors
-import torch
-import safetensors.torch
+
+from agents.models.llama_completion import strings_to_message_dict
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -42,14 +43,14 @@ class ModelConfig:
     rope_theta: float = 10000
     rope_traditional: bool = True
     max_position_embeddings: int = 2048
-    rope_scaling: Optional[Dict] = field(default=None)
+    rope_scaling: dict | None = field(default=None)
 
 
 class Llama3RoPE(nn.Module):
     """
     Llama 3 style RoPE scaling with low/high frequency factors.
     """
-    def __init__(self, dim: int, base: float, rope_scaling: Dict, max_position_embeddings: int):
+    def __init__(self, dim: int, base: float, rope_scaling: dict, max_position_embeddings: int):
         super().__init__()
         self.dim = dim
         self.base = base
@@ -132,9 +133,9 @@ class Attention(nn.Module):
     def __call__(
         self,
         x: mx.array,
-        mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+        mask: mx.array | None = None,
+        cache: tuple[mx.array, mx.array] | None = None,
+    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
         B, L, D = x.shape
 
         queries = self.wq(x)
@@ -228,9 +229,9 @@ class TransformerBlock(nn.Module):
     def __call__(
         self,
         x: mx.array,
-        mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+        mask: mx.array | None = None,
+        cache: tuple[mx.array, mx.array] | None = None,
+    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
         # Attention
         r, cache = self.attention(self.attention_norm(x), mask=mask, cache=cache)
         h = x + r
@@ -270,22 +271,22 @@ class Llama(nn.Module):
         """
         Token-by-token generator with optional temperature and top-p sampling.
         Yields one token at a time until EOS token or max_new_tokens is reached.
-        
+
         Parameters:
             x (mx.array): Input token ids with shape (batch_size, seq_len)
             temp (float): Temperature for sampling (1.0 = no change, <1.0 = more deterministic)
             top_p (float): Nucleus sampling probability threshold
             max_new_tokens (int): Maximum number of new tokens to generate
             eos_token_id (int, optional): Token ID that signals the end of sequence
-            
+
         Yields:
             int: Generated token IDs one at a time
         """
         def _normalize_eos_ids(eos_ids):
             if eos_ids is None:
                 return None
-            if isinstance(eos_ids, (list, tuple, set)):
-                return set(int(e) for e in eos_ids)
+            if isinstance(eos_ids, list | tuple | set):
+                return {int(e) for e in eos_ids}
             return {int(eos_ids)}
 
         eos_ids = _normalize_eos_ids(eos_token_id)
@@ -293,10 +294,10 @@ class Llama(nn.Module):
         def sample_logits(logits: mx.array) -> int:
             """
             Sample a token from the logits with temperature scaling and optional nucleus sampling.
-            
+
             Parameters:
                 logits (mx.array): Logits from the model.
-            
+
             Returns:
                 int: The sampled token.
             """
@@ -322,23 +323,23 @@ class Llama(nn.Module):
                 # Compute probabilities once
                 probs = np.exp(np_logits - np.max(np_logits))  # Subtract max for numerical stability
                 probs = probs / np.sum(probs)
-                
+
                 # Sort probabilities in descending order
                 sorted_indices = np.argsort(-probs)
                 sorted_probs = probs[sorted_indices]
                 cumulative_probs = np.cumsum(sorted_probs)
-                
+
                 # Find cutoff index for top-p
                 cutoff_idx = np.searchsorted(cumulative_probs, top_p)
-                
+
                 # Create a mask for the top-p tokens
                 top_p_mask = np.zeros_like(probs)
                 top_p_mask[sorted_indices[:cutoff_idx+1]] = 1
-                
+
                 # Apply the mask and renormalize
                 masked_probs = probs * top_p_mask
                 masked_probs = masked_probs / np.sum(masked_probs)
-                
+
                 # Sample from the masked distribution
                 next_id = np.random.choice(len(masked_probs), p=masked_probs)
                 return int(next_id)
@@ -366,13 +367,13 @@ class Llama(nn.Module):
 
         # Get 2D logits with shape (1, vocab_size)
         logits = self.output(h[:, -1])
-        
+
         # Squeeze the batch dimension to get a 1D tensor of shape (vocab_size,)
         logits = logits[0]
-        
+
         new_token = sample_logits(logits)
         yield new_token
-        
+
         # Check if we should stop after the first token
         if eos_ids is not None and new_token in eos_ids:
             logger.info("Generation stopped after first token (EOS token generated)")
@@ -383,13 +384,13 @@ class Llama(nn.Module):
         # Add a timeout mechanism to prevent infinite loops
         start_time = time.time()
         max_generation_time = 60  # 60 seconds timeout
-        
+
         while tokens_generated < max_new_tokens:
             # Check for timeout
             if time.time() - start_time > max_generation_time:
                 logger.warning(f"Generation timed out after {max_generation_time} seconds")
                 break
-            
+
             tokens_generated += 1
             x = mx.array([[new_token]])  # shape (batch=1, seq=1)
             # Use cached keys/values
@@ -402,7 +403,7 @@ class Llama(nn.Module):
             logits = logits[0]
             new_token = sample_logits(logits)
             yield new_token
-            
+
             # Stop if we hit the EOS token
             if eos_ids is not None and new_token in eos_ids:
                 logger.info(f"Generation stopped at token {tokens_generated}: EOS token generated")
@@ -426,17 +427,17 @@ class LlamaMLX:
         # Local directory to store model & tokenizer
         self.weights_dir = "app/model_weights/llama_3_1"
         self.cache_converted_safetensors = cache_converted_safetensors
-        
+
         # Our merged config
         self.config = ModelConfig()
-        self.eos_token_ids: Optional[List[int]] = None
+        self.eos_token_ids: list[int] | None = None
         self._weights_dtype = mx.float16
 
         logger.info("Initializing LlamaMLX.")
         self.load_model_and_tokenizer()
         logger.info("LlamaMLX initialized successfully.")
 
-    def _apply_hf_config(self, config_json: Dict):
+    def _apply_hf_config(self, config_json: dict):
         """
         Apply HF config.json fields to our ModelConfig, with Llama 3.1-specific keys.
         """
@@ -486,7 +487,7 @@ class LlamaMLX:
         else:
             self._weights_dtype = mx.float16
 
-    def _map_hf_to_mlx_key(self, key: str) -> Optional[str]:
+    def _map_hf_to_mlx_key(self, key: str) -> str | None:
         """
         Map HuggingFace Llama parameter names to MLX module names.
         """
@@ -590,7 +591,7 @@ class LlamaMLX:
 
         # Step 3: Load the config
         config_path = os.path.join(self.weights_dir, "config.json")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_json = json.load(f)
 
         # Merge HF config into our ModelConfig with Llama-specific keys.
@@ -608,7 +609,7 @@ class LlamaMLX:
         if not safetensors_files:
             raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
 
-        mapped_weights: Dict[str, mx.array] = {}
+        mapped_weights: dict[str, mx.array] = {}
         unmapped_keys = 0
         for file_path in safetensors_files:
             logger.info(f"Loading safetensors file: {file_path}")
@@ -646,10 +647,10 @@ class LlamaMLX:
         """
         Generate text using the LLaMA model's `generate` method (token-by-token).
         Returns the final token array (including prompt + generation).
-        
+
         Parameters:
             prompt (str): The input prompt to generate from
-            
+
         Returns:
             mx.array: Array of token IDs including prompt and generated tokens
         """
@@ -673,22 +674,22 @@ class LlamaMLX:
         # Set a timeout for the entire generation process
         start_time = time.time()
         max_generation_time = 120  # 2 minutes timeout
-        
+
         try:
             for new_tok in token_iter:
                 generated_tokens.append(new_tok)
-                
+
                 # Check if we've been generating for too long
                 if time.time() - start_time > max_generation_time:
                     logger.warning(f"Generation timed out after {max_generation_time} seconds")
                     break
-                
+
                 # If we hit EOS, we can stop
                 eos_ids = self.eos_token_ids or [self.tokenizer.eos_token_id]
                 if new_tok in eos_ids:
                     logger.info("Generation complete: EOS token generated")
                     break
-                
+
                 # Print progress every 10 tokens
                 if len(generated_tokens) % 10 == 0:
                     logger.debug(f"Generated {len(generated_tokens) - len(prompt_ids)} tokens so far")
@@ -696,7 +697,7 @@ class LlamaMLX:
             logger.error(f"Error during token generation: {str(e)}")
             # Return what we have so far rather than failing completely
             logger.info(f"Returning partial generation of {len(generated_tokens)} tokens")
-        
+
         logger.info(f"Generated tokens: {len(generated_tokens) - len(prompt_ids)} new, {len(generated_tokens)} total")
         return mx.array(generated_tokens)
 

@@ -1,23 +1,43 @@
 import logging
-from typing import Dict
 
-from app.models.database.database import SessionLocal
-from app.models.database.agent_preset import AgentPreset
-from agents.agent_settings import AgentSettings
 from agents.agent_context import AgentContext
-from app.environment import LoadEnvironmentDictionary
+from agents.agent_settings import AgentSettings
+from app.environment import load_environment_dictionary
+from app.models.database.agent_preset import AgentPreset
+from app.models.database.database import SessionLocal
+
 
 logger = logging.getLogger(__name__)
 
 
-def _get_envs() -> Dict[str, str]:
+def _get_envs() -> dict[str, str]:
     """
-    Load environment variables dictionary via `LoadEnvironmentDictionary`.
+    Load environment variables dictionary via `load_environment_dictionary`.
 
     Returns:
         Dict[str, str]: Environment key-value pairs
     """
-    return LoadEnvironmentDictionary()
+    return load_environment_dictionary()
+
+
+def settings_from_preset(preset: AgentPreset) -> AgentSettings:
+    """Build AgentSettings from a preset row, falling back to defaults for NULL columns."""
+    def pick(value, default):
+        return default if value is None else value
+
+    return AgentSettings(
+        name=pick(preset.name, "default"),
+        version=pick(preset.version, "1.0"),
+        description=pick(preset.description, ""),
+        max_tokens=pick(preset.max_tokens, 16),
+        n=pick(preset.n, 1),
+        temperature=pick(preset.temperature, 1.0),
+        top_p=pick(preset.top_p, 1.0),
+        frequency_penalty=pick(preset.frequency_penalty, 0.0),
+        presence_penalty=pick(preset.presence_penalty, 0.0),
+        interactive_only=pick(preset.interactive_only, False),
+        include_world_processing=pick(preset.process_world, False),
+    )
 
 
 def get_default_agent_context() -> AgentContext:
@@ -37,19 +57,7 @@ def get_default_agent_context() -> AgentContext:
         if not default_preset:
             raise ValueError("Default Context preset not found in the database.")
 
-        agent_settings = AgentSettings(
-            name=default_preset.name,
-            version=default_preset.version,
-            description=default_preset.description,
-            max_tokens=default_preset.max_tokens,
-            n=default_preset.n,
-            temperature=default_preset.temperature,
-            top_p=default_preset.top_p,
-            frequency_penalty=default_preset.frequency_penalty,
-            presence_penalty=default_preset.presence_penalty,
-            interactive_only=default_preset.interactive_only,
-            include_world_processing=default_preset.process_world,
-        )
+        agent_settings = settings_from_preset(default_preset)
 
         context = AgentContext(settings=agent_settings, envs=_get_envs())
         return context
