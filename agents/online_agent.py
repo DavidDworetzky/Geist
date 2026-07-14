@@ -14,6 +14,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
+from agents.model_catalog import PROVIDERS
 from agents.models.generic_completion import GenericCompletion
 from agents.tool_calling import (
     ToolCall,
@@ -41,6 +42,7 @@ class OnlineAgent(BaseAgent):
         model: str,
         api_key: str | None = None,
         backup_providers: list[dict[str, str]] | None = None,
+        generation_config: dict[str, Any] | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
         as_subprocess: bool = False,
@@ -55,6 +57,7 @@ class OnlineAgent(BaseAgent):
             model: Model name to use
             api_key: API key for authentication
             backup_providers: List of backup provider configurations
+            generation_config: Optional default generation parameters
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries
             as_subprocess: Whether to run as subprocess
@@ -65,6 +68,7 @@ class OnlineAgent(BaseAgent):
         self.model = model
         self.api_key = api_key or self._get_api_key_from_env()
         self.backup_providers = backup_providers or []
+        self.generation_config = generation_config or {}
         self.timeout = timeout
         self.max_retries = max_retries
 
@@ -78,6 +82,9 @@ class OnlineAgent(BaseAgent):
 
     def _get_api_key_from_env(self) -> str | None:
         """Get provider-specific API key from environment variables based on the endpoint."""
+        for provider in PROVIDERS.values():
+            if provider.base_url and provider.base_url.rstrip("/") in self.base_url:
+                return os.getenv(provider.api_key_env)
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
         elif "anthropic" in self.base_url:
@@ -86,8 +93,7 @@ class OnlineAgent(BaseAgent):
             return os.getenv("GROQ_API_KEY")
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
-        return None
-
+        return os.getenv("API_KEY")
     def _make_request(
         self, payload: dict[str, Any], use_backup: bool = False, backup_index: int = 0
     ) -> dict[str, Any]:
@@ -226,7 +232,6 @@ class OnlineAgent(BaseAgent):
             system_prompt,
             chat_id,
         )
-
         # Make request
         response_data = self._make_request(payload)
 
@@ -273,7 +278,6 @@ class OnlineAgent(BaseAgent):
             chat_id,
         )
         payload["stream"] = True
-
         # Ensure endpoint includes chat/completions
         current_url = self.base_url
         if not current_url.endswith("/chat/completions"):

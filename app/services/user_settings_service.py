@@ -189,7 +189,7 @@ class UserSettingsService:
             api_key=factory_config.api_key,
             runner_type=factory_config.runner_type,
             backup_providers=[provider.dict() for provider in factory_config.backup_providers],
-            **factory_config.generation_config
+            generation_config=factory_config.generation_config,
         )
 
         return agent

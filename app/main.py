@@ -12,7 +12,7 @@ from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
-from agents.local_agent import LocalAgent
+from agents.factory import AgentFactory
 from agents.models.agent_completion import AgentCompletion
 from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS
@@ -313,8 +313,14 @@ def get_local_agent():
     agent_context = get_default_agent_context()
     # Get user settings to determine local model configuration
     settings = UserSettingsService.get_default_user_settings()
+    factory_config = AgentFactoryConfig.from_user_settings(settings)
     model_id = settings.default_local_model or DEFAULT_LOCAL_MODEL
-    return LocalAgent(agent_context=agent_context, model_id=model_id, runner_type="mlx_llama")
+    return AgentFactory.create_agent(
+        agent_type="local",
+        agent_context=agent_context,
+        model=model_id,
+        generation_config=factory_config.generation_config,
+    )
 
 
 def get_online_agent():
@@ -323,23 +329,14 @@ def get_online_agent():
     settings = UserSettingsService.get_default_user_settings()
     factory_config = AgentFactoryConfig.from_user_settings(settings)
 
-    # Get provider-specific API key from environment
-    provider = settings.default_online_provider
-    api_key = None
-    if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-    elif provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-    elif provider == "groq":
-        api_key = os.getenv("GROQ_API_KEY")
-    elif provider == "grok":
-        api_key = os.getenv("GROK_API_KEY")
-
-    return OnlineAgent(
+    return AgentFactory.create_agent(
+        agent_type="online",
         agent_context=agent_context,
-        base_url=factory_config.endpoint or DEFAULT_API_URL,
+        # Preserve None so AgentFactory can infer the catalog endpoint and can
+        # fail safely when a self-hosted model has no configured server.
+        endpoint=factory_config.endpoint,
         model=factory_config.model,
-        api_key=api_key,
+        generation_config=factory_config.generation_config,
     )
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Script to manage model weights for llama_3_1.
+Script to manage local model weights.
 
 This script provides functionality to:
-1. Delete all weights in the app/model_weights/llama_3_1 folder
-2. Copy weights from a desktop location to the app/model_weights/llama_3_1 folder
+1. Delete weights from a model-specific directory.
+2. Copy weights from a desktop or configured location to that directory.
 """
 
 import logging
@@ -22,10 +22,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 # Load environment variables
 load_dotenv()
 
-models = {
-    "llama_3_1" : "llama_3_1",
-    "qwen3" : "qwen3"
-}
+DEFAULT_MODEL = "llama_3_1"
+
+
+def model_dir_name(model_id: str) -> str:
+    """Use the same deterministic directory convention as local runners."""
+    return model_id.replace("/", "_")
+
+
+def destination_for_model(model_id: str) -> Path:
+    return Path(__file__).parent.parent / "app" / "model_weights" / model_dir_name(model_id)
 
 def delete_weights(weights_dir: str | Path = None) -> tuple[bool, str]:
     """
@@ -127,10 +133,10 @@ def copy_weights(source_dir: str | Path,
         logger.error(f"Error copying files: {str(e)}")
         return False, f"Error copying files: {str(e)}"
 
-def copy_from_desktop() -> tuple[bool, str]:
+def copy_from_desktop(model_id: str = DEFAULT_MODEL) -> tuple[bool, str]:
     """
     Copy model weights from the directory specified in LOCAL_WEIGHTS_DIR environment variable
-    to app/model_weights/llama_3_1.
+    to a model-specific directory under app/model_weights.
 
     If LOCAL_WEIGHTS_DIR is not set, falls back to desktop llama_3_1 folder.
 
@@ -144,33 +150,32 @@ def copy_from_desktop() -> tuple[bool, str]:
 
     if local_weights_dir:
         local_weights_path = Path(local_weights_dir)
-        for model in models:
-            model_path = local_weights_path / models[model]
-            if model_path.exists():
-                logger.info(f"Using weights from LOCAL_WEIGHTS_DIR: {model_path}")
-                return copy_weights(model_path)
-            else:
-                logger.warning(f"LOCAL_WEIGHTS_DIR path does not exist: {model_path}")
+        model_path = local_weights_path / model_dir_name(model_id)
+        if model_path.exists():
+            logger.info(f"Using weights from LOCAL_WEIGHTS_DIR: {model_path}")
+            return copy_weights(model_path, destination_for_model(model_id))
+        logger.warning(f"LOCAL_WEIGHTS_DIR path does not exist: {model_path}")
 
     # Fall back to desktop path if LOCAL_WEIGHTS_DIR is not set or doesn't exist
     home_dir = Path.home()
-    desktop_dir = home_dir / "Desktop" / "llama_3_1"
+    desktop_dir = home_dir / "Desktop" / model_dir_name(model_id)
 
     if not desktop_dir.exists():
         # Try alternative desktop path on some systems
-        desktop_dir = home_dir / "OneDrive" / "Desktop" / "llama_3_1"
+        desktop_dir = home_dir / "OneDrive" / "Desktop" / model_dir_name(model_id)
 
         if not desktop_dir.exists():
-            logger.error("Could not find llama_3_1 folder on desktop.")
-            return False, "Could not find llama_3_1 folder on desktop."
+            logger.error(f"Could not find {model_dir_name(model_id)} folder on desktop.")
+            return False, f"Could not find {model_dir_name(model_id)} folder on desktop."
 
     logger.info(f"Using weights from desktop: {desktop_dir}")
-    return copy_weights(desktop_dir)
+    return copy_weights(desktop_dir, destination_for_model(model_id))
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Manage llama_3_1 model weights")
+    parser = argparse.ArgumentParser(description="Manage local model weights")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model ID or local model directory name")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # Delete command
@@ -183,15 +188,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.command == "delete":
-        success, message = delete_weights()
+        success, message = delete_weights(destination_for_model(args.model))
         print(message)
         exit(0 if success else 1)
 
     elif args.command == "copy":
         if args.source:
-            success, message = copy_weights(args.source)
+            success, message = copy_weights(args.source, destination_for_model(args.model))
         else:
-            success, message = copy_from_desktop()
+            success, message = copy_from_desktop(args.model)
         print(message)
         exit(0 if success else 1)
 
