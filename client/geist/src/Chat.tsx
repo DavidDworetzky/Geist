@@ -119,7 +119,7 @@ const Chat = () => {
     } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [chatHistory, page]);
+  }, [chatHistory, page, isLoading]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -295,7 +295,11 @@ const Chat = () => {
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
-            <ChatTextArea chatHistory={chatHistory?.chatHistory ?? []} ref={chatContainerRef} />
+            <ChatTextArea
+              chatHistory={chatHistory?.chatHistory ?? []}
+              isLoading={isLoading}
+              ref={chatContainerRef}
+            />
           </div>
 
           <aside

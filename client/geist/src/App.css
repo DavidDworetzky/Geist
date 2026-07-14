@@ -919,6 +919,56 @@ textarea:focus-visible {
   text-align: center;
 }
 
+@keyframes chat-dot-bounce {
+  0%, 60%, 100% {
+    opacity: 0.42;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+.chat-loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  width: fit-content;
+  min-width: 52px;
+  min-height: 38px;
+  padding: 10px 14px;
+  gap: 5px;
+  background: var(--geist-color-surface-strong);
+  border: 1px solid color-mix(in srgb, var(--geist-color-accent) 34%, var(--geist-color-border));
+  border-radius: var(--geist-radius-lg);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+}
+
+.chat-loading-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--geist-color-accent-strong);
+  border-radius: 50%;
+  animation: chat-dot-bounce 1.2s var(--geist-ease-standard) infinite;
+}
+
+.chat-loading-dot:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.chat-loading-dot:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-loading-dot {
+    opacity: 1;
+    animation: none;
+  }
+}
+
 .chat-turn {
   display: grid;
   gap: 8px;
