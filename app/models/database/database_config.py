@@ -1,7 +1,8 @@
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional, Protocol, Sequence
+from typing import Protocol
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine as SqlAlchemyEngine
@@ -139,9 +140,9 @@ DEFAULT_DATABASE_PROVIDERS = DatabaseProviderRegistry(
 
 
 def load_database_config(
-    provider: Optional[str] = None,
-    database_url: Optional[str] = None,
-    environ: Optional[Mapping[str, str]] = None,
+    provider: str | None = None,
+    database_url: str | None = None,
+    environ: Mapping[str, str] | None = None,
     registry: DatabaseProviderRegistry = DEFAULT_DATABASE_PROVIDERS,
 ) -> DatabaseConfig:
     environment = os.environ if environ is None else environ

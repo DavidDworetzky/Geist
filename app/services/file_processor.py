@@ -1,13 +1,15 @@
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Any
+
+from app.models.database.file_upload import get_file_upload_by_id, update_file_processing_status
 from app.services.text_extraction import TextExtractionService
-from app.models.database.file_upload import update_file_processing_status, get_file_upload_by_id
+
 
 class FileProcessingService:
     """Service for processing uploaded files asynchronously"""
-    
+
     @staticmethod
-    async def process_file(file_id: int) -> Dict[str, Any]:
+    async def process_file(file_id: int) -> dict[str, Any]:
         """
         Process a file by extracting text content and updating the database
         Returns dict with processing results
@@ -20,7 +22,7 @@ class FileProcessingService:
                     'success': False,
                     'error': f'File with ID {file_id} not found'
                 }
-            
+
             # Skip processing if already processed
             if file_upload.is_processed:
                 return {
@@ -28,27 +30,27 @@ class FileProcessingService:
                     'message': 'File already processed',
                     'extracted_text': file_upload.extracted_text
                 }
-            
+
             # Extract text from file
             extraction_result = TextExtractionService.extract_text_from_file(
                 file_upload.file_data,
                 file_upload.mime_type,
                 file_upload.filename
             )
-            
+
             if extraction_result['success']:
                 # Clean the extracted text
                 cleaned_text = TextExtractionService.clean_extracted_text(
                     extraction_result['text']
                 )
-                
+
                 # Update database with extracted text
                 update_file_processing_status(
                     file_id=file_id,
                     extracted_text=cleaned_text,
                     processing_error=None
                 )
-                
+
                 return {
                     'success': True,
                     'message': 'File processed successfully',
@@ -63,15 +65,15 @@ class FileProcessingService:
                     extracted_text=None,
                     processing_error=error_message
                 )
-                
+
                 return {
                     'success': False,
                     'error': error_message
                 }
-                
+
         except Exception as e:
             error_message = f'File processing failed: {str(e)}'
-            
+
             # Try to update database with error (but don't fail if this fails)
             try:
                 update_file_processing_status(
@@ -83,14 +85,14 @@ class FileProcessingService:
                 # Log but don't propagate database errors during error handling
                 import logging
                 logging.warning(f"Failed to update file processing status for file {file_id}: {db_error}")
-            
+
             return {
                 'success': False,
                 'error': error_message
             }
-    
+
     @staticmethod
-    def process_file_sync(file_id: int) -> Dict[str, Any]:
+    def process_file_sync(file_id: int) -> dict[str, Any]:
         """
         Synchronous wrapper for process_file
         Use this when you need to process files without async context
@@ -106,29 +108,29 @@ class FileProcessingService:
                 return loop.run_until_complete(FileProcessingService.process_file(file_id))
             finally:
                 loop.close()
-    
+
     @staticmethod
-    async def process_multiple_files(file_ids: list) -> Dict[str, Any]:
+    async def process_multiple_files(file_ids: list) -> dict[str, Any]:
         """
         Process multiple files concurrently
         Returns dict with results for each file
         """
         if not file_ids:
             return {'success': True, 'results': {}}
-        
+
         # Process files concurrently
         tasks = [FileProcessingService.process_file(file_id) for file_id in file_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Compile results
         file_results = {}
         success_count = 0
         error_count = 0
-        
+
         for i, result in enumerate(results):
             file_id = file_ids[i]
-            
-            if isinstance(result, Exception):
+
+            if isinstance(result, BaseException):
                 file_results[file_id] = {
                     'success': False,
                     'error': f'Processing exception: {str(result)}'
@@ -140,7 +142,7 @@ class FileProcessingService:
                     success_count += 1
                 else:
                     error_count += 1
-        
+
         return {
             'success': True,
             'results': file_results,
@@ -150,9 +152,9 @@ class FileProcessingService:
                 'failed': error_count
             }
         }
-    
+
     @staticmethod
-    def reprocess_file(file_id: int, force: bool = False) -> Dict[str, Any]:
+    def reprocess_file(file_id: int, force: bool = False) -> dict[str, Any]:
         """
         Reprocess a file (useful if processing failed or needs updating)
         """
@@ -164,14 +166,14 @@ class FileProcessingService:
                     'success': False,
                     'error': f'File with ID {file_id} not found'
                 }
-            
+
             if file_upload.is_processed and not file_upload.processing_error:
                 return {
                     'success': True,
                     'message': 'File already processed successfully. Use force=True to reprocess.',
                     'extracted_text': file_upload.extracted_text
                 }
-        
+
         # Reset processing status before reprocessing
         try:
             update_file_processing_status(
@@ -192,12 +194,12 @@ class FileProcessingService:
                 'success': False,
                 'error': f'Failed to reset processing status: {str(e)}'
             }
-        
+
         # Process the file
         return FileProcessingService.process_file_sync(file_id)
-    
+
     @staticmethod
-    def get_processing_status(file_id: int) -> Dict[str, Any]:
+    def get_processing_status(file_id: int) -> dict[str, Any]:
         """Get the current processing status of a file"""
         file_upload = get_file_upload_by_id(file_id)
         if not file_upload:
@@ -205,7 +207,7 @@ class FileProcessingService:
                 'success': False,
                 'error': f'File with ID {file_id} not found'
             }
-        
+
         return {
             'success': True,
             'file_id': file_upload.file_id,

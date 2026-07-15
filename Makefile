@@ -1,15 +1,14 @@
 # Variables
 UV=uv
 IS_WSL=$(shell grep -qi microsoft /proc/version 2>/dev/null && echo 1 || echo 0)
+COMPOSE_FILE=docker-compose.yml
 
 ifeq ($(IS_WSL),1)
 DOCKER=docker.exe
 DOCKER_COMPOSE=docker.exe compose
-COMPOSE_FILE=docker-compose.wsl.yml
 else
 DOCKER=docker
 DOCKER_COMPOSE=docker compose
-COMPOSE_FILE=docker-compose.yml
 endif
 
 # Default target
@@ -25,8 +24,8 @@ help:
 	@echo "  make debug       - Run the backend natively with debugger (pdb)"
 	@echo "  make sync        - Install/refresh the uv-managed environment from uv.lock"
 	@echo "  make init-db     - Initialize the database (SQLite by default)"
-	@echo "  make run-docker  - Run the full Docker stack (backend + PostgreSQL + frontend)"
-	@echo "  make services    - Run auxiliary Docker services only (PostgreSQL + frontend)"
+	@echo "  make run-docker  - Run the full Docker stack (backend + frontend, SQLite by default)"
+	@echo "  make services    - Run the Docker frontend alongside the native SQLite backend"
 	@echo "  make docker      - Alias for run-docker (detached)"
 	@echo "  make stop        - Stop all running services"
 	@echo "  make clean       - Clean up Docker resources"
@@ -69,7 +68,7 @@ debug:
 init-db:
 	$(UV) run python initdb.py
 
-# Run the full Docker stack (backend + PostgreSQL + frontend)
+# Run the full Docker stack (backend + frontend, SQLite by default)
 .PHONY: run-docker
 run-docker:
 ifeq ($(IS_WSL),1)
@@ -77,7 +76,7 @@ ifeq ($(IS_WSL),1)
 endif
 	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
 
-# Run auxiliary Docker services only (PostgreSQL + frontend), e.g. alongside a native backend
+# Run the Docker frontend alongside the native SQLite backend
 .PHONY: services
 services:
 	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d

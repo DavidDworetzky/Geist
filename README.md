@@ -63,13 +63,10 @@ uv sync --extra postgres   # psycopg2 driver, for GEIST_DATABASE_PROVIDER=postgr
 uv sync --extra voice      # sounddevice/sphn for the voice client tooling
 ```
 
-Note for Linux CPU runs: the `mlx` CPU backend JIT-compiles kernels with the system compiler and can fail on some gcc versions. If local MLX inference aborts, set `MLX_DISABLE_COMPILE=1`. (MLX inference is primarily intended for Apple silicon.)
+Note for Linux CPU runs: MLX and Moshi can JIT-compile kernels with the system compiler and fail on some compiler/architecture combinations. Docker defaults to portable interpreted paths with `MLX_DISABLE_COMPILE=1` and `NO_TORCH_COMPILE=1`; native runs can set the same values when needed. (MLX inference is primarily intended for Apple silicon.)
 
 ## Install PostgreSQL (optional)
-SQLite is the default database provider. To use PostgreSQL instead, install version 16.2 (or use the Docker compose stack, which provides it) and set `GEIST_DATABASE_PROVIDER=postgresql`.
-
-## Install Miniconda (legacy/Docker path)
-1. Create a python 3.10 environment solve and install with windows_x64_environment.yml or mac_arm_environment.yml. The Docker image still uses the conda environment files; native development should prefer the uv setup above.
+SQLite is the default database provider, including in Docker Compose. To use PostgreSQL instead, install version 16.2, configure its connection values, and set `GEIST_DATABASE_PROVIDER=postgresql`.
 
 ## Setting up your environment
 1. Make sure that your .env file is initialized - the following values are included but you may not need to set all of these depending on agent utilization and DEV/PROD settings:
@@ -93,7 +90,7 @@ GEIST_DATABASE_PROVIDER=sqlite          # default; may be omitted
 SQLITE_DATABASE_PATH=/absolute/path/to/geist.sqlite3
 ```
 
-To use PostgreSQL instead (the Docker compose stack sets this automatically), select it explicitly; it uses the existing `POSTGRES_*`, `DB_HOST`, and `DB_PORT` settings:
+To use PostgreSQL instead, select it explicitly; it uses the existing `POSTGRES_*`, `DB_HOST`, and `DB_PORT` settings:
 
 ```bash
 GEIST_DATABASE_PROVIDER=postgresql
@@ -145,15 +142,7 @@ uv add PACKAGE==VERSION   # updates pyproject.toml and uv.lock together
 
 Review the `pyproject.toml` and `uv.lock` diff before committing.
 
-The Docker image still installs from the conda environment files. When changing dependencies used inside the container, keep the conda files in sync:
-
-```bash
-docker exec backend /bin/bash
-pip install --only-binary=:all: PACKAGE==VERSION
-conda env export > linux_environment.yml
-```
-
-After changing backend dependencies, audit the pinned pip section and review the environment file diff before committing.
+The Docker image installs from the same `pyproject.toml`/`uv.lock` via uv, so container and native dependencies stay in sync automatically — no separate environment files to maintain.
 
 ### Hooks
 
@@ -164,22 +153,21 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-The dependency policy hook rejects npm version ranges, unsafe frontend Docker installs, missing npm lockfile integrity entries, and unpinned Python environment dependencies.
+The dependency policy hook rejects npm version ranges, unsafe frontend Docker installs, missing npm lockfile integrity entries, and unpinned Python dependencies in `pyproject.toml`.
 
 ## Starting the solution
 1. Run `make run` (SQLite by default; initializes the database and starts the backend natively via uv)
 
 To run against PostgreSQL natively instead:
-1. Start the postgresql server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start` (or `make services` to get the Docker Postgres + frontend)
+1. Start the PostgreSQL server `PATH/pg_ctl -D DATA_PATH -l LOG_PATH start`.
 2. Run `GEIST_DATABASE_PROVIDER=postgresql make run`
 
 ## Starting the solution with docker compose (no mlx support)
-1. Run `make run-docker` (or `docker compose up`). The compose stack uses PostgreSQL.
+1. Run `make run-docker` (or `docker compose up`). The compose stack uses SQLite by default.
 
-## Starting the frontend + Postgres in Docker with a native backend (mlx support on Mac)
+## Starting the frontend in Docker with a native backend (mlx support on Mac)
 1. Run `make services` then `make run`
 2. If you encounter port binding issues, make sure to disable airplay on mac. 
-3. When using the Docker Postgres, set GEIST_DATABASE_PROVIDER=postgresql, DB_HOST = localhost, DB_PORT = 5433 based off of external mappings in docker compose.
 
 
 ## Supported Environments

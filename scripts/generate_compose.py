@@ -9,19 +9,24 @@ based on a template ('backend'), and merges configurations before writing
 the result back to docker-compose.yml.
 """
 
+import argparse
+import copy
 import json
 import logging
-import argparse
-import copy 
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
-import yaml 
+from typing import Any
+
+import yaml
+
+
 reserved_source_keys = ["backend", "db", "frontend", "adapter"]
 template_name = "adapter"
 
 # Set up logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 # Define default paths relative to the script location
 SCRIPT_DIR = Path(__file__).parent
@@ -29,7 +34,8 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "containers.json"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "docker-compose.yml"
 
-def load_container_config(config_path: Path) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+
+def load_container_config(config_path: Path) -> tuple[list[dict[str, Any]] | None, str]:
     """
     Loads container configurations from a JSON file.
 
@@ -46,7 +52,7 @@ def load_container_config(config_path: Path) -> Tuple[Optional[List[Dict[str, An
         logger.error(msg)
         return None, msg
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             data = json.load(f)
         if not isinstance(data, list):
             msg = f"Invalid format in {config_path}: Expected a list of container definitions."
@@ -63,7 +69,8 @@ def load_container_config(config_path: Path) -> Tuple[Optional[List[Dict[str, An
         logger.error(msg, exc_info=True)
         return None, msg
 
-def load_base_compose(compose_path: Path) -> Tuple[Dict[str, Any],str]:
+
+def load_base_compose(compose_path: Path) -> tuple[dict[str, Any], str]:
     """
     Loads the base docker-compose.yml file.
 
@@ -75,29 +82,26 @@ def load_base_compose(compose_path: Path) -> Tuple[Dict[str, Any],str]:
             - The loaded docker-compose data (dict). Returns a default structure if not found.
             - Message describing the result (str).
     """
-    # Only include essential default keys
-    base_keys = ["version", "services"]
-    
     if not compose_path.is_file():
         msg = f"Base docker-compose file not found: {compose_path}. Starting with empty config."
         logger.warning(msg)
         # Return minimal default structure
         return {"version": "3", "services": {}}, msg
     try:
-        with open(compose_path, 'r') as f:
+        with open(compose_path) as f:
             data = yaml.safe_load(f)
         if not isinstance(data, dict):
             msg = f"Invalid format in {compose_path}: Expected a dictionary."
             logger.error(msg)
             # Return minimal default structure
             return {"version": "3", "services": {}}, msg
-            
+
         # Only ensure essential keys exist
         if "version" not in data:
             data["version"] = "3"
         if "services" not in data:
             data["services"] = {}
-            
+
         logger.info(f"Successfully loaded base configuration from {compose_path}")
         return data, f"Successfully loaded base configuration from {compose_path}"
     except yaml.YAMLError as e:
@@ -111,9 +115,8 @@ def load_base_compose(compose_path: Path) -> Tuple[Dict[str, Any],str]:
 
 
 def generate_compose_dict(
-    container_configs: List[Dict[str, Any]],
-    base_compose_path: Path
-) -> Tuple[Optional[Dict[str, Any]], str]:
+    container_configs: list[dict[str, Any]], base_compose_path: Path
+) -> tuple[dict[str, Any] | None, str]:
     """
     Generates the docker-compose dictionary structure by merging container
     configurations with a base docker-compose file and generating new services
@@ -133,50 +136,34 @@ def generate_compose_dict(
     compose_data, load_msg = load_base_compose(base_compose_path)
     logger.info(load_msg)
 
-    # Find the template configuration from containers.json
-    template_config = next((c for c in container_configs if c.get("name") == template_name), None)
-
     # Get the template service definition from the template config
-    template_service_definition = (next((x for x in container_configs if x.get("name") == template_name), None))
+    template_service_definition = next(
+        (x for x in container_configs if x.get("name") == template_name), None
+    )
 
     if not template_service_definition:
         msg = f"Template service '{template_name}' not found in base {base_compose_path}. Cannot generate derived services."
         raise ValueError(msg)
 
     all_networks = set(compose_data.get("networks", {}).keys())
-    all_volumes = set(compose_data.get("volumes", {}).keys()) # Track volumes defined in services
+    all_volumes = set(compose_data.get("volumes", {}).keys())  # Track volumes defined in services
 
-    # Keys from containers.json that map directly or with minor transformation
-    # to docker-compose service definitions.
-    valid_service_keys = [
-        "image", "build", "ports", "volumes", "environment", "env_file",
-        "depends_on", "mem_limit", "restart", "command", "entrypoint",
-        "working_dir", "user", "labels", "dns", "cap_add", "cap_drop",
-        "devices", "expose", "extra_hosts", "healthcheck", "logging",
-        "privileged", "read_only", "security_opt", "stdin_open", "stop_grace_period",
-        "stop_signal", "sysctls", "tmpfs", "tty", "ulimits", "networks"
-        # Note: 'networks' needs special handling below.
-        # Keys like 'name' and 'conda' are specific to containers.json and handled separately.
-    ]
-
-    processed_configs = set() # Keep track of configs used
+    processed_configs = set()  # Keep track of configs used
 
     try:
         for i, config in enumerate(container_configs):
             if not isinstance(config, dict):
-                 msg = f"Invalid configuration format for container #{i+1}: Expected a dictionary."
-                 logger.error(msg)
-                 continue # Skip invalid entry
+                msg = f"Invalid configuration format for container #{i+1}: Expected a dictionary."
+                logger.error(msg)
+                continue  # Skip invalid entry
 
             if "name" not in config:
                 msg = f"Missing required key 'name' in container configuration #{i+1}."
                 logger.error(msg)
-                continue # Skip invalid entry
+                continue  # Skip invalid entry
 
             service_name = config["name"]
             processed_configs.add(service_name)
-            service_definition: Dict[str, Any] = {}
-
             # Determine if this is a reserved key or a derived service
             is_reserved = service_name in reserved_source_keys
             is_derived = not is_reserved and template_service_definition is not None
@@ -191,42 +178,49 @@ def generate_compose_dict(
                 target_service_name = f"adapter-{service_name}"
                 # Start with a deep copy of the template definition
                 current_service_definition = copy.deepcopy(template_service_definition)
-                logger.info(f"Generating service '{target_service_name}' based on template '{template_name}'.")
+                logger.info(
+                    f"Generating service '{target_service_name}' based on template '{template_name}'."
+                )
             else:
                 # Not reserved, and template is missing or invalid - skip derivation
                 if not is_reserved:
-                    logger.warning(f"Skipping generation for '{service_name}' as template '{template_name}' is missing in base compose file.")
-                continue # Skip to next config
+                    logger.warning(
+                        f"Skipping generation for '{service_name}' as template '{template_name}' is missing in base compose file."
+                    )
+                continue  # Skip to next config
 
             # Add the processed/generated service definition to compose_data
             if not current_service_definition:
-                 logger.warning(f"Configuration for '{service_name}' resulted in an empty service definition for '{target_service_name}'. Skipping.")
-                 continue
+                logger.warning(
+                    f"Configuration for '{service_name}' resulted in an empty service definition for '{target_service_name}'. Skipping."
+                )
+                continue
 
             compose_data["services"][target_service_name] = current_service_definition
 
-
         # Add/Update top-level networks based on collected network names
         # Ensure existing network definitions (like external=true) are preserved if not overridden
-        final_networks = compose_data.get("networks", {}) # Start with base networks
-        for net in sorted(list(all_networks)):
-            final_networks.setdefault(net, None) # Add if not present, keep existing config if present
+        final_networks = compose_data.get("networks", {})  # Start with base networks
+        for net in sorted(all_networks):
+            final_networks.setdefault(
+                net, None
+            )  # Add if not present, keep existing config if present
         if final_networks:
             compose_data["networks"] = final_networks
         elif "networks" in compose_data:
-             del compose_data["networks"] # Clean up if no networks ended up being used
-
+            del compose_data["networks"]  # Clean up if no networks ended up being used
 
         # Add/Update top-level volumes based on collected volume names
         # Ensure existing volume definitions are preserved
-        final_volumes = compose_data.get("volumes", {}) # Start with base volumes
-        for vol in sorted(list(all_volumes)):
-             final_volumes.setdefault(vol, None) # Add if not present, keep existing config if present
+        final_volumes = compose_data.get("volumes", {})  # Start with base volumes
+        for vol in sorted(all_volumes):
+            final_volumes.setdefault(
+                vol, None
+            )  # Add if not present, keep existing config if present
         if final_volumes:
             compose_data["volumes"] = final_volumes
         elif "volumes" in compose_data:
-            del compose_data["volumes"] # Clean up if no volumes ended up being used
-
+            del compose_data["volumes"]  # Clean up if no volumes ended up being used
 
         if not compose_data.get("services"):
             msg = "No services were defined in the final configuration."
@@ -244,7 +238,8 @@ def generate_compose_dict(
         logger.error(msg, exc_info=True)
         return None, msg
 
-def write_compose_file(compose_data: Dict[str, Any], output_path: Path) -> Tuple[bool, str]:
+
+def write_compose_file(compose_data: dict[str, Any], output_path: Path) -> tuple[bool, str]:
     """
     Writes the docker-compose dictionary to a YAML file.
     Ports and env_file entries are explicitly converted to strings to ensure
@@ -266,19 +261,19 @@ def write_compose_file(compose_data: Dict[str, Any], output_path: Path) -> Tuple
                 if isinstance(service_config, dict):
                     # Ensure ports are strings
                     if "ports" in service_config and isinstance(service_config.get("ports"), list):
-                        service_config["ports"] = [
-                            str(port) for port in service_config["ports"]
-                        ]
-                    
+                        service_config["ports"] = [str(port) for port in service_config["ports"]]
+
                     # Ensure env_file entries are strings
-                    if "env_file" in service_config and isinstance(service_config.get("env_file"), list):
+                    if "env_file" in service_config and isinstance(
+                        service_config.get("env_file"), list
+                    ):
                         service_config["env_file"] = [
                             str(env_file_path) for env_file_path in service_config["env_file"]
                         ]
-        
+
         # Ensure parent directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             yaml.dump(compose_data, f, default_flow_style=False, sort_keys=False)
         msg = f"Successfully wrote docker-compose configuration to {output_path}"
         logger.info(msg)
@@ -288,21 +283,30 @@ def write_compose_file(compose_data: Dict[str, Any], output_path: Path) -> Tuple
         logger.error(msg, exc_info=True)
         return False, msg
 
+
 def main():
     """Main execution function."""
-    parser = argparse.ArgumentParser(description="Generate docker-compose.yml from JSON config, merging with existing file.")
-    parser.add_argument(
-        "-c", "--config", type=Path, default=DEFAULT_CONFIG_PATH,
-        help=f"Path to the input JSON configuration file (default: {DEFAULT_CONFIG_PATH})"
+    parser = argparse.ArgumentParser(
+        description="Generate docker-compose.yml from JSON config, merging with existing file."
     )
     parser.add_argument(
-        "-o", "--output", type=Path, default=DEFAULT_OUTPUT_PATH,
-        help=f"Path to the output docker-compose.yml file (default: {DEFAULT_OUTPUT_PATH})"
+        "-c",
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to the input JSON configuration file (default: {DEFAULT_CONFIG_PATH})",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_PATH,
+        help=f"Path to the output docker-compose.yml file (default: {DEFAULT_OUTPUT_PATH})",
     )
     args = parser.parse_args()
 
     config_path = args.config
-    output_path = args.output # This is also the base path now
+    output_path = args.output  # This is also the base path now
 
     # 1. Load container configurations from JSON
     container_configs, msg = load_container_config(config_path)
@@ -325,4 +329,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        

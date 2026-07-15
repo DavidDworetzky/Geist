@@ -9,7 +9,7 @@ repos:
         entry: python scripts/verify_dependency_policy.py
         language: system
         pass_filenames: false
-        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^.*environment.*\.yml$|^scripts/verify_dependency_policy\.py$)'
+        files: '(^client/geist/package(-lock)?\.json$|^client/geist/Dockerfile$|^pyproject\.toml$|^uv\.lock$|^scripts/verify_dependency_policy\.py$)'
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -24,7 +24,6 @@ repos:
       - id: check-merge-conflict
       # Check yaml files are valid
       - id: check-yaml
-        exclude: '^(linux_environment|mac_environment|conda).*\.yml$'
       # Check toml files are valid
       - id: check-toml
       # Detect private keys
@@ -33,6 +32,8 @@ repos:
       - id: end-of-file-fixer
       # Remove trailing whitespace
       - id: trailing-whitespace
+      # Normalize mixed line endings
+      - id: mixed-line-ending
 
   # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -65,6 +66,28 @@ repos:
         # Run mypy only on Python files that are tracked by git
         pass_filenames: true
         files: \.py$
+
+  # Python SAST scanning
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ["bandit[toml]"]
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [--format, parsable]
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.13.1-beta
+    hooks:
+      - id: hadolint-docker
+        args: [--ignore, DL3008, --ignore, DL4006]
 
   # Repo-local checks that avoid adding runtime dependencies.
   - repo: local

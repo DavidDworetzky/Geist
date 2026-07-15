@@ -1,9 +1,8 @@
-import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, LargeBinary, DateTime, Boolean, ARRAY, DateTime
-from sqlalchemy.orm import relationship, Session
-from app.models.database.database import Base, Session, SessionLocal
-from sqlalchemy.dialects.postgresql import insert
 import uuid
+
+from sqlalchemy import Column, Integer, String
+
+from app.models.database.database import Base, SessionLocal
 
 
 class Agent(Base):
@@ -23,7 +22,7 @@ class Agent(Base):
     def get_agent_by_id(cls, agent_id):
         """
         Queries the database for an agent with the given agent_id.
-        
+
         :param agent_id: The ID of the agent to retrieve.
         :return: The queried agent object if found, otherwise None.
         """
@@ -38,4 +37,3 @@ class Agent(Base):
         finally:
             session.close()
 
-    

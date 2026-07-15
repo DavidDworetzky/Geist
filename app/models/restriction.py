@@ -1,9 +1,9 @@
 #using dataclass
 from dataclasses import dataclass
-from typing import List, Optional
 
 #enum for restriction types
 from enum import Enum
+
 
 class RestrictionType(Enum):
     RATE_LIMIT = 1
@@ -29,8 +29,8 @@ class Restriction:
     #restrictions have time periods that max out when these actions can occur
     type: RestrictionType
     #allowed plugins and methods that an agent can use
-    allowed_plugins: List[AllowFlag]
-    allowed_methods: List[AllowFlag]
+    allowed_plugins: list[AllowFlag]
+    allowed_methods: list[AllowFlag]
 
 
 

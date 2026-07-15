@@ -7,7 +7,6 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,7 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(["git", *args], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return subprocess.run(["git", *args], check=False, capture_output=True)
 
 
 def staged_paths() -> list[str]:
@@ -40,7 +39,7 @@ def staged_paths() -> list[str]:
     return [line for line in result.stdout.decode("utf-8", errors="replace").splitlines() if line]
 
 
-def staged_text(path: str) -> Optional[str]:
+def staged_text(path: str) -> str | None:
     result = run_git(["show", f":{path}"])
     if result.returncode != 0:
         return None

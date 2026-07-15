@@ -4,14 +4,7 @@ Unit tests for GenericCompletion data types.
 Tests verify that from_dict methods handle arbitrary extra fields gracefully,
 ensuring forward compatibility with API changes.
 """
-import pytest
-from agents.models.generic_completion import (
-    Message,
-    Choice,
-    TokenDetails,
-    Usage,
-    GenericCompletion
-)
+from agents.models.generic_completion import Choice, GenericCompletion, Message, TokenDetails, Usage
 
 
 class TestMessageFromDict:

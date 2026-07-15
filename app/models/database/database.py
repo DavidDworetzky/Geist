@@ -10,6 +10,7 @@ from app.models.database.database_config import (
     load_database_config,
 )
 
+
 load_dotenv()
 
 DATABASE_CONFIG = load_database_config()

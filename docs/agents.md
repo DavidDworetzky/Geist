@@ -263,7 +263,10 @@ register_runner("my_custom_runner", MyCustomRunner)
 
 ### From Legacy Agents
 
-The legacy `LlamaAgent` and `GPT4Agent` classes are deprecated. To migrate:
+The legacy `LlamaAgent` and `GPT4Agent` classes have been removed; `LocalAgent`
+and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
+`GPT4AGENT` API agent types remain accepted and are served by `LocalAgent` and
+`OnlineAgent` respectively. To migrate code that used the old classes:
 
 1. **Replace direct instantiation:**
    ```python
@@ -438,7 +441,7 @@ python scripts/sync_models.py -p openai  # Unclear (what is -p?)
 The `scripts/` directory contains:
 
 - **Model Management**: `download_models.py`, `copy_weights.py`, `sync_models.py`, `list_hf_open_models.py`
-- **Environment Setup**: `copy_environment.py`, `generate_compose.py`
+- **Environment Setup**: `generate_compose.py`
 - **Database Setup**: `insert_presets.py`, `insert_default_user.py`
 - **Utilities**: `test_arch_availability.py`, `model_filter_config.py`
 

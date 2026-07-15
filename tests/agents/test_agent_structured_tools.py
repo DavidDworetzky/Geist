@@ -9,6 +9,7 @@ from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.architectures import register_runner
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.exceptions import FunctionCallError
 from agents.local_agent import LocalAgent
 from agents.models.llama_completion import strings_to_message_dict
 from agents.online_agent import OnlineAgent
@@ -255,5 +256,5 @@ class TestLocalAgentPromptTools:
         assert agent._take_json_and_call_function(wrapped) == 3
 
         assert not agent._is_valid_function_json("not a call")
-        with pytest.raises(Exception):
+        with pytest.raises(FunctionCallError):
             agent._take_json_and_call_function("not a call")
