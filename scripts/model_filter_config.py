@@ -27,7 +27,6 @@ ALWAYS_INCLUDE: list[str] = [
 
 # Patterns to exclude (regex)
 EXCLUDE_PATTERNS: list[str] = [
-    r".*-instruct$",       # Exclude instruct variants for some providers
     r".*-vision-preview$", # Exclude preview versions
     r"ft:.*",              # Exclude fine-tuned models
     r".*:ft:.*",           # Exclude fine-tuned models (alt format)
@@ -56,6 +55,16 @@ CHAT_MODEL_PREFIXES: list[str] = [
     "llama",
     "mixtral",
     "qwen",
+    "mistral",
+    "phi",
+    "gemma",
+    "smollm",
+    "granite",
+    "olmo",
+    "glm",
+    "gpt-oss",
+    "kimi",
+    "deepseek",
 ]
 
 # Model metadata overrides - used to enhance API-provided data
@@ -218,8 +227,12 @@ HUGGINGFACE_MODEL_FAMILIES: list[str] = [
     "google",
     "deepseek-ai",
     "01-ai",
-    "THUDM",  # GLM models
-    "moonshot",  # Kimi models
+    "zai-org",  # GLM models
+    "moonshotai",  # Kimi models
+    "ibm-granite",
+    "allenai",
+    "HuggingFaceTB",
+    "openai",
 ]
 
 # Specific HuggingFace models to include
@@ -229,14 +242,23 @@ HUGGINGFACE_MODELS: list[str] = [
     "meta-llama/Llama-3.3-70B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-3B-Instruct",
     "Qwen/Qwen3-8B",
     "Qwen/Qwen3-4B",
     "Qwen/Qwen3-1.7B",
     "Qwen/Qwen3-0.6B",
     "mistralai/Mixtral-8x7B-Instruct-v0.1",
     "mistralai/Mistral-7B-Instruct-v0.3",
-    "deepseek-ai/DeepSeek-V2.5",
-    "THUDM/glm-4-9b-chat",
+    "microsoft/Phi-4-mini-instruct",
+    "HuggingFaceTB/SmolLM3-3B",
+    "google/gemma-3-1b-it",
+    "ibm-granite/granite-3.3-8b-instruct",
+    "allenai/Olmo-3-7B-Instruct",
+    "zai-org/glm-4-9b-chat-hf",
+    "zai-org/GLM-4.7-Flash",
+    "openai/gpt-oss-20b",
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "moonshotai/Kimi-K2.5",
 ]
 
 

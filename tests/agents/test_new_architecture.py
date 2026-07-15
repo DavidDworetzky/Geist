@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from agents.agent_settings import AgentSettings
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import clear_registry, get_runner, register_runner
 from agents.factory import AgentFactory
@@ -138,6 +139,23 @@ class TestAgentFactory:
                 agent_context=context
             )
 
+
+def test_local_generation_config_preserves_zero_temperature():
+    """Greedy decoding must not be changed back to the 1.0 default."""
+    from agents.local_agent import LocalAgent
+
+    agent = LocalAgent.__new__(LocalAgent)
+    agent._agent_context = Mock(
+        settings=AgentSettings(name="test", version="1", description="test")
+    )
+    agent.generation_config = {"temperature": 0.4}
+
+    config = agent._create_generation_config(temperature=0.0)
+    assert config.temperature == 0.0
+
+    config = agent._create_generation_config()
+    assert config.temperature == 0.4
+
 class TestUserSettingsIntegration:
     """Test integration with user settings."""
 
@@ -145,7 +163,11 @@ class TestUserSettingsIntegration:
         """Test creating agent factory config from user settings."""
         from datetime import datetime
 
-        from app.models.user_settings import AgentFactoryConfig, UserSettingsResponse
+        from app.models.user_settings import (
+            AgentConfigRequest,
+            AgentFactoryConfig,
+            UserSettingsResponse,
+        )
 
         # Mock user settings
         settings = UserSettingsResponse(
@@ -172,7 +194,7 @@ class TestUserSettingsIntegration:
         config = AgentFactoryConfig.from_user_settings(settings)
         assert config.agent_type == "local"
         assert config.model == "test-model"
-        assert config.runner_type == "mlx_llama"
+        assert config.runner_type is None
         assert config.endpoint is None
 
         # Test online agent config
@@ -180,8 +202,12 @@ class TestUserSettingsIntegration:
         config = AgentFactoryConfig.from_user_settings(settings)
         assert config.agent_type == "online"
         assert config.model == "gpt-4"
-        assert config.endpoint == "https://api.openai.com/v1/chat/completions"
+        assert config.endpoint == "https://api.openai.com/v1"
         assert config.runner_type is None
+
+        overrides = AgentConfigRequest(temperature=0.0)
+        config = AgentFactoryConfig.from_user_settings(settings, overrides)
+        assert config.generation_config["temperature"] == 0.0
 
 if __name__ == "__main__":
     pytest.main([__file__])

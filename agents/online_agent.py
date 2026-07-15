@@ -17,6 +17,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
+from agents.model_catalog import PROVIDERS
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -66,6 +67,7 @@ class OnlineAgent(BaseAgent):
         model: str,
         api_key: str | None = None,
         backup_providers: list[dict[str, Any]] | None = None,
+        generation_config: dict[str, Any] | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
         supports_native_tool_calling: bool | None = None,
@@ -81,6 +83,7 @@ class OnlineAgent(BaseAgent):
             model: Model name to use
             api_key: API key for authentication
             backup_providers: List of backup provider configurations
+            generation_config: Optional default generation parameters
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries
             supports_native_tool_calling: Explicit capability override for
@@ -93,6 +96,7 @@ class OnlineAgent(BaseAgent):
         self.model = model
         self.api_key = api_key or self._get_api_key_from_env()
         self.backup_providers = backup_providers or []
+        self.generation_config = generation_config or {}
         self.timeout = timeout
         self.max_retries = max_retries
         self.supports_native_tool_calling = (
@@ -118,6 +122,9 @@ class OnlineAgent(BaseAgent):
 
     def _get_api_key_from_env(self) -> str | None:
         """Get provider-specific API key from environment variables based on the endpoint."""
+        for provider in PROVIDERS.values():
+            if provider.base_url and provider.base_url.rstrip("/") in self.base_url:
+                return os.getenv(provider.api_key_env)
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
         elif "anthropic" in self.base_url:
@@ -266,7 +273,6 @@ class OnlineAgent(BaseAgent):
             system_prompt,
             chat_id,
         )
-
         # Make request
         response_data = self._make_request(payload)
 
@@ -313,7 +319,6 @@ class OnlineAgent(BaseAgent):
             chat_id,
         )
         payload["stream"] = True
-
         # Ensure endpoint includes chat/completions
         current_url = self.base_url
         if not current_url.endswith("/chat/completions"):

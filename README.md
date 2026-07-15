@@ -167,6 +167,9 @@ To run against PostgreSQL natively instead:
 
 ## Starting the frontend in Docker with a native backend (mlx support on Mac)
 1. Run `make services` then `make run`
+   - The optimized in-repo MLX implementation is the default.
+   - Set `GEIST_MLX_IMPLEMENTATION=mlx_lm` to use the pinned `mlx-lm` runtime.
+   - Set `GEIST_MLX_IMPLEMENTATION=manual` to select the in-repo implementation explicitly.
 2. If you encounter port binding issues, make sure to disable airplay on mac. 
 
 

@@ -532,26 +532,26 @@ class TestQwen3RunnerRegistry:
 # Factory: auto-detection and weights_dir
 # ---------------------------------------------------------------------------
 
-class TestFactoryQwen3AutoDetection:
+class TestFactoryGenericAutoDetection:
 
-    def test_infer_runner_type_qwen3_models(self):
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == "qwen3"
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == "qwen3"
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-1.7B") == "qwen3"
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-0.6B") == "qwen3"
-        assert AgentFactory._infer_runner_type("qwen3-custom") == "qwen3"
+    def test_infer_runner_type_qwen_models(self):
+        assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == "transformers"
+        assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == "transformers"
+        assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == "transformers"
+        assert AgentFactory._infer_runner_type("qwen3-custom") == "transformers"
 
     def test_infer_runner_type_non_qwen(self):
         assert AgentFactory._infer_runner_type("meta-llama/Meta-Llama-3.1-8B-Instruct") == "mlx_llama"
-        assert AgentFactory._infer_runner_type("gpt-4") == "mlx_llama"
-        assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-72B-Instruct") == "mlx_llama"
+        assert AgentFactory._infer_runner_type("future-org/future-model") == "transformers"
+        with pytest.raises(ValueError, match="server-backed"):
+            AgentFactory._infer_runner_type("Qwen/Qwen2.5-72B-Instruct")
 
     def test_infer_runner_type_case_insensitive(self):
-        assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == "qwen3"
-        assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == "qwen3"
+        assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == "transformers"
+        assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == "transformers"
 
     def test_factory_auto_detects_qwen3(self):
-        """create_agent with a Qwen3 model ID should use the qwen3 runner."""
+        """Qwen uses the same generic runner as other standard causal LMs."""
         context = Mock()
         context.settings = Mock()
 
@@ -564,7 +564,7 @@ class TestFactoryQwen3AutoDetection:
 
             MockLocalAgent.assert_called_once()
             _, kwargs = MockLocalAgent.call_args
-            assert kwargs["runner_type"] == "qwen3"
+            assert kwargs["runner_type"] == "transformers"
             assert kwargs["model_id"] == "Qwen/Qwen3-8B"
 
     def test_factory_explicit_runner_overrides_auto(self):
@@ -658,7 +658,7 @@ class TestFactoryCreateFromConfig:
             AgentFactory.create_from_config(config, context)
 
             _, kwargs = MockLocalAgent.call_args
-            assert kwargs["runner_type"] == "qwen3"
+            assert kwargs["runner_type"] == "transformers"
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
 
 

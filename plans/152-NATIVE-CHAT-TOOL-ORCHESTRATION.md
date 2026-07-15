@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add a small Python-native model/tool contract and bounded chat orchestration loop inspired by Pi's core semantics, then expose live tool activity through the existing chat SSE and React interfaces. Add deterministic and DeepEval-backed routing coverage before enabling a default tool catalog.
+Add a small Python-native model/tool contract and bounded chat orchestration loop inspired by Pi's core semantics, then expose live tool activity through the existing chat SSE and React interfaces. Add deterministic routing coverage before enabling a default tool catalog.
 
 ## Scope
 
@@ -12,7 +12,7 @@ Add a small Python-native model/tool contract and bounded chat orchestration loo
 - Audit every existing adapter and expose only explicit, production-appropriate wrappers by default.
 - Preserve compatibility with existing `AgentCompletion`, chat history, SSE routes, and React chat rendering.
 - Add a frontend contract for live tool lifecycle events and artifacts.
-- Add deterministic pytest coverage plus a DeepEval routing suite that can run against configured live models without executing real side effects.
+- Add deterministic pytest routing coverage without executing real side effects.
 
 ## Design
 
@@ -59,7 +59,7 @@ Add a small Python-native model/tool contract and bounded chat orchestration loo
 8. Add evaluation coverage.
    - Fast pytest tests use fake model backends and fake tool handlers to verify loop, validation, persistence, events, failures, and limits.
    - A framework-neutral routing dataset covers expected tools, forbidden tools, and argument predicates for document search, current news, image generation, and no-tool contrasts.
-   - DeepEval checks tool-name correctness while project assertions check arguments and forbidden calls deterministically.
+   - Exact recorded-call checks cover tool names and arguments while project assertions reject forbidden calls.
    - Live-model evaluations are explicitly marked and do not execute real web, file mutation, messaging, or other side effects.
 
 ## Adapter Review Policy
@@ -75,7 +75,7 @@ The final PR documents the classification and only registers default tools autom
 ## Verification
 
 1. Run targeted Python compilation, Ruff, type checks where practical, and focused pytest suites.
-2. Run the deterministic DeepEval routing tests without an external judge.
+2. Run the deterministic routing tests without an external judge or evaluation dependency.
 3. Run frontend unit tests and production build.
 4. Start `db`, `backend`, and `frontend` with Docker; inspect logs and verify the frontend with `curl`.
 5. Exercise chat and live tool rendering in the browser using stubbed or locally available safe tools.

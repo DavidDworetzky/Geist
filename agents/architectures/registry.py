@@ -1,15 +1,16 @@
 """
 Initialize and register all available runners.
 """
+from __future__ import annotations
 
+import importlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Any, cast
 
-from agents.architectures.mlx_llama_runner import MLXLlamaRunner
-from agents.architectures.qwen3_runner import Qwen3Runner
-from agents.architectures.vllm_runner import VLLMRunner
+from agents.model_catalog import MODEL_SPECS, PROVIDERS
 
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ class RunnerRegistry:
 
     def __init__(self):
         """Initialize an empty runner registry."""
-        self._registry: dict[str, type] = {}
+        self._registry: dict[str, Any] = {}
         self._logger = logging.getLogger(__name__)
 
     def register(self, name: str, runner_class: type) -> None:
@@ -196,6 +197,11 @@ class RunnerRegistry:
         self._registry[name] = runner_class
         self._logger.info(f"Registered runner '{name}': {runner_class.__name__}")
 
+    def register_lazy(self, name: str, module: str, class_name: str) -> None:
+        """Register a runner without importing its optional dependencies."""
+        self._registry[name] = (module, class_name)
+        self._logger.info("Registered lazy runner '%s': %s.%s", name, module, class_name)
+
     def get(self, name: str) -> type | None:
         """
         Get a runner class by name.
@@ -206,9 +212,14 @@ class RunnerRegistry:
         Returns:
             The runner class if found, None otherwise
         """
-        return self._registry.get(name)
+        value = self._registry.get(name)
+        if isinstance(value, tuple):
+            module, class_name = value
+            value = getattr(importlib.import_module(module), class_name)
+            self._registry[name] = value
+        return cast(type | None, value)
 
-    def list(self) -> dict[str, type]:
+    def list(self) -> dict[str, Any]:
         """
         Get all registered runners.
 
@@ -264,14 +275,16 @@ def register_all_runners(registry: RunnerRegistry | None = None) -> None:
 
     logger.info("Registering all available runners...")
 
-    # Register MLX Llama runner
-    registry.register("mlx_llama", MLXLlamaRunner)
-
-    # Register vLLM runner (Transformers-based shim shared with Qwen3Runner)
-    registry.register("vllm", VLLMRunner)
-
-    # Register Qwen 3 runner
-    registry.register("qwen3", Qwen3Runner)
+    registry.register_lazy(
+        "mlx_llama", "agents.architectures.mlx_llama_runner", "MLXLlamaRunner"
+    )
+    registry.register_lazy(
+        "transformers", "agents.architectures.transformers_runner", "TransformersRunner"
+    )
+    registry.register_lazy("vllm", "agents.architectures.vllm_runner", "VLLMRunner")
+    # Backward-compatible explicit Qwen runner. Automatic selection now uses
+    # the generic Transformers runner for every standard causal LM family.
+    registry.register_lazy("qwen3", "agents.architectures.qwen3_runner", "Qwen3Runner")
 
     _initialized = True
     logger.info("All runners registered successfully")
@@ -335,7 +348,7 @@ class ModelInfo:
 
     id: str  # Model identifier (e.g., "gpt-4")
     name: str  # Display name (e.g., "GPT-4")
-    provider: OnlineModelProviders  # Provider enum
+    provider: OnlineModelProviders | str  # Legacy enum or catalog provider ID
     context_window: int | None = None  # Max context tokens
     max_output_tokens: int | None = None  # Max output tokens
     supports_vision: bool = False  # Multimodal support
@@ -343,13 +356,23 @@ class ModelInfo:
     supports_streaming: bool = True
     recommended: bool = False  # Highlight recommended models
     family: str | None = None  # Model family (e.g., "gpt-4", "claude-3")
+    backend: str | None = None
+    supports_reasoning: bool = False
+    gated: bool = False
+    requires_remote_code: bool = False
+    min_transformers_version: str | None = None
+    parameter_count: str | None = None
+    activated_parameters: str | None = None
+    optional_dependencies: tuple[str, ...] = ()
+    local: bool = False
+    performance_note: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
             "id": self.id,
             "name": self.name,
-            "provider": self.provider.value,
+            "provider": provider_to_string(self.provider),
             "context_window": self.context_window,
             "max_output_tokens": self.max_output_tokens,
             "supports_vision": self.supports_vision,
@@ -357,11 +380,21 @@ class ModelInfo:
             "supports_streaming": self.supports_streaming,
             "recommended": self.recommended,
             "family": self.family,
+            "backend": self.backend,
+            "supports_reasoning": self.supports_reasoning,
+            "gated": self.gated,
+            "requires_remote_code": self.requires_remote_code,
+            "min_transformers_version": self.min_transformers_version,
+            "parameter_count": self.parameter_count,
+            "activated_parameters": self.activated_parameters,
+            "optional_dependencies": self.optional_dependencies,
+            "local": self.local,
+            "performance_note": self.performance_note,
         }
 
 
 # Static registry - always available as fallback
-STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
+STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
         ModelInfo(
             id="gpt-4",
@@ -695,12 +728,62 @@ STATIC_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
     ],
 }
 
+# The hand-maintained catalog is the source of truth for new open-weight
+# families. Merge it after the legacy static registry so existing entries and
+# API contracts remain backward compatible while additions stay one-line-ish.
+
+for _spec in MODEL_SPECS:
+    _provider: OnlineModelProviders | str
+    try:
+        _provider = OnlineModelProviders(_spec.provider)
+    except ValueError:
+        _provider = _spec.provider
+    _models = STATIC_MODELS.setdefault(_provider, [])
+    _existing = next(
+        (existing for existing in _models if existing.id.lower() == _spec.id.lower()),
+        None,
+    )
+    if _existing:
+        _existing.backend = _spec.backend
+        _existing.supports_reasoning = _spec.supports_reasoning
+        _existing.gated = _spec.gated
+        _existing.requires_remote_code = _spec.requires_remote_code
+        _existing.min_transformers_version = _spec.min_transformers_version
+        _existing.parameter_count = _spec.parameter_count
+        _existing.activated_parameters = _spec.activated_parameters
+        _existing.optional_dependencies = _spec.optional_dependencies
+        _existing.local = _spec.local
+        _existing.performance_note = _spec.performance_note
+        continue
+    _models.append(ModelInfo(
+        id=_spec.id,
+        name=_spec.name,
+        provider=_provider,
+        context_window=_spec.context_window,
+        max_output_tokens=_spec.max_output_tokens,
+        supports_vision=_spec.supports_vision,
+        supports_function_calling=_spec.supports_function_calling,
+        supports_streaming=_spec.supports_streaming,
+        recommended=_spec.recommended,
+        family=_spec.family,
+        backend=_spec.backend,
+        supports_reasoning=_spec.supports_reasoning,
+        gated=_spec.gated,
+        requires_remote_code=_spec.requires_remote_code,
+        min_transformers_version=_spec.min_transformers_version,
+        parameter_count=_spec.parameter_count,
+        activated_parameters=_spec.activated_parameters,
+        optional_dependencies=_spec.optional_dependencies,
+        local=_spec.local,
+        performance_note=_spec.performance_note,
+    ))
+
 
 # Dynamic registry - populated by sync script
 # Auto-generated by scripts/sync_models.py
 # Do not edit manually
 
-DISCOVERED_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
+DISCOVERED_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
         ModelInfo(
             id="gpt-4-0613",
@@ -1343,7 +1426,12 @@ DISCOVERED_MODELS: dict[OnlineModelProviders, list[ModelInfo]] = {
 _last_model_sync: datetime | None = None
 
 
-def get_models_for_provider(provider: OnlineModelProviders) -> list[ModelInfo]:
+def provider_to_string(provider: OnlineModelProviders | str) -> str:
+    """Return the stable provider ID for enum and catalog-backed providers."""
+    return provider.value if isinstance(provider, OnlineModelProviders) else provider
+
+
+def get_models_for_provider(provider: OnlineModelProviders | str) -> list[ModelInfo]:
     """
     Get all available models for a provider, preferring discovered models.
 
@@ -1360,7 +1448,7 @@ def get_models_for_provider(provider: OnlineModelProviders) -> list[ModelInfo]:
         return STATIC_MODELS.get(provider, [])
 
 
-def get_all_models() -> dict[OnlineModelProviders, list[ModelInfo]]:
+def get_all_models() -> dict[OnlineModelProviders | str, list[ModelInfo]]:
     """
     Get all available models grouped by provider.
 
@@ -1368,7 +1456,10 @@ def get_all_models() -> dict[OnlineModelProviders, list[ModelInfo]]:
         Dictionary mapping Provider to list of ModelInfo
     """
     result = {}
-    for provider in OnlineModelProviders:
+    providers: list[OnlineModelProviders | str] = list(OnlineModelProviders)
+    providers.extend(provider for provider in STATIC_MODELS if provider not in providers)
+    providers.extend(provider for provider in DISCOVERED_MODELS if provider not in providers)
+    for provider in providers:
         models = get_models_for_provider(provider)
         if models:  # Only include providers with models
             result[provider] = models
@@ -1385,15 +1476,26 @@ def get_model_by_id(model_id: str) -> ModelInfo | None:
     Returns:
         ModelInfo if found, None otherwise
     """
-    for provider in OnlineModelProviders:
-        models = get_models_for_provider(provider)
+    matches = []
+    for models in get_all_models().values():
         for model in models:
             if model.id == model_id:
-                return model
-    return None
+                matches.append(model)
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda model: (
+            model.backend is not None,
+            model.local,
+            provider_to_string(model.provider) == "offline",
+        ),
+    )
 
 
-def update_discovered_models(provider: OnlineModelProviders, models: list[ModelInfo]) -> None:
+def update_discovered_models(
+    provider: OnlineModelProviders | str, models: list[ModelInfo]
+) -> None:
     """
     Update the discovered models for a provider.
 
@@ -1404,7 +1506,11 @@ def update_discovered_models(provider: OnlineModelProviders, models: list[ModelI
     global _last_model_sync
     DISCOVERED_MODELS[provider] = models
     _last_model_sync = datetime.utcnow()
-    logger.info(f"Updated discovered models for {provider.value}: {len(models)} models")
+    logger.info(
+        "Updated discovered models for %s: %s models",
+        provider_to_string(provider),
+        len(models),
+    )
 
 
 def get_last_model_sync_time() -> datetime | None:
@@ -1412,7 +1518,23 @@ def get_last_model_sync_time() -> datetime | None:
     return _last_model_sync
 
 
-def provider_from_string(provider_str: str) -> OnlineModelProviders | None:
+def get_provider_ids() -> list[str]:
+    """List legacy, catalog, static, and discovered provider IDs once."""
+    provider_ids = [provider.value for provider in OnlineModelProviders]
+    for provider in PROVIDERS:
+        if provider not in provider_ids:
+            provider_ids.append(provider)
+    _provider_key: OnlineModelProviders | str
+    for _provider_key in (*STATIC_MODELS, *DISCOVERED_MODELS):
+        provider_id = provider_to_string(_provider_key)
+        if provider_id not in provider_ids:
+            provider_ids.append(provider_id)
+    return provider_ids
+
+
+def provider_from_string(
+    provider_str: str,
+) -> OnlineModelProviders | str | None:
     """
     Convert a provider string to OnlineModelProviders enum.
 
@@ -1425,4 +1547,7 @@ def provider_from_string(provider_str: str) -> OnlineModelProviders | None:
     try:
         return OnlineModelProviders(provider_str.lower())
     except ValueError:
+        normalized = provider_str.lower()
+        if normalized in get_provider_ids():
+            return normalized
         return None

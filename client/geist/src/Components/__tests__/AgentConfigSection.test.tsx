@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import AgentConfigSection from '../AgentConfigSection';
 
 describe('AgentConfigSection', () => {
+  const originalFetch = global.fetch;
   const defaultProps = {
     agentType: 'online',
     localModel: 'Meta-Llama-3.1-8B-Instruct',
@@ -16,6 +17,10 @@ describe('AgentConfigSection', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   describe('Provider filtering', () => {
@@ -222,6 +227,42 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText('Select your preferred online API provider.')).toBeInTheDocument();
       // Description may show "Loading models..." or the actual text depending on loading state
       expect(screen.getByText(/Choose which model from the provider to use|Loading models.../)).toBeInTheDocument();
+    });
+
+    it('displays performance guidance supplied by the model API', async () => {
+      const performanceNote = 'Use 4-bit weights for tolerable laptop latency.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            offline: [{
+              id: 'example/future-model-3b',
+              name: 'Future Model 3B',
+              provider: 'offline',
+              context_window: 32768,
+              max_output_tokens: 4096,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_streaming: false,
+              recommended: true,
+              family: 'future-family',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          agentType="local"
+          localModel="example/future-model-3b"
+        />
+      );
+
+      expect(await screen.findByText(performanceNote)).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Future Model 3B' })).toBeInTheDocument();
     });
   });
 });

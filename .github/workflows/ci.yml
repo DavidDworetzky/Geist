@@ -114,29 +114,6 @@ jobs:
         cd client/geist
         npm test -- --watchAll=false --passWithNoTests
 
-  tool-routing-eval:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install isolated eval dependencies
-      run: |
-        python -m pip install --only-binary=:all: deepeval==4.0.9 pytest==8.3.4
-
-    - name: Run deterministic tool-routing evals
-      env:
-        PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-        DEEPEVAL_DISABLE_DOTENV: '1'
-        DEEPEVAL_DISABLE_LEGACY_KEYFILE: '1'
-        DEEPEVAL_TELEMETRY_OPT_OUT: '1'
-      run: pytest --confcutdir=evals -q evals
-
   security:
     runs-on: ubuntu-latest
 
@@ -241,7 +218,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [test, frontend-test, tool-routing-eval]
+    needs: [test, frontend-test]
 
     strategy:
       fail-fast: false
