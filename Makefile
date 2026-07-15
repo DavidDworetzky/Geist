@@ -1,6 +1,15 @@
 # Variables
 UV=uv
+IS_WSL=$(shell grep -qi microsoft /proc/version 2>/dev/null && echo 1 || echo 0)
+COMPOSE_FILE=docker-compose.yml
+
+ifeq ($(IS_WSL),1)
+DOCKER=docker.exe
+DOCKER_COMPOSE=docker.exe compose
+else
+DOCKER=docker
 DOCKER_COMPOSE=docker compose
+endif
 
 # Default target
 .PHONY: all
@@ -30,8 +39,18 @@ sync:
 # Run the backend natively. Uses SQLite unless GEIST_DATABASE_PROVIDER says otherwise.
 .PHONY: run
 run:
+ifeq ($(IS_WSL),1)
+ifeq ($(MLX_BACKEND),1)
+	@echo "WSL detected; MLX_BACKEND=1 uses the Docker stack via Windows Docker Desktop."
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
+else
 	$(UV) run python initdb.py
 	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
+endif
+else
+	$(UV) run python initdb.py
+	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
+endif
 
 # Alias for run
 .PHONY: up server
@@ -52,7 +71,10 @@ init-db:
 # Run the full Docker stack (backend + frontend, SQLite by default)
 .PHONY: run-docker
 run-docker:
-	$(DOCKER_COMPOSE) up
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
+endif
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
 
 # Run the Docker frontend alongside the native SQLite backend
 .PHONY: services
@@ -62,22 +84,29 @@ services:
 # Run the full Docker stack detached
 .PHONY: docker
 docker:
-	$(DOCKER_COMPOSE) up -d
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; using Windows Docker Desktop via docker.exe compose."
+endif
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up -d
 
 # Stop all services
 .PHONY: stop
 stop:
-	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) down
+ifeq ($(IS_WSL),1)
+	@echo "WSL detected; skipping Unix pkill cleanup."
+else
 	@echo "Checking for running Python processes..."
 	-pkill -f "python bootstrap.py"
+endif
 
 # Clean up Docker resources
 .PHONY: clean
 clean:
-	$(DOCKER_COMPOSE) down -v --remove-orphans
-	docker system prune -f
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) down -v --remove-orphans
+	$(DOCKER) system prune -f
 
 # Build Docker images
 .PHONY: build
 build:
-	$(DOCKER_COMPOSE) build
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) build
