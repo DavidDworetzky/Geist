@@ -18,6 +18,10 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   xai: 'xAI (Grok)',
   groq: 'Groq',
   huggingface: 'Hugging Face',
+  moonshot: 'Moonshot AI',
+  zai: 'Z.AI',
+  deepseek: 'DeepSeek',
+  'self-hosted': 'Self-hosted Server',
   offline: 'Local/Offline',
   custom: 'Custom Provider'
 };
@@ -31,7 +35,12 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   onOnlineProviderChange,
   onOnlineModelChange
 }) => {
-  const { getModelsForProvider, loading: modelsLoading, providers } = useAvailableModels();
+  const {
+    getModelById,
+    getModelsForProvider,
+    loading: modelsLoading,
+    providers,
+  } = useAvailableModels();
 
   const localModelOptions = useMemo(() => {
     const offlineModels = getModelsForProvider('offline');
@@ -89,7 +98,10 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
           value={localModel}
           options={localModelOptions}
           onChange={onLocalModelChange}
-          description="Select which local model to use for generation."
+          description={
+            getModelById(localModel)?.performance_note ||
+            'Select which local model to use for generation'
+          }
         />
       ) : (
         <>
@@ -106,7 +118,12 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             value={onlineModel}
             options={onlineModelOptions}
             onChange={onOnlineModelChange}
-            description={modelsLoading ? 'Loading models...' : 'Choose which model from the provider to use.'}
+            description={
+              modelsLoading
+                ? 'Loading models...'
+                : getModelById(onlineModel)?.performance_note ||
+                  'Choose which model from the provider to use'
+            }
           />
         </>
       )}

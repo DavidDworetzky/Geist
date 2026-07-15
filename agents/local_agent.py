@@ -30,6 +30,7 @@ class LocalAgent(BaseAgent):
         model_id: str,
         runner_type: str = "mlx_llama",
         device_config: dict[str, Any] | None = None,
+        generation_config: dict[str, Any] | None = None,
         as_subprocess: bool = False,
     ):
         """
@@ -40,6 +41,7 @@ class LocalAgent(BaseAgent):
             model_id: Model identifier to load
             runner_type: Type of runner to use (default: "mlx_llama")
             device_config: Optional device configuration
+            generation_config: Optional default generation parameters
             as_subprocess: Whether to run as subprocess
         """
         super().__init__(agent_context, as_subprocess)
@@ -47,8 +49,8 @@ class LocalAgent(BaseAgent):
         self.model_id = model_id
         self.runner_type = runner_type
         self.device_config = device_config or {}
+        self.generation_config = generation_config or {}
         self.runner: BaseRunner | None = None
-
         # Initialize the runner
         self._initialize_runner()
 

@@ -61,25 +61,26 @@ class AgentFactory:
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}. Must be 'local' or 'online'")
-
-    # Model ID prefixes that should use the qwen3 runner
-    _QWEN3_PREFIXES = ("qwen/qwen3", "qwen3")
-
     @staticmethod
     def _infer_runner_type(model: str) -> str:
-        """
-        Infer the appropriate runner type from a model identifier.
+        """Infer a backend from catalog capabilities, not provider branding."""
+        from agents.model_catalog import infer_model_spec
 
-        Args:
-            model: Model identifier string
+        spec = infer_model_spec(model)
+        if spec:
+            if not spec.local:
+                raise ValueError(
+                    f"{model} is server-backed. Create an online agent with the "
+                    f"'{spec.provider}' provider or an OpenAI-compatible endpoint."
+                )
+            return spec.backend
 
-        Returns:
-            Runner type string ("qwen3" or "mlx_llama")
-        """
-        model_lower = model.lower()
-        if any(model_lower.startswith(prefix) for prefix in AgentFactory._QWEN3_PREFIXES):
-            return "qwen3"
-        return "mlx_llama"
+        # Preserve legacy bare Llama weight-directory names. Unknown Hugging
+        # Face causal models intentionally fall back to the generic runner so
+        # adding a compatible model does not require a code change.
+        if model.lower().startswith(("meta-llama-", "llama_3", "llama-3")):
+            return "mlx_llama"
+        return "transformers"
 
     @staticmethod
     def _create_local_agent(
@@ -92,10 +93,8 @@ class AgentFactory:
         """
         Create a LocalAgent instance.
 
-        If runner_type is not specified it is inferred from the model ID.
-        For Qwen 3 models a "weights_dir" key in device_config (passed via
-        kwargs) tells the runner where to find local safetensors / pretrained
-        weights on disk.
+        If runner_type is not specified it is inferred from model catalog
+        metadata. A ``weights_dir`` key can point any runner at local weights.
         """
         try:
             from agents.local_agent import LocalAgent
@@ -104,9 +103,22 @@ class AgentFactory:
             if not model:
                 model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
+            runner_was_explicit = runner_type is not None
             # Auto-detect runner type from model ID when not explicitly set
             if not runner_type:
                 runner_type = AgentFactory._infer_runner_type(model)
+
+            # Automatic selection protects users from accidental 32B+ loads.
+            # A deliberate Transformers override is the opt-in for capable
+            # hardware and is forwarded as a narrowly scoped runner flag.
+            if runner_was_explicit and runner_type == "transformers":
+                from agents.model_catalog import infer_model_spec
+
+                spec = infer_model_spec(model)
+                if spec and not spec.local:
+                    device_config = kwargs.pop("device_config", None) or {}
+                    device_config.setdefault("allow_server_backed", True)
+                    kwargs["device_config"] = device_config
 
             # Propagate weights_dir into device_config so the runner can
             # load safetensors / pretrained weights from a custom path.
@@ -140,11 +152,21 @@ class AgentFactory:
         try:
             from agents.online_agent import OnlineAgent
 
-            # Default values
-            if not endpoint:
-                endpoint = "https://api.openai.com/v1/chat/completions"
             if not model:
                 model = "gpt-4"
+            if not endpoint:
+                from agents.model_catalog import get_provider_endpoint, infer_model_spec
+
+                spec = infer_model_spec(model)
+                if spec and spec.backend == "openai_compatible":
+                    endpoint = get_provider_endpoint(spec.provider)
+                    if not endpoint:
+                        raise ValueError(
+                            f"{model} requires an OpenAI-compatible endpoint. Pass endpoint=... "
+                            "or set OPENAI_COMPATIBLE_BASE_URL."
+                        )
+                else:
+                    endpoint = "https://api.openai.com/v1"
 
             logger.info(f"Creating OnlineAgent with endpoint: {endpoint}, model: {model}")
             return OnlineAgent(

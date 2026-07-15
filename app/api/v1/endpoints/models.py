@@ -8,12 +8,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from agents.architectures.registry import (
-    OnlineModelProviders,
     get_all_models,
     get_last_model_sync_time,
     get_model_by_id,
     get_models_for_provider,
+    get_provider_ids,
     provider_from_string,
+    provider_to_string,
 )
 
 
@@ -35,6 +36,16 @@ class ModelResponse(BaseModel):
     #recommended models can be filtered to the top in the UI.
     recommended: bool
     family: str | None
+    backend: str | None = None
+    supports_reasoning: bool = False
+    gated: bool = False
+    requires_remote_code: bool = False
+    min_transformers_version: str | None = None
+    parameter_count: str | None = None
+    activated_parameters: str | None = None
+    optional_dependencies: tuple[str, ...] = ()
+    local: bool = False
+    performance_note: str | None = None
 
 
 class ModelsListResponse(BaseModel):
@@ -56,7 +67,7 @@ async def get_available_models():
 
         providers_dict = {}
         for provider, models in all_models.items():
-            providers_dict[provider.value] = [
+            providers_dict[provider_to_string(provider)] = [
                 ModelResponse(**model.to_dict()) for model in models
             ]
 
@@ -85,7 +96,7 @@ async def get_models_by_provider(provider: str):
         if provider_enum is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {provider}. Valid providers: {[p.value for p in OnlineModelProviders]}"
+                detail=f"Invalid provider: {provider}. Valid providers: {get_provider_ids()}"
             )
 
         models = get_models_for_provider(provider_enum)
@@ -129,4 +140,4 @@ async def get_providers():
     Returns:
         List[str]: List of provider names
     """
-    return [p.value for p in OnlineModelProviders]
+    return get_provider_ids()

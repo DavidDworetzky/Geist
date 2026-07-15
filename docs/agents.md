@@ -195,6 +195,11 @@ User settings control default agent behavior and can be configured via API:
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `GROQ_API_KEY` - Groq API key
 - `GROK_API_KEY` - Grok (X.AI) API key
+- `MOONSHOT_API_KEY` - Moonshot API key for Kimi models
+- `ZAI_API_KEY` - Z.AI API key for hosted GLM models
+- `DEEPSEEK_API_KEY` - DeepSeek API key
+- `OPENAI_COMPATIBLE_BASE_URL` - Base `/v1` URL for a self-hosted inference server
+- `API_KEY` - Generic fallback API key
 
 ## Usage Examples
 

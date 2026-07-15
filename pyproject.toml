@@ -35,9 +35,10 @@ dependencies = [
     "torchtune==0.6.0",
     # torchtune imports torchao at runtime but does not declare it as a dependency.
     "torchao==0.10.0",
-    "transformers==4.48.3",
-    "tokenizers==0.21.0",
-    "huggingface-hub==0.28.1",
+    "accelerate==1.14.0",
+    "transformers==4.57.6",
+    "tokenizers==0.22.1",
+    "huggingface-hub==0.36.0",
     "safetensors==0.5.2",
     "sentencepiece==0.2.0",
     "einops==0.8.1",

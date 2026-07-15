@@ -1,49 +1,66 @@
 import argparse
 import os
+import re
 import subprocess
 
-from huggingface_hub import login
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from huggingface_hub import snapshot_download
 
 
-def download_llama_weights(model_id, weights_dir, use_cli=False):
-    # Login to Hugging Face
-    token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if not token:
-        raise ValueError("HUGGING_FACE_HUB_TOKEN not found in environment variables")
-    login(token=token)
+DEFAULT_MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+
+def model_dir_name(model_id):
+    """Convert repository IDs to one safe local directory component."""
+    directory_name = re.sub(r"[\\/]+", "_", model_id.strip()).strip(".")
+    if not directory_name:
+        raise ValueError("Model ID must contain a directory-safe name")
+    return directory_name
+
+
+def default_weights_dir(model_id):
+    """Preserve the existing MLX Llama directory; isolate all other models."""
+    if model_id == DEFAULT_MODEL_ID:
+        return os.path.join("app", "model_weights", "llama_3_1")
+    return os.path.join("app", "model_weights", model_dir_name(model_id))
+
+
+def download_model_weights(model_id, weights_dir=None, use_cli=False, revision=None):
+    """Download files without instantiating the model or doubling memory use."""
+    token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
+    weights_dir = weights_dir or default_weights_dir(model_id)
 
     if use_cli:
-        # Download using huggingface-cli
         print(f"Downloading model to {weights_dir} using huggingface-cli")
-        command = f"huggingface-cli download {model_id} --include \"original/*\" --local-dir {weights_dir}"
-        subprocess.run(command, shell=True, check=True)
+        command = ["huggingface-cli", "download", model_id, "--local-dir", weights_dir]
+        if revision:
+            command.extend(["--revision", revision])
+        subprocess.run(command, check=True)
     else:
-        # Download model and tokenizer using transformers
-        print(f"Downloading model to {weights_dir} using transformers")
-
-        # Add custom configuration to handle rope_scaling mismatch
-        config_kwargs = {
-            "rope_scaling": {
-                "type": "linear",
-                "factor": 8.0
-            },
-        }
-
-        AutoModelForCausalLM.from_pretrained(model_id, cache_dir=weights_dir, token=token, **config_kwargs)
-        AutoTokenizer.from_pretrained(model_id, cache_dir=weights_dir, token=token)
+        print(f"Downloading model files to {weights_dir}")
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=weights_dir,
+            token=token,
+            revision=revision,
+        )
 
     print("Download complete!")
 
+
+# Backward-compatible import for existing scripts.
+download_llama_weights = download_model_weights
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download Llama model weights")
-    parser.add_argument("--model_id", type=str, default="meta-llama/Meta-Llama-3.1-8B-Instruct",
+    parser = argparse.ArgumentParser(description="Download Hugging Face model weights")
+    parser.add_argument("--model_id", type=str, default=DEFAULT_MODEL_ID,
                         help="Hugging Face model ID")
-    parser.add_argument("--weights_dir", type=str, default="app/model_weights/llama_3_1",
-                        help="Directory to store the model weights")
+    parser.add_argument("--weights_dir", type=str, default=None,
+                        help="Directory to store weights (defaults to a model-specific directory)")
+    parser.add_argument("--revision", type=str, default=None,
+                        help="Optional immutable model revision")
     parser.add_argument("--use_cli", action="store_true",
                         help="Use huggingface-cli for downloading instead of transformers")
 
     args = parser.parse_args()
 
-    download_llama_weights(args.model_id, args.weights_dir, args.use_cli)
+    download_model_weights(args.model_id, args.weights_dir, args.use_cli, args.revision)

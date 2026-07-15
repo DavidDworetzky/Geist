@@ -92,23 +92,22 @@ class AgentFactoryConfig(BaseModel):
 
         if agent_type == "local":
             model = overrides.model or settings.default_local_model
-            runner_type = overrides.runner_type or "mlx_llama"
+            # Leave unset so AgentFactory can select a backend from catalog
+            # capabilities. Explicit user overrides still take precedence.
+            runner_type = overrides.runner_type
             endpoint = None
             api_key = None
         else:  # online
             model = overrides.model or settings.default_online_model
             runner_type = None
-            # Default endpoint based on provider
-            if settings.default_online_provider == "openai":
-                endpoint = overrides.endpoint or "https://api.openai.com/v1/chat/completions"
-            elif settings.default_online_provider == "anthropic":
+            # Anthropic is not OpenAI wire-compatible. Other providers use the
+            # generic provider catalog and the existing OpenAI-compatible agent.
+            if settings.default_online_provider == "anthropic":
                 endpoint = overrides.endpoint or "https://api.anthropic.com/v1/messages"
-            elif settings.default_online_provider == "groq":
-                endpoint = overrides.endpoint or "https://api.groq.com/openai/v1/chat/completions"
-            elif settings.default_online_provider == "grok":
-                endpoint = overrides.endpoint or "https://api.x.ai/v1/chat/completions"
             else:
-                endpoint = overrides.endpoint
+                from agents.model_catalog import get_provider_endpoint
+                provider = "xai" if settings.default_online_provider == "grok" else settings.default_online_provider
+                endpoint = overrides.endpoint or get_provider_endpoint(provider)
             api_key = None  # Will be retrieved from environment
 
         # Convert backup providers
@@ -118,11 +117,19 @@ class AgentFactoryConfig(BaseModel):
 
         # Generation config
         generation_config = {
-            "max_tokens": overrides.max_tokens or settings.default_max_tokens,
-            "temperature": overrides.temperature or settings.default_temperature,
-            "top_p": overrides.top_p or settings.default_top_p,
-            "frequency_penalty": overrides.frequency_penalty or settings.default_frequency_penalty,
-            "presence_penalty": overrides.presence_penalty or settings.default_presence_penalty,
+            "max_tokens": overrides.max_tokens if overrides.max_tokens is not None else settings.default_max_tokens,
+            "temperature": overrides.temperature if overrides.temperature is not None else settings.default_temperature,
+            "top_p": overrides.top_p if overrides.top_p is not None else settings.default_top_p,
+            "frequency_penalty": (
+                overrides.frequency_penalty
+                if overrides.frequency_penalty is not None
+                else settings.default_frequency_penalty
+            ),
+            "presence_penalty": (
+                overrides.presence_penalty
+                if overrides.presence_penalty is not None
+                else settings.default_presence_penalty
+            ),
         }
 
         return cls(
