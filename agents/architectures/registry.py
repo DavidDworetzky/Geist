@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from agents.model_catalog import MODEL_SPECS, PROVIDERS
 
@@ -217,7 +217,7 @@ class RunnerRegistry:
             module, class_name = value
             value = getattr(importlib.import_module(module), class_name)
             self._registry[name] = value
-        return value
+        return cast(type | None, value)
 
     def list(self) -> dict[str, Any]:
         """
@@ -733,6 +733,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
 # API contracts remain backward compatible while additions stay one-line-ish.
 
 for _spec in MODEL_SPECS:
+    _provider: OnlineModelProviders | str
     try:
         _provider = OnlineModelProviders(_spec.provider)
     except ValueError:
@@ -1523,8 +1524,9 @@ def get_provider_ids() -> list[str]:
     for provider in PROVIDERS:
         if provider not in provider_ids:
             provider_ids.append(provider)
-    for provider in (*STATIC_MODELS, *DISCOVERED_MODELS):
-        provider_id = provider_to_string(provider)
+    _provider_key: OnlineModelProviders | str
+    for _provider_key in (*STATIC_MODELS, *DISCOVERED_MODELS):
+        provider_id = provider_to_string(_provider_key)
         if provider_id not in provider_ids:
             provider_ids.append(provider_id)
     return provider_ids

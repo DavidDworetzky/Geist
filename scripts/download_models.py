@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import subprocess
 
 from huggingface_hub import snapshot_download
@@ -8,11 +9,19 @@ from huggingface_hub import snapshot_download
 DEFAULT_MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 
+def model_dir_name(model_id):
+    """Convert repository IDs to one safe local directory component."""
+    directory_name = re.sub(r"[\\/]+", "_", model_id.strip()).strip(".")
+    if not directory_name:
+        raise ValueError("Model ID must contain a directory-safe name")
+    return directory_name
+
+
 def default_weights_dir(model_id):
     """Preserve the existing MLX Llama directory; isolate all other models."""
     if model_id == DEFAULT_MODEL_ID:
         return os.path.join("app", "model_weights", "llama_3_1")
-    return os.path.join("app", "model_weights", model_id.replace("/", "_"))
+    return os.path.join("app", "model_weights", model_dir_name(model_id))
 
 
 def download_model_weights(model_id, weights_dir=None, use_cli=False, revision=None):

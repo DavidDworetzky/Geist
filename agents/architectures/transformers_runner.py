@@ -29,12 +29,12 @@ class TransformersRunner(BaseRunner):
     """Run standard Hugging Face causal LMs without family-specific code."""
 
     def __init__(self):
-        self.model = None
-        self.tokenizer = None
-        self.config = None
-        self.model_id = None
-        self.source = None
-        self.device = None
+        self.model: Any | None = None
+        self.tokenizer: Any | None = None
+        self.config: Any | None = None
+        self.model_id: str | None = None
+        self.source: str | None = None
+        self.device: torch.device | None = None
         self.model_spec = None
         self.trust_remote_code = False
 
@@ -79,7 +79,7 @@ class TransformersRunner(BaseRunner):
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.set_float32_matmul_precision("high")
 
-        common_kwargs = {"trust_remote_code": self.trust_remote_code}
+        common_kwargs: dict[str, Any] = {"trust_remote_code": self.trust_remote_code}
         token = os.getenv("HUGGING_FACE_HUB_TOKEN") or os.getenv("HF_TOKEN")
         if token:
             common_kwargs["token"] = token
@@ -96,7 +96,7 @@ class TransformersRunner(BaseRunner):
             )
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.source, **common_kwargs)
-        load_kwargs = dict(common_kwargs)
+        load_kwargs: dict[str, Any] = dict(common_kwargs)
         load_kwargs["torch_dtype"] = self._select_dtype(device_config.pop("dtype", None))
 
         has_accelerate = importlib.util.find_spec("accelerate") is not None
@@ -172,13 +172,17 @@ class TransformersRunner(BaseRunner):
             if value not in dtypes:
                 raise ValueError(f"Unsupported dtype: {explicit}")
             return dtypes[value]
+        if self.device is None:
+            raise RuntimeError("Device not selected. Call load() first.")
         if self.device.type == "cuda":
             return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         if self.device.type == "mps":
             return torch.float16
         return torch.float32
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> dict[str, Any]:
+    def generate(
+        self, prompt: str, generation_config: GenerationConfig
+    ) -> list[dict[str, str]]:
         return self.complete("", prompt, generation_config)
 
     def complete(
@@ -186,7 +190,7 @@ class TransformersRunner(BaseRunner):
         system_prompt: str,
         user_prompt: str,
         generation_config: GenerationConfig,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, str]]:
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
@@ -252,10 +256,24 @@ class TransformersRunner(BaseRunner):
             generated[0][input_length:], skip_special_tokens=True
         ).strip()
         if generation_config.stop:
-            response = response.split(generation_config.stop, 1)[0].rstrip()
+            stop_sequences = (
+                [generation_config.stop]
+                if isinstance(generation_config.stop, str)
+                else generation_config.stop
+            )
+            stop_positions = [
+                position
+                for stop_sequence in stop_sequences
+                if stop_sequence
+                if (position := response.find(stop_sequence)) >= 0
+            ]
+            if stop_positions:
+                response = response[: min(stop_positions)].rstrip()
         return strings_to_message_dict(user_prompt, response)
 
-    def _apply_chat_template(self, messages):
+    def _apply_chat_template(self, messages: list[dict[str, str]]) -> Any:
+        if self.tokenizer is None:
+            raise RuntimeError("Tokenizer not loaded. Call load() first.")
         return self.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,

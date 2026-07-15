@@ -111,6 +111,21 @@ def test_mapping_like_batch_encoding_and_system_role_fallback():
     assert {"input_ids", "attention_mask"}.issubset(kwargs)
 
 
+def test_multiple_stop_sequences_use_the_earliest_match():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.tokenizer.decode.return_value = "first END trailing STOP ignored"
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    result = runner.complete(
+        "", "hello", GenerationConfig(max_tokens=8, temperature=0.0, stop=["STOP", "END"])
+    )
+
+    assert result[1]["content"] == "first"
+
+
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec")
 @patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
 @patch("agents.architectures.transformers_runner.AutoTokenizer")

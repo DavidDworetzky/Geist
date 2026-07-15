@@ -9,6 +9,7 @@ This script provides functionality to:
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -27,7 +28,10 @@ DEFAULT_MODEL = "llama_3_1"
 
 def model_dir_name(model_id: str) -> str:
     """Use the same deterministic directory convention as local runners."""
-    return model_id.replace("/", "_")
+    directory_name = re.sub(r"[\\/]+", "_", model_id.strip()).strip(".")
+    if not directory_name:
+        raise ValueError("Model ID must contain a directory-safe name")
+    return directory_name
 
 
 def destination_for_model(model_id: str) -> Path:
