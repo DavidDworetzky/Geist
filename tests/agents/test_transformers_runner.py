@@ -151,6 +151,25 @@ def test_cuda_uses_accelerate_without_duplicate_device_copy(
     model.to.assert_not_called()
 
 
+@patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
+@patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
+@patch("agents.architectures.transformers_runner.AutoTokenizer")
+@patch("agents.architectures.transformers_runner.AutoConfig")
+def test_mps_defaults_to_stable_eager_attention(
+    config_cls, tokenizer_cls, model_cls, _find_spec
+):
+    config_cls.from_pretrained.return_value = MagicMock(architectures=["SmolLMForCausalLM"])
+    tokenizer_cls.from_pretrained.return_value = _tokenizer()
+    model_cls.from_pretrained.return_value = _model()
+
+    TransformersRunner().load(
+        "HuggingFaceTB/SmolLM2-135M-Instruct",
+        {"device": "mps"},
+    )
+
+    assert model_cls.from_pretrained.call_args.kwargs["attn_implementation"] == "eager"
+
+
 @patch("agents.architectures.transformers_runner.metadata.version", return_value="4.48.0")
 def test_minimum_transformers_version_fails_early(_version):
     runner = TransformersRunner()

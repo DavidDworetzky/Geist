@@ -100,9 +100,12 @@ class VLLMRunner(BaseRunner):
         return sorted(glob.glob(os.path.join(directory, "*.safetensors")))
 
     def _load_from_local(self) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained(self.weights_dir)
+        weights_dir = self.weights_dir
+        if weights_dir is None:
+            raise RuntimeError("Runner weights directory is not configured")
+        self.tokenizer = AutoTokenizer.from_pretrained(weights_dir)
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.weights_dir,
+            weights_dir,
             torch_dtype=torch.float16,
         )
         self.model = self.model.to(self.device)
@@ -149,13 +152,16 @@ class VLLMRunner(BaseRunner):
         logger.info(f"Model loaded from safetensors. Parameters: {self.model.num_parameters()}")
 
     def _load_from_hub(self) -> None:
+        model_id = self.model_id
+        if model_id is None:
+            raise RuntimeError("Runner model ID is not configured")
         token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
         if token:
             login(token=token)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+            model_id,
             torch_dtype=torch.float16,
         )
         self.model = self.model.to(self.device)

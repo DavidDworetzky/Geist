@@ -8,7 +8,7 @@ import os
 import re
 from contextlib import suppress
 from importlib import metadata
-from typing import Any
+from typing import Any, cast
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -98,6 +98,11 @@ class TransformersRunner(BaseRunner):
         self.tokenizer = AutoTokenizer.from_pretrained(self.source, **common_kwargs)
         load_kwargs: dict[str, Any] = dict(common_kwargs)
         load_kwargs["torch_dtype"] = self._select_dtype(device_config.pop("dtype", None))
+        if self.device.type == "mps" and "attn_implementation" not in device_config:
+            # Torch 2.6 SDPA can abort the process for otherwise valid causal-LM
+            # shapes on Apple MPS. Eager attention is slower but stable, and an
+            # explicit device option can still opt into a newer implementation.
+            load_kwargs["attn_implementation"] = "eager"
 
         has_accelerate = importlib.util.find_spec("accelerate") is not None
         if has_accelerate:
@@ -124,7 +129,7 @@ class TransformersRunner(BaseRunner):
         )
         self.model = AutoModelForCausalLM.from_pretrained(self.source, **load_kwargs)
         if not getattr(self.model, "hf_device_map", None):
-            self.model = self.model.to(self.device)
+            self.model = cast(Any, self.model).to(self.device)
         self.model.eval()
         if hasattr(self.model, "config"):
             self.model.config.use_cache = True
