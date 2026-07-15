@@ -17,9 +17,17 @@ class TypedAdapter(BaseAdapter):
     def enumerate_actions(self):
         return ["typed_action", "untyped_action"]
 
-    def typed_action(self, name: str, count: int, ratio: float, enabled: bool,
-                     tags: list[str], config: dict[str, str], limit: int | None = None,
-                     **kwargs) -> str:
+    def typed_action(
+        self,
+        name: str,
+        count: int,
+        ratio: float,
+        enabled: bool,
+        tags: list[str],
+        config: dict[str, str],
+        limit: int | None = None,
+        **kwargs,
+    ) -> str:
         """Do a typed thing.
 
         Longer explanation that should not appear in the summary.
@@ -28,6 +36,22 @@ class TypedAdapter(BaseAdapter):
 
     def untyped_action(self, anything, other=None):
         return anything
+
+
+class EmptyAdapter(BaseAdapter):
+    def enumerate_actions(self):
+        return []
+
+    def public_helper(self):
+        return "must not be exposed"
+
+
+class BrokenAdapter(BaseAdapter):
+    def enumerate_actions(self):
+        raise RuntimeError("declaration failed")
+
+    def public_helper(self):
+        return "must not be exposed"
 
 
 def test_build_action_schema_maps_types_and_required():
@@ -77,6 +101,11 @@ def test_enumerate_tool_schemas_uses_enumerate_actions(tmp_path):
     assert read_file.adapter == "MarkdownFileAdapter"
     assert read_file.parameters["required"] == ["filename"]
     assert read_file.description.startswith("Read content from a markdown file")
+
+
+@pytest.mark.parametrize("adapter", [EmptyAdapter(), BrokenAdapter()])
+def test_enumerate_tool_schemas_fails_closed_for_empty_or_broken_declarations(adapter):
+    assert enumerate_tool_schemas(adapter) == []
 
 
 def test_qualified_name_and_openai_tool_shape(tmp_path):

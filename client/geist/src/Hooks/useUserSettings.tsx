@@ -6,6 +6,7 @@ export interface BackupProvider {
   model: string;
   api_key?: string;
   priority: number;
+  supports_native_tool_calling?: boolean;
 }
 
 export interface UserSettings {
@@ -151,4 +152,3 @@ export const useUserSettings = (): UseUserSettingsReturn => {
 };
 
 export default useUserSettings;
-

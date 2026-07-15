@@ -1,9 +1,13 @@
+import dataclasses
+import json
 import logging
 import os
+from typing import Any, cast
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from adapters.mms_adapter import MMSAdapter
 from agents.agent_context import AgentContext
@@ -14,8 +18,9 @@ from agents.agent_type import AgentType
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.models.agent_completion import AgentCompletion
+from agents.models.tool_calling import ModelRequestConfig, ToolContext
 from agents.online_agent import OnlineAgent
-from agents.prompt.prompt import AGENT_PROMPTS
+from agents.prompt.prompt import AGENT_PROMPTS, TOOL_USE_PROMPT
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.models import router as models_router
@@ -32,8 +37,11 @@ from app.models.database.chat_session import (
     get_paginated_chat_sessions,
 )
 from app.models.database.database import SessionLocal
+from app.models.database.geist_user import get_default_user
 from app.models.user_settings import AgentFactoryConfig
+from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
+from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -67,6 +75,11 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 # constants
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
+run_controls = RunControlRegistry()
+chat_orchestrator = ChatOrchestrator(
+    build_default_tool_registry(),
+    run_controls=run_controls,
+)
 
 if enhanced_logging:
     logging.basicConfig(
@@ -87,6 +100,133 @@ def get_or_create_agent(agent_type: AgentType):
     return agent_cache[agent_type]
 
 
+def completion_to_response(completion) -> AgentCompletion:
+    if isinstance(completion, AgentCompletion):
+        return completion
+    if completion:
+        return AgentCompletion.from_completion(completion)
+    raise HTTPException(status_code=500, detail="Failed to generate completions.")
+
+
+def sse_event(event: str, payload: Any) -> str:
+    if dataclasses.is_dataclass(payload):
+        payload = dataclasses.asdict(cast(Any, payload))
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def chunk_completion_text(text: str, chunk_size: int = 160):
+    for index in range(0, len(text), chunk_size):
+        yield text[index : index + chunk_size]
+
+
+def resolve_agent_type(value) -> AgentType:
+    if value is None:
+        return default_agent_type
+    if isinstance(value, AgentType):
+        return value
+    return AgentType[str(value).upper()]
+
+
+def model_request_config(params: CompleteTextParams) -> ModelRequestConfig:
+    return ModelRequestConfig(
+        max_tokens=params.max_tokens,
+        temperature=params.temperature,
+        top_p=params.top_p,
+        frequency_penalty=params.frequency_penalty,
+        presence_penalty=params.presence_penalty,
+        stop=params.stop,
+    )
+
+
+def chat_system_prompt(enable_tools: bool) -> str:
+    if not enable_tools:
+        return DEFAULT_PROMPT
+    return f"{DEFAULT_PROMPT}\n\n{TOOL_USE_PROMPT}"
+
+
+def run_chat_completion(
+    params: CompleteTextParams,
+    chat_id: int | None = None,
+    agent=None,
+) -> AgentCompletion:
+    active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
+    if not params.enable_tools or not hasattr(active_agent, "stream_model_turn"):
+        completion = active_agent.complete_text(
+            prompt=params.prompt,
+            max_tokens=params.max_tokens,
+            n=params.n,
+            stop=params.stop,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            echo=params.echo,
+            best_of=params.best_of,
+            prompt_tokens=params.prompt_tokens,
+            response_format=params.response_format,
+            system_prompt=DEFAULT_PROMPT,
+            chat_id=chat_id,
+        )
+        return completion_to_response(completion)
+    return chat_orchestrator.complete(
+        backend=active_agent,
+        prompt=params.prompt,
+        user_id=get_default_user().user_id,
+        chat_id=chat_id,
+        config=model_request_config(params),
+        system_prompt=chat_system_prompt(params.enable_tools),
+        enable_tools=params.enable_tools,
+    )
+
+
+def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+    agent = get_active_agent(resolve_agent_type(params.agent_type))
+    if params.enable_tools and hasattr(agent, "stream_model_turn"):
+        for event in chat_orchestrator.stream(
+            backend=agent,
+            prompt=params.prompt,
+            user_id=get_default_user().user_id,
+            chat_id=chat_id,
+            config=model_request_config(params),
+            system_prompt=chat_system_prompt(params.enable_tools),
+            enable_tools=params.enable_tools,
+        ):
+            yield sse_event(event.event, event.payload)
+        return
+
+    # Legacy agents retain text-only behavior. Generate once and adapt the
+    # authoritative completion into SSE chunks; consuming a legacy text stream
+    # and then calling complete_text again can duplicate model work and database
+    # persistence.
+    completion = agent.complete_text(
+        prompt=params.prompt,
+        max_tokens=params.max_tokens,
+        n=params.n,
+        stop=params.stop,
+        temperature=params.temperature,
+        top_p=params.top_p,
+        frequency_penalty=params.frequency_penalty,
+        presence_penalty=params.presence_penalty,
+        echo=params.echo,
+        best_of=params.best_of,
+        prompt_tokens=params.prompt_tokens,
+        response_format=params.response_format,
+        system_prompt=DEFAULT_PROMPT,
+        chat_id=chat_id,
+    )
+    completion_object = completion_to_response(completion)
+    for chunk in chunk_completion_text(
+        completion_object.message[0] if completion_object.message else ""
+    ):
+        yield sse_event("delta", {"text": chunk})
+
+    yield sse_event("final", completion_object)
+    yield sse_event(
+        "done",
+        {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
+    )
+
+
 # App factory function
 def create_app():
     app = FastAPI()
@@ -98,15 +238,14 @@ def create_app():
 
     # Agent routes using agent_router
     @agent_router.post("/complete_text_new")
-    async def complete_text_new_agents(params: CompleteTextParams) -> AgentCompletion:
+    def complete_text_new_agents(params: CompleteTextParams) -> AgentCompletion:
         """Complete text using new agent architecture (LocalAgent/OnlineAgent)."""
         from app.models.user_settings import AgentConfigRequest
 
         # Create agent config overrides from params
+        requested_agent_type = resolve_agent_type(params.agent_type)
         overrides = AgentConfigRequest(
-            agent_type=AGENT_TYPE_TO_FACTORY_TYPE.get(params.agent_type)
-            if params.agent_type
-            else None,
+            agent_type=AGENT_TYPE_TO_FACTORY_TYPE.get(requested_agent_type),
             max_tokens=params.max_tokens,
             temperature=params.temperature,
             top_p=params.top_p,
@@ -120,87 +259,37 @@ def create_app():
         # Create agent using user settings
         agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
 
-        # Complete text
-        completions = agent.complete_text(
-            prompt=params.prompt,
-            max_tokens=params.max_tokens,
-            n=params.n,
-            stop=params.stop,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            echo=params.echo,
-            best_of=params.best_of,
-            prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT,
-        )
-
-        if completions:
-            completion_object = AgentCompletion.from_completion(completions)
-            return completion_object
-        else:
-            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+        return run_chat_completion(params, agent=agent)
 
     @agent_router.post("/complete_text")
-    async def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
-        # if params.agent_type is an AgentType, use it.
-        agent_type = params.agent_type or default_agent_type
+    def complete_text_endpoint(params: CompleteTextParams) -> AgentCompletion:
+        return run_chat_completion(params)
 
-        agent = get_active_agent(agent_type)
-
-        completions = agent.complete_text(
-            prompt=params.prompt,
-            max_tokens=params.max_tokens,
-            n=params.n,
-            stop=params.stop,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            echo=params.echo,
-            best_of=params.best_of,
-            prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT,
+    @agent_router.post("/complete_text_stream")
+    async def complete_text_stream_endpoint(params: CompleteTextParams):
+        return StreamingResponse(
+            stream_chat_completion(params),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-        if completions:
-            completion_object = AgentCompletion.from_completion(completions)
-            return completion_object
-        else:
-            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+    @agent_router.post("/complete_text_stream/{session_id}")
+    async def update_chat_session_and_stream_complete_text(
+        params: CompleteTextParams, session_id: int
+    ):
+        return StreamingResponse(
+            stream_chat_completion(params, chat_id=session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @agent_router.post("/complete_text/{session_id}")
-    async def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
-        # if params.agent_type is an AgentType, use it.
-        agent_type = params.agent_type or default_agent_type
+    def update_chat_session_and_complete_text(params: CompleteTextParams, session_id: int):
+        return run_chat_completion(params, chat_id=session_id)
 
-        agent = get_active_agent(agent_type)
-
-        completions = agent.complete_text(
-            prompt=params.prompt,
-            max_tokens=params.max_tokens,
-            n=params.n,
-            stop=params.stop,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            echo=params.echo,
-            best_of=params.best_of,
-            prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT,
-            chat_id=session_id,
-        )
-
-        if completions:
-            completion_object = AgentCompletion.from_completion(completions)
-            return completion_object
-        else:
-            raise HTTPException(status_code=500, detail="Failed to generate completions.")
+    @agent_router.post("/runs/{run_id}/cancel")
+    def cancel_chat_run(run_id: str):
+        return {"run_id": run_id, "cancelled": run_controls.cancel(run_id)}
 
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
@@ -220,6 +309,31 @@ def create_app():
     async def get_paginated_sessions_endpoint(page: int = 1, page_size: int = 20):
         chat_sessions = get_paginated_chat_sessions(page, page_size)
         return chat_sessions
+
+    @agent_router.get("/tools")
+    async def get_chat_tool_catalog():
+        user = get_default_user()
+        enabled_names = {
+            tool.name
+            for tool in chat_orchestrator.registry.definitions_for_context(
+                ToolContext(user_id=user.user_id, chat_id=None, run_id="catalog")
+            )
+        }
+        return {
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters_schema(),
+                    "enabled": tool.name in enabled_names,
+                    "enabled_by_default": tool.enabled_by_default,
+                    "requires_approval": tool.requires_approval,
+                    "side_effect": tool.side_effect,
+                    "source_adapter": tool.source_adapter,
+                }
+                for tool in chat_orchestrator.registry.catalog()
+            ]
+        }
 
     @agent_router.post("/initialize_task_and_tick")
     async def initialize_and_tick_agent(task_prompt: InitializeAgentParams):
@@ -336,6 +450,7 @@ def get_online_agent():
         # fail safely when a self-hosted model has no configured server.
         endpoint=factory_config.endpoint,
         model=factory_config.model,
+        backup_providers=[provider.model_dump() for provider in factory_config.backup_providers],
         generation_config=factory_config.generation_config,
     )
 

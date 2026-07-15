@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel
 
 from agents.agent_type import AgentType
@@ -17,8 +16,12 @@ class CompleteTextParams(BaseModel):
     best_of: int | None = None
     prompt_tokens: list[int] | None = None
     response_format: str = "text"
-    #more completion params for LLMs
+    # more completion params for LLMs
     agent_type: AgentType | None = AgentType.LLAMA
+    # Existing non-streaming API clients retain text-only behavior unless they
+    # explicitly opt into the native model/tool loop.
+    enable_tools: bool = False
+
 
 class InitializeAgentParams(BaseModel):
     prompt: str

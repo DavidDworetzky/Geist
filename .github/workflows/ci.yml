@@ -218,6 +218,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [test, frontend-test]
 
     strategy:
       fail-fast: false
