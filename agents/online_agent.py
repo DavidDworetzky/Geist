@@ -93,7 +93,8 @@ class OnlineAgent(BaseAgent):
             return os.getenv("GROQ_API_KEY")
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
-        return os.getenv("API_KEY")
+        return None
+
     def _make_request(
         self, payload: dict[str, Any], use_backup: bool = False, backup_index: int = 0
     ) -> dict[str, Any]:
