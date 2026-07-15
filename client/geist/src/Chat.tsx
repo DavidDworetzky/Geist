@@ -6,7 +6,7 @@ import useUserSettings from './Hooks/useUserSettings';
 import ChatTextArea from './Components/ChatTextArea';
 import EnhancedChatInput from './Components/EnhancedChatInput';
 import StagePanelIcon from './Components/StagePanelIcon';
-import { ChatPair, ChatHistory } from './Components/ChatTextArea';
+import { ChatPair, ChatHistory, ChatTurnResult } from './chatTypes';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 
 const PAGE_SIZE = 20;
@@ -22,6 +22,20 @@ interface ChatSessionListItem {
   link: string;
   date: Date;
 }
+
+export const turnBelongsToChatSelection = (
+  turn: Pick<ChatTurnResult, 'origin_chat_id' | 'chat_id'>,
+  routeChatId: number | null,
+  stateChatId: number | null,
+): boolean => {
+  if (routeChatId !== null) {
+    return turn.origin_chat_id === routeChatId || turn.chat_id === routeChatId;
+  }
+  if (stateChatId !== null) {
+    return turn.origin_chat_id === stateChatId || turn.chat_id === stateChatId;
+  }
+  return turn.origin_chat_id === null;
+};
 
 function getInitialDrawerState(): ChatDrawerState {
   if (typeof window === 'undefined') {
@@ -57,8 +71,18 @@ const Chat = () => {
   const [userInput, setUserInput] = useState('');
   const [fileContextInfo, setFileContextInfo] = useState<string>('');
   const { settings: userSettings } = useUserSettings();
-  const { prompt, completeText, loading: isLoading, error, completedText, state_chat_id } = useCompleteText(userSettings);
+  const {
+    completeText,
+    cancelGeneration,
+    resetChatSession,
+    loading: isLoading,
+    error,
+    completedTurn,
+    activeTurn,
+    state_chat_id,
+  } = useCompleteText(userSettings);
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
+  const routeChatId = chatId ? parseInt(chatId, 10) : null;
 
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -78,8 +102,12 @@ const Chat = () => {
 
       const data = await res.json();
       const newMessages = data.chat_history.map((h: any) => ({
+        run_id: h.run_id,
         user: h.user,
-        ai: h.ai
+        ai: h.ai,
+        status: h.status,
+        tool_calls: h.tool_calls,
+        artifacts: h.artifacts,
       }));
 
       setChatHistory(prev => {
@@ -172,7 +200,7 @@ const Chat = () => {
   }, [handleScroll]);
 
   const chatWithServer = async (input: string) => {
-    const parsedChatId = chatId ? parseInt(chatId) : state_chat_id;
+    const parsedChatId = routeChatId ?? state_chat_id;
     try {
       const processedMessage = await processMessage(input);
 
@@ -210,14 +238,32 @@ const Chat = () => {
       .sort((a, b) => b.date.getTime() - a.date.getTime());
   }, [chatSessions, chatTitles]);
   useEffect(() => {
-    if (completedText) {
-      const newHistory: ChatPair = {
-        user: prompt ?? '',
-        ai: completedText
-      };
-      setChatHistory(prev => ({ chatHistory: [...(prev?.chatHistory ?? []), newHistory] }));
-    }
-  }, [completedText, prompt]);
+    if (!completedTurn) return;
+    const belongsToCurrentChat = turnBelongsToChatSelection(
+      completedTurn,
+      routeChatId,
+      state_chat_id,
+    );
+    if (!belongsToCurrentChat) return;
+
+    const newHistory: ChatPair = {
+      run_id: completedTurn.run_id,
+      user: completedTurn.prompt,
+      ai: completedTurn.message,
+      tool_calls: completedTurn.tool_calls,
+      artifacts: completedTurn.artifacts,
+    };
+    setChatHistory(previous => {
+      const existingHistory = previous?.chatHistory ?? [];
+      if (
+        completedTurn.run_id &&
+        existingHistory.some((turn) => turn.run_id === completedTurn.run_id)
+      ) {
+        return previous;
+      }
+      return { chatHistory: [...existingHistory, newHistory] };
+    });
+  }, [completedTurn, routeChatId, state_chat_id]);
 
   const handleSubmit = async (message: string) => {
     if (message.trim()) {
@@ -246,6 +292,7 @@ const Chat = () => {
   };
 
   const handleNewChat = () => {
+    resetChatSession();
     setDrawerState('minimized');
     setChatHistory(undefined);
     setUserInput('');
@@ -289,6 +336,24 @@ const Chat = () => {
     ? chatSessionLinks.filter((session) => session.name.toLowerCase().includes(searchQuery))
     : chatSessionLinks;
   const sessionCountLabel = `${chatSessionLinks.length} ${chatSessionLinks.length === 1 ? 'chat' : 'chats'}`;
+  const activeTurnBelongsToCurrentChat = activeTurn && turnBelongsToChatSelection(
+    activeTurn,
+    routeChatId,
+    state_chat_id,
+  );
+  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat
+    ? [
+        ...(chatHistory?.chatHistory ?? []),
+        {
+          run_id: activeTurn!.run_id,
+          user: activeTurn!.prompt,
+          ai: activeTurn!.message,
+          status: activeTurn!.status,
+          tool_calls: activeTurn!.tool_calls,
+          artifacts: activeTurn!.artifacts,
+        },
+      ]
+    : (chatHistory?.chatHistory ?? []);
 
   return (
     <div className={`ChatContainer chat-drawer-${chatDrawerState}`}>
@@ -296,7 +361,7 @@ const Chat = () => {
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
             <ChatTextArea
-              chatHistory={chatHistory?.chatHistory ?? []}
+              chatHistory={displayedHistory}
               isLoading={isLoading}
               ref={chatContainerRef}
             />
@@ -463,9 +528,21 @@ const Chat = () => {
                 placeholder="Type your message..."
                 handleKeyDown={handleKeyDown}
                 rows={3}
-                sessionId={state_chat_id || (chatId ? parseInt(chatId) : 1)}
+                sessionId={routeChatId ?? state_chat_id ?? 1}
                 enableVoice={true}
               />
+              {isLoading && (
+                <button
+                  className="button button-danger"
+                  type="button"
+                  onClick={() => void cancelGeneration()}
+                  disabled={activeTurn?.status === 'cancelling'}
+                  aria-label="Stop generating"
+                  style={{ marginTop: 8 }}
+                >
+                  {activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
             </div>
 
             {(error || fileError) && (

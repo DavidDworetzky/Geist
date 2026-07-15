@@ -3,9 +3,12 @@ OnlineAgent implementation for routing to OpenAI-compatible HTTP endpoints.
 """
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
+import re
+import uuid
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -14,9 +17,22 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
+from agents.model_catalog import PROVIDERS
 from agents.models.generic_completion import GenericCompletion
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
+from agents.models.tool_calling import (
+    ToolCall as ChatToolCall,
+)
 from agents.tool_calling import (
-    ToolCall,
+    ToolCall as AdapterToolCall,
+)
+from agents.tool_calling import (
     ToolCallError,
     ToolCompletion,
     ToolDispatcher,
@@ -28,11 +44,21 @@ from agents.tool_calling import (
 logger = logging.getLogger(__name__)
 
 
+class NativeProviderError(CompletionRequestError):
+    """A provider failure classified for safe pre-emission retry decisions."""
+
+    def __init__(self, message: str, *, retryable: bool):
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class OnlineAgent(BaseAgent):
     """
     Online agent implementation that routes requests to OpenAI-compatible HTTP endpoints.
     Supports multiple providers including OpenAI, Anthropic, Grok, and Groq.
     """
+
+    supports_native_tool_calling = False
 
     def __init__(
         self,
@@ -40,9 +66,11 @@ class OnlineAgent(BaseAgent):
         base_url: str,
         model: str,
         api_key: str | None = None,
-        backup_providers: list[dict[str, str]] | None = None,
+        backup_providers: list[dict[str, Any]] | None = None,
+        generation_config: dict[str, Any] | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
+        supports_native_tool_calling: bool | None = None,
         as_subprocess: bool = False,
         **kwargs,
     ):
@@ -55,8 +83,11 @@ class OnlineAgent(BaseAgent):
             model: Model name to use
             api_key: API key for authentication
             backup_providers: List of backup provider configurations
+            generation_config: Optional default generation parameters
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries
+            supports_native_tool_calling: Explicit capability override for
+                custom OpenAI-compatible endpoints.
             as_subprocess: Whether to run as subprocess
         """
         super().__init__(agent_context, as_subprocess)
@@ -65,8 +96,14 @@ class OnlineAgent(BaseAgent):
         self.model = model
         self.api_key = api_key or self._get_api_key_from_env()
         self.backup_providers = backup_providers or []
+        self.generation_config = generation_config or {}
         self.timeout = timeout
         self.max_retries = max_retries
+        self.supports_native_tool_calling = (
+            supports_native_tool_calling
+            if supports_native_tool_calling is not None
+            else self._known_native_tool_provider()
+        )
 
         # Initialize HTTP client
         self.client = httpx.Client(timeout=timeout)
@@ -76,8 +113,18 @@ class OnlineAgent(BaseAgent):
         if self.api_key:
             self.headers["Authorization"] = f"Bearer {self.api_key}"
 
+    def _known_native_tool_provider(self) -> bool:
+        normalized_url = self.base_url.lower()
+        return any(
+            provider_host in normalized_url
+            for provider_host in ("openai.com", "anthropic.com", "groq.com", "api.x.ai")
+        )
+
     def _get_api_key_from_env(self) -> str | None:
         """Get provider-specific API key from environment variables based on the endpoint."""
+        for provider in PROVIDERS.values():
+            if provider.base_url and provider.base_url.rstrip("/") in self.base_url:
+                return os.getenv(provider.api_key_env)
         if "openai.com" in self.base_url:
             return os.getenv("OPENAI_API_KEY")
         elif "anthropic" in self.base_url:
@@ -226,7 +273,6 @@ class OnlineAgent(BaseAgent):
             system_prompt,
             chat_id,
         )
-
         # Make request
         response_data = self._make_request(payload)
 
@@ -273,7 +319,6 @@ class OnlineAgent(BaseAgent):
             chat_id,
         )
         payload["stream"] = True
-
         # Ensure endpoint includes chat/completions
         current_url = self.base_url
         if not current_url.endswith("/chat/completions"):
@@ -455,7 +500,7 @@ class OnlineAgent(BaseAgent):
             )
             if not isinstance(arguments, dict):
                 raise ToolCallError("tool call arguments must decode to a JSON object")
-            call = ToolCall.from_qualified_name(name, arguments, raw=str(raw_arguments))
+            call = AdapterToolCall.from_qualified_name(name, arguments, raw=str(raw_arguments))
         except (json.JSONDecodeError, ToolCallError) as e:
             self.logger.warning(f"Malformed native tool call '{name}': {e}")
             return ToolResult(call=None, success=False, error=f"Malformed tool call '{name}': {e}")
@@ -477,6 +522,349 @@ class OnlineAgent(BaseAgent):
             iterations=1,
             used_native_tools=False,
         )
+
+    def _is_anthropic(self) -> bool:
+        return "anthropic" in self.base_url.lower()
+
+    def _openai_chat_url(self) -> str:
+        if self.base_url.endswith("/chat/completions"):
+            return self.base_url
+        return f"{self.base_url}/chat/completions"
+
+    def _anthropic_messages_url(self) -> str:
+        if self.base_url.endswith("/messages"):
+            return self.base_url
+        if self.base_url.endswith("/v1"):
+            return f"{self.base_url}/messages"
+        return f"{self.base_url}/v1/messages"
+
+    @staticmethod
+    def _tool_arguments(value: str) -> dict[str, Any]:
+        try:
+            parsed = json.loads(value or "{}")
+        except json.JSONDecodeError:
+            return {"__raw_arguments__": value}
+        return parsed if isinstance(parsed, dict) else {"__raw_arguments__": value}
+
+    @staticmethod
+    def _provider_tool_name(name: str) -> str:
+        """Encode an internal tool name for provider function-name constraints."""
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+            return name
+        readable = re.sub(r"[^A-Za-z0-9_-]", "_", name).strip("_") or "tool"
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        return f"{readable[:55]}_{digest}"
+
+    @classmethod
+    def _provider_tool_name_maps(
+        cls,
+        tools: list[ToolDefinition],
+        messages: list[ChatMessage] | None = None,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        internal_to_provider: dict[str, str] = {}
+        provider_to_internal: dict[str, str] = {}
+
+        names = [tool.name for tool in tools]
+        for message in messages or []:
+            names.extend(call.name for call in message.tool_calls)
+            if message.name:
+                names.append(message.name)
+
+        for name in dict.fromkeys(names):
+            provider_name = cls._provider_tool_name(name)
+            if (
+                provider_name in provider_to_internal
+                and provider_to_internal[provider_name] != name
+            ):
+                digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+                provider_name = f"{provider_name[:51]}_{digest}"
+            internal_to_provider[name] = provider_name
+            provider_to_internal[provider_name] = name
+        return internal_to_provider, provider_to_internal
+
+    def _stream_openai_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        internal_to_provider, provider_to_internal = self._provider_tool_name_maps(tools, messages)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [message.to_openai(internal_to_provider) for message in messages],
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+            "top_p": config.top_p,
+            "frequency_penalty": config.frequency_penalty,
+            "presence_penalty": config.presence_penalty,
+            "stream": True,
+        }
+        if config.stop:
+            payload["stop"] = config.stop
+        if tools:
+            payload["tools"] = [tool.to_openai(internal_to_provider[tool.name]) for tool in tools]
+            payload["tool_choice"] = "auto"
+
+        text_parts: list[str] = []
+        call_parts: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
+        saw_done = False
+        with self.client.stream(
+            "POST",
+            self._openai_chat_url(),
+            json=payload,
+            headers=self.headers,
+        ) as response:
+            if response.status_code >= 400:
+                response.read()
+                raise NativeProviderError(
+                    f"Streaming request failed with status {response.status_code}: {response.text}",
+                    retryable=response.status_code in {408, 409, 429}
+                    or response.status_code >= 500,
+                )
+
+            for line in response.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if data == "[DONE]":
+                    saw_done = True
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    self.logger.warning("Ignoring invalid provider SSE data")
+                    continue
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                finish_reason = choice.get("finish_reason") or finish_reason
+                delta = choice.get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    text_parts.append(content)
+                    yield ModelEvent.text_delta(content)
+
+                for fallback_index, tool_delta in enumerate(delta.get("tool_calls") or []):
+                    index = tool_delta.get("index", fallback_index)
+                    current = call_parts.setdefault(
+                        int(index),
+                        {"id": "", "name": "", "arguments": ""},
+                    )
+                    current["id"] += tool_delta.get("id") or ""
+                    function = tool_delta.get("function") or {}
+                    current["name"] += function.get("name") or ""
+                    current["arguments"] += function.get("arguments") or ""
+
+        if not saw_done and finish_reason is None:
+            raise NativeProviderError(
+                "Provider stream ended before a terminal marker",
+                retryable=True,
+            )
+        if not text_parts and not call_parts and finish_reason is None:
+            raise NativeProviderError("Provider returned an empty model turn", retryable=True)
+
+        calls = [
+            ChatToolCall(
+                id=value["id"] or f"toolcall_{uuid.uuid4().hex}",
+                name=provider_to_internal.get(value["name"], value["name"]),
+                arguments=self._tool_arguments(value["arguments"]),
+            )
+            for _index, value in sorted(call_parts.items())
+        ]
+        yield ModelEvent.turn_complete(
+            ModelTurn(
+                text="".join(text_parts),
+                tool_calls=calls,
+                finish_reason=finish_reason,
+            )
+        )
+
+    @staticmethod
+    def _anthropic_payload_messages(
+        messages: list[ChatMessage],
+        tool_name_map: dict[str, str] | None = None,
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        result: list[dict[str, Any]] = []
+        for message in messages:
+            if message.role == "system":
+                if message.content:
+                    system_parts.append(message.content)
+                continue
+            if message.role == "assistant":
+                blocks: list[dict[str, Any]] = []
+                if message.content:
+                    blocks.append({"type": "text", "text": message.content})
+                blocks.extend(
+                    {
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": (tool_name_map or {}).get(call.name, call.name),
+                        "input": call.arguments,
+                    }
+                    for call in message.tool_calls
+                )
+                result.append({"role": "assistant", "content": blocks or ""})
+            elif message.role == "tool":
+                result.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": message.tool_call_id,
+                                "content": message.content or "",
+                            }
+                        ],
+                    }
+                )
+            else:
+                result.append({"role": "user", "content": message.content or ""})
+        return ("\n\n".join(system_parts) or None), result
+
+    def _stream_anthropic_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        internal_to_provider, provider_to_internal = self._provider_tool_name_maps(tools, messages)
+        system, provider_messages = self._anthropic_payload_messages(messages, internal_to_provider)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": provider_messages,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+            "top_p": config.top_p,
+        }
+        if system:
+            payload["system"] = system
+        if config.stop:
+            payload["stop_sequences"] = config.stop
+        if tools:
+            payload["tools"] = [
+                tool.to_anthropic(internal_to_provider[tool.name]) for tool in tools
+            ]
+            payload["tool_choice"] = {"type": "auto"}
+
+        headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        response = self.client.post(
+            self._anthropic_messages_url(),
+            json=payload,
+            headers=headers,
+        )
+        if response.status_code >= 400:
+            raise NativeProviderError(
+                f"Anthropic request failed with status {response.status_code}: {response.text}",
+                retryable=response.status_code in {408, 409, 429} or response.status_code >= 500,
+            )
+        data = response.json()
+        if not data.get("content") and not data.get("stop_reason"):
+            raise NativeProviderError("Anthropic returned an empty model turn", retryable=True)
+        text_parts: list[str] = []
+        calls: list[ChatToolCall] = []
+        for block in data.get("content") or []:
+            if block.get("type") == "text" and block.get("text"):
+                text_parts.append(block["text"])
+                yield ModelEvent.text_delta(block["text"])
+            elif block.get("type") == "tool_use":
+                arguments = block.get("input")
+                calls.append(
+                    ChatToolCall(
+                        id=block.get("id") or f"toolcall_{uuid.uuid4().hex}",
+                        name=provider_to_internal.get(
+                            block.get("name") or "", block.get("name") or ""
+                        ),
+                        arguments=arguments if isinstance(arguments, dict) else {},
+                    )
+                )
+        yield ModelEvent.turn_complete(
+            ModelTurn(
+                text="".join(text_parts),
+                tool_calls=calls,
+                finish_reason=data.get("stop_reason"),
+            )
+        )
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Normalize provider-native tool calls into Geist's small Python contract."""
+        last_error: Exception | None = None
+        for attempt in range(max(1, self.max_retries)):
+            emitted_event = False
+            try:
+                events = (
+                    self._stream_anthropic_model_turn(messages, tools, config)
+                    if self._is_anthropic()
+                    else self._stream_openai_model_turn(messages, tools, config)
+                )
+                for event in events:
+                    emitted_event = True
+                    yield event
+                return
+            except (httpx.RequestError, NativeProviderError) as error:
+                retryable = not isinstance(error, NativeProviderError) or error.retryable
+                if emitted_event or not retryable:
+                    raise
+                last_error = error
+                if attempt + 1 < max(1, self.max_retries):
+                    self.logger.warning(
+                        "Native model turn failed before emitting text; retrying (%s/%s): %s",
+                        attempt + 1,
+                        self.max_retries,
+                        error,
+                    )
+
+        for backup in sorted(
+            self.backup_providers,
+            key=lambda provider: int(provider.get("priority", 1)),
+        ):
+            backup_url = str(backup.get("base_url") or "").strip()
+            backup_model = str(backup.get("model") or self.model).strip()
+            if not backup_url:
+                continue
+            self.logger.warning("Trying native tool turn backup provider at %s", backup_url)
+            backup_agent = OnlineAgent(
+                agent_context=self._agent_context,
+                base_url=backup_url,
+                model=backup_model,
+                api_key=backup.get("api_key"),
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+                supports_native_tool_calling=backup.get("supports_native_tool_calling"),
+            )
+            if tools and not backup_agent.supports_native_tool_calling:
+                self.logger.warning(
+                    "Skipping backup provider without declared native tool capability: %s",
+                    backup_url,
+                )
+                backup_agent.client.close()
+                continue
+            emitted_event = False
+            try:
+                for event in backup_agent.stream_model_turn(messages, tools, config):
+                    emitted_event = True
+                    yield event
+                return
+            except Exception as error:
+                if emitted_event:
+                    raise
+                last_error = error
+                self.logger.warning("Native backup provider failed: %s", error)
+            finally:
+                backup_agent.client.close()
+
+        if last_error is not None:
+            raise last_error
+        raise CompletionRequestError("Native model turn failed without a provider response")
 
     def complete_audio(
         self,

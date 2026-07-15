@@ -44,7 +44,7 @@ class MarkdownFileAdapter(BaseAdapter):
             raise FileNotFoundError(f"File not found: {filename}")
 
         try:
-            with open(filepath, encoding='utf-8') as file:
+            with open(filepath, encoding="utf-8") as file:
                 return file.read()
         except Exception as e:
             raise OSError(f"Error reading file {filename}: {str(e)}") from e
@@ -66,7 +66,7 @@ class MarkdownFileAdapter(BaseAdapter):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
         try:
-            with open(filepath, 'w', encoding='utf-8') as file:
+            with open(filepath, "w", encoding="utf-8") as file:
                 file.write(content)
             return True
         except Exception as e:
@@ -83,10 +83,19 @@ class MarkdownFileAdapter(BaseAdapter):
         Returns:
             List of markdown file paths relative to the search directory
         """
-        search_root = file_root if file_root else self.file_root
-        search_path = os.path.abspath(search_root) if file_root else self.file_root
+        if file_root:
+            search_root = (
+                file_root if os.path.isabs(file_root) else os.path.join(self.file_root, file_root)
+            )
+            search_path = os.path.abspath(search_root)
+        else:
+            search_path = self.file_root
 
         if not os.path.exists(search_path):
+            return []
+        resolved_root = os.path.realpath(self.file_root)
+        resolved_search_path = os.path.realpath(search_path)
+        if os.path.commonpath([resolved_root, resolved_search_path]) != resolved_root:
             return []
 
         markdown_files = []
@@ -94,7 +103,7 @@ class MarkdownFileAdapter(BaseAdapter):
         try:
             for root, _dirs, files in os.walk(search_path):
                 for file in files:
-                    if file.lower().endswith(('.md', '.markdown')):
+                    if file.lower().endswith((".md", ".markdown")):
                         # Get relative path from search root
                         full_path = os.path.join(root, file)
                         relative_path = os.path.relpath(full_path, search_path)
@@ -115,4 +124,13 @@ class MarkdownFileAdapter(BaseAdapter):
         Returns:
             Absolute file path
         """
-        return os.path.join(self.file_root, filename)
+        if os.path.isabs(filename):
+            raise ValueError("filename must be relative to the configured root")
+        if not filename.lower().endswith((".md", ".markdown")):
+            raise ValueError("filename must use a .md or .markdown extension")
+        filepath = os.path.abspath(os.path.join(self.file_root, filename))
+        resolved_root = os.path.realpath(self.file_root)
+        resolved_filepath = os.path.realpath(filepath)
+        if os.path.commonpath([resolved_root, resolved_filepath]) != resolved_root:
+            raise ValueError("filename escapes the configured root")
+        return filepath

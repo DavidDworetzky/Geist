@@ -26,9 +26,13 @@ jest.mock('./Hooks/useCompleteText', () => ({
   default: () => ({
     prompt: null,
     completeText: jest.fn(),
+    cancelGeneration: jest.fn(),
+    resetChatSession: jest.fn(),
     loading: false,
     error: null,
     completedText: null,
+    completedTurn: null,
+    activeTurn: null,
     state_chat_id: null
   })
 }));

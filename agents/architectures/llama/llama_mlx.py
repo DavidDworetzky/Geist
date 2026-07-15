@@ -9,13 +9,10 @@ from dataclasses import dataclass, field
 # MLX imports
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
-import safetensors
-import safetensors.torch
-import torch
 
 # Tokenizer imports
-from huggingface_hub import hf_hub_download
+from huggingface_hub import snapshot_download
+from mlx.utils import tree_flatten
 from transformers import AutoTokenizer
 
 from agents.models.llama_completion import strings_to_message_dict
@@ -24,6 +21,75 @@ from agents.models.llama_completion import strings_to_message_dict
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class KVCache:
+    """Grow K/V storage in chunks and update it in place during decoding."""
+
+    def __init__(self, step: int = 256):
+        self.keys = None
+        self.values = None
+        self.offset = 0
+        self.step = step
+
+    def update_and_fetch(self, keys: mx.array, values: mx.array) -> tuple[mx.array, mx.array]:
+        previous = self.offset
+        required = previous + keys.shape[2]
+        if self.keys is None or required > self.keys.shape[2]:
+            batch, n_kv_heads, _, key_dim = keys.shape
+            value_dim = values.shape[-1]
+            growth = ((keys.shape[2] + self.step - 1) // self.step) * self.step
+            key_shape = (batch, n_kv_heads, growth, key_dim)
+            value_shape = (batch, n_kv_heads, growth, value_dim)
+            new_keys = mx.zeros(key_shape, dtype=keys.dtype)
+            new_values = mx.zeros(value_shape, dtype=values.dtype)
+            if self.keys is None:
+                self.keys, self.values = new_keys, new_values
+            else:
+                if previous % self.step:
+                    self.keys = self.keys[..., :previous, :]
+                    self.values = self.values[..., :previous, :]
+                self.keys = mx.concatenate([self.keys, new_keys], axis=2)
+                self.values = mx.concatenate([self.values, new_values], axis=2)
+
+        self.offset = required
+        self.keys[..., previous:self.offset, :] = keys
+        self.values[..., previous:self.offset, :] = values
+        return (
+            self.keys[..., :self.offset, :],
+            self.values[..., :self.offset, :],
+        )
+
+
+def sample_logits(logits: mx.array, temperature: float, top_p: float) -> mx.array:
+    """Sample entirely on the MLX device, avoiding a per-token NumPy copy."""
+    if temperature < 0:
+        raise ValueError("temperature must be non-negative")
+    if not 0 < top_p <= 1:
+        raise ValueError("top_p must be in the interval (0, 1]")
+    if temperature == 0:
+        return mx.argmax(logits, axis=-1)
+
+    if top_p < 1:
+        probabilities = mx.softmax(logits, axis=-1)
+        sorted_indices = mx.argsort(probabilities, axis=-1)
+        sorted_probabilities = mx.take_along_axis(
+            probabilities, sorted_indices, axis=-1
+        )
+        cumulative_probabilities = mx.cumsum(sorted_probabilities, axis=-1)
+        kept_probabilities = mx.where(
+            cumulative_probabilities > 1 - top_p,
+            sorted_probabilities,
+            0,
+        )
+        inverse_indices = mx.argsort(sorted_indices, axis=-1)
+        probabilities = mx.take_along_axis(
+            kept_probabilities, inverse_indices, axis=-1
+        )
+        logits = mx.log(probabilities)
+
+    return mx.random.categorical(logits / temperature)
+
 
 @dataclass
 class ModelConfig:
@@ -56,49 +122,38 @@ class Llama3RoPE(nn.Module):
         self.base = base
         self.rope_scaling = rope_scaling or {}
         self.max_position_embeddings = max_position_embeddings
-
-        # Precompute scaled inverse frequencies.
-        inv_freq = 1.0 / (self.base ** (mx.arange(0, dim, 2, dtype=mx.float32) / dim))
-        self.inv_freq = self._apply_llama3_scaling(inv_freq)
-
-    def _apply_llama3_scaling(self, inv_freq: mx.array) -> mx.array:
         factor = float(self.rope_scaling.get("factor", 1.0))
         low_freq_factor = float(self.rope_scaling.get("low_freq_factor", 1.0))
         high_freq_factor = float(self.rope_scaling.get("high_freq_factor", 1.0))
         orig_max_pos = float(self.rope_scaling.get("original_max_position_embeddings", self.max_position_embeddings))
 
-        if factor == 1.0 or low_freq_factor == high_freq_factor:
-            return inv_freq
-
-        wavelen = (2.0 * np.pi) / inv_freq
+        frequencies = self.base ** (mx.arange(0, dim, 2, dtype=mx.float32) / dim)
+        wavelen = 2.0 * mx.pi * frequencies
         low_freq_wavelen = orig_max_pos / low_freq_factor
         high_freq_wavelen = orig_max_pos / high_freq_factor
 
-        # Start with low-frequency scaled down by factor.
-        inv_freq_scaled = mx.where(wavelen > low_freq_wavelen, inv_freq / factor, inv_freq)
-
-        # Smoothly interpolate in the middle band.
-        smooth = (orig_max_pos / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
-        smooth = mx.clip(smooth, 0.0, 1.0)
-        interp = inv_freq / (factor * (1.0 - smooth) + smooth)
-        mid_mask = mx.logical_and(wavelen <= low_freq_wavelen, wavelen >= high_freq_wavelen)
-        inv_freq_scaled = mx.where(mid_mask, interp, inv_freq_scaled)
-
-        return inv_freq_scaled
+        frequencies = mx.where(
+            wavelen > low_freq_wavelen,
+            frequencies * factor,
+            frequencies,
+        )
+        medium = (wavelen > high_freq_wavelen) & (wavelen < low_freq_wavelen)
+        smooth = (orig_max_pos / wavelen - low_freq_factor) / (
+            high_freq_factor - low_freq_factor
+        )
+        smooth_frequencies = frequencies / ((1.0 - smooth) / factor + smooth)
+        self._frequencies = mx.where(medium, smooth_frequencies, frequencies)
 
     def __call__(self, x: mx.array, offset: int = 0) -> mx.array:
-        # x: [B, H, L, D]
-        seq_len = x.shape[2]
-        positions = mx.arange(offset, offset + seq_len, dtype=self.inv_freq.dtype)
-        freqs = positions[:, None] * self.inv_freq[None, :]
-        cos = mx.cos(freqs)[None, None, :, :].astype(x.dtype)
-        sin = mx.sin(freqs)[None, None, :, :].astype(x.dtype)
-
-        x_ = x.reshape(*x.shape[:-1], -1, 2)
-        x1 = x_[..., 0]
-        x2 = x_[..., 1]
-        out = mx.stack([x1 * cos - x2 * sin, x1 * sin + x2 * cos], axis=-1)
-        return out.reshape(x.shape)
+        return mx.fast.rope(
+            x,
+            self.dim,
+            traditional=False,
+            base=None,
+            scale=1.0,
+            offset=offset,
+            freqs=self._frequencies,
+        )
 
 class Attention(nn.Module):
     def __init__(self, args: ModelConfig):
@@ -107,9 +162,6 @@ class Attention(nn.Module):
 
         self.n_heads = args.n_heads
         self.n_kv_heads = args.n_kv_heads
-
-        # How many times each key/value head is repeated to match the query heads
-        self.repeats = self.n_heads // self.n_kv_heads
 
         # Per the LLama approach, scale = head_dim^-0.5
         self.scale = args.head_dim ** -0.5
@@ -134,9 +186,9 @@ class Attention(nn.Module):
         self,
         x: mx.array,
         mask: mx.array | None = None,
-        cache: tuple[mx.array, mx.array] | None = None,
-    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
-        B, L, D = x.shape
+        cache: KVCache | None = None,
+    ) -> tuple[mx.array, KVCache | None]:
+        batch, sequence_length, model_dim = x.shape
 
         queries = self.wq(x)
         keys    = self.wk(x)
@@ -144,66 +196,37 @@ class Attention(nn.Module):
 
         # Reshape into (B, n_heads, L, head_dim) for queries,
         #            (B, n_kv_heads, L, head_dim) for keys/values
-        queries = queries.reshape(B, L, self.n_heads,  self.args.head_dim).transpose(0, 2, 1, 3)
-        keys    = keys   .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
-        values  = values .reshape(B, L, self.n_kv_heads, self.args.head_dim).transpose(0, 2, 1, 3)
+        queries = queries.reshape(
+            batch, sequence_length, self.n_heads, self.args.head_dim
+        ).transpose(0, 2, 1, 3)
+        keys = keys.reshape(
+            batch, sequence_length, self.n_kv_heads, self.args.head_dim
+        ).transpose(0, 2, 1, 3)
+        values = values.reshape(
+            batch, sequence_length, self.n_kv_heads, self.args.head_dim
+        ).transpose(0, 2, 1, 3)
 
         # Handle caching
         if cache is not None:
-            key_cache, value_cache = cache
-            # offset = length so far for rope
-            offset = key_cache.shape[2]
+            offset = cache.offset
             queries = self.rope(queries, offset=offset)
             keys    = self.rope(keys,    offset=offset)
-            # Cache in KV-head space to avoid expanding cache size by repeats.
-            keys    = mx.concatenate([key_cache, keys], axis=2)
-            values  = mx.concatenate([value_cache, values], axis=2)
+            keys, values = cache.update_and_fetch(keys, values)
         else:
             queries = self.rope(queries)
             keys    = self.rope(keys)
 
-        # Repeat KV heads only for the attention matmul (avoid bloating cache).
-        if self.repeats > 1:
-            keys_expanded = mx.repeat(
-                mx.expand_dims(keys, axis=1),  # [B, 1, n_kv_heads, S, head_dim]
-                repeats=self.repeats,
-                axis=1
-            )
-            keys_for_attn = keys_expanded.reshape(B, self.n_heads, keys.shape[2], self.args.head_dim)
-
-            values_expanded = mx.repeat(
-                mx.expand_dims(values, axis=1),  # [B, 1, n_kv_heads, S, head_dim]
-                repeats=self.repeats,
-                axis=1
-            )
-            values_for_attn = values_expanded.reshape(B, self.n_heads, values.shape[2], self.args.head_dim)
-        else:
-            keys_for_attn = keys
-            values_for_attn = values
-
-        # Compute attention scores with better numerical stability
-        scores = (queries * self.scale) @ keys_for_attn.transpose(0, 1, 3, 2)
-
-        # Apply mask if provided
-        if mask is not None:
-            scores = scores + mask
-
-        # Convert to float32 for better numerical stability in softmax
-        scores_f32 = scores.astype(mx.float32)
-
-        # Apply softmax with better numerical stability
-        # First subtract the max value for numerical stability
-        scores_max = mx.max(scores_f32, axis=-1, keepdims=True)
-        scores_exp = mx.exp(scores_f32 - scores_max)
-        scores_sum = mx.sum(scores_exp, axis=-1, keepdims=True)
-        attention_probs = scores_exp / scores_sum
-
-        # Convert back to original dtype
-        attention_probs = attention_probs.astype(scores.dtype)
-
-        # Apply attention to values
-        output = (attention_probs @ values_for_attn).transpose(0, 2, 1, 3).reshape(B, L, D)
-        return self.wo(output), (keys, values)
+        output = mx.fast.scaled_dot_product_attention(
+            queries,
+            keys,
+            values,
+            scale=self.scale,
+            mask=mask,
+        )
+        output = output.transpose(0, 2, 1, 3).reshape(
+            batch, sequence_length, model_dim
+        )
+        return self.wo(output), cache
 
 
 class FeedForward(nn.Module):
@@ -230,8 +253,8 @@ class TransformerBlock(nn.Module):
         self,
         x: mx.array,
         mask: mx.array | None = None,
-        cache: tuple[mx.array, mx.array] | None = None,
-    ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+        cache: KVCache | None = None,
+    ) -> tuple[mx.array, KVCache | None]:
         # Attention
         r, cache = self.attention(self.attention_norm(x), mask=mask, cache=cache)
         h = x + r
@@ -268,146 +291,66 @@ class Llama(nn.Module):
         return self.output(x)
 
     def generate(self, x: mx.array, temp=1.0, top_p=1.0, max_new_tokens=100, eos_token_id=None):
-        """
-        Token-by-token generator with optional temperature and top-p sampling.
-        Yields one token at a time until EOS token or max_new_tokens is reached.
+        """Yield generated token IDs using an in-place K/V cache."""
+        if max_new_tokens <= 0:
+            return
 
-        Parameters:
-            x (mx.array): Input token ids with shape (batch_size, seq_len)
-            temp (float): Temperature for sampling (1.0 = no change, <1.0 = more deterministic)
-            top_p (float): Nucleus sampling probability threshold
-            max_new_tokens (int): Maximum number of new tokens to generate
-            eos_token_id (int, optional): Token ID that signals the end of sequence
+        if eos_token_id is None:
+            eos_ids = None
+        elif isinstance(eos_token_id, list | tuple | set):
+            eos_ids = {int(token_id) for token_id in eos_token_id}
+        else:
+            eos_ids = {int(eos_token_id)}
 
-        Yields:
-            int: Generated token IDs one at a time
-        """
-        def _normalize_eos_ids(eos_ids):
-            if eos_ids is None:
-                return None
-            if isinstance(eos_ids, list | tuple | set):
-                return {int(e) for e in eos_ids}
-            return {int(eos_ids)}
-
-        eos_ids = _normalize_eos_ids(eos_token_id)
-
-        def sample_logits(logits: mx.array) -> int:
-            """
-            Sample a token from the logits with temperature scaling and optional nucleus sampling.
-
-            Parameters:
-                logits (mx.array): Logits from the model.
-
-            Returns:
-                int: The sampled token.
-            """
-            # Optionally apply temperature scaling:
-            if temp != 0.0:
-                logits = logits / temp
-
-            # Convert to a NumPy array for sampling logic in Python
-            np_logits = np.array(logits)
-
-            # Ensure logits has a 1D shape
-            if np_logits.ndim != 1:
-                logger.error(f"Unexpected logits shape: {np_logits.shape}. Expected a 1D tensor.")
-                raise ValueError("Logits tensor has an unexpected shape.")
-
-            # Check for invalid values in the logits tensor
-            if np.any(np.isnan(np_logits)) or np.any(np.isinf(np_logits)):
-                logger.error("Logits tensor contains NaN or Inf values.")
-                raise ValueError("Logits tensor contains invalid values (NaN or Inf).")
-
-            # If top_p < 1.0, perform nucleus (top-p) sampling:
-            if top_p < 1.0:
-                # Compute probabilities once
-                probs = np.exp(np_logits - np.max(np_logits))  # Subtract max for numerical stability
-                probs = probs / np.sum(probs)
-
-                # Sort probabilities in descending order
-                sorted_indices = np.argsort(-probs)
-                sorted_probs = probs[sorted_indices]
-                cumulative_probs = np.cumsum(sorted_probs)
-
-                # Find cutoff index for top-p
-                cutoff_idx = np.searchsorted(cumulative_probs, top_p)
-
-                # Create a mask for the top-p tokens
-                top_p_mask = np.zeros_like(probs)
-                top_p_mask[sorted_indices[:cutoff_idx+1]] = 1
-
-                # Apply the mask and renormalize
-                masked_probs = probs * top_p_mask
-                masked_probs = masked_probs / np.sum(masked_probs)
-
-                # Sample from the masked distribution
-                next_id = np.random.choice(len(masked_probs), p=masked_probs)
-                return int(next_id)
-            else:
-                # Full-distribution sampling (top_p == 1.0) unless temp == 0.
-                if temp == 0.0:
-                    return int(np_logits.argmax())
-                probs = np.exp(np_logits - np.max(np_logits))
-                probs = probs / np.sum(probs)
-                next_id = np.random.choice(len(probs), p=probs)
-                return int(next_id)
-
-        # Caches to store K/V from each layer
-        cache_per_layer = []
-
-        # Process the initial prompt:
+        prompt_token_count = int(x.shape[1])
+        cache_per_layer = [KVCache() for _ in self.layers]
         mask = nn.MultiHeadAttention.create_additive_causal_mask(x.shape[1])
         mask = mask.astype(self.tok_embeddings.weight.dtype)
 
+        prompt_started = time.perf_counter()
         h = self.tok_embeddings(x)
-        for layer in self.layers:
-            h, c = layer(h, mask)
-            cache_per_layer.append(c)
+        for index, layer in enumerate(self.layers):
+            h, _ = layer(h, mask, cache=cache_per_layer[index])
         h = self.norm(h)
+        logits = self.output(h[:, -1])[0]
+        mx.eval(logits)
+        prompt_elapsed = time.perf_counter() - prompt_started
 
-        # Get 2D logits with shape (1, vocab_size)
-        logits = self.output(h[:, -1])
-
-        # Squeeze the batch dimension to get a 1D tensor of shape (vocab_size,)
-        logits = logits[0]
-
-        new_token = sample_logits(logits)
-        yield new_token
-
-        # Check if we should stop after the first token
-        if eos_ids is not None and new_token in eos_ids:
-            logger.info("Generation stopped after first token (EOS token generated)")
-            return
-
-        # Generate up to max_new_tokens:
-        tokens_generated = 1
-        # Add a timeout mechanism to prevent infinite loops
         start_time = time.time()
-        max_generation_time = 60  # 60 seconds timeout
+        generation_started = time.perf_counter()
+        max_generation_time = 120
+        generated_count = 0
+        for tokens_generated in range(1, max_new_tokens + 1):
+            token = sample_logits(logits, temp, top_p)
+            mx.eval(token)
+            token_id = int(token.item())
+            generated_count = tokens_generated
+            generation_elapsed = time.perf_counter() - generation_started
+            self.last_stats = {
+                "prompt_tokens": prompt_token_count,
+                "prompt_tps": prompt_token_count / prompt_elapsed,
+                "generation_tokens": generated_count,
+                "generation_tps": generated_count / generation_elapsed,
+                "peak_memory_gb": mx.get_peak_memory() / 1e9,
+            }
+            yield token_id
 
-        while tokens_generated < max_new_tokens:
-            # Check for timeout
+            if eos_ids is not None and token_id in eos_ids:
+                break
             if time.time() - start_time > max_generation_time:
-                logger.warning(f"Generation timed out after {max_generation_time} seconds")
+                logger.warning(
+                    "Generation timed out after %s seconds", max_generation_time
+                )
+                break
+            if tokens_generated == max_new_tokens:
                 break
 
-            tokens_generated += 1
-            x = mx.array([[new_token]])  # shape (batch=1, seq=1)
-            # Use cached keys/values
-            h = self.tok_embeddings(x)
-            for i, layer in enumerate(self.layers):
-                h, updated_cache = layer(h, mask=None, cache=cache_per_layer[i])
-                cache_per_layer[i] = updated_cache
+            h = self.tok_embeddings(mx.array([[token_id]], dtype=mx.int64))
+            for index, layer in enumerate(self.layers):
+                h, _ = layer(h, cache=cache_per_layer[index])
             h = self.norm(h)
-            logits = self.output(h[:, -1])
-            logits = logits[0]
-            new_token = sample_logits(logits)
-            yield new_token
+            logits = self.output(h[:, -1])[0]
 
-            # Stop if we hit the EOS token
-            if eos_ids is not None and new_token in eos_ids:
-                logger.info(f"Generation stopped at token {tokens_generated}: EOS token generated")
-                break
 
 class LlamaMLX:
     """
@@ -418,14 +361,22 @@ class LlamaMLX:
     - complete
     """
 
-    def __init__(self, max_new_tokens: int, temperature: float = 0.7, top_p: float = 1.0, cache_converted_safetensors: bool = False):
-        self.model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    def __init__(
+        self,
+        max_new_tokens: int,
+        temperature: float = 0.7,
+        top_p: float = 1.0,
+        cache_converted_safetensors: bool = False,
+        model_id: str = "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        weights_dir: str | None = None,
+    ):
+        self.model_id = model_id
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
 
         # Local directory to store model & tokenizer
-        self.weights_dir = "app/model_weights/llama_3_1"
+        self.weights_dir = weights_dir or "app/model_weights/llama_3_1"
         self.cache_converted_safetensors = cache_converted_safetensors
 
         # Our merged config
@@ -546,12 +497,12 @@ class LlamaMLX:
         """
         logger.info("Checking if model files exist locally...")
         config_path = os.path.join(self.weights_dir, "config.json")
-        weights_path = os.path.join(self.weights_dir, "weights.npz")
         tokenizer_path = os.path.join(self.weights_dir, "tokenizer.json")
+        weights = glob.glob(os.path.join(self.weights_dir, "model*.safetensors"))
 
         # If any key file doesn't exist, pull them
         if not (os.path.exists(config_path) and
-                os.path.exists(weights_path) and
+                weights and
                 os.path.exists(tokenizer_path)):
             logger.info("Downloading model files from HuggingFace...")
             token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
@@ -561,14 +512,12 @@ class LlamaMLX:
                     "Set your token to download model from Hugging Face."
                 )
 
-            files = ["config.json", "tokenizer.json", "tokenizer_config.json", "weights.npz"]
-            for file in files:
-                hf_hub_download(
-                    repo_id=self.model_id,
-                    filename=file,
-                    token=token,
-                    cache_dir=self.weights_dir
-                )
+            snapshot_download(
+                repo_id=self.model_id,
+                token=token,
+                local_dir=self.weights_dir,
+                allow_patterns=["*.json", "*.model", "*.safetensors"],
+            )
             logger.info(f"Downloaded model files to {self.weights_dir}")
         else:
             logger.info("All model files found locally. No download needed.")
@@ -605,16 +554,22 @@ class LlamaMLX:
 
         # Step 4: Load the weights
         logger.info(f"Loading model weights from {self.weights_dir} ...")
-        safetensors_files = sorted(glob.glob(os.path.join(self.weights_dir, "model-*.safetensors")))
+        safetensors_files = sorted(glob.glob(os.path.join(self.weights_dir, "model*.safetensors")))
         if not safetensors_files:
-            raise FileNotFoundError(f"No model weights found in {self.weights_dir}. Expected weights.npz or model-*.safetensors files.")
+            raise FileNotFoundError(
+                f"No model weights found in {self.weights_dir}. "
+                "Expected model*.safetensors files."
+            )
 
-        mapped_weights: dict[str, mx.array] = {}
         unmapped_keys = 0
+        loaded_keys = set()
+        cached_weights: dict[str, mx.array] = {}
+        logger.info("Instantiating LLaMA model.")
+        self.model = Llama(self.config)
         for file_path in safetensors_files:
             logger.info(f"Loading safetensors file: {file_path}")
-            # Load the safetensors file using PyTorch
-            tensors = safetensors.torch.load_file(file_path, device="cpu")
+            tensors = mx.load(file_path)
+            mapped_weights: dict[str, mx.array] = {}
             for key, tensor in tensors.items():
                 # Convert HF key names to MLX parameter names.
                 mlx_key = self._map_hf_to_mlx_key(key)
@@ -622,16 +577,24 @@ class LlamaMLX:
                     unmapped_keys += 1
                     continue
 
-                # Convert tensor to MLX-friendly dtype (float16/bfloat16) to speed inference.
-                tensor = tensor.to(torch.float32)  # keep stable conversion before cast
-                np_tensor = tensor.cpu().numpy()
-                mapped_weights[mlx_key] = mx.array(np_tensor, dtype=self._weights_dtype)
+                mapped_weights[mlx_key] = tensor.astype(self._weights_dtype)
 
-        # Step 5: Instantiate the LLaMA model using our config and the converted weights
-        logger.info("Instantiating LLaMA model.")
-        self.model = Llama(self.config)
-        # Load the converted weights
-        self.model.update(mapped_weights)
+            self.model.load_weights(list(mapped_weights.items()), strict=False)
+            loaded_keys.update(mapped_weights)
+            if self.cache_converted_safetensors:
+                cached_weights.update(mapped_weights)
+
+        expected_keys = {
+            key
+            for key, _ in tree_flatten(self.model.parameters())
+            if not key.endswith(".rope._frequencies")
+        }
+        missing_keys = expected_keys - loaded_keys
+        if missing_keys:
+            missing = ", ".join(sorted(missing_keys)[:10])
+            raise ValueError(f"Missing {len(missing_keys)} model weights: {missing}")
+        mx.eval(self.model.parameters())
+        self.model.eval()
         if unmapped_keys:
             logger.warning(f"Unmapped HF weights encountered: {unmapped_keys}")
         logger.info("Model loaded into MLX successfully.")
@@ -639,9 +602,11 @@ class LlamaMLX:
         if self.cache_converted_safetensors:
             # Save the converted weights (MLX-named) to a new safetensors file for reuse.
             converted_weights_path = os.path.join(self.weights_dir, "converted_weights.safetensors")
-            metadata = {"format": "pt"}  # Metadata should be a dictionary
-            torch_weights = {k: torch.from_numpy(np.array(v)) for k, v in mapped_weights.items()}
-            safetensors.torch.save(torch_weights, converted_weights_path, metadata=metadata)
+            mx.save_safetensors(
+                converted_weights_path,
+                cached_weights,
+                metadata={"format": "mlx"},
+            )
 
     def generate_text(self, prompt: str) -> mx.array:
         """
@@ -657,6 +622,7 @@ class LlamaMLX:
         logger.info(f"Generating text with prompt length: {len(prompt)}")
         # Encode prompt
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        self._last_prompt_token_count = len(prompt_ids)
         x = mx.array([prompt_ids], dtype=mx.int64)  # shape (1, seq_length)
 
         # We'll build up the sequence in a Python list as tokens come out
@@ -671,37 +637,24 @@ class LlamaMLX:
             eos_token_id=self.eos_token_ids or self.tokenizer.eos_token_id
         )
 
-        # Set a timeout for the entire generation process
-        start_time = time.time()
-        max_generation_time = 120  # 2 minutes timeout
+        for new_tok in token_iter:
+            generated_tokens.append(new_tok)
 
-        try:
-            for new_tok in token_iter:
-                generated_tokens.append(new_tok)
+            eos_ids = self.eos_token_ids or [self.tokenizer.eos_token_id]
+            if new_tok in eos_ids:
+                logger.info("Generation complete: EOS token generated")
+                break
 
-                # Check if we've been generating for too long
-                if time.time() - start_time > max_generation_time:
-                    logger.warning(f"Generation timed out after {max_generation_time} seconds")
-                    break
-
-                # If we hit EOS, we can stop
-                eos_ids = self.eos_token_ids or [self.tokenizer.eos_token_id]
-                if new_tok in eos_ids:
-                    logger.info("Generation complete: EOS token generated")
-                    break
-
-                # Print progress every 10 tokens
-                if len(generated_tokens) % 10 == 0:
-                    logger.debug(f"Generated {len(generated_tokens) - len(prompt_ids)} tokens so far")
-        except Exception as e:
-            logger.error(f"Error during token generation: {str(e)}")
-            # Return what we have so far rather than failing completely
-            logger.info(f"Returning partial generation of {len(generated_tokens)} tokens")
+            if len(generated_tokens) % 10 == 0:
+                logger.debug(
+                    "Generated %s tokens so far",
+                    len(generated_tokens) - len(prompt_ids),
+                )
 
         logger.info(f"Generated tokens: {len(generated_tokens) - len(prompt_ids)} new, {len(generated_tokens)} total")
         return mx.array(generated_tokens)
 
-    def complete(self, system_prompt: str, user_prompt: str) -> str:
+    def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
         """
         Provide a standard "instruct" format completion.
         Combines system_prompt and user_prompt into a single prompt, then calls `generate_text`.
@@ -737,18 +690,19 @@ class LlamaMLX:
         try:
             # Generate
             output_tokens = self.generate_text(prompt)
-            # Decode the output
-            output_list = output_tokens.tolist()
-            output_text = self.tokenizer.decode(output_list)
-            # Extract just the assistant's response (strip headers + <|eot_id|> if present).
-            assistant_tag = "<|start_header_id|>assistant<|end_header_id|>"
-            response_start = output_text.find(assistant_tag)
-            if response_start != -1:
-                output_text = output_text[response_start + len(assistant_tag):]
-            output_text = output_text.strip()
-            eot_idx = output_text.find("<|eot_id|>")
-            if eot_idx != -1:
-                output_text = output_text[:eot_idx].strip()
+            # Decode only newly generated IDs so prompt text cannot leak into the response.
+            output_list = output_tokens.tolist()[self._last_prompt_token_count:]
+            output_text = self.tokenizer.decode(
+                output_list,
+                skip_special_tokens=True,
+            ).strip()
+            self.last_stats = dict(getattr(self.model, "last_stats", {}))
+            self.last_stats.update(
+                {
+                    "prompt_tokens": self._last_prompt_token_count,
+                    "generation_tokens": len(output_list),
+                }
+            )
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")

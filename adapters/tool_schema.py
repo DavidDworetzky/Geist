@@ -6,6 +6,7 @@ type hints, and docstrings so agents can expose adapter functions to models
 as structured tools (native function calling for online providers, schema
 grounded prompts for local models).
 """
+
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ QUALIFIED_NAME_SEPARATOR = "__"
 @dataclass
 class ToolSchema:
     """JSON-schema description of a single adapter action."""
+
     adapter: str
     action: str
     description: str
@@ -155,12 +157,11 @@ def _visible_actions(adapter: BaseAdapter | type) -> list[str]:
     """
     if isinstance(adapter, BaseAdapter):
         try:
-            actions = adapter.enumerate_actions()
-            if actions:
-                return list(actions)
+            return list(adapter.enumerate_actions())
         except Exception:
-            pass
-        adapter = type(adapter)
+            # Adapter declarations are an allowlist. Empty or broken
+            # declarations must not fall back to exposing public helpers.
+            return []
 
     return [
         name
@@ -184,4 +185,6 @@ def enumerate_tool_schemas(adapter: BaseAdapter | type) -> list[ToolSchema]:
 
 def render_tool_prompt(schemas: list[ToolSchema]) -> str:
     """Render tool schemas as a compact JSON listing for prompt-based tool calling."""
-    return "\n".join(json.dumps(schema.to_prompt_dict(), separators=(", ", ": ")) for schema in schemas)
+    return "\n".join(
+        json.dumps(schema.to_prompt_dict(), separators=(", ", ": ")) for schema in schemas
+    )

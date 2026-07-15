@@ -154,20 +154,29 @@ class BaseAgent(ABC):
         """
         settings = self._agent_context.settings
 
-        def pick(value, setting, default):
+        generation_config = getattr(self, "generation_config", {})
+
+        def pick(name, value, setting, default):
             if value is not None:
                 return value
+            configured = generation_config.get(name)
+            if configured is not None:
+                return configured
             if setting is not None:
                 return setting
             return default
 
         return GenerationParams(
-            max_tokens=pick(max_tokens, settings.max_tokens, 16),
-            n=pick(n, settings.n, 1),
-            temperature=pick(temperature, settings.temperature, 1.0),
-            top_p=pick(top_p, settings.top_p, 1.0),
-            frequency_penalty=pick(frequency_penalty, settings.frequency_penalty, 0.0),
-            presence_penalty=pick(presence_penalty, settings.presence_penalty, 0.0),
+            max_tokens=pick("max_tokens", max_tokens, settings.max_tokens, 16),
+            n=pick("n", n, settings.n, 1),
+            temperature=pick("temperature", temperature, settings.temperature, 1.0),
+            top_p=pick("top_p", top_p, settings.top_p, 1.0),
+            frequency_penalty=pick(
+                "frequency_penalty", frequency_penalty, settings.frequency_penalty, 0.0
+            ),
+            presence_penalty=pick(
+                "presence_penalty", presence_penalty, settings.presence_penalty, 0.0
+            ),
         )
 
     # ------------------------------------------------------------------

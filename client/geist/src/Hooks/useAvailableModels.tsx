@@ -11,6 +11,16 @@ export interface ModelInfo {
   supports_streaming: boolean;
   recommended: boolean;
   family: string | null;
+  backend?: string | null;
+  supports_reasoning?: boolean;
+  gated?: boolean;
+  requires_remote_code?: boolean;
+  min_transformers_version?: string | null;
+  parameter_count?: string | null;
+  activated_parameters?: string | null;
+  optional_dependencies?: string[];
+  local?: boolean;
+  performance_note?: string | null;
 }
 
 export interface AvailableModels {

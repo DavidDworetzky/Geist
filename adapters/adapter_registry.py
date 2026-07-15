@@ -12,18 +12,25 @@ class AdapterWrapper:
     name: str
     instance: Any
 
+
 def _get_adapter_files() -> list[str]:
     directory = os.path.dirname(__file__)
-    adapter_classes = [filename for filename in os.listdir(directory) if filename.endswith('.py') and not filename.startswith('__')]
+    adapter_classes = [
+        filename
+        for filename in os.listdir(directory)
+        if filename.endswith(".py") and not filename.startswith("__")
+    ]
     return adapter_classes
+
 
 def _get_class_module(module_name: str) -> str:
     return f"adapters.{module_name}"
 
+
 def find_adapter_classes():
-    '''
+    """
     helper to return adapters and class methods from the directory of this file
-    '''
+    """
     adapter_classes = []
     filenames = _get_adapter_files()
     for filename in filenames:
@@ -32,17 +39,30 @@ def find_adapter_classes():
         absolute_module_path = _get_class_module(module_name)
         module = importlib.import_module(absolute_module_path)
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            if issubclass(obj, BaseAdapter) and obj is not BaseAdapter and not inspect.isabstract(obj):
-                class_methods = [method[0] for method in inspect.getmembers(obj, inspect.isfunction)]
+            if (
+                issubclass(obj, BaseAdapter)
+                and obj is not BaseAdapter
+                and not inspect.isabstract(obj)
+            ):
+                # Legacy agents use this only to describe their action surface.
+                # Constructors and helpers must never be advertised as actions.
+                try:
+                    uninitialized = obj.__new__(obj)
+                    class_methods = list(uninitialized.enumerate_actions())
+                except Exception:
+                    # An adapter's declaration is the authority boundary. If it
+                    # cannot be read, advertise no actions rather than widening
+                    # the surface through reflection.
+                    class_methods = []
                 adapter_classes.append((name, class_methods))
     return adapter_classes
 
 
 def init_adapter_class(classname: str, args: dict) -> AdapterWrapper | None:
-    '''
+    """
     Dynamically initializes an adapter class by name with the provided kwargs,
     only using the kwargs that are valid for the class's constructor.
-    '''
+    """
     filenames = _get_adapter_files()
     for filename in filenames:
         module_name = filename[:-3]  # Remove .py extension
@@ -54,15 +74,20 @@ def init_adapter_class(classname: str, args: dict) -> AdapterWrapper | None:
                 # Get the signature of the constructor
                 constructor_signature = inspect.signature(adapter_class.__init__)
                 # Filter args to only include valid parameters, excluding 'self'
-                valid_args = {k: v for k, v in args.items() if k in constructor_signature.parameters and k != 'self'}
+                valid_args = {
+                    k: v
+                    for k, v in args.items()
+                    if k in constructor_signature.parameters and k != "self"
+                }
                 # Instantiate the class with filtered kwargs
                 try:
                     instance = adapter_class(**valid_args)
-                    wrapper = AdapterWrapper(name = classname, instance = instance)
+                    wrapper = AdapterWrapper(name=classname, instance=instance)
                     return wrapper
                 except (TypeError, ValueError) as e:
                     # Log the error for debugging but return None to indicate failure
                     import logging
+
                     logging.warning(f"Failed to initialize adapter {classname}: {e}")
                     return None
 

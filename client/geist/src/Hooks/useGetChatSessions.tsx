@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ChatPair } from '../chatTypes';
 
-export interface ChatMessage {
-    user: string;
-    ai: string;
-}
+export type ChatMessage = ChatPair;
 
 export interface ChatSession {
     chat_history: ChatMessage[];
