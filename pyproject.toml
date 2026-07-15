@@ -78,6 +78,20 @@ environments = [
     "sys_platform == 'linux'",
 ]
 
+# Linux resolves torch from the CPU wheel index: the default PyPI Linux wheels
+# bundle the full CUDA/nvidia library set (~6GB installed), which the
+# cross-platform container never uses (macOS runs MLX; the container is CPU).
+# GPU hosts can be reintroduced later via uv's conflicting-extras pattern
+# (a cu12x extra pointing at the matching download.pytorch.org index).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.mypy]
 # Python version to target
 python_version = "3.11"
