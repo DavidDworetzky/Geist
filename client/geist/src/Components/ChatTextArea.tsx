@@ -12,8 +12,12 @@ const statusTone = (status: ToolCallStatus): string => {
   return '';
 };
 
-const ChatTextArea = forwardRef<HTMLDivElement, ChatHistory>((props, ref) => {
-  const isEmpty = props.chatHistory.length === 0;
+interface ChatTextAreaProps extends ChatHistory {
+  isLoading?: boolean;
+}
+
+const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
+  const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
 
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
@@ -126,6 +130,17 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatHistory>((props, ref) => {
           })}
         </div>
       ))}
+      {props.isLoading && (
+        <div
+          className="chat-loading-indicator"
+          role="status"
+          aria-label="Geist is responding"
+        >
+          <span className="chat-loading-dot" aria-hidden="true" />
+          <span className="chat-loading-dot" aria-hidden="true" />
+          <span className="chat-loading-dot" aria-hidden="true" />
+        </div>
+      )}
     </div>
   );
 });
