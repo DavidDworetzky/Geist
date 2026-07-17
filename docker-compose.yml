@@ -9,6 +9,9 @@ services:
       - SQLITE_DATABASE_PATH=data/geist.sqlite3
       - DEBUG=${DEBUG:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # MLX is a native macOS runtime. Linux containers use Transformers unless
+      # an operator deliberately selects another registered runner.
+      - GEIST_LOCAL_RUNNER=${GEIST_LOCAL_RUNNER:-transformers}
     env_file:
       - path: .env
         required: false

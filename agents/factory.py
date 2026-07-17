@@ -2,6 +2,7 @@
 Agent factory for instantiating LocalAgent and OnlineAgent instances.
 """
 import logging
+import os
 from typing import Any
 
 from agents.agent_context import AgentContext
@@ -103,10 +104,11 @@ class AgentFactory:
             if not model:
                 model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-            runner_was_explicit = runner_type is not None
+            configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
+            runner_was_explicit = runner_type is not None or bool(configured_runner)
             # Auto-detect runner type from model ID when not explicitly set
             if not runner_type:
-                runner_type = AgentFactory._infer_runner_type(model)
+                runner_type = configured_runner or AgentFactory._infer_runner_type(model)
 
             # Automatic selection protects users from accidental 32B+ loads.
             # A deliberate Transformers override is the opt-in for capable

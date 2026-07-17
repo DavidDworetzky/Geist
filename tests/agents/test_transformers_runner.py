@@ -1,4 +1,5 @@
 """Unit tests for the generic Transformers causal-LM runner."""
+import os
 from collections import UserDict
 from unittest.mock import MagicMock, patch
 
@@ -62,6 +63,33 @@ def test_load_and_generate_uses_direct_suffix_decode(
     decoded_ids = tokenizer.decode.call_args.args[0]
     assert decoded_ids.tolist() == [8, 9]
     assert result[1]["content"] == "fast response"
+
+
+@patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
+@patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
+@patch("agents.architectures.transformers_runner.AutoTokenizer")
+@patch("agents.architectures.transformers_runner.AutoConfig")
+def test_default_llama_uses_existing_legacy_weights_directory(
+    config_cls, tokenizer_cls, model_cls, _find_spec, tmp_path, monkeypatch
+):
+    weights_dir = tmp_path / "app" / "model_weights" / "llama_3_1"
+    weights_dir.mkdir(parents=True)
+    (weights_dir / "config.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    config_cls.from_pretrained.return_value = MagicMock(architectures=["LlamaForCausalLM"])
+    tokenizer_cls.from_pretrained.return_value = _tokenizer()
+    model_cls.from_pretrained.return_value = _model()
+
+    TransformersRunner().load(
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        {"device": "cpu"},
+    )
+
+    expected_source = os.path.join("app", "model_weights", "llama_3_1")
+    config_cls.from_pretrained.assert_called_once_with(
+        expected_source,
+        trust_remote_code=False,
+    )
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)

@@ -56,6 +56,22 @@ def test_legacy_stream_generates_completion_once():
     assert events[-1] == ('event: done\ndata: {"run_id": "legacy-run", "chat_id": 14}\n\n')
 
 
+def test_stream_emits_terminal_error_when_agent_initialization_fails():
+    params = CompleteTextParams(prompt="request with unavailable model")
+
+    with patch(
+        "app.main.get_active_agent",
+        side_effect=ValueError("private initialization detail"),
+    ):
+        events = list(stream_chat_completion(params))
+
+    assert len(events) == 2
+    assert "event: error\n" in events[0]
+    assert '"code": "chat_backend_error"' in events[0]
+    assert "private initialization detail" not in events[0]
+    assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
+
+
 @patch("adapters.log_adapter.LogAdapter.log", autospec=True)
 def test_completion(log, local_agent, client):
     log.side_effect = lambda self, output: print(output)

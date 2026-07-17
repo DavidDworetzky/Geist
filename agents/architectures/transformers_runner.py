@@ -70,8 +70,16 @@ class TransformersRunner(BaseRunner):
                 )
 
         weights_dir = device_config.pop("weights_dir", None)
-        default_dir = os.path.join("app", "model_weights", model_id.replace("/", "_"))
-        self.source = weights_dir or (default_dir if os.path.isdir(default_dir) else model_id)
+        default_dirs = [
+            os.path.join("app", "model_weights", model_id.replace("/", "_"))
+        ]
+        if model_id == "meta-llama/Meta-Llama-3.1-8B-Instruct":
+            default_dirs.append(os.path.join("app", "model_weights", "llama_3_1"))
+        local_default = next(
+            (path for path in default_dirs if os.path.isfile(os.path.join(path, "config.json"))),
+            None,
+        )
+        self.source = weights_dir or local_default or model_id
         explicit_device = device_config.pop("device", None)
         self.device = self._select_device(explicit_device)
         compile_model = bool(device_config.pop("compile", False))

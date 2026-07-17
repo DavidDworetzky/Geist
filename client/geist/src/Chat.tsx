@@ -151,7 +151,7 @@ const Chat = () => {
 
   useEffect(() => {
     const container = chatContainerRef.current;
-    if (container && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
+    if (container && chatId && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
       if (container.scrollHeight <= container.clientHeight) {
         const nextPage = page + 1;
         setPage(nextPage);
@@ -177,8 +177,9 @@ const Chat = () => {
     [isChatSessionLoading, hasMoreSessions, loadMoreSessions, chatSessionError]
   );
 
+  const loadedHistoryLength = chatHistory?.chatHistory?.length ?? 0;
   const handleScroll = useCallback(() => {
-    if (chatContainerRef.current) {
+    if (chatContainerRef.current && chatId && loadedHistoryLength > 0) {
       const { scrollTop, scrollHeight } = chatContainerRef.current;
       if (scrollTop <= 10 && hasMore && !isLoadingHistory) {
         prevScrollHeightRef.current = scrollHeight;
@@ -189,7 +190,7 @@ const Chat = () => {
         }
       }
     }
-  }, [hasMore, isLoadingHistory, page, chatId, fetchHistory]);
+  }, [hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
