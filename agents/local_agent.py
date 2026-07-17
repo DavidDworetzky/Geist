@@ -266,19 +266,6 @@ class LocalAgent(BaseAgent):
         if not self.runner:
             raise RuntimeError("Runner not initialized")
 
-        system_prompt = (
-            "\n\n".join(message.content or "" for message in messages if message.role == "system")
-            or SYSTEM_PROMPT
-        )
-        conversation = []
-        for message in messages:
-            if message.role == "system":
-                continue
-            label = "Assistant" if message.role == "assistant" else "User"
-            if message.role == "tool":
-                label = f"Tool {message.name or ''}".strip()
-            conversation.append(f"{label}: {message.content or ''}")
-
         generation_config = GenerationConfig(
             max_tokens=config.max_tokens,
             temperature=config.temperature,
@@ -287,11 +274,18 @@ class LocalAgent(BaseAgent):
             presence_penalty=config.presence_penalty,
             stop=config.stop[0] if config.stop else None,
         )
-        result = self.runner.complete(
-            system_prompt=system_prompt,
-            user_prompt="\n".join(conversation),
-            generation_config=generation_config,
-        )
+        structured_messages = [
+            {"role": message.role, "content": message.content} for message in messages
+        ]
+        complete_messages = getattr(self.runner, "complete_messages", None)
+        if complete_messages is None:
+            result = BaseRunner.complete_messages(
+                self.runner,
+                structured_messages,
+                generation_config,
+            )
+        else:
+            result = complete_messages(structured_messages, generation_config)
         completion = LlamaCompletion.from_dict(result)
         text = next(
             (message.content for message in completion.messages if message.role == "assistant"),

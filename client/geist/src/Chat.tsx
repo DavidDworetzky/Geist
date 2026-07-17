@@ -84,6 +84,12 @@ const Chat = () => {
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
   const routeChatId = chatId ? parseInt(chatId, 10) : null;
 
+  useEffect(() => {
+    if (!chatId && state_chat_id !== null) {
+      navigate(`/chat/${state_chat_id}`, { replace: true });
+    }
+  }, [chatId, navigate, state_chat_id]);
+
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -342,7 +348,11 @@ const Chat = () => {
     routeChatId,
     state_chat_id,
   );
-  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat
+  const activeTurnAlreadyPersisted = Boolean(
+    activeTurn?.run_id &&
+    (chatHistory?.chatHistory ?? []).some((turn) => turn.run_id === activeTurn.run_id)
+  );
+  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
     ? [
         ...(chatHistory?.chatHistory ?? []),
         {

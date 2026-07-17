@@ -150,7 +150,7 @@ def run_chat_completion(
     agent=None,
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
-    if not params.enable_tools or not hasattr(active_agent, "stream_model_turn"):
+    if not hasattr(active_agent, "stream_model_turn"):
         completion = active_agent.complete_text(
             prompt=params.prompt,
             max_tokens=params.max_tokens,
@@ -182,7 +182,7 @@ def run_chat_completion(
 def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
-        if params.enable_tools and hasattr(agent, "stream_model_turn"):
+        if hasattr(agent, "stream_model_turn"):
             for event in chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,

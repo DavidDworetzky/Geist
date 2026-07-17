@@ -5,22 +5,37 @@ from typing import Any
 
 import uvicorn
 
-from agents.models.agent_completion import AgentCompletion
+from agents.models.tool_calling import ChatMessage, ModelEvent, ModelTurn
 from initdb import main as initialize_database
 
 
 class BrowserE2EAgent:
-    """Exercise the production legacy-agent SSE adapter without loading a model."""
+    """Exercise the production orchestrator without loading a model."""
 
-    def complete_text(self, **kwargs: Any) -> AgentCompletion:
-        if kwargs["prompt"] == "Trigger backend failure":
-            raise RuntimeError("browser e2e injected failure")
-        return AgentCompletion(
-            message=["E2E chat works."],
-            id="e2e-completion",
-            chat_id=101,
-            run_id="e2e-run",
+    supports_native_tool_calling = False
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        _tools: list[Any],
+        _config: Any,
+    ):
+        prompt = next(
+            message.content or "" for message in reversed(messages) if message.role == "user"
         )
+        if prompt == "Trigger backend failure":
+            raise RuntimeError("browser e2e injected failure")
+        if prompt == "Remember cobalt.":
+            response = "I will remember cobalt."
+        elif prompt == "What should you remember?":
+            prior_user_messages = [
+                message.content for message in messages[:-1] if message.role == "user"
+            ]
+            response = "cobalt" if "Remember cobalt." in prior_user_messages else "missing context"
+        else:
+            response = "E2E chat works."
+        yield ModelEvent.text_delta(response)
+        yield ModelEvent.turn_complete(ModelTurn(text=response, finish_reason="stop"))
 
 
 def run_server() -> None:

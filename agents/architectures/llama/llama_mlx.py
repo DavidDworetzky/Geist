@@ -53,11 +53,11 @@ class KVCache:
                 self.values = mx.concatenate([self.values, new_values], axis=2)
 
         self.offset = required
-        self.keys[..., previous:self.offset, :] = keys
-        self.values[..., previous:self.offset, :] = values
+        self.keys[..., previous : self.offset, :] = keys
+        self.values[..., previous : self.offset, :] = values
         return (
-            self.keys[..., :self.offset, :],
-            self.values[..., :self.offset, :],
+            self.keys[..., : self.offset, :],
+            self.values[..., : self.offset, :],
         )
 
 
@@ -73,9 +73,7 @@ def sample_logits(logits: mx.array, temperature: float, top_p: float) -> mx.arra
     if top_p < 1:
         probabilities = mx.softmax(logits, axis=-1)
         sorted_indices = mx.argsort(probabilities, axis=-1)
-        sorted_probabilities = mx.take_along_axis(
-            probabilities, sorted_indices, axis=-1
-        )
+        sorted_probabilities = mx.take_along_axis(probabilities, sorted_indices, axis=-1)
         cumulative_probabilities = mx.cumsum(sorted_probabilities, axis=-1)
         kept_probabilities = mx.where(
             cumulative_probabilities > 1 - top_p,
@@ -83,9 +81,7 @@ def sample_logits(logits: mx.array, temperature: float, top_p: float) -> mx.arra
             0,
         )
         inverse_indices = mx.argsort(sorted_indices, axis=-1)
-        probabilities = mx.take_along_axis(
-            kept_probabilities, inverse_indices, axis=-1
-        )
+        probabilities = mx.take_along_axis(kept_probabilities, inverse_indices, axis=-1)
         logits = mx.log(probabilities)
 
     return mx.random.categorical(logits / temperature)
@@ -96,12 +92,13 @@ class ModelConfig:
     """
     ModelConfig.
     """
+
     # Matches the naming of the first script for correctness, with some defaults:
-    dim: int = 4096          # was "n_embd" in second script
-    n_layers: int = 32       # was "n_layer"
-    n_heads: int = 32        # was "n_head"
+    dim: int = 4096  # was "n_embd" in second script
+    n_layers: int = 32  # was "n_layer"
+    n_heads: int = 32  # was "n_head"
     # Additional fields from the first code:
-    head_dim: int = 128      # will often be dim // n_heads
+    head_dim: int = 128  # will often be dim // n_heads
     n_kv_heads: int = 32
     hidden_dim: int = 11008
     norm_eps: float = 1e-5
@@ -116,6 +113,7 @@ class Llama3RoPE(nn.Module):
     """
     Llama 3 style RoPE scaling with low/high frequency factors.
     """
+
     def __init__(self, dim: int, base: float, rope_scaling: dict, max_position_embeddings: int):
         super().__init__()
         self.dim = dim
@@ -125,7 +123,9 @@ class Llama3RoPE(nn.Module):
         factor = float(self.rope_scaling.get("factor", 1.0))
         low_freq_factor = float(self.rope_scaling.get("low_freq_factor", 1.0))
         high_freq_factor = float(self.rope_scaling.get("high_freq_factor", 1.0))
-        orig_max_pos = float(self.rope_scaling.get("original_max_position_embeddings", self.max_position_embeddings))
+        orig_max_pos = float(
+            self.rope_scaling.get("original_max_position_embeddings", self.max_position_embeddings)
+        )
 
         frequencies = self.base ** (mx.arange(0, dim, 2, dtype=mx.float32) / dim)
         wavelen = 2.0 * mx.pi * frequencies
@@ -138,9 +138,7 @@ class Llama3RoPE(nn.Module):
             frequencies,
         )
         medium = (wavelen > high_freq_wavelen) & (wavelen < low_freq_wavelen)
-        smooth = (orig_max_pos / wavelen - low_freq_factor) / (
-            high_freq_factor - low_freq_factor
-        )
+        smooth = (orig_max_pos / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
         smooth_frequencies = frequencies / ((1.0 - smooth) / factor + smooth)
         self._frequencies = mx.where(medium, smooth_frequencies, frequencies)
 
@@ -155,6 +153,7 @@ class Llama3RoPE(nn.Module):
             freqs=self._frequencies,
         )
 
+
 class Attention(nn.Module):
     def __init__(self, args: ModelConfig):
         super().__init__()
@@ -164,7 +163,7 @@ class Attention(nn.Module):
         self.n_kv_heads = args.n_kv_heads
 
         # Per the LLama approach, scale = head_dim^-0.5
-        self.scale = args.head_dim ** -0.5
+        self.scale = args.head_dim**-0.5
 
         self.wq = nn.Linear(args.dim, args.n_heads * args.head_dim, bias=False)
         self.wk = nn.Linear(args.dim, args.n_kv_heads * args.head_dim, bias=False)
@@ -180,7 +179,9 @@ class Attention(nn.Module):
                 max_position_embeddings=args.max_position_embeddings,
             )
         else:
-            self.rope = nn.RoPE(args.head_dim, traditional=args.rope_traditional, base=args.rope_theta)
+            self.rope = nn.RoPE(
+                args.head_dim, traditional=args.rope_traditional, base=args.rope_theta
+            )
 
     def __call__(
         self,
@@ -191,17 +192,17 @@ class Attention(nn.Module):
         batch, sequence_length, model_dim = x.shape
 
         queries = self.wq(x)
-        keys    = self.wk(x)
-        values  = self.wv(x)
+        keys = self.wk(x)
+        values = self.wv(x)
 
         # Reshape into (B, n_heads, L, head_dim) for queries,
         #            (B, n_kv_heads, L, head_dim) for keys/values
         queries = queries.reshape(
             batch, sequence_length, self.n_heads, self.args.head_dim
         ).transpose(0, 2, 1, 3)
-        keys = keys.reshape(
-            batch, sequence_length, self.n_kv_heads, self.args.head_dim
-        ).transpose(0, 2, 1, 3)
+        keys = keys.reshape(batch, sequence_length, self.n_kv_heads, self.args.head_dim).transpose(
+            0, 2, 1, 3
+        )
         values = values.reshape(
             batch, sequence_length, self.n_kv_heads, self.args.head_dim
         ).transpose(0, 2, 1, 3)
@@ -210,11 +211,11 @@ class Attention(nn.Module):
         if cache is not None:
             offset = cache.offset
             queries = self.rope(queries, offset=offset)
-            keys    = self.rope(keys,    offset=offset)
+            keys = self.rope(keys, offset=offset)
             keys, values = cache.update_and_fetch(keys, values)
         else:
             queries = self.rope(queries)
-            keys    = self.rope(keys)
+            keys = self.rope(keys)
 
         output = mx.fast.scaled_dot_product_attention(
             queries,
@@ -223,9 +224,7 @@ class Attention(nn.Module):
             scale=self.scale,
             mask=mask,
         )
-        output = output.transpose(0, 2, 1, 3).reshape(
-            batch, sequence_length, model_dim
-        )
+        output = output.transpose(0, 2, 1, 3).reshape(batch, sequence_length, model_dim)
         return self.wo(output), cache
 
 
@@ -268,6 +267,7 @@ class Llama(nn.Module):
     """
     Core LLaMA model definition from the first code sample.
     """
+
     def __init__(self, args: ModelConfig):
         super().__init__()
         self.args = args
@@ -338,9 +338,7 @@ class Llama(nn.Module):
             if eos_ids is not None and token_id in eos_ids:
                 break
             if time.time() - start_time > max_generation_time:
-                logger.warning(
-                    "Generation timed out after %s seconds", max_generation_time
-                )
+                logger.warning("Generation timed out after %s seconds", max_generation_time)
                 break
             if tokens_generated == max_new_tokens:
                 break
@@ -491,6 +489,25 @@ class LlamaMLX:
             "<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
 
+    def _build_messages_prompt(self, messages: list[dict[str, str | None]]) -> str:
+        normalized = [
+            {"role": message["role"], "content": message.get("content") or ""}
+            for message in messages
+        ]
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            return self.tokenizer.apply_chat_template(
+                normalized,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        prompt = "<|begin_of_text|>"
+        for message in normalized:
+            prompt += (
+                f"<|start_header_id|>{message['role']}<|end_header_id|>\n\n"
+                f"{message['content']}<|eot_id|>"
+            )
+        return f"{prompt}<|start_header_id|>assistant<|end_header_id|>\n\n"
+
     def download_model(self):
         """
         Download model files from huggingface_hub if they are not present locally.
@@ -501,9 +518,7 @@ class LlamaMLX:
         weights = glob.glob(os.path.join(self.weights_dir, "model*.safetensors"))
 
         # If any key file doesn't exist, pull them
-        if not (os.path.exists(config_path) and
-                weights and
-                os.path.exists(tokenizer_path)):
+        if not (os.path.exists(config_path) and weights and os.path.exists(tokenizer_path)):
             logger.info("Downloading model files from HuggingFace...")
             token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
             if not token:
@@ -634,7 +649,7 @@ class LlamaMLX:
             temp=self.temperature,
             top_p=self.top_p,
             max_new_tokens=self.max_new_tokens,
-            eos_token_id=self.eos_token_ids or self.tokenizer.eos_token_id
+            eos_token_id=self.eos_token_ids or self.tokenizer.eos_token_id,
         )
 
         for new_tok in token_iter:
@@ -651,7 +666,9 @@ class LlamaMLX:
                     len(generated_tokens) - len(prompt_ids),
                 )
 
-        logger.info(f"Generated tokens: {len(generated_tokens) - len(prompt_ids)} new, {len(generated_tokens)} total")
+        logger.info(
+            f"Generated tokens: {len(generated_tokens) - len(prompt_ids)} new, {len(generated_tokens)} total"
+        )
         return mx.array(generated_tokens)
 
     def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
@@ -666,21 +683,27 @@ class LlamaMLX:
         Returns:
             str: The generated completion text
         """
-        logger.info("Beginning completion call...")
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        return self.complete_messages(messages)
 
-        # Format the prompt according to the tokenizer's chat template when available.
-        if hasattr(self.tokenizer, "apply_chat_template"):
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": user_prompt})
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-        else:
-            prompt = self._build_instruct_prompt(system_prompt, user_prompt)
+    def complete_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> list[dict[str, str]]:
+        """Complete a structured conversation using native chat-template roles."""
+        logger.info("Beginning completion call...")
+        prompt = self._build_messages_prompt(messages)
+        user_prompt = next(
+            (
+                message.get("content") or ""
+                for message in reversed(messages)
+                if message.get("role") == "user"
+            ),
+            "",
+        )
 
         logger.info(
             f"Starting text generation with temperature={self.temperature}, "
@@ -691,7 +714,7 @@ class LlamaMLX:
             # Generate
             output_tokens = self.generate_text(prompt)
             # Decode only newly generated IDs so prompt text cannot leak into the response.
-            output_list = output_tokens.tolist()[self._last_prompt_token_count:]
+            output_list = output_tokens.tolist()[self._last_prompt_token_count :]
             output_text = self.tokenizer.decode(
                 output_list,
                 skip_special_tokens=True,
