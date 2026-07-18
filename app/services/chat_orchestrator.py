@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents.models.agent_completion import AgentCompletion
+from agents.models.agent_state import ConversationState, RunStatus
 from agents.models.chat_result import ToolCallResult, WorkArtifact
 from agents.models.tool_calling import (
     ChatMessage,
@@ -291,91 +292,71 @@ class ChatOrchestrator:
         system_prompt: str | None,
         enable_tools: bool = True,
     ) -> Iterator[ChatStreamEvent]:
-        run_id = f"run_{uuid.uuid4().hex}"
-        context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run_id)
+        conversation = ConversationState(chat_id=chat_id, user_id=user_id)
+        conversation.add_system_prompt(system_prompt)
+        if chat_id is not None:
+            try:
+                conversation.hydrate(self._history_messages(self.history_loader(chat_id)))
+            except Exception as error:
+                logger.warning("Could not hydrate chat %s: %s", chat_id, error)
+        run = conversation.begin_run(prompt)
+        context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
             self.registry.definitions_for_context(context) if enable_tools and native_tools else []
         )
 
-        messages: list[ChatMessage] = []
-        if system_prompt:
-            messages.append(ChatMessage(role="system", content=system_prompt))
-        if chat_id is not None:
-            try:
-                messages.extend(self._history_messages(self.history_loader(chat_id)))
-            except Exception as error:
-                logger.warning("Could not hydrate chat %s: %s", chat_id, error)
-
-        current_transcript: list[ChatMessage] = [ChatMessage(role="user", content=prompt)]
-        messages.extend(current_transcript)
-        assistant_text_parts: list[str] = []
-        trajectory: list[ToolCallResult] = []
-        artifacts: list[WorkArtifact] = []
-        total_calls = 0
-        tool_result_chars = 0
-        completed = False
-        persisted = False
-        persisted_chat_id = chat_id
-        persisted_status: str | None = None
-        persistence_lock = threading.Lock()
-
-        def persist_turn(status: str, ai_message: str | None) -> int | None:
-            nonlocal persisted, persisted_chat_id, persisted_status
-            with persistence_lock:
-                if persisted:
-                    return persisted_chat_id
+        def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
+            with run.persistence_lock:
+                if run.persisted:
+                    return conversation.chat_id
 
                 # Snapshot mutable run state so a cancellation callback can
                 # safely persist while a provider/tool thread is unwinding.
-                trajectory_snapshot = list(trajectory)
-                artifact_snapshot = [
-                    self._artifact_for_history(artifact) for artifact in list(artifacts)
+                run.transition(status)
+                snapshot = run.persistence_snapshot()
+                snapshot["new_ai_message"] = ai_message
+                snapshot["artifacts"] = [
+                    self._artifact_for_history(artifact) for artifact in list(run.artifacts)
                 ]
-                transcript_snapshot = [message.to_dict() for message in list(current_transcript)]
                 try:
-                    history = self.history_writer(
-                        new_user_message=prompt,
-                        new_ai_message=ai_message,
-                        session_id=chat_id,
-                        tool_calls=trajectory_snapshot,
-                        artifacts=artifact_snapshot,
-                        transcript=transcript_snapshot,
-                        user_id=user_id,
-                        run_id=run_id,
-                        status=status,
-                    )
+                    history = self.history_writer(**snapshot)
                 except Exception:
-                    logger.exception("Could not persist terminal state for chat run %s", run_id)
+                    logger.exception(
+                        "Could not persist terminal state for chat run %s",
+                        run.run_id,
+                    )
                     if status == "completed":
                         raise
-                    return persisted_chat_id
-                persisted = True
-                persisted_chat_id = getattr(history, "chat_session_id", chat_id)
-                persisted_status = status
-                return persisted_chat_id
+                    return conversation.chat_id
+                persisted_chat_id = getattr(history, "chat_session_id", conversation.chat_id)
+                run.mark_persisted(persisted_chat_id)
+                return conversation.chat_id
 
         def cancelled_payload() -> dict[str, Any]:
             persisted_chat_id = persist_turn(
                 "cancelled",
-                "\n\n".join(part for part in assistant_text_parts if part).strip() or None,
+                run.assistant_text or None,
             )
-            return {"run_id": run_id, "chat_id": persisted_chat_id}
+            return {"run_id": run.run_id, "chat_id": persisted_chat_id}
 
         def persist_cancelled_state() -> bool:
             cancelled_payload()
-            return persisted_status == "cancelled"
+            return run.persisted_status == "cancelled"
 
         # Register durable cancellation before exposing the run ID. The cancel
         # endpoint therefore cannot acknowledge a run and then lose its terminal
         # record merely because the browser closes the SSE response.
         cancellation = self.run_controls.start(
-            run_id,
+            run.run_id,
             on_cancel=persist_cancelled_state,
         )
 
         try:
-            yield ChatStreamEvent("run_started", {"run_id": run_id, "chat_id": chat_id})
+            yield ChatStreamEvent(
+                "run_started",
+                {"run_id": run.run_id, "chat_id": conversation.chat_id},
+            )
 
             for _round_number in range(self.max_rounds):
                 if cancellation.is_set():
@@ -383,7 +364,7 @@ class ChatOrchestrator:
                     return
 
                 completed_turn = None
-                for event in backend.stream_model_turn(messages, tools, config):
+                for event in backend.stream_model_turn(run.model_messages, tools, config):
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -397,22 +378,19 @@ class ChatOrchestrator:
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")
 
-                if completed_turn.text:
-                    assistant_text_parts.append(completed_turn.text)
                 assistant_message = ChatMessage(
                     role="assistant",
                     content=completed_turn.text or None,
                     tool_calls=completed_turn.tool_calls,
                 )
-                messages.append(assistant_message)
-                current_transcript.append(assistant_message)
+                run.record_assistant(assistant_message)
 
                 if not completed_turn.tool_calls:
-                    completed = True
+                    run.mark_model_completed()
                     break
 
-                total_calls += len(completed_turn.tool_calls)
-                if total_calls > self.max_tool_calls:
+                run.total_tool_calls += len(completed_turn.tool_calls)
+                if run.total_tool_calls > self.max_tool_calls:
                     raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
 
                 for call in completed_turn.tool_calls:
@@ -427,7 +405,7 @@ class ChatOrchestrator:
 
                     if cancellation.is_set():
                         cancelled = self._tool_state(call, "cancelled")
-                        trajectory.append(cancelled)
+                        run.record_tool_call(cancelled)
                         yield ChatStreamEvent("tool_call", cancelled)
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -439,7 +417,9 @@ class ChatOrchestrator:
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
-                    remaining_result_chars = self.max_tool_result_chars_total - tool_result_chars
+                    remaining_result_chars = (
+                        self.max_tool_result_chars_total - run.tool_result_chars
+                    )
                     if remaining_result_chars <= 0:
                         result.content = ""
                     elif len(result.content) > remaining_result_chars:
@@ -449,7 +429,10 @@ class ChatOrchestrator:
                         else:
                             retained_chars = remaining_result_chars - len(truncation_marker)
                             result.content = f"{result.content[:retained_chars]}{truncation_marker}"
-                    tool_result_chars += min(len(result.content), max(0, remaining_result_chars))
+                    run.tool_result_chars += min(
+                        len(result.content),
+                        max(0, remaining_result_chars),
+                    )
                     state = self._tool_state(
                         call,
                         result.status,
@@ -458,62 +441,64 @@ class ChatOrchestrator:
                         error=result.error,
                         requires_approval=requires_approval,
                     )
-                    trajectory.append(state)
-                    artifacts.extend(result.artifacts)
+                    run.record_tool_call(state)
+                    run.record_artifacts(result.artifacts)
                     for artifact in result.artifacts:
                         yield ChatStreamEvent("artifact", artifact)
                     yield ChatStreamEvent("tool_call", state)
 
                     tool_message = result.to_message()
-                    messages.append(tool_message)
-                    current_transcript.append(tool_message)
+                    run.record_tool_message(tool_message)
 
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-            if not completed:
+            if not run.model_completed:
                 raise RuntimeError(f"Model/tool round limit exceeded ({self.max_rounds})")
 
             if cancellation.is_set():
                 yield ChatStreamEvent("cancelled", cancelled_payload())
                 return
 
-            final_text = "\n\n".join(part for part in assistant_text_parts if part).strip()
+            final_text = run.assistant_text
             persisted_chat_id = persist_turn("completed", final_text)
-            if persisted_status == "cancelled":
+            if run.persisted_status == "cancelled":
                 yield ChatStreamEvent("cancelled", cancelled_payload())
                 return
             completion = AgentCompletion(
                 message=[final_text],
                 id=f"completion_{uuid.uuid4().hex}",
                 chat_id=persisted_chat_id,
-                run_id=run_id,
-                tool_calls=trajectory,
-                artifacts=artifacts,
+                run_id=run.run_id,
+                tool_calls=run.tool_calls,
+                artifacts=run.artifacts,
             )
             yield ChatStreamEvent("final", completion)
             yield ChatStreamEvent(
                 "done",
-                {"run_id": run_id, "chat_id": persisted_chat_id},
+                {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
         except Exception as error:
-            logger.exception("Chat run %s failed", run_id)
+            logger.exception("Chat run %s failed", run.run_id)
             persisted_chat_id = persist_turn(
                 "failed",
-                "\n\n".join(part for part in assistant_text_parts if part).strip() or None,
+                run.assistant_text or None,
             )
             yield ChatStreamEvent(
                 "error",
                 {
-                    "run_id": run_id,
+                    "run_id": run.run_id,
                     "chat_id": persisted_chat_id,
                     "message": self._public_error_message(error),
                 },
             )
-            yield ChatStreamEvent("done", {"run_id": run_id, "chat_id": persisted_chat_id})
+            yield ChatStreamEvent(
+                "done",
+                {"run_id": run.run_id, "chat_id": persisted_chat_id},
+            )
         finally:
-            self.run_controls.finish(run_id)
+            self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:
         completion: AgentCompletion | None = None

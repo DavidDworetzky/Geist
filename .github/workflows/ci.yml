@@ -114,6 +114,54 @@ jobs:
         cd client/geist
         npm test -- --watchAll=false --passWithNoTests
 
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        version: "0.9.5"
+        enable-cache: true
+
+    - name: Install backend dependencies
+      run: uv sync --frozen
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: client/geist/package-lock.json
+
+    - name: Install frontend dependencies
+      run: |
+        cd client/geist
+        npm ci --ignore-scripts --audit=false --fund=false
+
+    - name: Run browser end-to-end tests
+      run: |
+        cd client/geist
+        npm run test:e2e
+
+    - name: Upload browser test artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report
+        path: |
+          client/geist/playwright-report
+          client/geist/test-results
+        if-no-files-found: ignore
+
   security:
     runs-on: ubuntu-latest
 
@@ -218,7 +266,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [test, frontend-test]
+    needs: [test, frontend-test, browser-e2e]
 
     strategy:
       fail-fast: false

@@ -8,7 +8,7 @@ runner (registered in conftest) so no model weights are loaded.
 from unittest.mock import patch
 
 from agents.models.agent_completion import AgentCompletion
-from app.main import AgentType, agent_cache, stream_chat_completion
+from app.main import AgentType, agent_cache, run_chat_completion, stream_chat_completion
 from app.models.completion import CompleteTextParams
 from tests.agents.test_online_agent_routes import (
     completions_generator,
@@ -54,6 +54,43 @@ def test_legacy_stream_generates_completion_once():
     assert any('event: delta\ndata: {"text": "legacy response"}' in event for event in events)
     assert any("event: final\n" in event for event in events)
     assert events[-1] == ('event: done\ndata: {"run_id": "legacy-run", "chat_id": 14}\n\n')
+
+
+def test_stream_emits_terminal_error_when_agent_initialization_fails():
+    params = CompleteTextParams(prompt="request with unavailable model")
+
+    with patch(
+        "app.main.get_active_agent",
+        side_effect=ValueError("private initialization detail"),
+    ):
+        events = list(stream_chat_completion(params))
+
+    assert len(events) == 2
+    assert "event: error\n" in events[0]
+    assert '"code": "chat_backend_error"' in events[0]
+    assert "private initialization detail" not in events[0]
+    assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
+
+
+def test_modern_non_streaming_completion_uses_orchestrator_without_tools():
+    class ModernAgent:
+        def stream_model_turn(self, *_args, **_kwargs):
+            raise AssertionError("orchestrator is mocked")
+
+    completion = AgentCompletion(
+        message=["orchestrated"],
+        id="completion",
+        chat_id=8,
+        run_id="run",
+    )
+    params = CompleteTextParams(prompt="continue this chat", enable_tools=False)
+
+    with patch("app.main.chat_orchestrator.complete", return_value=completion) as complete:
+        result = run_chat_completion(params, chat_id=8, agent=ModernAgent())
+
+    assert result == completion
+    assert complete.call_args.kwargs["chat_id"] == 8
+    assert complete.call_args.kwargs["enable_tools"] is False
 
 
 @patch("adapters.log_adapter.LogAdapter.log", autospec=True)

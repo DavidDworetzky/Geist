@@ -150,7 +150,7 @@ def run_chat_completion(
     agent=None,
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
-    if not params.enable_tools or not hasattr(active_agent, "stream_model_turn"):
+    if not hasattr(active_agent, "stream_model_turn"):
         completion = active_agent.complete_text(
             prompt=params.prompt,
             max_tokens=params.max_tokens,
@@ -180,51 +180,66 @@ def run_chat_completion(
 
 
 def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
-    agent = get_active_agent(resolve_agent_type(params.agent_type))
-    if params.enable_tools and hasattr(agent, "stream_model_turn"):
-        for event in chat_orchestrator.stream(
-            backend=agent,
+    try:
+        agent = get_active_agent(resolve_agent_type(params.agent_type))
+        if hasattr(agent, "stream_model_turn"):
+            for event in chat_orchestrator.stream(
+                backend=agent,
+                prompt=params.prompt,
+                user_id=get_default_user().user_id,
+                chat_id=chat_id,
+                config=model_request_config(params),
+                system_prompt=chat_system_prompt(params.enable_tools),
+                enable_tools=params.enable_tools,
+            ):
+                yield sse_event(event.event, event.payload)
+            return
+
+        # Legacy agents retain text-only behavior. Generate once and adapt the
+        # authoritative completion into SSE chunks; consuming a legacy text stream
+        # and then calling complete_text again can duplicate model work and database
+        # persistence.
+        completion = agent.complete_text(
             prompt=params.prompt,
-            user_id=get_default_user().user_id,
+            max_tokens=params.max_tokens,
+            n=params.n,
+            stop=params.stop,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            echo=params.echo,
+            best_of=params.best_of,
+            prompt_tokens=params.prompt_tokens,
+            response_format=params.response_format,
+            system_prompt=DEFAULT_PROMPT,
             chat_id=chat_id,
-            config=model_request_config(params),
-            system_prompt=chat_system_prompt(params.enable_tools),
-            enable_tools=params.enable_tools,
+        )
+        completion_object = completion_to_response(completion)
+        for chunk in chunk_completion_text(
+            completion_object.message[0] if completion_object.message else ""
         ):
-            yield sse_event(event.event, event.payload)
-        return
+            yield sse_event("delta", {"text": chunk})
 
-    # Legacy agents retain text-only behavior. Generate once and adapt the
-    # authoritative completion into SSE chunks; consuming a legacy text stream
-    # and then calling complete_text again can duplicate model work and database
-    # persistence.
-    completion = agent.complete_text(
-        prompt=params.prompt,
-        max_tokens=params.max_tokens,
-        n=params.n,
-        stop=params.stop,
-        temperature=params.temperature,
-        top_p=params.top_p,
-        frequency_penalty=params.frequency_penalty,
-        presence_penalty=params.presence_penalty,
-        echo=params.echo,
-        best_of=params.best_of,
-        prompt_tokens=params.prompt_tokens,
-        response_format=params.response_format,
-        system_prompt=DEFAULT_PROMPT,
-        chat_id=chat_id,
-    )
-    completion_object = completion_to_response(completion)
-    for chunk in chunk_completion_text(
-        completion_object.message[0] if completion_object.message else ""
-    ):
-        yield sse_event("delta", {"text": chunk})
-
-    yield sse_event("final", completion_object)
-    yield sse_event(
-        "done",
-        {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
-    )
+        yield sse_event("final", completion_object)
+        yield sse_event(
+            "done",
+            {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
+        )
+    except Exception:
+        logger.exception("Chat stream failed before a terminal event")
+        yield sse_event(
+            "error",
+            {
+                "code": "chat_backend_error",
+                "message": (
+                    "Chat backend failed to start. Check the configured model, "
+                    "local weights, and required credentials."
+                ),
+                "chat_id": chat_id,
+            },
+        )
+        yield sse_event("done", {"run_id": None, "chat_id": chat_id})
 
 
 # App factory function

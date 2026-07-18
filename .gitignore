@@ -153,3 +153,7 @@ safety-report.json
 npm-audit-report.json
 trivy-results.sarif
 requirements-check.txt
+
+# Playwright browser-test artifacts
+client/geist/playwright-report/
+client/geist/test-results/

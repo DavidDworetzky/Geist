@@ -98,6 +98,37 @@ def test_explicit_runner_override_allows_large_local_model():
     assert local_agent.call_args.kwargs["device_config"]["allow_server_backed"] is True
 
 
+def test_environment_runner_override_precedes_catalog_inference():
+    context = MagicMock()
+    with (
+        patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": "transformers"}),
+        patch("agents.local_agent.LocalAgent") as local_agent,
+    ):
+        AgentFactory.create_agent(
+            "local",
+            context,
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+        )
+
+    assert local_agent.call_args.kwargs["runner_type"] == "transformers"
+
+
+def test_explicit_runner_argument_precedes_environment_override():
+    context = MagicMock()
+    with (
+        patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": "transformers"}),
+        patch("agents.local_agent.LocalAgent") as local_agent,
+    ):
+        AgentFactory.create_agent(
+            "local",
+            context,
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            runner_type="mlx_llama",
+        )
+
+    assert local_agent.call_args.kwargs["runner_type"] == "mlx_llama"
+
+
 def test_existing_llama_id_preserves_optimized_runner():
     assert AgentFactory._infer_runner_type(
         "meta-llama/Meta-Llama-3.1-8B-Instruct"

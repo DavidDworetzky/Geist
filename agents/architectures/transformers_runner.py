@@ -1,4 +1,5 @@
 """Generic, performance-aware Hugging Face causal language-model runner."""
+
 from __future__ import annotations
 
 import gc
@@ -70,8 +71,14 @@ class TransformersRunner(BaseRunner):
                 )
 
         weights_dir = device_config.pop("weights_dir", None)
-        default_dir = os.path.join("app", "model_weights", model_id.replace("/", "_"))
-        self.source = weights_dir or (default_dir if os.path.isdir(default_dir) else model_id)
+        default_dirs = [os.path.join("app", "model_weights", model_id.replace("/", "_"))]
+        if model_id == "meta-llama/Meta-Llama-3.1-8B-Instruct":
+            default_dirs.append(os.path.join("app", "model_weights", "llama_3_1"))
+        local_default = next(
+            (path for path in default_dirs if os.path.isfile(os.path.join(path, "config.json"))),
+            None,
+        )
+        self.source = weights_dir or local_default or model_id
         explicit_device = device_config.pop("device", None)
         self.device = self._select_device(explicit_device)
         compile_model = bool(device_config.pop("compile", False))
@@ -114,18 +121,27 @@ class TransformersRunner(BaseRunner):
                 load_kwargs["device_map"] = "auto"
 
         for option in (
-            "attn_implementation", "quantization_config", "load_in_4bit",
-            "load_in_8bit", "max_memory", "offload_folder",
-            "offload_state_dict", "use_safetensors",
+            "attn_implementation",
+            "quantization_config",
+            "load_in_4bit",
+            "load_in_8bit",
+            "max_memory",
+            "offload_folder",
+            "offload_state_dict",
+            "use_safetensors",
         ):
             if option in device_config:
                 load_kwargs[option] = device_config.pop(option)
         if device_config:
-            logger.warning("Ignoring unsupported Transformers device options: %s", sorted(device_config))
+            logger.warning(
+                "Ignoring unsupported Transformers device options: %s", sorted(device_config)
+            )
 
         logger.info(
             "Loading %s with Transformers on %s (%s)",
-            model_id, self.device, load_kwargs["torch_dtype"],
+            model_id,
+            self.device,
+            load_kwargs["torch_dtype"],
         )
         self.model = AutoModelForCausalLM.from_pretrained(self.source, **load_kwargs)
         if not getattr(self.model, "hf_device_map", None):
@@ -170,9 +186,13 @@ class TransformersRunner(BaseRunner):
                 return explicit
             value = str(explicit).replace("torch.", "").lower()
             dtypes = {
-                "auto": "auto", "float32": torch.float32, "fp32": torch.float32,
-                "float16": torch.float16, "fp16": torch.float16,
-                "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
+                "auto": "auto",
+                "float32": torch.float32,
+                "fp32": torch.float32,
+                "float16": torch.float16,
+                "fp16": torch.float16,
+                "bfloat16": torch.bfloat16,
+                "bf16": torch.bfloat16,
             }
             if value not in dtypes:
                 raise ValueError(f"Unsupported dtype: {explicit}")
@@ -185,9 +205,7 @@ class TransformersRunner(BaseRunner):
             return torch.float16
         return torch.float32
 
-    def generate(
-        self, prompt: str, generation_config: GenerationConfig
-    ) -> list[dict[str, str]]:
+    def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
         return self.complete("", prompt, generation_config)
 
     def complete(
@@ -196,13 +214,27 @@ class TransformersRunner(BaseRunner):
         user_prompt: str,
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
-        if self.model is None or self.tokenizer is None:
-            raise RuntimeError("Model not loaded. Call load() first.")
-
-        messages = []
+        messages: list[dict[str, str | None]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
+        return self.complete_messages(messages, generation_config)
+
+    def complete_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> list[dict[str, str]]:
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        normalized_messages: list[dict[str, str]] = [
+            {
+                "role": str(message.get("role") or ""),
+                "content": message.get("content") or "",
+            }
+            for message in messages
+        ]
         if not getattr(self.tokenizer, "chat_template", None):
             raise ValueError(
                 f"{self.model_id} does not provide a tokenizer chat template. "
@@ -210,20 +242,35 @@ class TransformersRunner(BaseRunner):
             )
 
         try:
-            inputs = self._apply_chat_template(messages)
+            inputs = self._apply_chat_template(normalized_messages)
         except Exception:
+            system_prompt = "\n\n".join(
+                message["content"] for message in normalized_messages if message["role"] == "system"
+            )
             if not system_prompt:
                 raise
             # A few otherwise standard instruction checkpoints do not define a
-            # system role. Preserve the instruction without family-specific
-            # branching by placing it ahead of the user content.
+            # system role. Preserve the instruction and all conversation turns
+            # by folding it into the first user message.
             logger.info(
                 "%s chat template rejected a system role; folding it into the user turn",
                 self.model_id,
             )
-            inputs = self._apply_chat_template([
-                {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
-            ])
+            fallback_messages = [
+                dict(message) for message in normalized_messages if message["role"] != "system"
+            ]
+            first_user = next(
+                (message for message in fallback_messages if message["role"] == "user"),
+                None,
+            )
+            if first_user is None:
+                fallback_messages.insert(
+                    0,
+                    {"role": "user", "content": system_prompt},
+                )
+            else:
+                first_user["content"] = f"{system_prompt}\n\n{first_user['content']}"
+            inputs = self._apply_chat_template(fallback_messages)
         inputs = dict(inputs) if hasattr(inputs, "items") else {"input_ids": inputs}
         target_device = getattr(self.model, "device", self.device)
         inputs = {name: value.to(target_device) for name, value in inputs.items()}
@@ -240,7 +287,8 @@ class TransformersRunner(BaseRunner):
             if max_new_tokens > available_tokens:
                 logger.warning(
                     "Clamping max_new_tokens from %s to %s for model context limit",
-                    max_new_tokens, available_tokens,
+                    max_new_tokens,
+                    available_tokens,
                 )
                 max_new_tokens = available_tokens
 
@@ -274,6 +322,14 @@ class TransformersRunner(BaseRunner):
             ]
             if stop_positions:
                 response = response[: min(stop_positions)].rstrip()
+        user_prompt = next(
+            (
+                message["content"]
+                for message in reversed(normalized_messages)
+                if message["role"] == "user"
+            ),
+            "",
+        )
         return strings_to_message_dict(user_prompt, response)
 
     def _apply_chat_template(self, messages: list[dict[str, str]]) -> Any:

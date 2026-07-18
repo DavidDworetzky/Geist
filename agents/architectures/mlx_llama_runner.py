@@ -19,6 +19,11 @@ class _MLXBackend(Protocol):
 
     def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]: ...
 
+    def complete_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> list[dict[str, str]]: ...
+
 
 class MLXLlamaRunner(BaseRunner):
     """Run Llama through Geist's manual MLX code or the mlx-lm adapter."""
@@ -118,6 +123,14 @@ class MLXLlamaRunner(BaseRunner):
             system_prompt=system_prompt or "You are a helpful assistant.",
             user_prompt=user_prompt,
         )
+
+    def complete_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> list[dict[str, str]]:
+        backend = self._apply_generation_config(generation_config)
+        return backend.complete_messages(messages)
 
     def cleanup(self) -> None:
         self.llama = None

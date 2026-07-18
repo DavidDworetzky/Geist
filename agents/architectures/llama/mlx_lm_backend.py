@@ -37,18 +37,36 @@ class MLXLMBackend:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
+        return self._build_messages_prompt(messages)
+
+    def _build_messages_prompt(self, messages: list[dict[str, str | None]]) -> str:
+        normalized = [
+            {"role": message["role"], "content": message.get("content") or ""}
+            for message in messages
+        ]
         return self.tokenizer.apply_chat_template(
-            messages,
+            normalized,
             tokenize=False,
             add_generation_prompt=True,
         )
 
     def stream_text(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
         """Yield decoded text segments and retain mlx-lm timing statistics."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        yield from self.stream_messages(messages)
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> Iterator[str]:
+        """Yield decoded text for a structured conversation."""
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
 
-        prompt = self._build_prompt(system_prompt, user_prompt)
+        prompt = self._build_messages_prompt(messages)
         sampler = make_sampler(temp=self.temperature, top_p=self.top_p)
         started = time.perf_counter()
         final_response = None
@@ -75,5 +93,23 @@ class MLXLMBackend:
             }
 
     def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
-        response = "".join(self.stream_text(system_prompt, user_prompt)).strip()
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        return self.complete_messages(messages)
+
+    def complete_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> list[dict[str, str]]:
+        response = "".join(self.stream_messages(messages)).strip()
+        user_prompt = next(
+            (
+                message.get("content") or ""
+                for message in reversed(messages)
+                if message.get("role") == "user"
+            ),
+            "",
+        )
         return strings_to_message_dict(user_prompt, response)

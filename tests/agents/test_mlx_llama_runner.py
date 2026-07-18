@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agents.architectures.base_runner import GenerationConfig
+from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 
 
@@ -90,4 +91,45 @@ def test_generation_config_and_response_contract():
     runner.llama.complete.assert_called_once_with(
         system_prompt="system",
         user_prompt="hello",
+    )
+
+
+def test_structured_messages_reach_mlx_backend_unchanged():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    messages = [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Remember cobalt."},
+        {"role": "assistant", "content": "I will remember cobalt."},
+        {"role": "user", "content": "What should you remember?"},
+    ]
+    runner.llama.complete_messages.return_value = [
+        {"role": "user", "content": messages[-1]["content"]},
+        {"role": "assistant", "content": "cobalt"},
+    ]
+
+    result = runner.complete_messages(messages, GenerationConfig(max_tokens=12))
+
+    assert result[-1]["content"] == "cobalt"
+    runner.llama.complete_messages.assert_called_once_with(messages)
+
+
+def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.tokenizer = MagicMock()
+    messages = [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Remember cobalt."},
+        {"role": "assistant", "content": "I will remember cobalt."},
+        {"role": "user", "content": "What should you remember?"},
+    ]
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+
+    prompt = backend._build_messages_prompt(messages)
+
+    assert prompt == "rendered prompt"
+    backend.tokenizer.apply_chat_template.assert_called_once_with(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
     )

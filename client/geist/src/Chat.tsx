@@ -84,6 +84,12 @@ const Chat = () => {
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
   const routeChatId = chatId ? parseInt(chatId, 10) : null;
 
+  useEffect(() => {
+    if (!chatId && state_chat_id !== null) {
+      navigate(`/chat/${state_chat_id}`, { replace: true });
+    }
+  }, [chatId, navigate, state_chat_id]);
+
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -151,7 +157,7 @@ const Chat = () => {
 
   useEffect(() => {
     const container = chatContainerRef.current;
-    if (container && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
+    if (container && chatId && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
       if (container.scrollHeight <= container.clientHeight) {
         const nextPage = page + 1;
         setPage(nextPage);
@@ -177,8 +183,9 @@ const Chat = () => {
     [isChatSessionLoading, hasMoreSessions, loadMoreSessions, chatSessionError]
   );
 
+  const loadedHistoryLength = chatHistory?.chatHistory?.length ?? 0;
   const handleScroll = useCallback(() => {
-    if (chatContainerRef.current) {
+    if (chatContainerRef.current && chatId && loadedHistoryLength > 0) {
       const { scrollTop, scrollHeight } = chatContainerRef.current;
       if (scrollTop <= 10 && hasMore && !isLoadingHistory) {
         prevScrollHeightRef.current = scrollHeight;
@@ -189,7 +196,7 @@ const Chat = () => {
         }
       }
     }
-  }, [hasMore, isLoadingHistory, page, chatId, fetchHistory]);
+  }, [hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -341,7 +348,11 @@ const Chat = () => {
     routeChatId,
     state_chat_id,
   );
-  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat
+  const activeTurnAlreadyPersisted = Boolean(
+    activeTurn?.run_id &&
+    (chatHistory?.chatHistory ?? []).some((turn) => turn.run_id === activeTurn.run_id)
+  );
+  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
     ? [
         ...(chatHistory?.chatHistory ?? []),
         {

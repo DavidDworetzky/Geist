@@ -14,11 +14,20 @@ from app.main import create_app
 
 
 def create_agent_settings(include_world_processing: bool = True):
-    return AgentSettings(name="default agent", version="1.0", description="default", include_world_processing=include_world_processing)
+    return AgentSettings(
+        name="default agent",
+        version="1.0",
+        description="default",
+        include_world_processing=include_world_processing,
+    )
+
 
 openai_key = os.getenv("OPENAI_API_KEY")
-def get_envs() -> dict[str,str]:
+
+
+def get_envs() -> dict[str, str]:
     return load_environment_dictionary()
+
 
 class StubRunner(BaseRunner):
     """Deterministic in-memory runner so LocalAgent tests never load real weights."""
@@ -33,8 +42,15 @@ class StubRunner(BaseRunner):
         # Same shape as the real runners: a list of message dicts (see strings_to_message_dict)
         return [
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": f"Response to: {user_prompt}"}
+            {"role": "assistant", "content": f"Response to: {user_prompt}"},
         ]
+
+    def complete_messages(self, messages, generation_config: GenerationConfig):
+        user_prompt = next(
+            message["content"] for message in reversed(messages) if message["role"] == "user"
+        )
+        return self.complete("", user_prompt, generation_config)
+
 
 @pytest.fixture(scope="module")
 def app():
@@ -42,25 +58,37 @@ def app():
     app = create_app()
     yield app
 
+
 @pytest.fixture(scope="module")
 def client(app):
     # Create a TestClient instance using the app fixture
     with TestClient(app) as client:
         yield client
 
+
 @pytest.fixture(scope="module")
 def online_agent():
     settings = create_agent_settings(include_world_processing=True)
     context = AgentContext(settings=settings, envs=get_envs())
-    return OnlineAgent(agent_context=context, base_url="https://api.openai.com/v1",
-                       model="gpt-4", api_key=None)
+    return OnlineAgent(
+        agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4", api_key=None
+    )
+
 
 @pytest.fixture(scope="module")
 def process_world_variation_online_agents():
-    variant_settings = [create_agent_settings(include_world_processing=True), create_agent_settings(include_world_processing=False)]
+    variant_settings = [
+        create_agent_settings(include_world_processing=True),
+        create_agent_settings(include_world_processing=False),
+    ]
     contexts = [AgentContext(settings=setting, envs=get_envs()) for setting in variant_settings]
-    return [OnlineAgent(agent_context=context, base_url="https://api.openai.com/v1",
-                        model="gpt-4", api_key=None) for context in contexts]
+    return [
+        OnlineAgent(
+            agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4", api_key=None
+        )
+        for context in contexts
+    ]
+
 
 @pytest.fixture(scope="module")
 def local_agent():

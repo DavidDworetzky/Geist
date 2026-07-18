@@ -1,4 +1,6 @@
 """Unit tests for the generic Transformers causal-LM runner."""
+
+import os
 from collections import UserDict
 from unittest.mock import MagicMock, patch
 
@@ -64,6 +66,55 @@ def test_load_and_generate_uses_direct_suffix_decode(
     assert result[1]["content"] == "fast response"
 
 
+def test_complete_messages_preserves_structured_conversation_roles():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+    messages = [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Remember cobalt."},
+        {"role": "assistant", "content": "I will remember cobalt."},
+        {"role": "user", "content": "What should you remember?"},
+    ]
+
+    runner.complete_messages(
+        messages,
+        GenerationConfig(max_tokens=8, temperature=0.0),
+    )
+
+    applied_messages = runner.tokenizer.apply_chat_template.call_args.args[0]
+    assert applied_messages == messages
+
+
+@patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
+@patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
+@patch("agents.architectures.transformers_runner.AutoTokenizer")
+@patch("agents.architectures.transformers_runner.AutoConfig")
+def test_default_llama_uses_existing_legacy_weights_directory(
+    config_cls, tokenizer_cls, model_cls, _find_spec, tmp_path, monkeypatch
+):
+    weights_dir = tmp_path / "app" / "model_weights" / "llama_3_1"
+    weights_dir.mkdir(parents=True)
+    (weights_dir / "config.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    config_cls.from_pretrained.return_value = MagicMock(architectures=["LlamaForCausalLM"])
+    tokenizer_cls.from_pretrained.return_value = _tokenizer()
+    model_cls.from_pretrained.return_value = _model()
+
+    TransformersRunner().load(
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        {"device": "cpu"},
+    )
+
+    expected_source = os.path.join("app", "model_weights", "llama_3_1")
+    config_cls.from_pretrained.assert_called_once_with(
+        expected_source,
+        trust_remote_code=False,
+    )
+
+
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
 @patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
 @patch("agents.architectures.transformers_runner.AutoTokenizer")
@@ -90,23 +141,21 @@ def test_mapping_like_batch_encoding_and_system_role_fallback():
     runner.model = _model()
     runner.tokenizer = _tokenizer()
     runner.config = MagicMock(max_position_embeddings=64)
-    encoded = UserDict({
-        "input_ids": torch.tensor([[1, 2, 3]]),
-        "attention_mask": torch.tensor([[1, 1, 1]]),
-    })
+    encoded = UserDict(
+        {
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1]]),
+        }
+    )
     runner.tokenizer.apply_chat_template.side_effect = [
         ValueError("system role unsupported"),
         encoded,
     ]
 
-    runner.complete(
-        "Be concise", "hello", GenerationConfig(max_tokens=4, temperature=0.0)
-    )
+    runner.complete("Be concise", "hello", GenerationConfig(max_tokens=4, temperature=0.0))
 
     fallback_messages = runner.tokenizer.apply_chat_template.call_args.args[0]
-    assert fallback_messages == [
-        {"role": "user", "content": "Be concise\n\nhello"}
-    ]
+    assert fallback_messages == [{"role": "user", "content": "Be concise\n\nhello"}]
     kwargs = runner.model.generate.call_args.kwargs
     assert {"input_ids", "attention_mask"}.issubset(kwargs)
 
@@ -140,9 +189,7 @@ def test_cuda_uses_accelerate_without_duplicate_device_copy(
     model.hf_device_map = {"": 0}
     model_cls.from_pretrained.return_value = model
 
-    with patch.object(
-        TransformersRunner, "_select_device", return_value=torch.device("cuda")
-    ):
+    with patch.object(TransformersRunner, "_select_device", return_value=torch.device("cuda")):
         TransformersRunner().load("Qwen/Qwen2.5-3B-Instruct")
 
     kwargs = model_cls.from_pretrained.call_args.kwargs
@@ -155,9 +202,7 @@ def test_cuda_uses_accelerate_without_duplicate_device_copy(
 @patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
 @patch("agents.architectures.transformers_runner.AutoTokenizer")
 @patch("agents.architectures.transformers_runner.AutoConfig")
-def test_mps_defaults_to_stable_eager_attention(
-    config_cls, tokenizer_cls, model_cls, _find_spec
-):
+def test_mps_defaults_to_stable_eager_attention(config_cls, tokenizer_cls, model_cls, _find_spec):
     config_cls.from_pretrained.return_value = MagicMock(architectures=["SmolLMForCausalLM"])
     tokenizer_cls.from_pretrained.return_value = _tokenizer()
     model_cls.from_pretrained.return_value = _model()
@@ -190,9 +235,7 @@ def test_server_backed_model_fails_before_loading():
 def test_explicit_override_can_load_server_backed_text_model(
     config_cls, tokenizer_cls, model_cls, _find_spec
 ):
-    config_cls.from_pretrained.return_value = MagicMock(
-        architectures=["Glm4MoeLiteForCausalLM"]
-    )
+    config_cls.from_pretrained.return_value = MagicMock(architectures=["Glm4MoeLiteForCausalLM"])
     tokenizer_cls.from_pretrained.return_value = _tokenizer()
     model_cls.from_pretrained.return_value = _model()
 
