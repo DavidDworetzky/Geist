@@ -3,8 +3,11 @@ import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
 import useUserSettings from './Hooks/useUserSettings';
+import useChatMemory from './Hooks/useChatMemory';
 import ChatTextArea from './Components/ChatTextArea';
 import EnhancedChatInput from './Components/EnhancedChatInput';
+import ChatMemoryControls from './Components/ChatMemoryControls';
+import MemoryExplorer from './Components/MemoryExplorer';
 import StagePanelIcon from './Components/StagePanelIcon';
 import { ChatPair, ChatHistory, ChatTurnResult } from './chatTypes';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
@@ -21,6 +24,9 @@ interface ChatSessionListItem {
   name: string;
   link: string;
   date: Date;
+  folderId: number | null;
+  memoryEnabled: boolean;
+  memoryMode: 'public' | 'private';
 }
 
 export const turnBelongsToChatSelection = (
@@ -67,7 +73,14 @@ const Chat = () => {
   const [editingChatId, setEditingChatId] = useState<number | null>(null);
   const [chatTitleDraft, setChatTitleDraft] = useState('');
   const [chatTitleError, setChatTitleError] = useState('');
-  const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions } = useGetChatSessions();
+  const [folderFilter, setFolderFilter] = useState<number | 'all'>('all');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [folderNameDraft, setFolderNameDraft] = useState('');
+  const [folderCreateError, setFolderCreateError] = useState('');
+  const [editingFolderId, setEditingFolderId] = useState<number | null>(null);
+  const [folderRenameDraft, setFolderRenameDraft] = useState('');
+  const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<number | null>(null);
+  const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions, refreshChatSessions } = useGetChatSessions();
   const [userInput, setUserInput] = useState('');
   const [fileContextInfo, setFileContextInfo] = useState<string>('');
   const { settings: userSettings } = useUserSettings();
@@ -83,6 +96,19 @@ const Chat = () => {
   } = useCompleteText(userSettings);
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
   const routeChatId = chatId ? parseInt(chatId, 10) : null;
+  const selectedChatId = routeChatId ?? state_chat_id;
+  const {
+    settings: memorySettings,
+    folders,
+    loading: isMemoryLoading,
+    error: memoryError,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    setMemoryEnabled,
+    setPrivate,
+    setFolder,
+  } = useChatMemory(selectedChatId);
 
   useEffect(() => {
     if (!chatId && state_chat_id !== null) {
@@ -219,7 +245,11 @@ const Chat = () => {
       }
 
       const messageToSend = processedMessage.enhancedMessage || input;
-      await completeText(messageToSend, parsedChatId);
+      await completeText(messageToSend, parsedChatId, {
+        memory_enabled: memorySettings.memory_enabled,
+        memory_mode: memorySettings.memory_mode,
+        folder_id: memorySettings.folder_id,
+      });
     } catch (err) {
       console.error('Error chatting with server:', err);
     }
@@ -240,6 +270,9 @@ const Chat = () => {
           name: chatTitles[String(session.chat_id)] || defaultName,
           link: `/chat/${session.chat_id}`,
           date,
+          folderId: session.folder_id,
+          memoryEnabled: session.memory_enabled,
+          memoryMode: session.memory_mode,
         };
       })
       .sort((a, b) => b.date.getTime() - a.date.getTime());
@@ -270,7 +303,8 @@ const Chat = () => {
       }
       return { chatHistory: [...existingHistory, newHistory] };
     });
-  }, [completedTurn, routeChatId, state_chat_id]);
+    void refreshChatSessions();
+  }, [completedTurn, refreshChatSessions, routeChatId, state_chat_id]);
 
   const handleSubmit = async (message: string) => {
     if (message.trim()) {
@@ -338,10 +372,62 @@ const Chat = () => {
     }
   };
 
+  const saveFolder = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = folderNameDraft.trim();
+    if (!name) {
+      setFolderCreateError('Enter a folder name.');
+      return;
+    }
+    try {
+      const folder = await createFolder(name);
+      setFolderNameDraft('');
+      setFolderCreateError('');
+      setIsCreatingFolder(false);
+      setFolderFilter(folder.folder_id);
+    } catch (folderError) {
+      setFolderCreateError(
+        folderError instanceof Error ? folderError.message : 'Could not create folder.',
+      );
+    }
+  };
+
+  const saveFolderRename = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (editingFolderId === null || !folderRenameDraft.trim()) return;
+    try {
+      await renameFolder(editingFolderId, folderRenameDraft.trim());
+      setEditingFolderId(null);
+      setFolderRenameDraft('');
+      setFolderCreateError('');
+    } catch (folderError) {
+      setFolderCreateError(
+        folderError instanceof Error ? folderError.message : 'Could not rename folder.',
+      );
+    }
+  };
+
+  const removeFolder = async (folderId: number) => {
+    try {
+      await deleteFolder(folderId);
+      setFolderFilter('all');
+      setConfirmDeleteFolderId(null);
+      setFolderCreateError('');
+    } catch (folderError) {
+      setFolderCreateError(
+        folderError instanceof Error ? folderError.message : 'Could not delete folder.',
+      );
+    }
+  };
+
   const searchQuery = chatSearch.trim().toLowerCase();
-  const filteredChatSessionLinks = searchQuery
-    ? chatSessionLinks.filter((session) => session.name.toLowerCase().includes(searchQuery))
-    : chatSessionLinks;
+  const selectedFolder = folderFilter === 'all'
+    ? null
+    : folders.find(folder => folder.folder_id === folderFilter) ?? null;
+  const filteredChatSessionLinks = chatSessionLinks.filter((session) => (
+    (folderFilter === 'all' || session.folderId === folderFilter)
+    && (!searchQuery || session.name.toLowerCase().includes(searchQuery))
+  ));
   const sessionCountLabel = `${chatSessionLinks.length} ${chatSessionLinks.length === 1 ? 'chat' : 'chats'}`;
   const activeTurnBelongsToCurrentChat = activeTurn && turnBelongsToChatSelection(
     activeTurn,
@@ -431,16 +517,136 @@ const Chat = () => {
                     </label>
 
                     <section className="chat-folder-summary" aria-label="Chat folders">
-                      <div className="chat-folder-row">
+                      <button
+                        className={`chat-folder-row${folderFilter === 'all' ? ' is-selected' : ''}`}
+                        type="button"
+                        onClick={() => setFolderFilter('all')}
+                      >
                         <span className="chat-folder-icon">
                           <StagePanelIcon name="folder" />
                         </span>
                         <span>
-                          <strong>Recent</strong>
+                          <strong>All chats</strong>
                           <small>{sessionCountLabel}</small>
                         </span>
-                      </div>
+                      </button>
+                      {folders.map(folder => (
+                        <button
+                          className={`chat-folder-row folder-${folder.color}${folderFilter === folder.folder_id ? ' is-selected' : ''}`}
+                          type="button"
+                          key={folder.folder_id}
+                          onClick={() => setFolderFilter(folder.folder_id)}
+                        >
+                          <span className="chat-folder-icon">
+                            <StagePanelIcon name="folder" />
+                          </span>
+                          <span>
+                            <strong>{folder.name}</strong>
+                            <small>{folder.chat_count} {folder.chat_count === 1 ? 'chat' : 'chats'} · Private</small>
+                          </span>
+                        </button>
+                      ))}
+                      {isCreatingFolder ? (
+                        <form className="chat-folder-create-form" onSubmit={saveFolder}>
+                          <input
+                            aria-label="Folder name"
+                            value={folderNameDraft}
+                            onChange={event => setFolderNameDraft(event.target.value)}
+                            placeholder="Folder name"
+                            maxLength={120}
+                            autoFocus
+                          />
+                          <button className="icon-action" type="submit" aria-label="Save folder">
+                            <StagePanelIcon name="check" />
+                          </button>
+                          <button
+                            className="icon-action"
+                            type="button"
+                            aria-label="Cancel folder"
+                            onClick={() => {
+                              setIsCreatingFolder(false);
+                              setFolderNameDraft('');
+                              setFolderCreateError('');
+                            }}
+                          >
+                            <StagePanelIcon name="close" />
+                          </button>
+                          {folderCreateError && <span className="chat-title-error" role="alert">{folderCreateError}</span>}
+                        </form>
+                      ) : (
+                        <button
+                          className="chat-folder-add"
+                          type="button"
+                          onClick={() => setIsCreatingFolder(true)}
+                        >
+                          <StagePanelIcon name="plus" />
+                          New private folder
+                        </button>
+                      )}
                     </section>
+
+                    {selectedFolder && (
+                      <section className="chat-folder-memory-preview" aria-label={`${selectedFolder.name} folder details`}>
+                        <div className="chat-folder-detail-header">
+                          <span>Private folder</span>
+                          <span className="chat-folder-detail-actions">
+                            <button
+                              type="button"
+                              aria-label={`Rename ${selectedFolder.name} folder`}
+                              onClick={() => {
+                                setEditingFolderId(selectedFolder.folder_id);
+                                setFolderRenameDraft(selectedFolder.name);
+                              }}
+                            >
+                              <StagePanelIcon name="edit" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Delete ${selectedFolder.name} folder`}
+                              onClick={() => setConfirmDeleteFolderId(selectedFolder.folder_id)}
+                            >
+                              <StagePanelIcon name="close" />
+                            </button>
+                          </span>
+                        </div>
+                        {editingFolderId === selectedFolder.folder_id && (
+                          <form className="chat-folder-rename-form" onSubmit={saveFolderRename}>
+                            <input
+                              aria-label="Rename folder"
+                              value={folderRenameDraft}
+                              onChange={event => setFolderRenameDraft(event.target.value)}
+                              autoFocus
+                            />
+                            <button type="submit" aria-label="Save folder name">
+                              <StagePanelIcon name="check" />
+                            </button>
+                          </form>
+                        )}
+                        {confirmDeleteFolderId === selectedFolder.folder_id && (
+                          <div className="chat-folder-delete-confirm" role="alert">
+                            <p>Chats stay private and become unfiled.</p>
+                            <button type="button" onClick={() => setConfirmDeleteFolderId(null)}>Cancel</button>
+                            <button
+                              className="is-danger"
+                              type="button"
+                              onClick={() => void removeFolder(selectedFolder.folder_id)}
+                            >
+                              Delete folder
+                            </button>
+                          </div>
+                        )}
+                        {selectedFolder.summary ? (
+                          <p>{selectedFolder.summary}</p>
+                        ) : (
+                          <p>No folder summary yet. Complete a chat here to create one.</p>
+                        )}
+                      </section>
+                    )}
+
+                    <MemoryExplorer
+                      scope={selectedFolder ? 'folder' : 'user'}
+                      folderId={selectedFolder?.folder_id ?? null}
+                    />
 
                     <div className="chat-drawer-section-title">
                       <span>Recent chats</span>
@@ -493,6 +699,13 @@ const Chat = () => {
                                     onClick={() => setDrawerState('minimized')}
                                   >
                                     <span className="chat-history-item">{session.name}</span>
+                                    <span className="chat-session-meta">
+                                      {!session.memoryEnabled
+                                        ? 'Memory off'
+                                        : session.folderId !== null
+                                          ? folders.find(folder => folder.folder_id === session.folderId)?.name || 'Private folder'
+                                          : session.memoryMode === 'private' ? 'Private' : 'Global memory'}
+                                    </span>
                                   </NavLink>
                                   <button
                                     className="chat-session-edit-button"
@@ -524,6 +737,15 @@ const Chat = () => {
           </aside>
 
           <div className="chat-composer-dock" aria-hidden={chatDrawerState === 'expanded'}>
+            <ChatMemoryControls
+              settings={memorySettings}
+              folders={folders}
+              loading={isMemoryLoading}
+              error={memoryError}
+              onMemoryEnabledChange={enabled => void setMemoryEnabled(enabled)}
+              onPrivateChange={isPrivate => void setPrivate(isPrivate)}
+              onFolderChange={folderId => void setFolder(folderId)}
+            />
             {fileContextInfo && (
               <div className="chat-context-info">
                 {fileContextInfo}

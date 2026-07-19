@@ -291,6 +291,9 @@ class ChatOrchestrator:
         config: ModelRequestConfig,
         system_prompt: str | None,
         enable_tools: bool = True,
+        memory_enabled: bool = True,
+        memory_mode: str = "public",
+        folder_id: int | None = None,
     ) -> Iterator[ChatStreamEvent]:
         conversation = ConversationState(chat_id=chat_id, user_id=user_id)
         conversation.add_system_prompt(system_prompt)
@@ -316,6 +319,9 @@ class ChatOrchestrator:
                 run.transition(status)
                 snapshot = run.persistence_snapshot()
                 snapshot["new_ai_message"] = ai_message
+                snapshot["memory_enabled"] = memory_enabled
+                snapshot["memory_mode"] = memory_mode
+                snapshot["folder_id"] = folder_id
                 snapshot["artifacts"] = [
                     self._artifact_for_history(artifact) for artifact in list(run.artifacts)
                 ]

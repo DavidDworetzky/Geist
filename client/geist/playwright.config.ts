@@ -34,6 +34,7 @@ export default defineConfig({
               GEIST_DATABASE_PROVIDER: 'sqlite',
               SQLITE_DATABASE_PATH: `/tmp/geist-playwright-${process.pid}.sqlite3`,
               GEIST_E2E_BACKEND_PORT: String(backendPort),
+              GEIST_MEMORY_IDLE_SECONDS: '0',
             },
           },
         ]),

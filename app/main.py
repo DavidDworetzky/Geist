@@ -23,6 +23,7 @@ from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS, TOOL_USE_PROMPT
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
+from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
@@ -38,9 +39,13 @@ from app.models.database.chat_session import (
 )
 from app.models.database.database import SessionLocal
 from app.models.database.geist_user import get_default_user
+from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentFactoryConfig
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
+from app.services.memory_context import build_memory_context
+from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
+from app.services.memory_service import get_chat_memory_settings
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 
@@ -138,10 +143,44 @@ def model_request_config(params: CompleteTextParams) -> ModelRequestConfig:
     )
 
 
-def chat_system_prompt(enable_tools: bool) -> str:
-    if not enable_tools:
-        return DEFAULT_PROMPT
-    return f"{DEFAULT_PROMPT}\n\n{TOOL_USE_PROMPT}"
+def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
+    sections = [DEFAULT_PROMPT]
+    if enable_tools:
+        sections.append(TOOL_USE_PROMPT)
+    if memory_context:
+        sections.append(memory_context)
+    return "\n\n".join(sections)
+
+
+def resolved_memory_settings(
+    params: CompleteTextParams,
+    chat_id: int | None,
+    user_id: int,
+) -> tuple[bool, str, int | None]:
+    if chat_id is not None:
+        current = get_chat_memory_settings(user_id, chat_id)
+        if current is not None:
+            return (
+                bool(current["memory_enabled"]),
+                str(current["memory_mode"]),
+                current["folder_id"],
+            )
+    folder_id = params.folder_id
+    memory_mode = params.memory_mode if params.memory_mode in {"public", "private"} else "public"
+    if folder_id is not None:
+        with SessionLocal() as session:
+            owned_folder = (
+                session.query(MemoryFolder)
+                .filter(
+                    MemoryFolder.folder_id == folder_id,
+                    MemoryFolder.user_id == user_id,
+                )
+                .first()
+            )
+        if owned_folder is None:
+            raise HTTPException(status_code=422, detail="Memory folder not found")
+        memory_mode = "private"
+    return params.memory_enabled, memory_mode, folder_id
 
 
 def run_chat_completion(
@@ -150,6 +189,16 @@ def run_chat_completion(
     agent=None,
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
+    user_id = int(get_default_user().user_id)
+    memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, user_id)
+    memory_context = build_memory_context(
+        user_id,
+        params.prompt,
+        chat_session_id=chat_id,
+        memory_enabled=memory_enabled,
+        memory_mode=memory_mode,
+        folder_id=folder_id,
+    )
     if not hasattr(active_agent, "stream_model_turn"):
         completion = active_agent.complete_text(
             prompt=params.prompt,
@@ -171,11 +220,14 @@ def run_chat_completion(
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
-        user_id=get_default_user().user_id,
+        user_id=user_id,
         chat_id=chat_id,
         config=model_request_config(params),
-        system_prompt=chat_system_prompt(params.enable_tools),
+        system_prompt=chat_system_prompt(params.enable_tools, memory_context),
         enable_tools=params.enable_tools,
+        memory_enabled=memory_enabled,
+        memory_mode=memory_mode,
+        folder_id=folder_id,
     )
 
 
@@ -183,14 +235,29 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
         if hasattr(agent, "stream_model_turn"):
+            user_id = int(get_default_user().user_id)
+            memory_enabled, memory_mode, folder_id = resolved_memory_settings(
+                params, chat_id, user_id
+            )
+            memory_context = build_memory_context(
+                user_id,
+                params.prompt,
+                chat_session_id=chat_id,
+                memory_enabled=memory_enabled,
+                memory_mode=memory_mode,
+                folder_id=folder_id,
+            )
             for event in chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,
-                user_id=get_default_user().user_id,
+                user_id=user_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
-                system_prompt=chat_system_prompt(params.enable_tools),
+                system_prompt=chat_system_prompt(params.enable_tools, memory_context),
                 enable_tools=params.enable_tools,
+                memory_enabled=memory_enabled,
+                memory_mode=memory_mode,
+                folder_id=folder_id,
             ):
                 yield sse_event(event.event, event.payload)
             return
@@ -390,6 +457,7 @@ def create_app():
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
+    app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
 
     @app.on_event("startup")
     def start_job_worker():
