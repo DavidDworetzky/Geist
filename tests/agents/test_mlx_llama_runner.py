@@ -63,7 +63,10 @@ def test_device_config_overrides_environment(monkeypatch):
     fake_module = _backend_module(module_name, "LlamaMLX", backend_class)
     with patch.dict(sys.modules, {module_name: fake_module}):
         runner = MLXLlamaRunner()
-        runner.load("model-id", {"implementation": "manual"})
+        runner.load(
+            "model-id",
+            {"implementation": "manual", "weights_dir": "/models/llama"},
+        )
     assert runner.implementation == "manual"
 
 
@@ -71,6 +74,39 @@ def test_unknown_implementation_is_rejected():
     runner = MLXLlamaRunner()
     with pytest.raises(ValueError, match="Unknown MLX implementation"):
         runner.load("model-id", {"implementation": "other"})
+
+
+def test_managed_snapshot_is_required_when_no_explicit_weights_path():
+    manager = MagicMock()
+    artifact = MagicMock(id="managed-mlx", backend="mlx_llama")
+    manager.require_installed.return_value = (artifact, "/models/managed/snapshot")
+    module_name = "app.services.local_models"
+    fake_module = ModuleType(module_name)
+    fake_module.get_local_model_manager = MagicMock(return_value=manager)
+
+    with patch.dict(sys.modules, {module_name: fake_module}):
+        resolved = MLXLlamaRunner._resolve_weights_dir(
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            {"artifact_id": "managed-mlx"},
+        )
+
+    assert resolved == "/models/managed/snapshot"
+    manager.require_installed.assert_called_once_with("managed-mlx")
+
+
+def test_mlx_runner_rejects_managed_gguf_artifact():
+    manager = MagicMock()
+    artifact = MagicMock(id="managed-gguf", backend="llama_server")
+    manager.require_installed.return_value = (artifact, "/models/model.gguf")
+    module_name = "app.services.local_models"
+    fake_module = ModuleType(module_name)
+    fake_module.get_local_model_manager = MagicMock(return_value=manager)
+
+    with (
+        patch.dict(sys.modules, {module_name: fake_module}),
+        pytest.raises(ValueError, match="not compatible with the MLX runner"),
+    ):
+        MLXLlamaRunner._resolve_weights_dir("model-id", {"artifact_id": "managed-gguf"})
 
 
 def test_generation_config_and_response_contract():

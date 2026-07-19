@@ -7,8 +7,24 @@ of growing model-name conditionals throughout the application.
 from __future__ import annotations
 
 import os
+import platform
 import re
 from dataclasses import dataclass
+
+
+MLX_DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+GGUF_DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B"
+
+
+def default_local_model_id() -> str:
+    """Keep the existing MLX default on Apple silicon; use curated GGUF elsewhere."""
+
+    if platform.system().lower() == "darwin" and platform.machine().lower() in {
+        "arm64",
+        "aarch64",
+    }:
+        return MLX_DEFAULT_LOCAL_MODEL
+    return GGUF_DEFAULT_LOCAL_MODEL
 
 
 @dataclass(frozen=True)

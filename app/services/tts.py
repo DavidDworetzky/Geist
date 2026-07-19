@@ -516,7 +516,7 @@ class Qwen3TTSProvider(TTSProvider):
         audio_np = audio_tensor.cpu().numpy()
         audio_np = np.clip(audio_np, -1.0, 1.0)
         audio_int16 = (audio_np * 32767).astype(np.int16)
-        return audio_int16.tobytes()
+        return bytes(audio_int16.tobytes())
 
     def _stream_native(self, text: str) -> Iterator[bytes] | None:
         self._ensure_initialized()

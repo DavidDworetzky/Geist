@@ -23,7 +23,7 @@ The Geist Architecture consists of three main components: a world model, a task 
 
 Geist now supports a flexible agent architecture with two main agent types:
 
-- **LocalAgent**: Executes local MLX-backed models with pluggable runners (MLX, vLLM)
+- **LocalAgent**: Executes local models with pluggable MLX, llama.cpp, and Transformers runners
 - **OnlineAgent**: Routes requests to OpenAI-compatible HTTP endpoints (OpenAI, Anthropic, Groq, Grok)
 
 Both agents inherit from `BaseAgent` and support:
@@ -61,6 +61,8 @@ Optional extras:
 ```bash
 uv sync --extra postgres   # psycopg2 driver, for GEIST_DATABASE_PROVIDER=postgresql
 uv sync --extra voice      # sounddevice/sphn for the voice client tooling
+uv sync --extra local-transformers  # Torch/Transformers local runner (Docker/Linux)
+uv sync --extra local-mlx  # Apple-silicon MLX local runner
 ```
 
 Note for Linux CPU runs: MLX and Moshi can JIT-compile kernels with the system compiler and fail on some compiler/architecture combinations. Docker defaults to portable interpreted paths with `MLX_DISABLE_COMPILE=1` and `NO_TORCH_COMPILE=1`; native runs can set the same values when needed. (MLX inference is primarily intended for Apple silicon.)
@@ -100,10 +102,15 @@ GEIST_DATABASE_PROVIDER=postgresql
 
 Tests and alternate application entry points can inject `DatabaseConfig(provider=..., database_url=...)` directly into `configure_database()` without changing environment variables.
 
-2. Copy any model weights into app/models/weights/MODEL_NAME.
-    - Currently supported Models: llama_3_1
-    - This can be run from python scripts/download_models.py 
-    - If the download script doesn't work, direct download links can be found at : https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/tree/main
+2. Start Geist and open the Models page to install local weights.
+    - Windows x64 and Linux x64 download the pinned Qwen3 4B Q4_K_M GGUF or
+      import an existing GGUF, then run it through managed `llama-server`.
+    - macOS ARM64 downloads the pinned Meta Llama 3.1 8B snapshot and keeps the
+      MLX backend. Accept the model license and set `HF_TOKEN` or
+      `HUGGING_FACE_HUB_TOKEN` for the gated repository.
+    - Downloads are resumable, cancellable, verified before inference, and
+      stored beneath the user-writable `GEIST_MODEL_HOME`/data directory.
+      `LOCAL_WEIGHTS_DIR` remains available for legacy MLX installations.
 
 
 client/geist/.env settings:

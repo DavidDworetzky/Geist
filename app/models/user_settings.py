@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agents.model_catalog import default_local_model_id
+
 
 class UserSettingsBase(BaseModel):
     """Base user settings model."""
@@ -15,7 +17,11 @@ class UserSettingsBase(BaseModel):
         default="local", description="Default agent type (local or online)"
     )
     default_local_model: str = Field(
-        default="meta-llama/Meta-Llama-3.1-8B-Instruct", description="Default local model"
+        default_factory=default_local_model_id, description="Default local model"
+    )
+    default_local_artifact_id: str | None = Field(
+        default=None,
+        description="Concrete managed artifact selected for the default local model",
     )
     default_online_model: str = Field(default="gpt-4", description="Default online model")
     default_online_provider: str = Field(default="openai", description="Default online provider")
@@ -45,6 +51,7 @@ class UserSettingsUpdate(BaseModel):
 
     default_agent_type: str | None = None
     default_local_model: str | None = None
+    default_local_artifact_id: str | None = None
     default_online_model: str | None = None
     default_online_provider: str | None = None
     default_file_archives: list[int] | None = None
@@ -77,6 +84,7 @@ class AgentConfigRequest(BaseModel):
     model: str | None = None  # Override default
     endpoint: str | None = None  # For online agents
     runner_type: str | None = None  # For local agents
+    artifact_id: str | None = None  # Concrete managed local artifact override
     max_tokens: int | None = None
     temperature: float | None = None
     top_p: float | None = None
@@ -106,13 +114,14 @@ class AgentFactoryConfig(BaseModel):
     endpoint: str | None = None
     api_key: str | None = None
     runner_type: str | None = None
+    device_config: dict[str, Any] = Field(default_factory=dict)
     backup_providers: list[BackupProviderConfig] = []
     generation_config: dict[str, Any] = {}
 
     @classmethod
     def from_user_settings(
         cls, settings: UserSettingsResponse, overrides: AgentConfigRequest | None = None
-    ):
+    ) -> "AgentFactoryConfig":
         """Create agent factory config from user settings with optional overrides."""
         overrides = overrides or AgentConfigRequest()
 
@@ -123,11 +132,14 @@ class AgentFactoryConfig(BaseModel):
             # Leave unset so AgentFactory can select a backend from catalog
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type
+            artifact_id = overrides.artifact_id or settings.default_local_artifact_id
+            device_config = {"artifact_id": artifact_id} if artifact_id else {}
             endpoint = None
             api_key = None
         else:  # online
             model = overrides.model or settings.default_online_model
             runner_type = None
+            device_config = {}
             # Anthropic is not OpenAI wire-compatible. Other providers use the
             # generic provider catalog and the existing OpenAI-compatible agent.
             if settings.default_online_provider == "anthropic":
@@ -166,6 +178,7 @@ class AgentFactoryConfig(BaseModel):
             endpoint=endpoint,
             api_key=api_key,
             runner_type=runner_type,
+            device_config=device_config,
             backup_providers=backup_providers,
             generation_config=generation_config,
         )

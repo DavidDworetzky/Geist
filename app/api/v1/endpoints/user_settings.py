@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from agents.model_catalog import default_local_model_id
 from app.models.database.geist_user import get_default_user
 from app.models.user_settings import AgentConfigRequest, UserSettingsResponse, UserSettingsUpdate
 from app.services.user_settings_service import UserSettingsService
@@ -86,6 +87,8 @@ async def update_user_settings(
         return settings
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error updating user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -112,6 +115,8 @@ async def update_user_settings_by_id(
         return settings
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error updating user settings for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -128,7 +133,8 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
         # Reset by updating with all default values
         default_updates = UserSettingsUpdate(
             default_agent_type="local",
-            default_local_model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            default_local_model=default_local_model_id(),
+            default_local_artifact_id=None,
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],

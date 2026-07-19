@@ -1,6 +1,7 @@
 """Tests for generic model/provider catalog and runner routing."""
 import asyncio
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,10 +11,22 @@ from agents.model_catalog import (
     MODEL_SPECS,
     PROVIDERS,
     ProviderSpec,
+    default_local_model_id,
     get_model_spec,
     get_provider_endpoint,
     infer_model_spec,
 )
+
+
+def test_platform_default_preserves_apple_silicon_mlx_and_uses_gguf_on_windows():
+    with (
+        patch("agents.model_catalog.platform.system", return_value="Darwin"),
+        patch("agents.model_catalog.platform.machine", return_value="arm64"),
+    ):
+        assert default_local_model_id() == "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+    with patch("agents.model_catalog.platform.system", return_value="Windows"):
+        assert default_local_model_id() == "Qwen/Qwen3-4B"
 
 
 def test_catalog_covers_requested_families():
@@ -59,12 +72,14 @@ def test_heavyweight_models_are_server_backed():
     "openai/gpt-oss-20b",
 ])
 def test_standard_local_models_use_generic_runner(model_id):
-    assert AgentFactory._infer_runner_type(model_id) == "transformers"
+    expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+    assert AgentFactory._infer_runner_type(model_id) == expected
 
 
 def test_unknown_huggingface_model_uses_generic_runner():
-    assert AgentFactory._infer_runner_type("new-org/future-causal-lm") == "transformers"
-    assert AgentFactory._infer_runner_type("new-org/future-8B-instruct") == "transformers"
+    expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+    assert AgentFactory._infer_runner_type("new-org/future-causal-lm") == expected
+    assert AgentFactory._infer_runner_type("new-org/future-8B-instruct") == expected
 
 
 @pytest.mark.parametrize(
@@ -130,9 +145,10 @@ def test_explicit_runner_argument_precedes_environment_override():
 
 
 def test_existing_llama_id_preserves_optimized_runner():
+    expected = "llama_server" if sys.platform in {"win32", "linux"} else "mlx_llama"
     assert AgentFactory._infer_runner_type(
         "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    ) == "mlx_llama"
+    ) == expected
 
 
 @pytest.mark.parametrize("model_id", [
@@ -198,6 +214,7 @@ def test_lazy_registry_does_not_import_every_backend():
     raw_values = get_registry().list()
     assert isinstance(raw_values["mlx_llama"], tuple)
     assert isinstance(raw_values["transformers"], tuple)
+    assert isinstance(raw_values["llama_server"], tuple)
 
 
 def test_model_api_metadata_contains_performance_fields():

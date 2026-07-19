@@ -7,6 +7,12 @@ from typing import Any
 from adapters.base_adapter import BaseAdapter
 
 
+# MMS is a voice-only InertAdapter, not a legacy BaseAdapter tool. Importing it
+# during generic tool discovery would make every text AgentContext depend on
+# the optional Torch/Transformers voice stack.
+_DISCOVERY_EXCLUDED_FILES = frozenset({"mms_adapter.py"})
+
+
 @dataclass
 class AdapterWrapper:
     name: str
@@ -18,7 +24,9 @@ def _get_adapter_files() -> list[str]:
     adapter_classes = [
         filename
         for filename in os.listdir(directory)
-        if filename.endswith(".py") and not filename.startswith("__")
+        if filename.endswith(".py")
+        and not filename.startswith("__")
+        and filename not in _DISCOVERY_EXCLUDED_FILES
     ]
     return adapter_classes
 

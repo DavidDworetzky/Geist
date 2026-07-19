@@ -2,14 +2,16 @@ import dataclasses
 import json
 import logging
 import os
+import threading
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from adapters.mms_adapter import MMSAdapter
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
@@ -17,6 +19,7 @@ from agents.agent_type import AgentType
 # Initialize agent architecture registry
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
+from agents.model_catalog import default_local_model_id
 from agents.models.agent_completion import AgentCompletion
 from agents.models.tool_calling import ModelRequestConfig, ToolContext
 from agents.online_agent import OnlineAgent
@@ -28,6 +31,7 @@ from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
+from app.loopback_security import install_loopback_security
 from app.models.completion import CompleteTextParams, InitializeAgentParams
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
@@ -38,11 +42,13 @@ from app.models.database.chat_session import (
 )
 from app.models.database.database import SessionLocal
 from app.models.database.geist_user import get_default_user
-from app.models.user_settings import AgentFactoryConfig
+from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
+from app.runtime_config import application_version
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
+from app.static_web import install_spa
 
 
 # Register all available runners at startup
@@ -52,7 +58,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 
 load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
-DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+DEFAULT_LOCAL_MODEL = default_local_model_id()
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
@@ -63,6 +69,12 @@ agent_cache = {
     AgentType.HTTPAGENT: None,
     AgentType.LOCALAGENT: None,
 }
+
+_LOCAL_AGENT_TYPES = (AgentType.LLAMA, AgentType.LOCALAGENT)
+_agent_cache_signatures: dict[AgentType, str | None] = {
+    agent_type: None for agent_type in agent_cache
+}
+_agent_cache_lock = threading.RLock()
 
 # mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
@@ -94,10 +106,125 @@ def get_envs() -> dict[str, str]:
 
 
 def get_or_create_agent(agent_type: AgentType):
-    if agent_cache[agent_type] is None:
-        agent_cache[agent_type] = agent_mappings[agent_type]()
-        logger.info(f"Created new {agent_type} agent")
-    return agent_cache[agent_type]
+    if agent_type in _LOCAL_AGENT_TYPES:
+        return _get_or_create_local_agent(agent_type)
+
+    with _agent_cache_lock:
+        if agent_cache[agent_type] is None:
+            agent_cache[agent_type] = agent_mappings[agent_type]()
+            logger.info("Created new %s agent", agent_type)
+        return agent_cache[agent_type]
+
+
+def _get_or_create_local_agent(agent_type: AgentType):
+    with _agent_cache_lock:
+        requested_agent = agent_cache[agent_type]
+        requested_signature = _agent_cache_signatures[agent_type]
+
+        # Tests and older integrations sometimes inject an agent directly into
+        # the public cache. Preserve that explicit override without claiming it
+        # was created from the current persisted settings.
+        other_local_agents = [
+            agent_cache[local_type]
+            for local_type in _LOCAL_AGENT_TYPES
+            if local_type != agent_type and agent_cache[local_type] is not None
+        ]
+        if (
+            requested_agent is not None
+            and requested_signature is None
+            and all(other_agent is requested_agent for other_agent in other_local_agents)
+        ):
+            return requested_agent
+
+        factory_config = _get_local_agent_factory_config()
+        signature = _local_agent_configuration_signature(factory_config)
+
+        local_entries = [
+            (cached_agent, _agent_cache_signatures[local_type])
+            for local_type in _LOCAL_AGENT_TYPES
+            if (cached_agent := agent_cache[local_type]) is not None
+        ]
+        if local_entries:
+            cached_agent = local_entries[0][0]
+            if all(
+                entry_agent is cached_agent and entry_signature == signature
+                for entry_agent, entry_signature in local_entries
+            ):
+                _set_local_agent_cache(cached_agent, signature)
+                return cached_agent
+
+        stale_agents = _clear_local_agent_cache()
+        for stale_agent in stale_agents:
+            _phase_out_agent_safely(stale_agent)
+
+        new_agent = _create_local_agent(factory_config)
+        _set_local_agent_cache(new_agent, signature)
+        logger.info(
+            "Created local agent for model %s (artifact=%s, runner=%s)",
+            factory_config.model,
+            factory_config.device_config.get("artifact_id"),
+            factory_config.runner_type or "auto",
+        )
+        return new_agent
+
+
+def _get_local_agent_factory_config() -> AgentFactoryConfig:
+    settings = UserSettingsService.get_default_user_settings()
+    return AgentFactoryConfig.from_user_settings(
+        settings,
+        AgentConfigRequest(agent_type="local"),
+    )
+
+
+def _local_agent_configuration_signature(factory_config: AgentFactoryConfig) -> str:
+    return json.dumps(
+        {
+            "model": factory_config.model or DEFAULT_LOCAL_MODEL,
+            "runner_type": factory_config.runner_type,
+            "device_config": factory_config.device_config,
+            "generation_config": factory_config.generation_config,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _set_local_agent_cache(agent, signature: str) -> None:
+    for local_type in _LOCAL_AGENT_TYPES:
+        agent_cache[local_type] = agent
+        _agent_cache_signatures[local_type] = signature
+
+
+def _clear_local_agent_cache() -> list[Any]:
+    stale_agents: list[Any] = []
+    seen_ids: set[int] = set()
+    for local_type in _LOCAL_AGENT_TYPES:
+        cached_agent = agent_cache[local_type]
+        if cached_agent is not None and id(cached_agent) not in seen_ids:
+            stale_agents.append(cached_agent)
+            seen_ids.add(id(cached_agent))
+        agent_cache[local_type] = None
+        _agent_cache_signatures[local_type] = None
+    return stale_agents
+
+
+def _phase_out_agent_safely(agent) -> None:
+    try:
+        agent.phase_out()
+    except Exception:
+        logger.exception("Failed to phase out a stale local agent")
+        for method_name in ("_cleanup_resources", "terminate_subprocess"):
+            cleanup = getattr(agent, method_name, None)
+            if not callable(cleanup):
+                continue
+            try:
+                cleanup()
+            except Exception:
+                logger.exception(
+                    "Failed to run %s for a stale local agent",
+                    method_name,
+                )
 
 
 def completion_to_response(completion) -> AgentCompletion:
@@ -243,8 +370,26 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
 
 
 # App factory function
-def create_app():
-    app = FastAPI()
+def create_app(
+    web_dir: str | Path | None = None,
+    *,
+    loopback_only: bool = False,
+):
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            app.state.job_worker = start_worker()
+            app.state.ready = True
+            yield
+        finally:
+            app.state.ready = False
+            _stop_runtime_services()
+
+    app = FastAPI(lifespan=lifespan)
+    if loopback_only:
+        install_loopback_security(app)
+    app.state.ready = False
+    app.state.job_worker = None
 
     # agent routes, for agentic flows.
     agent_router = APIRouter()
@@ -377,7 +522,7 @@ def create_app():
     # Adapter routes using adapter_router
     @adapter_router.post("/speech_to_text")
     async def create_upload_file(
-        file: UploadFile = File(...), adapter: MMSAdapter = Depends(get_speech_to_text_client)
+        file: UploadFile = File(...), adapter: Any = Depends(get_speech_to_text_client)
     ):
         return adapter.transcribe(file)
 
@@ -391,17 +536,40 @@ def create_app():
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
 
-    @app.on_event("startup")
-    def start_job_worker():
-        start_worker()
+    @app.get("/health", include_in_schema=False)
+    def health():
+        payload, status_code = _readiness_payload(app, ready_status="ok")
+        return JSONResponse(payload, status_code=status_code)
 
-    @app.on_event("shutdown")
-    def stop_job_worker():
-        stop_worker()
+    @app.get("/health/live", include_in_schema=False)
+    def health_live():
+        return {
+            "status": "live",
+            "version": application_version(),
+            "checks": {"process": "ok"},
+        }
 
-    @app.get("/")
-    def version():
-        return {"Version": f"{api_version}"}
+    @app.get("/health/ready", include_in_schema=False)
+    def health_ready():
+        payload, status_code = _readiness_payload(app, ready_status="ready")
+        return JSONResponse(payload, status_code=status_code)
+
+    @app.get("/api/v1/system", tags=["system"])
+    def system_info():
+        return {
+            "version": application_version(),
+            "apiVersion": f"{api_version}",
+            "spa": web_dir is not None,
+        }
+
+    if web_dir is None:
+
+        @app.get("/")
+        def version():
+            return {"Version": f"{api_version}"}
+
+    else:
+        app.state.web_dir = install_spa(app, web_dir)
 
     return app
 
@@ -439,15 +607,18 @@ def get_llama_agent():
 
 
 def get_local_agent():
+    return _create_local_agent(_get_local_agent_factory_config())
+
+
+def _create_local_agent(factory_config: AgentFactoryConfig):
     agent_context = get_default_agent_context()
-    # Get user settings to determine local model configuration
-    settings = UserSettingsService.get_default_user_settings()
-    factory_config = AgentFactoryConfig.from_user_settings(settings)
-    model_id = settings.default_local_model or DEFAULT_LOCAL_MODEL
+    model_id = factory_config.model or DEFAULT_LOCAL_MODEL
     return AgentFactory.create_agent(
         agent_type="local",
         agent_context=agent_context,
         model=model_id,
+        runner_type=factory_config.runner_type,
+        device_config=factory_config.device_config,
         generation_config=factory_config.generation_config,
     )
 
@@ -517,7 +688,59 @@ def get_default_agent_context():
 
 
 def get_speech_to_text_client():
+    from adapters.mms_adapter import MMSAdapter
+
     return MMSAdapter()
+
+
+def _readiness_payload(app: FastAPI, *, ready_status: str) -> tuple[dict[str, Any], int]:
+    database_ready = _database_is_ready()
+    lifespan_ready = bool(app.state.ready)
+    ready = lifespan_ready and database_ready
+    return (
+        {
+            "status": ready_status if ready else "not_ready",
+            "version": application_version(),
+            "checks": {
+                "lifespan": "ok" if lifespan_ready else "not_ready",
+                "database": "ok" if database_ready else "not_ready",
+            },
+        },
+        200 if ready else 503,
+    )
+
+
+def _database_is_ready() -> bool:
+    from sqlalchemy import text
+
+    try:
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        logger.exception("Database readiness check failed")
+        return False
+
+
+def _stop_runtime_services() -> None:
+    try:
+        stop_worker()
+    except Exception:
+        logger.exception("Failed to stop the job worker")
+
+    try:
+        from app.services.local_models import shutdown_local_model_manager
+
+        shutdown_local_model_manager()
+    except Exception:
+        logger.exception("Failed to stop the local-model manager")
+
+    try:
+        from agents.architectures.llama_server_process import shutdown_llama_server_manager
+
+        shutdown_llama_server_manager()
+    except Exception:
+        logger.exception("Failed to stop the llama-server manager")
 
 
 # Initialize and run the app
