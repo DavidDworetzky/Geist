@@ -57,6 +57,28 @@ jest.mock('../Hooks/useUserSettings', () => ({
   default: () => ({ settings: null }),
 }));
 
+jest.mock('../Hooks/useChatMemory', () => ({
+  __esModule: true,
+  default: () => ({
+    settings: {
+      memory_enabled: true,
+      memory_mode: 'public',
+      folder_id: null,
+      effective_scope: 'public',
+      status: 'ready',
+    },
+    folders: [],
+    loading: false,
+    error: null,
+    createFolder: jest.fn(),
+    renameFolder: jest.fn(),
+    deleteFolder: jest.fn(),
+    setMemoryEnabled: jest.fn(),
+    setPrivate: jest.fn(),
+    setFolder: jest.fn(),
+  }),
+}));
+
 jest.mock('react-router-dom', () => ({
   NavLink: ({ to, children, ...props }: any) => <a href={to} {...props}>{children}</a>,
   useNavigate: () => mockNavigate,
