@@ -3,11 +3,12 @@ import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
+import ProviderKeysSection from './Components/ProviderKeysSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer';
+type Tab = 'general' | 'models' | 'providers' | 'generation' | 'rag' | 'ui' | 'developer';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -110,6 +111,7 @@ const Settings: React.FC = () => {
   const tabs = [
     { id: 'general' as Tab, label: 'General' },
     { id: 'models' as Tab, label: 'Models and Providers' },
+    { id: 'providers' as Tab, label: 'API Keys' },
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'ui' as Tab, label: 'Appearance' },
@@ -216,6 +218,8 @@ const Settings: React.FC = () => {
             }}
           />
         )}
+
+        {activeTab === 'providers' && <ProviderKeysSection />}
 
         {activeTab === 'generation' && (
           <GenerationParamsSection

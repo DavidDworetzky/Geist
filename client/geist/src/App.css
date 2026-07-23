@@ -2305,3 +2305,27 @@ select.form-control {
     flex-direction: column;
   }
 }
+
+.local-weights-panel {
+  margin-bottom: 16px;
+}
+
+.local-weights-panel .notice {
+  margin-bottom: 10px;
+}
+
+.downloaded-pill {
+  border-color: var(--geist-color-accent);
+  color: var(--geist-color-text);
+}
+
+.detected-weights {
+  margin-top: 12px;
+}
+
+.detected-weights h4 {
+  margin: 0 0 8px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 650;
+}

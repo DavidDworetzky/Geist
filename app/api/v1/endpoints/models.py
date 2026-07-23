@@ -4,8 +4,8 @@ API endpoints for model discovery and listing.
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from agents.architectures.registry import (
     get_all_models,
@@ -16,6 +16,8 @@ from agents.architectures.registry import (
     provider_from_string,
     provider_to_string,
 )
+from app.models.database.geist_user import get_default_user
+from app.services.model_downloads import enqueue_model_download, local_model_statuses
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,59 @@ class ModelsListResponse(BaseModel):
     last_updated: datetime | None
 
 
+class LocalModelStatus(BaseModel):
+    """Download state of one catalog model in the packed weights folder."""
+    id: str
+    name: str
+    family: str | None
+    backend: str | None
+    gated: bool
+    parameter_count: str | None
+    downloaded: bool
+    weights_path: str
+    size_bytes: int
+    download_status: str | None = None
+    download_job_id: int | None = None
+    download_error: str | None = None
+
+
+class DetectedWeightsDirectory(BaseModel):
+    """A weights directory present on disk but not mapped to a catalog model."""
+    directory: str
+    weights_path: str
+    size_bytes: int
+
+
+class LocalModelsResponse(BaseModel):
+    """Local weight inventory for the packed weights folder."""
+    models: list[LocalModelStatus]
+    detected_directories: list[DetectedWeightsDirectory]
+    weights_root: str
+
+
+class ModelDownloadRequest(BaseModel):
+    """Request body for queueing a model weight download."""
+    model_id: str = Field(min_length=1, max_length=512)
+    revision: str | None = Field(default=None, max_length=256)
+    force: bool = False
+
+
+class ModelDownloadResponse(BaseModel):
+    """The queued (or already active) download job."""
+    job_id: int
+    model_id: str
+    status: str
+    error: str | None = None
+
+
+def get_current_user():
+    """
+    Get current user (placeholder - should integrate with actual auth system).
+    For now, returns the default user.
+    """
+    return get_default_user()
+
+
 @router.get("/", response_model=ModelsListResponse)
 async def get_available_models():
     """
@@ -78,6 +133,49 @@ async def get_available_models():
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/local", response_model=LocalModelsResponse)
+async def get_local_models(current_user = Depends(get_current_user)):
+    """
+    Get downloadable catalog models with their packed-weights state, plus any
+    extra weight directories detected on disk.
+    """
+    try:
+        return local_model_statuses(user_id=current_user.user_id)
+    except Exception as e:
+        logger.error(f"Error getting local model statuses: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.post("/download", response_model=ModelDownloadResponse, status_code=202)
+async def download_model(
+    request: ModelDownloadRequest,
+    current_user = Depends(get_current_user),
+):
+    """
+    Queue a background download of one local catalog model from Hugging Face
+    into the packed weights folder. Poll /local for progress.
+    """
+    try:
+        job = enqueue_model_download(
+            request.model_id,
+            user_id=current_user.user_id,
+            revision=request.revision,
+            force=request.force,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error queueing download for '{request.model_id}': {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+    return ModelDownloadResponse(
+        job_id=job["job_id"],
+        model_id=(job.get("payload") or {}).get("model_id", request.model_id),
+        status=job["status"],
+        error=job.get("error"),
+    )
 
 
 @router.get("/provider/{provider}", response_model=list[ModelResponse])
