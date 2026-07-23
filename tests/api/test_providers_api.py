@@ -2,6 +2,7 @@
 import importlib
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.models.database.database import (
@@ -13,6 +14,15 @@ from app.models.database.database import (
 )
 from app.models.database.database_config import DatabaseConfig
 from app.models.database.geist_user import GeistUser
+
+
+def _providers_app() -> FastAPI:
+    """Mount just the providers router so tests run without torch-heavy app.main."""
+    from app.api.v1.endpoints.providers import router as providers_router
+
+    app = FastAPI()
+    app.include_router(providers_router, prefix="/api/v1/providers", tags=["providers"])
+    return app
 
 
 @pytest.fixture()
@@ -38,9 +48,8 @@ def providers_client(tmp_path, monkeypatch):
             )
         )
         session.commit()
-    from app.main import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(_providers_app()) as client:
         yield client
     Session.remove()
     Base.metadata.drop_all(bind=engine)
