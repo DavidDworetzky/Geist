@@ -3,6 +3,7 @@ import importlib
 import os
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.models.database.database import (
@@ -53,9 +54,12 @@ def downloads_env(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def downloads_client(downloads_env):
-    from app.main import create_app
+    # Mount just the models router so tests run without torch-heavy app.main.
+    from app.api.v1.endpoints.models import router as models_router
 
-    with TestClient(create_app()) as client:
+    app = FastAPI()
+    app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
+    with TestClient(app) as client:
         yield client
 
 
