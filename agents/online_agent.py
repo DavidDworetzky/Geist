@@ -121,7 +121,12 @@ class OnlineAgent(BaseAgent):
         )
 
     def _get_api_key_from_env(self) -> str | None:
-        """Get provider-specific API key from environment variables based on the endpoint."""
+        """Resolve the endpoint's API key: stored credential first, then environment."""
+        provider_id = self._provider_id_for_base_url()
+        if provider_id:
+            stored = self._get_stored_api_key(provider_id)
+            if stored:
+                return stored
         for provider in PROVIDERS.values():
             if provider.base_url and provider.base_url.rstrip("/") in self.base_url:
                 return os.getenv(provider.api_key_env)
@@ -134,6 +139,38 @@ class OnlineAgent(BaseAgent):
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
         return None
+
+    def _provider_id_for_base_url(self) -> str | None:
+        """Map this agent's endpoint to a managed provider ID."""
+        for provider in PROVIDERS.values():
+            if provider.base_url and provider.base_url.rstrip("/") in self.base_url:
+                return provider.id
+        if "openai.com" in self.base_url:
+            return "openai"
+        if "anthropic" in self.base_url:
+            return "anthropic"
+        if "groq.com" in self.base_url:
+            return "groq"
+        if "x.ai" in self.base_url:
+            return "xai"
+        return None
+
+    @staticmethod
+    def _get_stored_api_key(provider_id: str) -> str | None:
+        """
+        Look up a key saved through the Settings UI.
+
+        Imported lazily and swallowed on failure so agents constructed without
+        an application database (unit tests, scripts) keep working.
+        """
+        try:
+            from app.models.database.geist_user import get_default_user
+            from app.models.database.provider_credential import get_provider_credential
+
+            credential = get_provider_credential(get_default_user().user_id, provider_id)
+            return credential.api_key if credential else None
+        except Exception:
+            return None
 
     def _make_request(
         self, payload: dict[str, Any], use_backup: bool = False, backup_index: int = 0

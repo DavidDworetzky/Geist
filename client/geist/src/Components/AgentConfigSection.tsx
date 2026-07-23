@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import SettingsSelect from './SettingsSelect';
 import { useAvailableModels } from '../Hooks/useAvailableModels';
+import { useLocalModels } from '../Hooks/useLocalModels';
 
 interface AgentConfigSectionProps {
   agentType: string;
@@ -41,11 +42,25 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
     loading: modelsLoading,
     providers,
   } = useAvailableModels();
+  const { localModels } = useLocalModels();
+
+  const downloadedModelIds = useMemo(
+    () => new Set(localModels.filter(m => m.downloaded).map(m => m.id)),
+    [localModels]
+  );
 
   const localModelOptions = useMemo(() => {
     const offlineModels = getModelsForProvider('offline');
     if (offlineModels.length > 0) {
-      return offlineModels.map(m => ({ value: m.id, label: m.name }));
+      const options = offlineModels.map(m => ({
+        value: m.id,
+        label: downloadedModelIds.has(m.id) ? `${m.name} • downloaded` : m.name,
+        downloaded: downloadedModelIds.has(m.id)
+      }));
+      // Surface models already present in the weights folder first.
+      return options
+        .sort((a, b) => Number(b.downloaded) - Number(a.downloaded))
+        .map(({ value, label }) => ({ value, label }));
     }
 
     return [
@@ -53,7 +68,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
       { value: 'Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
       { value: 'Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
     ];
-  }, [getModelsForProvider]);
+  }, [getModelsForProvider, downloadedModelIds]);
 
   const onlineProviderOptions = useMemo(() => {
     const onlineProviders = providers.filter(p => p !== 'offline');
@@ -99,8 +114,10 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
           options={localModelOptions}
           onChange={onLocalModelChange}
           description={
-            getModelById(localModel)?.performance_note ||
-            'Select which local model to use for generation'
+            localModels.length > 0 && !downloadedModelIds.has(localModel)
+              ? 'Weights not downloaded yet - download them from the Models page.'
+              : getModelById(localModel)?.performance_note ||
+                'Select which local model to use for generation'
           }
         />
       ) : (

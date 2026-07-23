@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useAvailableModels, { ModelInfo } from './Hooks/useAvailableModels';
+import useLocalModels, { LocalModelStatus } from './Hooks/useLocalModels';
 import useUserSettings from './Hooks/useUserSettings';
 
 function formatNumber(value: number | null): string {
@@ -7,6 +8,36 @@ function formatNumber(value: number | null): string {
     return 'Unknown';
   }
   return new Intl.NumberFormat().format(value);
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes) {
+    return '—';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function downloadStateLabel(model: LocalModelStatus): string {
+  if (model.downloaded) {
+    return `Downloaded (${formatSize(model.size_bytes)})`;
+  }
+  if (model.download_status === 'queued') {
+    return 'Queued...';
+  }
+  if (model.download_status === 'running') {
+    return 'Downloading...';
+  }
+  if (model.download_status === 'failed') {
+    return 'Download failed';
+  }
+  return 'Not downloaded';
 }
 
 function capabilityLabels(model: ModelInfo): string[] {
@@ -18,8 +49,129 @@ function capabilityLabels(model: ModelInfo): string[] {
   return labels;
 }
 
+interface LocalWeightsPanelProps {
+  localModels: LocalModelStatus[];
+  detectedDirectories: { directory: string; weights_path: string; size_bytes: number }[];
+  weightsRoot: string | null;
+  localError: string | null;
+  onDownload: (modelId: string) => Promise<void>;
+}
+
+function LocalWeightsPanel({
+  localModels,
+  detectedDirectories,
+  weightsRoot,
+  localError,
+  onDownload,
+}: LocalWeightsPanelProps): JSX.Element {
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
+
+  const handleDownload = async (modelId: string) => {
+    try {
+      setPendingModel(modelId);
+      setActionError(null);
+      await onDownload(modelId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to start download');
+    } finally {
+      setPendingModel(null);
+    }
+  };
+
+  return (
+    <section className="provider-panel local-weights-panel">
+      <div className="provider-panel-header">
+        <div>
+          <h3>Local weights</h3>
+          <p>
+            {weightsRoot
+              ? `Download models from Hugging Face into ${weightsRoot}.`
+              : 'Download models from Hugging Face into the packed weights folder.'}
+          </p>
+        </div>
+      </div>
+
+      {localError && (
+        <div className="notice notice-warning">Local weight scan failed. {localError}</div>
+      )}
+      {actionError && <div className="notice notice-error">{actionError}</div>}
+
+      <div className="model-table">
+        <div className="model-table-row model-table-heading">
+          <span>Model</span>
+          <span>Params</span>
+          <span>Status</span>
+          <span>Action</span>
+        </div>
+        {localModels.map((model) => {
+          const active =
+            model.download_status === 'queued' || model.download_status === 'running';
+          return (
+            <div className="model-table-row" key={`local-${model.id}`}>
+              <span>
+                <strong>{model.name}</strong>
+                <small>{model.id}</small>
+              </span>
+              <span>{model.parameter_count ?? 'Unknown'}</span>
+              <span className="capability-list">
+                <span
+                  className={`capability-pill ${model.downloaded ? 'downloaded-pill' : ''}`}
+                  data-testid={`local-status-${model.id}`}
+                >
+                  {downloadStateLabel(model)}
+                </span>
+                {model.gated && <span className="capability-pill">Gated</span>}
+              </span>
+              <span>
+                {!model.downloaded && (
+                  <button
+                    className="button button-secondary button-small"
+                    type="button"
+                    disabled={active || pendingModel === model.id}
+                    onClick={() => void handleDownload(model.id)}
+                  >
+                    {active ? 'In progress' : model.download_status === 'failed' ? 'Retry' : 'Download'}
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {detectedDirectories.length > 0 && (
+        <div className="detected-weights">
+          <h4>Also detected in the weights folder</h4>
+          {detectedDirectories.map((entry) => (
+            <div className="model-table-row" key={`detected-${entry.directory}`}>
+              <span>
+                <strong>{entry.directory}</strong>
+                <small>{entry.weights_path}</small>
+              </span>
+              <span>{formatSize(entry.size_bytes)}</span>
+              <span className="capability-list">
+                <span className="capability-pill">Unmanaged</span>
+              </span>
+              <span />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function Models(): JSX.Element {
   const { models, loading, error, refetch, providers } = useAvailableModels();
+  const {
+    localModels,
+    detectedDirectories,
+    weightsRoot,
+    error: localError,
+    startDownload,
+    refetch: refetchLocal,
+  } = useLocalModels();
   const { settings } = useUserSettings();
 
   const activeModel = settings?.default_agent_type === 'online'
@@ -48,7 +200,13 @@ export default function Models(): JSX.Element {
             Review available models and the current default runtime without leaving the workbench.
           </p>
         </div>
-        <button className="button button-secondary" onClick={() => void refetch()}>
+        <button
+          className="button button-secondary"
+          onClick={() => {
+            void refetch();
+            void refetchLocal();
+          }}
+        >
           Refresh
         </button>
       </div>
@@ -73,6 +231,14 @@ export default function Models(): JSX.Element {
           <strong>{providers.length}</strong>
         </article>
       </div>
+
+      <LocalWeightsPanel
+        localModels={localModels}
+        detectedDirectories={detectedDirectories}
+        weightsRoot={weightsRoot}
+        localError={localError}
+        onDownload={startDownload}
+      />
 
       <div className="model-inventory-scroll" role="region" aria-label="Model inventory">
         <div className="provider-stack">

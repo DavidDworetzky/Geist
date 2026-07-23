@@ -25,6 +25,7 @@ from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.providers import router as providers_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -46,6 +47,7 @@ from app.services.job_queue import start_worker, stop_worker
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.model_downloads import DOWNLOAD_JOB_KIND  # noqa: F401  (registers handler)
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 
@@ -456,6 +458,7 @@ def create_app():
     app.include_router(user_settings_router, prefix="/api/v1/user-settings", tags=["user-settings"])
     app.include_router(voice_router, prefix="/api/v1/voice", tags=["voice"])
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
+    app.include_router(providers_router, prefix="/api/v1/providers", tags=["providers"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
 
