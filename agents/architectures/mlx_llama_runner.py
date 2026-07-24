@@ -37,7 +37,7 @@ class MLXLlamaRunner(BaseRunner):
         self.implementation: str | None = None
 
     @staticmethod
-    def _resolve_weights_dir(device_config: dict[str, Any]) -> str | None:
+    def _resolve_weights_dir(model_id: str, device_config: dict[str, Any]) -> str:
         configured = device_config.get("weights_dir")
         if configured is not None:
             if not isinstance(configured, str):
@@ -51,8 +51,17 @@ class MLXLlamaRunner(BaseRunner):
                 return local_root
             return os.path.join(local_root, "llama_3_1")
 
-        default = os.path.join("app", "model_weights", "llama_3_1")
-        return default if os.path.exists(os.path.join(default, "config.json")) else None
+        from app.services.local_models import get_local_model_manager
+
+        artifact_reference = device_config.get("artifact_id") or model_id
+        if not isinstance(artifact_reference, str):
+            raise TypeError("artifact_id must be a string")
+        artifact, installed_path = get_local_model_manager().require_installed(artifact_reference)
+        if artifact.backend != "mlx_llama":
+            raise ValueError(
+                f"Managed artifact {artifact.id} is not compatible with the MLX runner"
+            )
+        return str(installed_path)
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """Load the selected implementation and propagate the requested model path."""
@@ -71,7 +80,7 @@ class MLXLlamaRunner(BaseRunner):
                 f"Unknown MLX implementation '{requested}'. Expected one of: {choices}."
             )
 
-        self.weights_dir = self._resolve_weights_dir(device_config)
+        self.weights_dir = self._resolve_weights_dir(model_id, device_config)
         if self.implementation == "manual":
             from agents.architectures.llama.llama_mlx import LlamaMLX
 

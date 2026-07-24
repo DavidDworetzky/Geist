@@ -46,7 +46,7 @@ jobs:
         enable-cache: true
 
     - name: Install dependencies
-      run: uv sync --frozen --extra postgres
+      run: uv sync --frozen --extra postgres --extra local-transformers --extra voice
 
     - name: Lint (ruff)
       shell: bash -l {0}

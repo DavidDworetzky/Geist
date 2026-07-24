@@ -3,6 +3,8 @@ Agent factory for instantiating LocalAgent and OnlineAgent instances.
 """
 import logging
 import os
+import platform
+import sys
 from typing import Any
 
 from agents.agent_context import AgentContext
@@ -74,11 +76,20 @@ class AgentFactory:
                     f"{model} is server-backed. Create an online agent with the "
                     f"'{spec.provider}' provider or an OpenAI-compatible endpoint."
                 )
+            if sys.platform in {"win32", "linux"}:
+                return "llama_server"
+            if sys.platform == "darwin" and platform.machine().lower() in {
+                "arm64",
+                "aarch64",
+            }:
+                return "mlx_llama"
             return spec.backend
 
         # Preserve legacy bare Llama weight-directory names. Unknown Hugging
         # Face causal models intentionally fall back to the generic runner so
         # adding a compatible model does not require a code change.
+        if sys.platform in {"win32", "linux"}:
+            return "llama_server"
         if model.lower().startswith(("meta-llama-", "llama_3", "llama-3")):
             return "mlx_llama"
         return "transformers"
@@ -109,6 +120,15 @@ class AgentFactory:
             # Auto-detect runner type from model ID when not explicitly set
             if not runner_type:
                 runner_type = configured_runner or AgentFactory._infer_runner_type(model)
+
+            if not runner_was_explicit and runner_type == "mlx_llama":
+                from agents.model_catalog import infer_model_spec
+
+                spec = infer_model_spec(model)
+                if spec is not None and spec.family != "llama":
+                    device_config = kwargs.pop("device_config", None) or {}
+                    device_config.setdefault("implementation", "mlx_lm")
+                    kwargs["device_config"] = device_config
 
             # Automatic selection protects users from accidental 32B+ loads.
             # A deliberate Transformers override is the opt-in for capable

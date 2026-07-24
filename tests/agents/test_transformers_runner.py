@@ -5,7 +5,9 @@ from collections import UserDict
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
+
+
+torch = pytest.importorskip("torch")
 
 from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.transformers_runner import TransformersRunner

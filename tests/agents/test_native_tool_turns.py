@@ -423,6 +423,16 @@ class LocalRunner:
         ]
 
 
+class UnsupportedNativeStreamLocalRunner(LocalRunner):
+    def __init__(self):
+        super().__init__()
+        self.stream_called = False
+
+    def stream_model_turn(self, messages, tools, config):
+        self.stream_called = True
+        yield from ()
+
+
 def local_agent_without_loading_model():
     agent = LocalAgent.__new__(LocalAgent)
     agent.runner_type = "test"
@@ -440,6 +450,23 @@ def test_local_runner_fails_closed_when_given_tool_schemas():
                 ModelRequestConfig(),
             )
         )
+
+
+def test_local_runner_fails_closed_before_calling_unsupported_native_stream():
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "test"
+    agent.runner = UnsupportedNativeStreamLocalRunner()
+
+    with pytest.raises(ValueError, match="does not support native tool calling"):
+        list(
+            agent.stream_model_turn(
+                [ChatMessage(role="user", content="news")],
+                [tool_definition()],
+                ModelRequestConfig(),
+            )
+        )
+
+    assert agent.runner.stream_called is False
 
 
 def test_local_runner_can_complete_persistence_free_without_tools():

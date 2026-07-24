@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
+from agents.model_catalog import default_local_model_id
 from app.models.database.database import Base, SessionLocal
 
 
@@ -22,7 +23,8 @@ class UserSettings(Base):
 
     # Default agent preferences
     default_agent_type = Column(String, default='local')  # 'local' or 'online'
-    default_local_model = Column(String, default='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    default_local_model = Column(String, default=default_local_model_id)
+    default_local_artifact_id = Column(String, nullable=True)
     default_online_model = Column(String, default='gpt-4')
     default_online_provider = Column(String, default='openai')  # 'openai', 'anthropic', 'groq', 'grok'
 
@@ -59,6 +61,7 @@ class UserSettingsModel:
     user_id: int
     default_agent_type: str
     default_local_model: str
+    default_local_artifact_id: str | None
     default_online_model: str
     default_online_provider: str
     default_file_archives: list[int]
@@ -91,6 +94,7 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 user_id=settings.user_id,
                 default_agent_type=settings.default_agent_type,
                 default_local_model=settings.default_local_model,
+                default_local_artifact_id=settings.default_local_artifact_id,
                 default_online_model=settings.default_online_model,
                 default_online_provider=settings.default_online_provider,
                 default_file_archives=settings.default_file_archives or [],
@@ -121,7 +125,8 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
         settings = UserSettings(
             user_id=user_id,
             default_agent_type='local',
-            default_local_model='meta-llama/Meta-Llama-3.1-8B-Instruct',
+            default_local_model=default_local_model_id(),
+            default_local_artifact_id=None,
             default_online_model='gpt-4',
             default_online_provider='openai',
             default_file_archives=[],
@@ -143,6 +148,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             user_id=settings.user_id,
             default_agent_type=settings.default_agent_type,
             default_local_model=settings.default_local_model,
+            default_local_artifact_id=settings.default_local_artifact_id,
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
@@ -188,6 +194,7 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             user_id=settings.user_id,
             default_agent_type=settings.default_agent_type,
             default_local_model=settings.default_local_model,
+            default_local_artifact_id=settings.default_local_artifact_id,
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],

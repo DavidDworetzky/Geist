@@ -17,8 +17,6 @@ dependencies = [
     # Config / models
     "pydantic==2.10.6",
     "python-dotenv==1.0.1",
-    # Torch's CPU compiler imports setuptools at runtime.
-    "setuptools==78.1.1",
     # HTTP clients and adapters
     "requests==2.32.3",
     "httpx==0.28.1",
@@ -28,41 +26,78 @@ dependencies = [
     # File/text extraction services
     "openpyxl==3.1.5",
     "chardet==5.2.0",
-    # Local inference stack
-    "numpy==2.2.3",
-    "torch==2.6.0",
-    "torchaudio==2.6.0",
-    "torchtune==0.6.0",
-    # torchtune imports torchao at runtime but does not declare it as a dependency.
-    "torchao==0.10.0",
-    "accelerate==1.14.0",
-    "transformers==4.57.6",
-    "tokenizers==0.22.1",
+    # Managed local-model downloads and the private llama-server lifecycle.
     "huggingface-hub==0.36.0",
-    "safetensors==0.5.2",
-    "sentencepiece==0.2.0",
-    "einops==0.8.1",
-    "tiktoken==0.9.0",
-    # Older mlx releases (0.22/0.23 pinned by the conda envs) no longer have wheels on PyPI.
-    # Linux needs an explicit backend (mlx-cpu); macOS arm64 pulls mlx-metal automatically.
-    "mlx==0.31.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "mlx[cpu]==0.31.2; sys_platform == 'linux'",
-    "mlx-lm==0.29.1",
     "psutil==6.1.1",
 ]
+
+[project.scripts]
+geist = "app.cli:main"
+
+[build-system]
+requires = ["setuptools==78.1.1"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "agents*", "adapters*", "migrations*", "scripts*", "utils*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+migrations = ["script.py.mako"]
 
 [project.optional-dependencies]
 postgres = [
     "psycopg2-binary==2.9.10",
 ]
+local-mlx = [
+    "numpy==2.2.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers==4.57.6; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "tokenizers==0.22.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "safetensors==0.5.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentencepiece==0.2.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "einops==0.8.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "tiktoken==0.9.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx==0.31.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm==0.29.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+local-transformers = [
+    # Torch's CPU compiler imports setuptools at runtime.
+    "setuptools==78.1.1",
+    "numpy==2.2.3",
+    "torch==2.6.0",
+    "accelerate==1.14.0",
+    "transformers==4.57.6",
+    "tokenizers==0.22.1",
+    "safetensors==0.5.2",
+    "sentencepiece==0.2.0",
+    "einops==0.8.1",
+    "tiktoken==0.9.0",
+]
 voice = [
     "sounddevice==0.5.0",
     "sphn==0.1.12",
+    "numpy==2.2.3",
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+    "torchtune==0.6.0",
+    # torchtune imports torchao at runtime but does not declare it.
+    "torchao==0.10.0",
+    "transformers==4.57.6",
+    "tokenizers==0.22.1",
+    "safetensors==0.5.2",
+    "sentencepiece==0.2.0",
+    "einops==0.8.1",
+    "tiktoken==0.9.0",
+]
+packaged = [
+    "pyinstaller==6.21.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==8.3.5",
+    "pytest-asyncio==0.25.3",
     "mypy==1.13.0",
     "ruff==0.8.4",
     "pre-commit==4.0.1",
@@ -73,16 +108,20 @@ dev = [
 ]
 
 [tool.uv]
-# Geist is an application, not an installable library.
-package = false
+package = true
 environments = [
-    "sys_platform == 'darwin'",
-    "sys_platform == 'linux'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
-# Linux resolves torch from the CPU wheel index: the default PyPI Linux wheels
-# bundle the full CUDA/nvidia library set (~6GB installed), which the
-# cross-platform container never uses (macOS runs MLX; the container is CPU).
+# Linux resolves optional Torch installs from the CPU wheel index: the default
+# PyPI Linux wheels bundle the full CUDA/nvidia library set (~6GB installed).
 # GPU hosts can be reintroduced later via uv's conflicting-extras pattern
 # (a cu12x extra pointing at the matching download.pytorch.org index).
 [tool.uv.sources]
@@ -119,9 +158,6 @@ strict_optional = true
 # Import discovery
 namespace_packages = true
 explicit_package_bases = true
-
-# Platform configuration
-platform = "linux"
 
 # Ignore missing imports for third-party libraries without type stubs
 ignore_missing_imports = true

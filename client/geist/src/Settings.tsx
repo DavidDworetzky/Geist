@@ -47,6 +47,7 @@ const Settings: React.FC = () => {
       const updates: UserSettingsUpdate = {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
+        default_local_artifact_id: localSettings.default_local_artifact_id,
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
@@ -198,6 +199,7 @@ const Settings: React.FC = () => {
             onlineModel={localSettings.default_online_model}
             onLocalModelChange={(value) => {
               updateLocalSetting('default_local_model', value);
+              updateLocalSetting('default_local_artifact_id', null);
               if (localSettings.default_agent_type !== 'local') {
                 updateLocalSetting('default_agent_type', 'local');
               }
