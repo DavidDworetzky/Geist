@@ -12,15 +12,18 @@ from app.models.database.database import (
     configure_database,
 )
 from app.models.database.database_config import DatabaseConfig
+from app.models.database.geist_user import GeistUser
 from app.models.database.job import (
     Job,
     JobStatus,
     claim_next_job,
     enqueue_job,
+    enqueue_or_reschedule_job,
     get_job,
     get_jobs,
     mark_job_failed,
     mark_job_succeeded,
+    recover_stale_jobs,
 )
 
 
@@ -128,3 +131,51 @@ def test_get_job_and_list_filtering(sqlite_database):
     succeeded = get_jobs(status=JobStatus.SUCCEEDED.value)
     assert [j.job_id for j in succeeded] == [finished.job_id]
     assert len(get_jobs()) == 2
+
+
+def test_enqueue_or_reschedule_coalesces_latest_payload(sqlite_database):
+    with SessionLocal() as session:
+        session.add(
+            GeistUser(
+                user_id=7,
+                username="queue-user",
+                name="Queue User",
+                email="queue@example.com",
+                password="",
+            )
+        )
+        session.commit()
+
+    first = enqueue_or_reschedule_job(
+        "chat.memory.digest",
+        {"expected_revision": 1},
+        user_id=7,
+        dedupe_key="chat-memory:7:9",
+        delay_seconds=20,
+    )
+    second = enqueue_or_reschedule_job(
+        "chat.memory.digest",
+        {"expected_revision": 2},
+        user_id=7,
+        dedupe_key="chat-memory:7:9",
+        delay_seconds=20,
+    )
+
+    assert second.job_id == first.job_id
+    assert second.to_dict()["payload"]["expected_revision"] == 2
+    assert get_jobs(user_id=8) == []
+    assert [job.job_id for job in get_jobs(user_id=7)] == [first.job_id]
+
+
+def test_recover_stale_running_job(sqlite_database):
+    job = enqueue_job("stale")
+    claim_next_job()
+    with SessionLocal() as session:
+        row = session.query(Job).filter_by(job_id=job.job_id).first()
+        row.locked_at = datetime.datetime.utcnow() - datetime.timedelta(minutes=10)
+        session.commit()
+
+    assert recover_stale_jobs(lease_seconds=60) == 1
+    recovered = get_job(job.job_id)
+    assert recovered.status == JobStatus.QUEUED.value
+    assert recovered.locked_at is None

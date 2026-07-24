@@ -21,6 +21,9 @@ class CompleteTextParams(BaseModel):
     # Existing non-streaming API clients retain text-only behavior unless they
     # explicitly opt into the native model/tool loop.
     enable_tools: bool = False
+    memory_enabled: bool = True
+    memory_mode: str = "public"
+    folder_id: int | None = None
 
 
 class InitializeAgentParams(BaseModel):

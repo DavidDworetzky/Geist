@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from app.models.database.database import Base, SessionLocal
 
@@ -22,6 +22,12 @@ class ChatSession(Base):
     create_date = Column(DateTime)
     update_date = Column(DateTime)
     user_id = Column(Integer, ForeignKey("geist_user.user_id"))
+    memory_enabled = Column(Boolean, nullable=False, default=True)
+    memory_mode = Column(String(20), nullable=False, default="public")
+    folder_id = Column(Integer, ForeignKey("memory_folder.folder_id"), nullable=True, index=True)
+    memory_revision = Column(Integer, nullable=False, default=0)
+    memory_processed_revision = Column(Integer, nullable=False, default=0)
+    memory_last_activity_at = Column(DateTime, nullable=True)
 
 
 @dataclass
@@ -38,6 +44,11 @@ class ChatHistory(list):
     chat_id: int
     create_date: datetime
     total_messages: int = 0
+    memory_enabled: bool = True
+    memory_mode: str = "public"
+    folder_id: int | None = None
+    memory_revision: int = 0
+    memory_processed_revision: int = 0
 
     def __post_init__(self) -> None:
         """Initialize the list with chat_history contents"""
@@ -97,6 +108,9 @@ def update_chat_history(
     user_id: int | None = None,
     run_id: str | None = None,
     status: str | None = None,
+    memory_enabled: bool | None = None,
+    memory_mode: str | None = None,
+    folder_id: int | None = None,
 ) -> ChatSession:
     """
     Method to update chat history by ID
@@ -114,6 +128,9 @@ def update_chat_history(
                 create_date=datetime.now(),
                 update_date=datetime.now(),
                 user_id=user_id,
+                memory_enabled=True if memory_enabled is None else memory_enabled,
+                memory_mode=memory_mode or ("private" if folder_id is not None else "public"),
+                folder_id=folder_id,
             )
             session.add(chat_session)
         elif user_id is not None and chat_session.user_id is None:
@@ -139,9 +156,23 @@ def update_chat_history(
 
         chat_session.chat_history = json.dumps(current_history)
         chat_session.update_date = datetime.now()
+        should_schedule_memory = status == "completed" and bool(chat_session.memory_enabled)
+        if status == "completed":
+            chat_session.memory_revision = int(chat_session.memory_revision or 0) + 1
+            chat_session.memory_last_activity_at = datetime.utcnow()
+            if not chat_session.memory_enabled:
+                chat_session.memory_processed_revision = chat_session.memory_revision
         session.commit()
         session.refresh(chat_session)
+        chat_session_id = int(chat_session.chat_session_id)
+        memory_revision = int(chat_session.memory_revision or 0)
+        owner_user_id = int(chat_session.user_id) if chat_session.user_id is not None else None
+        session.expunge(chat_session)
         logger.info("Updated chat history for session %s", chat_session.chat_session_id)
+        if should_schedule_memory and owner_user_id is not None:
+            from app.services.memory_scheduler import schedule_chat_memory
+
+            schedule_chat_memory(owner_user_id, chat_session_id, memory_revision)
         return chat_session
 
 
@@ -166,6 +197,11 @@ def get_chat_history(chat_session_id: int) -> ChatHistory:
                 chat_history=chat_session.chat_history,
                 chat_id=chat_session.chat_session_id,
                 create_date=chat_session.create_date,
+                memory_enabled=bool(chat_session.memory_enabled),
+                memory_mode=str(chat_session.memory_mode or "public"),
+                folder_id=chat_session.folder_id,
+                memory_revision=int(chat_session.memory_revision or 0),
+                memory_processed_revision=int(chat_session.memory_processed_revision or 0),
             )
         # When no chat session exists, create with current timestamp
         return ChatHistory(
@@ -212,6 +248,11 @@ def get_paginated_chat_history(
                 chat_id=chat_session_id,
                 create_date=chat_session.create_date,
                 total_messages=total_count,
+                memory_enabled=bool(chat_session.memory_enabled),
+                memory_mode=str(chat_session.memory_mode or "public"),
+                folder_id=chat_session.folder_id,
+                memory_revision=int(chat_session.memory_revision or 0),
+                memory_processed_revision=int(chat_session.memory_processed_revision or 0),
             )
 
         # When no chat session exists
@@ -234,6 +275,11 @@ def get_all_chat_history() -> list[ChatHistory]:
                 chat_history=chat_session.chat_history,
                 chat_id=chat_session.chat_session_id,
                 create_date=chat_session.create_date,
+                memory_enabled=bool(chat_session.memory_enabled),
+                memory_mode=str(chat_session.memory_mode or "public"),
+                folder_id=chat_session.folder_id,
+                memory_revision=int(chat_session.memory_revision or 0),
+                memory_processed_revision=int(chat_session.memory_processed_revision or 0),
             )
             for chat_session in chat_sessions
         ]
@@ -266,6 +312,11 @@ def get_paginated_chat_sessions(page: int = 1, page_size: int = 20) -> list[Chat
                 chat_history=chat_session.chat_history,
                 chat_id=chat_session.chat_session_id,
                 create_date=chat_session.create_date,
+                memory_enabled=bool(chat_session.memory_enabled),
+                memory_mode=str(chat_session.memory_mode or "public"),
+                folder_id=chat_session.folder_id,
+                memory_revision=int(chat_session.memory_revision or 0),
+                memory_processed_revision=int(chat_session.memory_processed_revision or 0),
             )
             for chat_session in chat_sessions
         ]

@@ -20,7 +20,7 @@ async def get_job_endpoint(
     current_user: dict = Depends(get_current_user),
 ) -> JobResponse:
     """Get the status and result of a background job."""
-    job = get_job(job_id)
+    job = get_job(job_id, user_id=int(current_user["user_id"]))
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return JobResponse(**job.to_dict())
@@ -33,5 +33,9 @@ async def list_jobs_endpoint(
     current_user: dict = Depends(get_current_user),
 ) -> list[JobResponse]:
     """List background jobs, newest first, optionally filtered by status."""
-    jobs = get_jobs(status=status_filter, limit=min(limit, 200))
+    jobs = get_jobs(
+        status=status_filter,
+        limit=min(limit, 200),
+        user_id=int(current_user["user_id"]),
+    )
     return [JobResponse(**job.to_dict()) for job in jobs]

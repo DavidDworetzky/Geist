@@ -195,6 +195,7 @@ async def run_workflow(
                 "user_id": current_user["user_id"],
                 "input_data": input_data or {},
             },
+            user_id=int(current_user["user_id"]),
         )
         return {
             "job_id": job.job_id,

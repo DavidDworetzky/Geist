@@ -58,6 +58,35 @@ jest.mock('./Hooks/useUserSettings', () => ({
   default: () => ({ settings: null })
 }));
 
+jest.mock('./Hooks/useChatMemory', () => ({
+  __esModule: true,
+  default: () => ({
+    settings: {
+      memory_enabled: true,
+      memory_mode: 'public',
+      folder_id: null,
+      effective_scope: 'public',
+      status: 'ready',
+    },
+    folders: [
+      {
+        folder_id: 9,
+        name: 'Research',
+        color: 'violet',
+        chat_count: 0,
+      },
+    ],
+    loading: false,
+    error: null,
+    createFolder: jest.fn(),
+    renameFolder: jest.fn(),
+    deleteFolder: jest.fn(),
+    setMemoryEnabled: jest.fn(),
+    setPrivate: jest.fn(),
+    setFolder: jest.fn(),
+  }),
+}));
+
 jest.mock('./Components/ChatTextArea', () => {
   const React = require('react');
   return {
@@ -108,6 +137,8 @@ describe('Chat history panel', () => {
     expect(drawer.querySelector('.stage-panel-surface')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Chats' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search chats')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Research/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New private folder' })).toBeInTheDocument();
     expect(screen.getByText('Recent chats')).toBeInTheDocument();
     expect(screen.getByText(/Plan Geist drawer behavior/i)).toBeInTheDocument();
     expect(window.localStorage.getItem('geist.chatDrawerState')).toBe('expanded');
@@ -119,6 +150,8 @@ describe('Chat history panel', () => {
     expect(composerDock).toHaveAttribute('aria-hidden', 'false');
     expect(screen.queryByRole('heading', { name: 'Chats' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('geist.chatDrawerState')).toBe('minimized');
+    expect(screen.getByRole('switch', { name: 'Memory enabled' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Private' })).toBeInTheDocument();
   });
 
   it('edits a chat name and persists it locally', () => {

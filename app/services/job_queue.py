@@ -22,8 +22,10 @@ from app.models.database.job import (
     Job,
     claim_next_job,
     enqueue_job,
+    enqueue_or_reschedule_job,
     mark_job_failed,
     mark_job_succeeded,
+    recover_stale_jobs,
 )
 
 
@@ -61,10 +63,37 @@ def enqueue(
     payload: dict[str, Any] | None = None,
     max_attempts: int = 3,
     delay_seconds: int = 0,
+    user_id: int | None = None,
+    dedupe_key: str | None = None,
 ) -> Job:
     """Queue one job for background execution."""
     return enqueue_job(
-        kind, payload=payload, max_attempts=max_attempts, delay_seconds=delay_seconds
+        kind,
+        payload=payload,
+        max_attempts=max_attempts,
+        delay_seconds=delay_seconds,
+        user_id=user_id,
+        dedupe_key=dedupe_key,
+    )
+
+
+def enqueue_or_reschedule(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    user_id: int,
+    dedupe_key: str,
+    max_attempts: int = 3,
+    delay_seconds: int = 0,
+) -> Job:
+    """Queue the latest version of one logical delayed job."""
+    return enqueue_or_reschedule_job(
+        kind,
+        payload,
+        user_id=user_id,
+        dedupe_key=dedupe_key,
+        max_attempts=max_attempts,
+        delay_seconds=delay_seconds,
     )
 
 
@@ -160,6 +189,13 @@ def start_worker() -> JobWorker | None:
         except ValueError:
             poll_interval = 1.0
         _worker = JobWorker(poll_interval=poll_interval)
+        try:
+            lease_seconds = int(os.getenv("GEIST_JOB_LEASE_SECONDS", "300"))
+        except ValueError:
+            lease_seconds = 300
+        recovered = recover_stale_jobs(lease_seconds=max(1, lease_seconds))
+        if recovered:
+            logger.warning("Recovered %s stale jobs", recovered)
     _worker.start()
     return _worker
 

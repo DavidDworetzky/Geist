@@ -372,7 +372,15 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     return event;
   };
 
-  const completeText = async (inputText: string, chat_id?: number | null) => {
+  const completeText = async (
+    inputText: string,
+    chat_id?: number | null,
+    memorySettings?: {
+      memory_enabled: boolean;
+      memory_mode: 'public' | 'private';
+      folder_id: number | null;
+    },
+  ) => {
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -397,7 +405,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt, ...params }),
+        body: JSON.stringify({ prompt, ...params, ...memorySettings }),
         signal: abortController.signal,
       });
 
