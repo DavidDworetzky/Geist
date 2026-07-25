@@ -80,16 +80,32 @@ the residual per-audit risk explicitly.
 Sampling audits only work if re-execution reproduces the original output.
 The protocol therefore requires temperature-0 (or fixed-seed) decoding, and
 `AuditPolicy.logprob_tolerance` absorbs benign numeric noise across hardware.
-Real GPU inference is not always bit-exact across devices or batch sizes;
-production systems attack this from three directions: pinning
-runtime/hardware classes per model and comparing logprobs within a tolerance
-(what this implementation does), committing to locality-sensitive hashes of
-intermediate activations that are robust across GPU types and kernels
-(TOPLOC), or making the computation itself bitwise reproducible with
-fixed-order floating-point operator libraries (Gensyn's RepOps, <30% overhead
-on large matmuls). `GeistAgentRunner` (`protocol/geist_runner.py`) adapts any
-Geist `BaseAgent` as a runner, so audits can run against the local MLX/vLLM
-stack or an online provider.
+A tolerance is a real attack surface — a provider serving a quantized or
+distilled model whose logprobs stay inside the tolerance is undetectable by
+this audit — so the goal is to eliminate it, and the ecosystem now can:
+
+- **Batch-invariant kernels** (Thinking Machines Lab, "Defeating
+  Nondeterminism in LLM Inference", 2025): the dominant source of
+  serving-time nondeterminism is that matmul/RMSNorm/attention kernels
+  change reduction order with batch size, so identical requests diverge
+  under dynamic batching. Constraining kernels to a single reduction
+  strategy yields 100% bitwise-identical outputs across runs at a 10–40%
+  slowdown (open-sourced as `batch_invariant_ops`; deterministic modes now
+  ship in vLLM and SGLang). With provider and auditor pinned to the same
+  runtime image and hardware class, this makes exact-match audits
+  (`logprob_tolerance=0`) sound.
+- **Bitwise-reproducible operators across hardware** (Gensyn's RepOps):
+  fixed floating-point evaluation order at <30% overhead on large matmuls,
+  removing even the same-hardware-class requirement.
+- **Activation commitments** (TOPLOC): sidestep bit-exactness entirely by
+  committing to locality-sensitive hashes of intermediate activations that
+  are robust across GPU types, tensor-parallel layouts, and kernels.
+
+Note the split: batch invariance fixes run-to-run divergence on one stack;
+cross-hardware audits still need RepOps-style operators or TOPLOC-style
+robust commitments. `GeistAgentRunner` (`protocol/geist_runner.py`) adapts
+any Geist `BaseAgent` as a runner, so audits can run against the local
+MLX/vLLM stack or an online provider.
 
 ## Does this already exist?
 
