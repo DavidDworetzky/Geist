@@ -23,9 +23,10 @@ def mock_agent():
 @pytest.fixture
 def mock_stt():
     """Create a mock STT adapter."""
-    with patch('app.services.voice_session.MMSAdapter') as MockSTT:
-        stt = MockSTT.return_value
+    with patch('app.services.voice_session.create_stt_adapter') as mock_create:
+        stt = Mock()
         stt.transcribe = Mock(return_value="test transcript")
+        mock_create.return_value = stt
         yield stt
 
 
@@ -42,11 +43,12 @@ def mock_tts():
 
 @pytest.fixture
 def voice_service(mock_agent, mock_stt, mock_tts):
-    """Create a voice session service for testing."""
+    """Create a voice session service for testing (deterministic RMS VAD)."""
     service = VoiceSessionService(
         agent=mock_agent,
         stt_provider="mms",
-        tts_provider="sesame"
+        tts_provider="sesame",
+        vad_provider="rms"
     )
     return service
 
@@ -174,6 +176,25 @@ class TestVoiceSessionService:
         # Should fall back to complete_text
         mock_agent.complete_text.assert_called_once()
         assert any(r["type"] == "text_complete" for r in responses)
+
+    def test_stt_factory_receives_provider_and_kwargs(self, mock_agent, mock_tts):
+        """The configured STT provider and kwargs reach the STT factory."""
+        with patch('app.services.voice_session.create_stt_adapter') as mock_create:
+            mock_create.return_value = Mock()
+            VoiceSessionService(
+                agent=mock_agent,
+                stt_provider="faster_whisper",
+                tts_provider="sesame",
+                vad_provider="rms",
+                stt_model="small",
+            )
+            mock_create.assert_called_once_with("faster_whisper", stt_model="small")
+
+    def test_reset_clears_vad_state(self, voice_service):
+        """Session reset propagates to the VAD provider."""
+        voice_service.vad = Mock()
+        voice_service.reset()
+        voice_service.vad.reset.assert_called_once()
 
     def test_reset(self, voice_service):
         """Test session reset."""

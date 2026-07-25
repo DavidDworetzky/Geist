@@ -17,6 +17,7 @@ from agents.base_agent import BaseAgent
 from agents.prompt.prompt import AGENT_PROMPTS
 from app.models.user_settings import AgentConfigRequest
 from app.services.agent_context_provider import get_default_agent_context
+from app.services.stt import get_supported_stt_providers
 from app.services.tts import get_supported_tts_providers
 from app.services.user_settings_service import UserSettingsService
 from app.services.voice_session import VoiceSessionService
@@ -64,6 +65,7 @@ async def get_agent_for_session(
 def _build_provider_kwargs(
     stt_provider: str,
     tts_provider: str,
+    stt_model: str | None = None,
     tts_model: str | None = None,
     tts_voice: str | None = None,
     tts_language: str | None = None,
@@ -76,6 +78,7 @@ def _build_provider_kwargs(
     Args:
         stt_provider: Selected STT provider name.
         tts_provider: Selected TTS provider name.
+        stt_model: Optional STT model override.
         tts_model: Optional TTS model override.
         tts_voice: Optional TTS voice override.
         tts_language: Optional language code override.
@@ -93,6 +96,8 @@ def _build_provider_kwargs(
     if tts_provider == "openai":
         provider_kwargs["api_key"] = os.getenv("OPENAI_API_KEY")
 
+    if stt_model:
+        provider_kwargs["stt_model"] = stt_model
     if tts_model:
         provider_kwargs["model"] = tts_model
     if tts_voice:
@@ -113,6 +118,8 @@ async def list_voice_models():
     return {
         "default_provider": "sesame",
         "providers": get_supported_tts_providers(),
+        "default_stt_provider": "mms",
+        "stt_providers": get_supported_stt_providers(),
     }
 
 
@@ -121,8 +128,13 @@ async def voice_stream_websocket(
     websocket: WebSocket,
     session_id: int = Query(..., description="Chat session ID"),
     agent_type: str = Query("online", description="Agent type (online or local)"),
-    stt_provider: str = Query("mms", description="STT provider (mms or whisper)"),
-    tts_provider: str = Query("sesame", description="TTS provider (sesame, openai, or qwen3)"),
+    stt_provider: str = Query(
+        "mms", description="STT provider (mms, whisper, faster_whisper, or parakeet)"
+    ),
+    tts_provider: str = Query(
+        "sesame", description="TTS provider (sesame, openai, qwen3, kokoro, or cosyvoice2)"
+    ),
+    stt_model: str | None = Query(None, description="STT model ID override"),
     tts_model: str | None = Query(None, description="TTS model ID override"),
     tts_voice: str | None = Query(None, description="TTS voice override"),
     tts_language: str | None = Query(None, description="TTS language code override"),
@@ -165,6 +177,7 @@ async def voice_stream_websocket(
         provider_kwargs = _build_provider_kwargs(
             stt_provider=stt_provider,
             tts_provider=tts_provider,
+            stt_model=stt_model,
             tts_model=tts_model,
             tts_voice=tts_voice,
             tts_language=tts_language,
@@ -264,6 +277,7 @@ async def voice_upload(
     agent_type: str = Query("online"),
     stt_provider: str = Query("mms"),
     tts_provider: str = Query("sesame"),
+    stt_model: str | None = Query(None),
     tts_model: str | None = Query(None),
     tts_voice: str | None = Query(None),
     tts_language: str | None = Query(None),
@@ -284,6 +298,7 @@ async def voice_upload(
         provider_kwargs = _build_provider_kwargs(
             stt_provider=stt_provider,
             tts_provider=tts_provider,
+            stt_model=stt_model,
             tts_model=tts_model,
             tts_voice=tts_voice,
             tts_language=tts_language,
