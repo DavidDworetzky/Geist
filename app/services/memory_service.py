@@ -27,7 +27,9 @@ from app.services.memory_scheduler import schedule_chat_memory
 FOLDER_COLORS = {"violet", "blue", "mint", "amber", "rose", "slate"}
 
 
-def _folder_dict(folder: MemoryFolder, chat_count: int = 0, summary: str | None = None):
+def _folder_dict(
+    folder: MemoryFolder, chat_count: int = 0, summary: str | None = None
+) -> dict[str, Any]:
     return {
         "folder_id": folder.folder_id,
         "name": folder.name,
@@ -277,7 +279,7 @@ def update_chat_memory_settings(
         if chat.memory_enabled and int(chat.memory_revision or 0) > int(
             chat.memory_processed_revision or 0
         ):
-            schedule = (user_id, chat_session_id, int(chat.memory_revision))
+            schedule = (user_id, chat_session_id, int(chat.memory_revision or 0))
     if schedule is not None:
         schedule_chat_memory(*schedule)
     return result
@@ -439,8 +441,10 @@ def update_memory_record(
             return None
         record.content = clean_content
         record.content_hash = hashlib.sha256(clean_content.encode("utf-8")).hexdigest()
-        record.importance = 1.0
-        record.confidence = 1.0
+        # RATCHET: old-style Column(Float) attributes reject plain float
+        # assignments under mypy until models move to Mapped[] declarations.
+        record.importance = 1.0  # type: ignore[assignment]
+        record.confidence = 1.0  # type: ignore[assignment]
         embedding = (
             session.query(MemoryEmbedding)
             .filter(MemoryEmbedding.memory_id == memory_id)
