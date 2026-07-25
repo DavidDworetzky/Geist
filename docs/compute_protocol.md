@@ -81,32 +81,56 @@ Sampling audits only work if re-execution reproduces the original output.
 The protocol therefore requires temperature-0 (or fixed-seed) decoding, and
 `AuditPolicy.logprob_tolerance` absorbs benign numeric noise across hardware.
 Real GPU inference is not always bit-exact across devices or batch sizes;
-production deployments handle this by pinning runtime/hardware classes per
-model, comparing logprobs within a tolerance instead of exact token ids, or
-using activation commitments (see TOPLOC below). `GeistAgentRunner`
-(`protocol/geist_runner.py`) adapts any Geist `BaseAgent` as a runner, so
-audits can run against the local MLX/vLLM stack or an online provider.
+production systems attack this from three directions: pinning
+runtime/hardware classes per model and comparing logprobs within a tolerance
+(what this implementation does), committing to locality-sensitive hashes of
+intermediate activations that are robust across GPU types and kernels
+(TOPLOC), or making the computation itself bitwise reproducible with
+fixed-order floating-point operator libraries (Gensyn's RepOps, <30% overhead
+on large matmuls). `GeistAgentRunner` (`protocol/geist_runner.py`) adapts any
+Geist `BaseAgent` as a runner, so audits can run against the local MLX/vLLM
+stack or an online provider.
 
 ## Does this already exist?
 
 Yes — this design space is active, and several systems combine "rent out
 blocks of compute" with probabilistic verification for ML/LLM workloads:
 
-- **Gensyn** — decentralized ML compute protocol whose verification
-  (probabilistic proof-of-learning, graph-based pinpointing, Truebit-style
-  incentive games) is the closest analogue for training workloads.
-- **Hyperbolic's Proof of Sampling (PoSP, 2024)** — spot-checks a fraction of
-  inference results with validators and slashes discrepancies; essentially
-  the same sampling-audit economics implemented here.
-- **Prime Intellect's TOPLOC (2025)** — verifiable inference via
-  locality-sensitive hashes of intermediate activations, letting a verifier
-  cheaply confirm which model actually produced an output — a stronger
-  commitment than output hashing that tolerates GPU nondeterminism.
-- **opML / ORA** — optimistic ML: results are accepted unless challenged
-  within a dispute window, with fraud proofs bisecting the computation.
-- **zkML (EZKL, Modulus Labs)** — full cryptographic proofs of inference;
-  strongest guarantees, but orders of magnitude too slow for LLM-scale
-  workloads today, which is exactly why sampling/optimistic schemes exist.
+- **Hyperbolic's Proof of Sampling** ([PoSP, arXiv:2405.00295](https://arxiv.org/pdf/2405.00295)) —
+  spot-checks a random fraction of inference results with validators and
+  slashes discrepancies: the same sampling-audit economics implemented here.
+  Two ideas worth borrowing that this reference does not implement: the
+  sampling rate is derived game-theoretically so that honest behavior is a
+  pure-strategy Nash equilibrium, and it adapts per node — new providers get
+  sampled more, providers with proven track records less. Adopted by
+  EigenLayer as an AVS verification layer.
+- **Prime Intellect's TOPLOC** ([arXiv:2501.16007](https://arxiv.org/pdf/2501.16007)) —
+  providers commit to locality-sensitive hashes of intermediate activations
+  (~258 bytes per 32 tokens) instead of output hashes; validators re-check up
+  to 100× faster than inference and the commitment is robust across GPU
+  types, tensor-parallel layouts, and attention kernels — a direct answer to
+  the nondeterminism problem that output-hash audits (like this one) dodge
+  via tolerances. Used in production for INTELLECT-2's distributed RL.
+- **Gensyn's Verde** ([arXiv:2502.19405](https://arxiv.org/abs/2502.19405)) —
+  refereed delegation for both training *and* inference: replicate the work
+  across a few providers, and on disagreement a referee bisects the
+  computational graph to the first divergent operator, so only that operator
+  is re-run to settle the dispute. Made possible by RepOps, a library of
+  bitwise-reproducible CUDA operators (fixed floating-point evaluation
+  order), which eliminates the tolerance games entirely.
+- **VeriLLM** ([arXiv:2509.24257](https://arxiv.org/html/2509.24257)) — a
+  2025 academic design very close to this package's shape: commit-then-sample
+  audits with random openings over decentralized LLM inference, claiming ~1%
+  verification overhead.
+- **opML / ORA** ([arXiv:2401.17555](https://arxiv.org/pdf/2401.17555)) —
+  optimistic ML: results are accepted unless challenged within a dispute
+  window, with fraud proofs bisecting the computation.
+- **zkML (EZKL, zkLLM)** — full cryptographic proofs of inference; strongest
+  guarantees, but still impractical at LLM scale (proving a 1M-parameter
+  model takes ~16 minutes; a 70B model extrapolates to days), which is
+  exactly why sampling/optimistic schemes exist. Hybrids (zk-OPML,
+  optimistic TEE-rollups) and TEE attestation on H100-class hardware are the
+  emerging middle ground.
 - **Bittensor** — incentivized inference network where validators score miner
   outputs (quality-weighted rather than correctness-audited).
 - **Akash, Golem, io.net, Petals** — compute/GPU marketplaces and volunteer
@@ -116,7 +140,10 @@ blocks of compute" with probabilistic verification for ML/LLM workloads:
 What this package contributes to Geist is a small, testable reference of the
 audit-marketplace core — content-addressed blocks, post-commitment beacon
 sampling, Merkle-bound results, stake/escrow/slash settlement — that plugs
-into Geist's own agents as runners.
+into Geist's own agents as runners. The clearest upgrade paths suggested by
+the literature: PoSP-style reputation-adaptive sample sizes, and swapping
+output-hash records for TOPLOC-style activation commitments once a
+deterministic or commitment-friendly runner is available.
 
 ## Usage
 
