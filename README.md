@@ -104,6 +104,9 @@ Tests and alternate application entry points can inject `DatabaseConfig(provider
     - Currently supported Models: llama_3_1
     - This can be run from python scripts/download_models.py 
     - If the download script doesn't work, direct download links can be found at : https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/tree/main
+    - Voice (STT/TTS) models can be pre-fetched into the Hugging Face cache with
+      `python scripts/download_models.py --voice_model <name|all>`; list the
+      available names with `--list_voice_models`.
 
 
 client/geist/.env settings:
