@@ -2116,6 +2116,82 @@ ul.relative {
   font-weight: 720;
 }
 
+.voice-settings {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+
+.voice-settings-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 40px;
+  color: var(--geist-color-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--geist-radius-md);
+  cursor: pointer;
+}
+
+.voice-settings-toggle:hover:not(:disabled),
+.voice-settings-toggle.expanded {
+  color: var(--geist-color-text);
+  background: var(--geist-color-surface-strong);
+}
+
+.voice-settings-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.voice-settings-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: 260px;
+  padding: 12px;
+  background: var(--geist-color-surface);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-lg);
+  box-shadow: var(--geist-shadow-panel);
+}
+
+.voice-settings-title {
+  color: var(--geist-color-text);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.voice-settings-field {
+  display: grid;
+  gap: 4px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.72rem;
+}
+
+.voice-settings-field select {
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--geist-color-text);
+  background: var(--geist-color-surface);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.voice-settings-status {
+  color: var(--geist-color-text-muted);
+  font-size: 0.72rem;
+}
+
+.voice-settings-error {
+  color: var(--geist-color-danger);
+}
+
 .suggestion-menu {
   position: absolute;
   right: 0;
