@@ -11,6 +11,7 @@ torch = pytest.importorskip("torch")
 
 from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.transformers_runner import TransformersRunner
+from agents.model_load_status import model_load_status_registry
 
 
 def _tokenizer():
@@ -52,6 +53,7 @@ def test_load_and_generate_uses_direct_suffix_decode(
 
     runner = TransformersRunner()
     runner.load("Qwen/Qwen2.5-3B-Instruct", {"device": "cpu"})
+    assert model_load_status_registry.get("Qwen/Qwen2.5-3B-Instruct").state == "ready"
     result = runner.complete(
         "Be helpful", "hello", GenerationConfig(max_tokens=100, temperature=0.0)
     )
@@ -217,6 +219,13 @@ def test_mps_defaults_to_stable_eager_attention(config_cls, tokenizer_cls, model
     assert model_cls.from_pretrained.call_args.kwargs["attn_implementation"] == "eager"
 
 
+def test_cpu_preserves_checkpoint_dtype_to_avoid_expanding_model_memory():
+    runner = TransformersRunner()
+    runner.device = torch.device("cpu")
+
+    assert runner._select_dtype(None) == "auto"
+
+
 @patch("agents.architectures.transformers_runner.metadata.version", return_value="4.48.0")
 def test_minimum_transformers_version_fails_early(_version):
     runner = TransformersRunner()
@@ -228,6 +237,7 @@ def test_server_backed_model_fails_before_loading():
     runner = TransformersRunner()
     with pytest.raises(ValueError, match="server-backed"):
         runner.load("kimi-k2.5")
+    assert model_load_status_registry.get("kimi-k2.5").state == "failed"
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)

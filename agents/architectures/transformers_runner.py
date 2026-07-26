@@ -16,6 +16,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.model_catalog import infer_model_spec
+from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import strings_to_message_dict
 
 
@@ -40,6 +41,21 @@ class TransformersRunner(BaseRunner):
         self.trust_remote_code = False
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
+        model_load_status_registry.mark_loading(
+            model_id,
+            "Preparing local model files.",
+        )
+        try:
+            self._load(model_id, device_config)
+        except Exception as error:
+            model_load_status_registry.mark_failed(
+                model_id,
+                f"Model failed to load: {error}",
+            )
+            raise
+        model_load_status_registry.mark_ready(model_id)
+
+    def _load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         device_config = dict(device_config or {})
         allow_server_backed = bool(device_config.pop("allow_server_backed", False))
         self.model_id = model_id
@@ -79,6 +95,12 @@ class TransformersRunner(BaseRunner):
             None,
         )
         self.source = weights_dir or local_default or model_id
+        source_description = (
+            "Loading model from local files."
+            if self.source != model_id
+            else "Downloading or loading model files from the Hugging Face cache."
+        )
+        model_load_status_registry.mark_loading(model_id, source_description)
         explicit_device = device_config.pop("device", None)
         self.device = self._select_device(explicit_device)
         compile_model = bool(device_config.pop("compile", False))
@@ -203,7 +225,10 @@ class TransformersRunner(BaseRunner):
             return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         if self.device.type == "mps":
             return torch.float16
-        return torch.float32
+        # Preserve the checkpoint dtype on CPU. Expanding an 8B bf16 checkpoint
+        # to fp32 roughly doubles its resident memory and can OOM before the
+        # first generated token.
+        return "auto"
 
     def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
         return self.complete("", prompt, generation_config)

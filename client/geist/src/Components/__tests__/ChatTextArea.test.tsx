@@ -16,6 +16,29 @@ describe('ChatTextArea loading state', () => {
 
     expect(screen.queryByRole('status', { name: 'Geist is responding' })).not.toBeInTheDocument();
   });
+
+  it('shows the selected model lifecycle while weights are loading', () => {
+    render(<ChatTextArea chatHistory={[{
+      user: 'Hello',
+      ai: '',
+      status: 'model_loading',
+      model_load: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'loading',
+        detail: 'Downloading or loading model files from the Hugging Face cache.',
+        started_at: '2026-07-26T00:00:00Z',
+        updated_at: '2026-07-26T00:00:01Z',
+      },
+    }]} isLoading />);
+
+    expect(screen.getByRole('status', { name: 'Model loading status' })).toHaveTextContent(
+      'meta-llama/Meta-Llama-3.1-8B-Instruct',
+    );
+    expect(screen.getByRole('status', { name: 'Model loading status' })).toHaveTextContent(
+      'Downloading or loading model files from the Hugging Face cache.',
+    );
+    expect(screen.queryByText('Turn status: model loading')).not.toBeInTheDocument();
+  });
 });
 
 describe('ChatTextArea tool activity', () => {

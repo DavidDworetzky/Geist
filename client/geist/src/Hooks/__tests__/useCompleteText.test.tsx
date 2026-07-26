@@ -31,6 +31,28 @@ const streamingResponse = (chunks: string[]): Response => {
 };
 
 describe('chatStreamReducer', () => {
+  it('reflects backend model loading state before the stream starts', () => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Hello',
+      chatId: null,
+    });
+
+    state = chatStreamReducer(state, {
+      type: 'MODEL_LOAD_STATUS',
+      status: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'loading',
+        detail: 'Loading cached weights.',
+        started_at: '2026-07-26T00:00:00Z',
+        updated_at: '2026-07-26T00:00:01Z',
+      },
+    });
+
+    expect(state.activeTurn?.status).toBe('model_loading');
+    expect(state.activeTurn?.model_load?.detail).toBe('Loading cached weights.');
+  });
+
   it('upserts repeated tool lifecycle events by id', () => {
     let state = chatStreamReducer(initialChatStreamState, {
       type: 'START',

@@ -4,6 +4,7 @@ import {
   ActiveChatTurn,
   ChatTurnResult,
   CompleteTextResponse,
+  ModelLoadStatus,
   ToolCallResult,
   WorkArtifact,
 } from '../chatTypes';
@@ -16,6 +17,7 @@ const AGENT_TYPE_MAPPING = {
 }
 
 const DEFAULT_AGENT_TYPE = "LOCALAGENT";
+const MODEL_STATUS_POLL_INTERVAL_MS = 1000;
 
 const getAgentTypeFromSettings = (settings: UserSettings | null): string => {
   if (!settings) {
@@ -54,6 +56,7 @@ export type ChatStreamAction =
   | { type: 'START'; prompt: string; chatId: number | null }
   | { type: 'RUN_STARTED'; runId: string; chatId?: number | null }
   | { type: 'TEXT_DELTA'; text: string }
+  | { type: 'MODEL_LOAD_STATUS'; status: ModelLoadStatus }
   | { type: 'TOOL_UPSERT'; toolCall: ToolCallUpdate }
   | { type: 'ARTIFACT_UPSERT'; artifact: WorkArtifact }
   | { type: 'FINAL'; prompt: string; data: CompleteTextResponse }
@@ -163,6 +166,28 @@ export const chatStreamReducer = (
           run_id: action.runId,
           chat_id: action.chatId ?? state.activeTurn.chat_id,
           status: 'streaming',
+          model_load: state.activeTurn.model_load
+            ? {
+                ...state.activeTurn.model_load,
+                state: 'ready',
+                detail: 'Model is loaded and ready.',
+              }
+            : undefined,
+        },
+      };
+    case 'MODEL_LOAD_STATUS':
+      if (!state.activeTurn || state.activeTurn.run_id) return state;
+      return {
+        ...state,
+        error: action.status.state === 'failed' ? action.status.detail : state.error,
+        activeTurn: {
+          ...state.activeTurn,
+          model_load: action.status,
+          status: action.status.state === 'failed'
+            ? 'failed'
+            : action.status.state === 'ready'
+              ? 'connecting'
+              : 'model_loading',
         },
       };
     case 'TEXT_DELTA':
@@ -320,6 +345,62 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
   }, []);
+
+  const hasActiveTurn = streamState.activeTurn !== null;
+  const activeRunId = streamState.activeTurn?.run_id;
+  const currentModelState = streamState.activeTurn?.model_load?.state;
+
+  useEffect(() => {
+    const isLocalModel = userSettings?.default_agent_type === 'local';
+    const modelId = userSettings?.default_local_model;
+    const shouldPoll = Boolean(
+      streamState.loading
+      && hasActiveTurn
+      && !activeRunId
+      && isLocalModel
+      && modelId
+      && currentModelState !== 'ready'
+      && currentModelState !== 'failed'
+    );
+    if (!shouldPoll || !modelId) return undefined;
+
+    let stopped = false;
+    let pollTimer: number | undefined;
+
+    const poll = async () => {
+      let keepPolling = true;
+      try {
+        const response = await fetch(
+          `/api/v1/models/status/${encodeURIComponent(modelId)}`,
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+        if (response.ok) {
+          const status = await response.json() as ModelLoadStatus;
+          if (!stopped) dispatch({ type: 'MODEL_LOAD_STATUS', status });
+          keepPolling = status.state !== 'ready' && status.state !== 'failed';
+        }
+      } catch {
+        // The chat stream remains authoritative. A transient polling failure
+        // should not replace its eventual response or error.
+      }
+      if (!stopped && keepPolling) {
+        pollTimer = window.setTimeout(poll, MODEL_STATUS_POLL_INTERVAL_MS);
+      }
+    };
+
+    void poll();
+    return () => {
+      stopped = true;
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+    };
+  }, [
+    streamState.loading,
+    hasActiveTurn,
+    activeRunId,
+    currentModelState,
+    userSettings?.default_agent_type,
+    userSettings?.default_local_model,
+  ]);
 
   const handleSseEvent = (eventBlock: string, turnPrompt: string): string | null => {
     const parsedEvent = parseSseEventBlock(eventBlock);

@@ -35,7 +35,19 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             {element.ai}
           </div>
 
-          {element.status && element.status !== 'completed' && (
+          {element.model_load && element.model_load.state !== 'ready' && (
+            <div
+              aria-live="polite"
+              aria-label="Model loading status"
+              role="status"
+              className={`model-load-indicator model-load-${element.model_load.state}`}
+            >
+              <strong>{element.model_load.model_id}</strong>
+              <span>{element.model_load.detail}</span>
+            </div>
+          )}
+
+          {element.status && element.status !== 'completed' && element.status !== 'model_loading' && (
             <div aria-live="polite" className="input-help">
               Turn status: {statusLabel(element.status)}
             </div>
