@@ -4,6 +4,7 @@ import useCompleteText, {
   chatStreamReducer,
   initialChatStreamState,
 } from '../useCompleteText';
+import { UserSettings } from '../useUserSettings';
 
 
 Object.defineProperty(global, 'TextDecoder', {
@@ -30,7 +31,104 @@ const streamingResponse = (chunks: string[]): Response => {
   } as unknown as Response;
 };
 
+const localSettings = {
+  default_agent_type: 'local',
+  default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+} as UserSettings;
+
+const pendingStreamingResponse = (signal?: AbortSignal | null): Response => ({
+  ok: true,
+  body: {
+    getReader: () => ({
+      read: jest.fn(() => new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      })),
+    }),
+  },
+} as unknown as Response);
+
+const flushAsyncWork = async () => {
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+
 describe('chatStreamReducer', () => {
+  it('reflects backend model loading state before the stream starts', () => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Hello',
+      chatId: null,
+      startedAt: '2026-07-26T00:00:00Z',
+    });
+
+    state = chatStreamReducer(state, {
+      type: 'MODEL_LOAD_STATUS',
+      status: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'loading',
+        detail: 'Loading cached weights.',
+        started_at: '2026-07-26T00:00:00Z',
+        updated_at: '2026-07-26T00:00:01Z',
+      },
+    });
+
+    expect(state.activeTurn?.status).toBe('model_loading');
+    expect(state.activeTurn?.model_load?.detail).toBe('Loading cached weights.');
+  });
+
+  it('ignores model status left over from an earlier turn', () => {
+    const state = chatStreamReducer(chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Try again',
+      chatId: null,
+      startedAt: '2026-07-26T00:01:00Z',
+    }), {
+      type: 'MODEL_LOAD_STATUS',
+      status: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'failed',
+        detail: 'Previous load failed.',
+        started_at: '2026-07-26T00:00:00Z',
+        updated_at: '2026-07-26T00:00:30Z',
+      },
+    });
+
+    expect(state.activeTurn?.status).toBe('connecting');
+    expect(state.activeTurn?.model_load).toBeUndefined();
+    expect(state.error).toBeNull();
+  });
+
+  it.each([
+    { type: 'ERROR' as const, message: 'Stream failed.' },
+    { type: 'CANCELLED' as const },
+  ])('clears model loading state on $type', (terminalAction) => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Hello',
+      chatId: null,
+      startedAt: '2026-07-26T00:00:00Z',
+    });
+    state = chatStreamReducer(state, {
+      type: 'MODEL_LOAD_STATUS',
+      status: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'loading',
+        detail: 'Loading cached weights.',
+        started_at: '2026-07-26T00:00:01Z',
+        updated_at: '2026-07-26T00:00:02Z',
+      },
+    });
+
+    state = chatStreamReducer(state, terminalAction);
+
+    expect(state.activeTurn?.model_load).toBeUndefined();
+  });
+
   it('upserts repeated tool lifecycle events by id', () => {
     let state = chatStreamReducer(initialChatStreamState, {
       type: 'START',
@@ -111,6 +209,91 @@ describe('chatStreamReducer', () => {
 describe('useCompleteText', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('stops model status polling when the endpoint returns 404', async () => {
+    jest.useFakeTimers();
+    const fetchMock = jest.fn((url: RequestInfo | URL, options?: RequestInit) => {
+      if (String(url).startsWith('/api/v1/models/status/')) {
+        return Promise.resolve({ ok: false, status: 404 } as Response);
+      }
+      return Promise.resolve(pendingStreamingResponse(options?.signal));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result, unmount } = renderHook(() => useCompleteText(localSettings));
+    let completionPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      completionPromise = result.current.completeText('Hello');
+    });
+    await flushAsyncWork();
+
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/models/status/')))
+      .toHaveLength(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+      await Promise.resolve();
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/models/status/')))
+      .toHaveLength(1);
+
+    unmount();
+    await completionPromise;
+  });
+
+  it('backs off repeated model status polling failures', async () => {
+    jest.useFakeTimers();
+    const fetchMock = jest.fn((url: RequestInfo | URL, options?: RequestInit) => {
+      if (String(url).startsWith('/api/v1/models/status/')) {
+        return Promise.resolve({ ok: false, status: 503 } as Response);
+      }
+      return Promise.resolve(pendingStreamingResponse(options?.signal));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result, unmount } = renderHook(() => useCompleteText(localSettings));
+    let completionPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      completionPromise = result.current.completeText('Hello');
+    });
+    await flushAsyncWork();
+    const statusCallCount = () => fetchMock.mock.calls
+      .filter(([url]) => String(url).includes('/models/status/')).length;
+
+    expect(statusCallCount()).toBe(1);
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    expect(statusCallCount()).toBe(2);
+    await act(async () => {
+      jest.advanceTimersByTime(1999);
+      await Promise.resolve();
+    });
+    expect(statusCallCount()).toBe(2);
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(statusCallCount()).toBe(3);
+    await act(async () => {
+      jest.advanceTimersByTime(4999);
+      await Promise.resolve();
+    });
+    expect(statusCallCount()).toBe(3);
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(statusCallCount()).toBe(4);
+
+    unmount();
+    await completionPromise;
   });
 
   it('handles fragmented SSE and returns the authoritative final envelope', async () => {

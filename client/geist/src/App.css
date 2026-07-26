@@ -1497,6 +1497,25 @@ textarea:focus-visible {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
 }
 
+.model-load-indicator {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  max-width: min(820px, 92%);
+  padding: 9px 12px;
+  color: var(--geist-color-text);
+  background: var(--geist-color-surface-strong);
+  border: 1px solid var(--geist-color-border);
+  border-left: 3px solid var(--geist-color-accent);
+  border-radius: var(--geist-radius-lg);
+  font-size: 0.85rem;
+}
+
+.model-load-failed {
+  border-left-color: var(--geist-color-danger);
+}
+
 .chat-loading-dot {
   width: 7px;
   height: 7px;

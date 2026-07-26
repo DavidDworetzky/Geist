@@ -11,6 +11,7 @@ from agents.architectures import get_runner
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
+from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import LlamaCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -77,11 +78,23 @@ class LocalAgent(BaseAgent):
 
         self.logger.info(f"Initializing {self.runner_type} runner with model: {self.model_id}")
         runner = runner_class()
-        runner.load(self.model_id, self.device_config)
+        model_load_status_registry.mark_loading(
+            self.model_id,
+            f"Loading model with the {self.runner_type} runtime.",
+        )
+        try:
+            runner.load(self.model_id, self.device_config)
+        except Exception as error:
+            model_load_status_registry.mark_failed(
+                self.model_id,
+                f"Model failed to load: {error}",
+            )
+            raise
         self.runner = runner
         self.supports_native_tool_calling = bool(
             getattr(runner, "supports_native_tool_calling", False)
         )
+        model_load_status_registry.mark_ready(self.model_id)
 
     def _create_generation_config(
         self,

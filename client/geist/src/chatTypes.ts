@@ -45,8 +45,19 @@ export interface ChatTurnResult {
   artifacts: WorkArtifact[];
 }
 
+export type ModelLoadState = 'unloaded' | 'loading' | 'ready' | 'failed';
+
+export interface ModelLoadStatus {
+  model_id: string;
+  state: ModelLoadState;
+  detail: string;
+  started_at: string | null;
+  updated_at: string;
+}
+
 export type ActiveTurnStatus =
   | 'connecting'
+  | 'model_loading'
   | 'cancelling'
   | 'streaming'
   | 'awaiting_approval'
@@ -56,6 +67,8 @@ export type ActiveTurnStatus =
 
 export interface ActiveChatTurn extends ChatTurnResult {
   status: ActiveTurnStatus;
+  started_at: string;
+  model_load?: ModelLoadStatus;
 }
 
 export interface ChatPair {
@@ -63,6 +76,7 @@ export interface ChatPair {
   user: string;
   ai: string;
   status?: ActiveTurnStatus;
+  model_load?: ModelLoadStatus;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
 }

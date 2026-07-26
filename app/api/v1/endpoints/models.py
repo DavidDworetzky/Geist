@@ -1,6 +1,7 @@
 """
 API endpoints for model discovery and listing.
 """
+
 import logging
 from datetime import datetime
 
@@ -17,6 +18,7 @@ from agents.architectures.registry import (
     provider_from_string,
     provider_to_string,
 )
+from agents.model_load_status import model_load_status_registry
 from app.services.local_models import get_local_model_manager
 
 
@@ -27,6 +29,7 @@ router = APIRouter()
 
 class ModelResponse(BaseModel):
     """Response model for a single model."""
+
     id: str
     name: str
     provider: str
@@ -35,7 +38,7 @@ class ModelResponse(BaseModel):
     supports_vision: bool
     supports_function_calling: bool
     supports_streaming: bool
-    #recommended models can be filtered to the top in the UI.
+    # recommended models can be filtered to the top in the UI.
     recommended: bool
     family: str | None
     backend: str | None = None
@@ -53,6 +56,7 @@ class ModelResponse(BaseModel):
 
 class ModelsListResponse(BaseModel):
     """Response model for list of models grouped by provider."""
+
     providers: dict[str, list[ModelResponse]]
     last_updated: datetime | None
 
@@ -61,6 +65,16 @@ def _model_response(model) -> ModelResponse:
     payload = model.to_dict()
     payload["local_artifacts"] = get_local_model_manager().list_artifacts(model.id)
     return ModelResponse(**payload)
+
+
+class ModelLoadStatusResponse(BaseModel):
+    """Current process-local lifecycle state for a local model."""
+
+    model_id: str
+    state: str
+    detail: str
+    started_at: datetime | None
+    updated_at: datetime
 
 
 @router.get("/", response_model=ModelsListResponse)
@@ -80,10 +94,7 @@ async def get_available_models():
                 _model_response(model) for model in models
             ]
 
-        return ModelsListResponse(
-            providers=providers_dict,
-            last_updated=get_last_model_sync_time()
-        )
+        return ModelsListResponse(providers=providers_dict, last_updated=get_last_model_sync_time())
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -105,7 +116,7 @@ async def get_models_by_provider(provider: str):
         if provider_enum is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {provider}. Valid providers: {get_provider_ids()}"
+                detail=f"Invalid provider: {provider}. Valid providers: {get_provider_ids()}",
             )
 
         models = get_models_for_provider(provider_enum)
@@ -139,6 +150,24 @@ async def get_model(model_id: str):
     except Exception as e:
         logger.error(f"Error getting model {model_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/status/{model_id:path}", response_model=ModelLoadStatusResponse)
+async def get_model_load_status(model_id: str):
+    """Return whether a local model is unloaded, loading, ready, or failed."""
+    model = get_model_by_id(model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+    if not model.local:
+        now = datetime.now().astimezone()
+        return ModelLoadStatusResponse(
+            model_id=model_id,
+            state="ready",
+            detail="Remote models do not require a local load.",
+            started_at=None,
+            updated_at=now,
+        )
+    return ModelLoadStatusResponse(**model_load_status_registry.get(model_id).to_dict())
 
 
 @router.get("/providers", response_model=list[str])

@@ -446,6 +446,7 @@ const Chat = () => {
           user: activeTurn!.prompt,
           ai: activeTurn!.message,
           status: activeTurn!.status,
+          model_load: activeTurn!.model_load,
           tool_calls: activeTurn!.tool_calls,
           artifacts: activeTurn!.artifacts,
         },
