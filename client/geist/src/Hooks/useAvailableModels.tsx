@@ -184,7 +184,7 @@ const STATIC_MODELS: AvailableModels = {
     ],
     offline: [
       {
-        id: 'Meta-Llama-3.1-8B-Instruct',
+        id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
         name: 'Meta Llama 3.1 8B Instruct (Local)',
         provider: 'offline',
         context_window: 131072,

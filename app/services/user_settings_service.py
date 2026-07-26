@@ -6,6 +6,7 @@ import logging
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.factory import AgentFactory
+from agents.model_ids import canonicalize_local_model_id
 from app.models.database.geist_user import get_default_user
 from app.models.database.user_settings import (
     get_or_create_user_settings,
@@ -42,7 +43,7 @@ class UserSettingsService:
                 user_settings_id=settings_model.user_settings_id,
                 user_id=settings_model.user_id,
                 default_agent_type=settings_model.default_agent_type,
-                default_local_model=settings_model.default_local_model,
+                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
                 default_local_artifact_id=settings_model.default_local_artifact_id,
                 default_online_model=settings_model.default_online_model,
                 default_online_provider=settings_model.default_online_provider,
@@ -76,7 +77,7 @@ class UserSettingsService:
             user_settings_id=settings_model.user_settings_id,
             user_id=settings_model.user_id,
             default_agent_type=settings_model.default_agent_type,
-            default_local_model=settings_model.default_local_model,
+            default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
             default_local_artifact_id=settings_model.default_local_artifact_id,
             default_online_model=settings_model.default_online_model,
             default_online_provider=settings_model.default_online_provider,
@@ -112,10 +113,16 @@ class UserSettingsService:
         if current_settings is None:
             return None
 
+        if "default_local_model" in update_dict:
+            update_dict["default_local_model"] = canonicalize_local_model_id(
+                update_dict["default_local_model"]
+            )
+
+        current_local_model = canonicalize_local_model_id(current_settings.default_local_model)
         if (
             "default_local_model" in update_dict
             and "default_local_artifact_id" not in update_dict
-            and update_dict["default_local_model"] != current_settings.default_local_model
+            and update_dict["default_local_model"] != current_local_model
         ):
             update_dict["default_local_artifact_id"] = None
 
@@ -125,7 +132,7 @@ class UserSettingsService:
 
             selected_model = (
                 update_dict.get("default_local_model")
-                or current_settings.default_local_model
+                or current_local_model
             )
             manager = get_local_model_manager()
             try:
@@ -163,7 +170,7 @@ class UserSettingsService:
                 user_settings_id=settings_model.user_settings_id,
                 user_id=settings_model.user_id,
                 default_agent_type=settings_model.default_agent_type,
-                default_local_model=settings_model.default_local_model,
+                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
                 default_local_artifact_id=settings_model.default_local_artifact_id,
                 default_online_model=settings_model.default_online_model,
                 default_online_provider=settings_model.default_online_provider,

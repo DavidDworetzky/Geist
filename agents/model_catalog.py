@@ -11,8 +11,10 @@ import platform
 import re
 from dataclasses import dataclass
 
+from agents.model_ids import META_LLAMA_31_8B_INSTRUCT_ID
 
-MLX_DEFAULT_LOCAL_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+MLX_DEFAULT_LOCAL_MODEL = META_LLAMA_31_8B_INSTRUCT_ID
 GGUF_DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B"
 
 
@@ -87,16 +89,11 @@ PROVIDERS: dict[str, ProviderSpec] = {
 MODEL_SPECS: tuple[ModelSpec, ...] = (
     # Existing families and practical local reference checkpoints.
     ModelSpec(
-        "Meta-Llama-3.1-8B-Instruct", "Meta Llama 3.1 8B Instruct (Local)",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct", "Meta Llama 3.1 8B Instruct (Local)",
         "llama", backend="mlx_llama", context_window=131072,
         max_output_tokens=8192, recommended=True, gated=True,
-        parameter_count="8B", performance_note="Optimized legacy MLX path on Apple Silicon.",
-    ),
-    ModelSpec(
-        "meta-llama/Meta-Llama-3.1-8B-Instruct", "Meta Llama 3.1 8B Instruct (HF Local)",
-        "llama", backend="mlx_llama", context_window=131072, max_output_tokens=8192, gated=True,
         parameter_count="8B",
-        performance_note="Preserves Geist's optimized Llama path; use an explicit transformers override for HF-native loading.",
+        performance_note="Optimized MLX path on Apple Silicon; use an explicit transformers override for HF-native loading.",
     ),
     ModelSpec(
         "Qwen/Qwen2.5-3B-Instruct", "Qwen 2.5 3B Instruct (Local)", "qwen",
