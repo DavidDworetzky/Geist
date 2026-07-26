@@ -11,6 +11,11 @@ from enum import Enum
 from typing import Any, cast
 
 from agents.model_catalog import MODEL_SPECS, PROVIDERS
+from agents.model_ids import (
+    META_LLAMA_3_8B_INSTRUCT_ID,
+    META_LLAMA_31_8B_BASE_ID,
+    META_LLAMA_31_8B_INSTRUCT_ID,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -65,7 +70,7 @@ class OnlineModelNames(Enum):
     # Open Source / Huggingface Models
     QWEN3 = "qwen3"
     QWEN25_72B = "Qwen/Qwen2.5-72B-Instruct"
-    META_LLAMA_31_8B = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    META_LLAMA_31_8B = META_LLAMA_31_8B_INSTRUCT_ID
     MIXTRAL_8X7B_HF = "mistralai/Mixtral-8x7B-Instruct-v0.1"
     # Offline / Local models
     META_LLAMA_31_8B_LOCAL = "Meta-Llama-3.1-8B-Instruct"
@@ -654,7 +659,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     ],
     OnlineModelProviders.OFFLINE: [
         ModelInfo(
-            id="Meta-Llama-3.1-8B-Instruct",
+            id=META_LLAMA_31_8B_INSTRUCT_ID,
             name="Meta Llama 3.1 8B Instruct (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=131072,
@@ -665,7 +670,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             family="llama-3",
         ),
         ModelInfo(
-            id="Meta-Llama-3.1-8B",
+            id=META_LLAMA_31_8B_BASE_ID,
             name="Meta Llama 3.1 8B (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=131072,
@@ -676,7 +681,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             family="llama-3",
         ),
         ModelInfo(
-            id="Meta-Llama-3-8B-Instruct",
+            id=META_LLAMA_3_8B_INSTRUCT_ID,
             name="Meta Llama 3 8B Instruct (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=8192,

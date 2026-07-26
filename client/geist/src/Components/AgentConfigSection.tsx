@@ -50,9 +50,9 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
     }
 
     return [
-      { value: 'Meta-Llama-3.1-8B-Instruct', label: 'Meta-Llama-3.1-8B-Instruct' },
-      { value: 'Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
-      { value: 'Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
+      { value: 'meta-llama/Meta-Llama-3.1-8B-Instruct', label: 'Meta-Llama-3.1-8B-Instruct' },
+      { value: 'meta-llama/Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
+      { value: 'meta-llama/Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
     ];
   }, [getModelsForProvider]);
 

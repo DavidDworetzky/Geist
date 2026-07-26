@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agents.model_catalog import default_local_model_id
+from agents.model_ids import canonicalize_local_model_id
 
 
 class UserSettingsBase(BaseModel):
@@ -128,7 +129,9 @@ class AgentFactoryConfig(BaseModel):
         agent_type = overrides.agent_type or settings.default_agent_type
 
         if agent_type == "local":
-            model = overrides.model or settings.default_local_model
+            model = canonicalize_local_model_id(
+                overrides.model or settings.default_local_model
+            )
             # Leave unset so AgentFactory can select a backend from catalog
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type

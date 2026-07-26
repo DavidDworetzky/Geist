@@ -9,6 +9,7 @@ from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
+from agents.model_ids import canonicalize_local_model_id
 
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,11 @@ class AgentFactory:
 
             # Default model
             if not model:
-                model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+                from agents.model_catalog import default_local_model_id
+
+                model = default_local_model_id()
+
+            model = canonicalize_local_model_id(model)
 
             configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
             runner_was_explicit = runner_type is not None or bool(configured_runner)
