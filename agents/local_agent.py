@@ -79,6 +79,9 @@ class LocalAgent(BaseAgent):
         runner = runner_class()
         runner.load(self.model_id, self.device_config)
         self.runner = runner
+        self.supports_native_tool_calling = bool(
+            getattr(runner, "supports_native_tool_calling", False)
+        )
 
     def _create_generation_config(
         self,
@@ -260,11 +263,15 @@ class LocalAgent(BaseAgent):
         tools: list[ToolDefinition],
         config: ModelRequestConfig,
     ) -> Iterator[ModelEvent]:
-        """Run a persistence-free local text turn and fail closed on tool schemas."""
-        if tools:
-            raise ValueError(f"Runner {self.runner_type} does not support native tool calling")
+        """Run a persistence-free local turn through the selected runner."""
         if not self.runner:
             raise RuntimeError("Runner not initialized")
+        if tools and not self.supports_native_tool_calling:
+            raise ValueError(f"Runner {self.runner_type} does not support native tool calling")
+        native_stream = getattr(self.runner, "stream_model_turn", None)
+        if callable(native_stream):
+            yield from native_stream(messages, tools, config)
+            return
 
         generation_config = GenerationConfig(
             max_tokens=config.max_tokens,

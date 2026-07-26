@@ -8,7 +8,6 @@ import logging
 import os
 from typing import Any
 
-import numpy as np
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
@@ -17,9 +16,7 @@ from agents.base_agent import BaseAgent
 from agents.prompt.prompt import AGENT_PROMPTS
 from app.models.user_settings import AgentConfigRequest
 from app.services.agent_context_provider import get_default_agent_context
-from app.services.tts import get_supported_tts_providers
 from app.services.user_settings_service import UserSettingsService
-from app.services.voice_session import VoiceSessionService
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +107,8 @@ def _build_provider_kwargs(
 @router.get("/models")
 async def list_voice_models():
     """Return supported voice/TTS providers and model options for frontend selection."""
+    from app.services.tts import get_supported_tts_providers
+
     return {
         "default_provider": "sesame",
         "providers": get_supported_tts_providers(),
@@ -145,6 +144,8 @@ async def voice_stream_websocket(
       - {"type": "done"}
       - {"type": "error", "message": "..."}
     """
+    from app.services.voice_session import VoiceSessionService
+
     logger.info(
         "Voice WebSocket connection attempt: "
         f"session_id={session_id}, agent_type={agent_type}, stt={stt_provider}, "
@@ -276,6 +277,10 @@ async def voice_upload(
     Upload an audio clip, get back transcript, text response, and audio response.
     """
     try:
+        import numpy as np
+
+        from app.services.voice_session import VoiceSessionService
+
         # Get agent context and create agent
         agent_context = get_default_agent_context()
         agent = await get_agent_for_session(agent_type, agent_context)

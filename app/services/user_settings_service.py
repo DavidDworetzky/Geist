@@ -43,6 +43,7 @@ class UserSettingsService:
                 user_id=settings_model.user_id,
                 default_agent_type=settings_model.default_agent_type,
                 default_local_model=settings_model.default_local_model,
+                default_local_artifact_id=settings_model.default_local_artifact_id,
                 default_online_model=settings_model.default_online_model,
                 default_online_provider=settings_model.default_online_provider,
                 default_file_archives=settings_model.default_file_archives,
@@ -76,6 +77,7 @@ class UserSettingsService:
             user_id=settings_model.user_id,
             default_agent_type=settings_model.default_agent_type,
             default_local_model=settings_model.default_local_model,
+            default_local_artifact_id=settings_model.default_local_artifact_id,
             default_online_model=settings_model.default_online_model,
             default_online_provider=settings_model.default_online_provider,
             default_file_archives=settings_model.default_file_archives,
@@ -103,8 +105,42 @@ class UserSettingsService:
         Returns:
             Updated UserSettingsResponse if successful, None if user not found
         """
-        # Convert Pydantic model to dict, excluding None values
-        update_dict = {k: v for k, v in updates.dict().items() if v is not None}
+        # Preserve explicitly supplied nulls so callers can clear a previously
+        # selected concrete artifact when switching back to a catalog model.
+        update_dict = updates.model_dump(exclude_unset=True)
+        current_settings = get_user_settings(user_id)
+        if current_settings is None:
+            return None
+
+        if (
+            "default_local_model" in update_dict
+            and "default_local_artifact_id" not in update_dict
+            and update_dict["default_local_model"] != current_settings.default_local_model
+        ):
+            update_dict["default_local_artifact_id"] = None
+
+        selected_artifact_id = update_dict.get("default_local_artifact_id")
+        if selected_artifact_id:
+            from app.services.local_models import get_local_model_manager
+
+            selected_model = (
+                update_dict.get("default_local_model")
+                or current_settings.default_local_model
+            )
+            manager = get_local_model_manager()
+            try:
+                artifact = manager.get_artifact(str(selected_artifact_id))
+            except KeyError as error:
+                raise ValueError(str(error)) from error
+            if artifact.model_id != selected_model:
+                raise ValueError(
+                    f"Artifact {artifact.id} belongs to {artifact.model_id}, not {selected_model}"
+                )
+            artifact_status = manager.status(artifact.id)
+            if artifact_status.get("supported") is False:
+                raise ValueError(f"Artifact {artifact.id} is unavailable on this platform")
+            if artifact_status.get("status") != "installed":
+                raise ValueError(f"Artifact {artifact.id} must be installed before selection")
 
         # Backend validation: auto-infer agent_type based on model/provider changes
         # This acts as a safety net if the frontend doesn't set agent_type correctly
@@ -117,7 +153,7 @@ class UserSettingsService:
                     update_dict['default_agent_type'] = 'online'
                     logger.info("Auto-inferred agent_type='online' based on online model/provider update")
             # If local model is being set, infer agent_type as 'local'
-            elif 'default_local_model' in update_dict:
+            elif 'default_local_model' in update_dict or selected_artifact_id:
                 update_dict['default_agent_type'] = 'local'
                 logger.info("Auto-inferred agent_type='local' based on local model update")
 
@@ -128,6 +164,7 @@ class UserSettingsService:
                 user_id=settings_model.user_id,
                 default_agent_type=settings_model.default_agent_type,
                 default_local_model=settings_model.default_local_model,
+                default_local_artifact_id=settings_model.default_local_artifact_id,
                 default_online_model=settings_model.default_online_model,
                 default_online_provider=settings_model.default_online_provider,
                 default_file_archives=settings_model.default_file_archives,
@@ -188,7 +225,10 @@ class UserSettingsService:
             endpoint=factory_config.endpoint,
             api_key=factory_config.api_key,
             runner_type=factory_config.runner_type,
-            backup_providers=[provider.dict() for provider in factory_config.backup_providers],
+            device_config=factory_config.device_config,
+            backup_providers=[
+                provider.model_dump() for provider in factory_config.backup_providers
+            ],
             generation_config=factory_config.generation_config,
         )
 

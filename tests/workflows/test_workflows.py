@@ -13,7 +13,7 @@ from app.models.database.workflow import Workflow, WorkflowStep
 @pytest.fixture
 def client():
     """Test client fixture."""
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 @pytest.fixture
 def db_session():

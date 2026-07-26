@@ -3,8 +3,10 @@ Unit tests for voice session service.
 """
 from unittest.mock import Mock, patch
 
-import numpy as np
 import pytest
+
+
+np = pytest.importorskip("numpy")
 
 from app.services.voice_session import VoiceSessionService
 

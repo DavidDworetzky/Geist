@@ -14,6 +14,7 @@ export interface UserSettings {
   user_id: number;
   default_agent_type: string;
   default_local_model: string;
+  default_local_artifact_id: string | null;
   default_online_model: string;
   default_online_provider: string;
   default_file_archives: number[];
@@ -32,6 +33,7 @@ export interface UserSettings {
 export interface UserSettingsUpdate {
   default_agent_type?: string;
   default_local_model?: string;
+  default_local_artifact_id?: string | null;
   default_online_model?: string;
   default_online_provider?: string;
   default_file_archives?: number[];

@@ -281,6 +281,11 @@ def register_all_runners(registry: RunnerRegistry | None = None) -> None:
     registry.register_lazy(
         "transformers", "agents.architectures.transformers_runner", "TransformersRunner"
     )
+    registry.register_lazy(
+        "llama_server",
+        "agents.architectures.llama_server_runner",
+        "LlamaServerRunner",
+    )
     registry.register_lazy("vllm", "agents.architectures.vllm_runner", "VLLMRunner")
     # Backward-compatible explicit Qwen runner. Automatic selection now uses
     # the generic Transformers runner for every standard causal LM family.

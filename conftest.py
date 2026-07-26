@@ -62,7 +62,7 @@ def app():
 @pytest.fixture(scope="module")
 def client(app):
     # Create a TestClient instance using the app fixture
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         yield client
 
 

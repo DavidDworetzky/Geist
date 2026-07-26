@@ -11,7 +11,6 @@ import mlx.core as mx
 import mlx.nn as nn
 
 # Tokenizer imports
-from huggingface_hub import snapshot_download
 from mlx.utils import tree_flatten
 from transformers import AutoTokenizer
 
@@ -520,17 +519,19 @@ class LlamaMLX:
         # If any key file doesn't exist, pull them
         if not (os.path.exists(config_path) and weights and os.path.exists(tokenizer_path)):
             logger.info("Downloading model files from HuggingFace...")
-            token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
+            token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
             if not token:
                 raise ValueError(
                     "HUGGING_FACE_HUB_TOKEN not found in environment variables. "
                     "Set your token to download model from Hugging Face."
                 )
 
-            snapshot_download(
-                repo_id=self.model_id,
+            from app.services.local_models import get_local_model_manager
+
+            get_local_model_manager().ensure_hugging_face_snapshot(
+                self.model_id,
+                self.weights_dir,
                 token=token,
-                local_dir=self.weights_dir,
                 allow_patterns=["*.json", "*.model", "*.safetensors"],
             )
             logger.info(f"Downloaded model files to {self.weights_dir}")
@@ -542,9 +543,13 @@ class LlamaMLX:
         Load the tokenizer (Hugging Face) and the LLaMA model (MLX) from local disk.
         """
 
-        # Check if model exists, if not, download it
+        # Model installation is owned by LocalModelManager. Inference must not
+        # start a multi-gigabyte gated download while serving a chat request.
         if not os.path.exists(os.path.join(self.weights_dir, "config.json")):
-            self.download_model()
+            raise FileNotFoundError(
+                "Managed MLX weights are incomplete. Download the selected model "
+                "from Geist's Models page before starting inference."
+            )
 
         # Step 2: Load the tokenizer
         logger.info("Loading tokenizer from local weights...")

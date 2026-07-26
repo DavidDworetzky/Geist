@@ -39,8 +39,8 @@ describe('BrandingProvider', () => {
 
     expect(screen.getByTestId('product-name')).toHaveTextContent('Geist');
 
-    const pitchblendBranding: GeistBranding = {
-      productName: 'pitchblend AI',
+    const runtimeBranding: GeistBranding = {
+      productName: 'Hosted Geist',
       theme: {
         '--geist-color-bg': '#1a0b2e',
         '--geist-color-accent': '#a78bfa',
@@ -48,24 +48,24 @@ describe('BrandingProvider', () => {
     };
 
     act(() => {
-      window.__GEIST_BRANDING__ = pitchblendBranding;
-      window.dispatchEvent(new CustomEvent('geist-branding-updated', { detail: pitchblendBranding }));
+      window.__GEIST_BRANDING__ = runtimeBranding;
+      window.dispatchEvent(new CustomEvent('geist-branding-updated', { detail: runtimeBranding }));
     });
 
-    expect(screen.getByTestId('product-name')).toHaveTextContent('pitchblend AI');
+    expect(screen.getByTestId('product-name')).toHaveTextContent('Hosted Geist');
 
     await act(async () => {
       resolveFetch({ ok: false } as Response);
       await fetchPromise;
     });
 
-    expect(screen.getByTestId('product-name')).toHaveTextContent('pitchblend AI');
+    expect(screen.getByTestId('product-name')).toHaveTextContent('Hosted Geist');
     expect(document.documentElement.style.getPropertyValue('--geist-color-bg')).toBe('#1a0b2e');
   });
 
   it('uses runtime branding on the first render when Electron injected it before mount', () => {
     window.__GEIST_BRANDING__ = {
-      productName: 'pitchblend AI',
+      productName: 'Hosted Geist',
       theme: {
         '--geist-color-bg': '#1a0b2e',
       },
@@ -78,7 +78,7 @@ describe('BrandingProvider', () => {
       </BrandingProvider>
     );
 
-    expect(screen.getByTestId('product-name')).toHaveTextContent('pitchblend AI');
+    expect(screen.getByTestId('product-name')).toHaveTextContent('Hosted Geist');
     expect(window.fetch).not.toHaveBeenCalled();
   });
 });

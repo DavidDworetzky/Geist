@@ -14,8 +14,9 @@ echo "Installing Python dependencies using uv..."
 # Sync dependencies from lock file
 # --frozen: Use the lock file as-is, don't update it
 # PostgreSQL remains available through the optional postgres extra; the default
-# container uses SQLite and does not need a system database or driver.
-if uv sync --frozen; then
+# container uses SQLite. Linux containers deliberately retain the existing
+# Transformers inference path while native Windows/Linux packages use llama.cpp.
+if uv sync --frozen --extra local-transformers; then
     echo "Successfully installed dependencies"
 else
     echo "Error: Failed to sync dependencies"

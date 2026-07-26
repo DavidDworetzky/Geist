@@ -1,8 +1,11 @@
 """
 Unit tests for text-to-speech provider wiring.
 """
-import numpy as np
-import torch
+import pytest
+
+
+np = pytest.importorskip("numpy")
+torch = pytest.importorskip("torch")
 
 from app.services.tts import (
     DEFAULT_QWEN3_TTS_MODEL,

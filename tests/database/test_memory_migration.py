@@ -54,6 +54,12 @@ def _create_legacy_schema(database_url: str) -> None:
         Column("created_at", DateTime),
         Column("updated_at", DateTime),
     )
+    Table(
+        "user_settings",
+        metadata,
+        Column("user_settings_id", Integer, primary_key=True, autoincrement=True),
+        Column("user_id", Integer, ForeignKey("geist_user.user_id"), nullable=False),
+    )
     engine = create_engine(database_url)
     metadata.create_all(engine)
     engine.dispose()
@@ -93,6 +99,9 @@ def test_memory_migration_round_trip_from_job_revision(tmp_path):
         assert {"user_id", "dedupe_key", "locked_at"}.issubset(
             {column["name"] for column in inspector.get_columns("job")}
         )
+        assert "default_local_artifact_id" in {
+            column["name"] for column in inspector.get_columns("user_settings")
+        }
         engine.dispose()
 
         command.downgrade(config, "c3a1f5e7d9b2")
@@ -104,6 +113,9 @@ def test_memory_migration_round_trip_from_job_revision(tmp_path):
         }
         assert "dedupe_key" not in {
             column["name"] for column in inspector.get_columns("job")
+        }
+        assert "default_local_artifact_id" not in {
+            column["name"] for column in inspector.get_columns("user_settings")
         }
         engine.dispose()
     finally:
