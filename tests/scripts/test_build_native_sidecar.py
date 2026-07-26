@@ -64,6 +64,12 @@ def test_windows_recipe_is_onedir_and_includes_llama_runner(tmp_path: Path) -> N
     assert "agents.architectures.llama_server_runner" in _option_values(
         arguments, "--hidden-import"
     )
+    assert "agents.architectures.llama_server_process_windows" in _option_values(
+        arguments, "--hidden-import"
+    )
+    assert "agents.architectures.llama_server_process_posix" in _option_values(
+        arguments, "--exclude-module"
+    )
     assert "agents.architectures.mlx_llama_runner" in _option_values(
         arguments, "--exclude-module"
     )
@@ -94,6 +100,12 @@ def test_macos_recipe_collects_mlx_and_excludes_llama_server(tmp_path: Path) -> 
         arguments, "--hidden-import"
     )
     assert "agents.architectures.llama_server_process" not in _option_values(
+        arguments, "--exclude-module"
+    )
+    assert "agents.architectures.llama_server_process_posix" in _option_values(
+        arguments, "--hidden-import"
+    )
+    assert "agents.architectures.llama_server_process_windows" in _option_values(
         arguments, "--exclude-module"
     )
     assert "agents.architectures.llama_server_runner" in _option_values(

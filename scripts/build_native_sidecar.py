@@ -52,6 +52,8 @@ TARGETS: dict[str, NativeTarget] = {
         backend="llama-server",
         hidden_imports=(
             "agents.architectures.llama_server_process",
+            "agents.architectures.llama_server_process_platform",
+            "agents.architectures.llama_server_process_windows",
             "agents.architectures.llama_server_runner",
         ),
         excluded_modules=(
@@ -60,6 +62,7 @@ TARGETS: dict[str, NativeTarget] = {
             "agents.architectures.mlx_llama_runner",
             "agents.architectures.llama.llama_mlx",
             "agents.architectures.llama.mlx_lm_backend",
+            "agents.architectures.llama_server_process_posix",
         ),
     ),
     "darwin-arm64": NativeTarget(
@@ -75,10 +78,15 @@ TARGETS: dict[str, NativeTarget] = {
             # The models API imports lifecycle diagnostics on every platform,
             # even though macOS does not stage a llama-server executable.
             "agents.architectures.llama_server_process",
+            "agents.architectures.llama_server_process_platform",
+            "agents.architectures.llama_server_process_posix",
             "safetensors.numpy",
         ),
         collect_all=("mlx", "mlx_lm"),
-        excluded_modules=("agents.architectures.llama_server_runner",),
+        excluded_modules=(
+            "agents.architectures.llama_server_process_windows",
+            "agents.architectures.llama_server_runner",
+        ),
     ),
     "linux-x64": NativeTarget(
         key="linux-x64",
@@ -88,6 +96,8 @@ TARGETS: dict[str, NativeTarget] = {
         backend="llama-server",
         hidden_imports=(
             "agents.architectures.llama_server_process",
+            "agents.architectures.llama_server_process_platform",
+            "agents.architectures.llama_server_process_posix",
             "agents.architectures.llama_server_runner",
         ),
         excluded_modules=(
@@ -96,6 +106,7 @@ TARGETS: dict[str, NativeTarget] = {
             "agents.architectures.mlx_llama_runner",
             "agents.architectures.llama.llama_mlx",
             "agents.architectures.llama.mlx_lm_backend",
+            "agents.architectures.llama_server_process_windows",
         ),
     ),
 }

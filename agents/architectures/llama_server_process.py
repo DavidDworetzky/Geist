@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import logging
 import os
 import secrets
 import socket
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -18,7 +16,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import psutil
+
+from agents.architectures.llama_server_process_platform import (
+    attach_process_lifetime,
+    close_process_lifetime,
+    process_options,
+    terminate_process_tree,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -77,7 +81,7 @@ class LlamaServerManager:
         self._start_lock = threading.Lock()
         self._stop_epoch = 0
         self._process: subprocess.Popen[str] | None = None
-        self._windows_job_handle: Any | None = None
+        self._process_lifetime_handle: Any | None = None
         self._connection: LlamaServerConnection | None = None
         self._state = LlamaServerState()
 
@@ -193,7 +197,7 @@ class LlamaServerManager:
             if not gpu_layers.isdigit():
                 raise ValueError("GEIST_LLAMA_GPU_LAYERS must be a non-negative integer")
             args.extend(["--n-gpu-layers", gpu_layers])
-        process_options: dict[str, Any] = {
+        popen_options: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
@@ -205,23 +209,16 @@ class LlamaServerManager:
             "cwd": str(executable.parent),
             "env": dict(self.environment),
         }
-        # sys.platform, not os.name: mypy narrows platform only on sys.platform,
-        # so os.name guards leave the Windows-only branch type-checked on Linux.
-        if sys.platform == "win32":
-            process_options["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            )
-        else:
-            process_options["start_new_session"] = True
+        popen_options.update(process_options_for_platform())
 
-        process = self._process_factory(args, **process_options)
-        windows_job_handle = _assign_windows_kill_on_close_job(process)
+        process = self._process_factory(args, **popen_options)
+        process_lifetime_handle = attach_process_lifetime(process)
         with self._lock:
             if start_epoch != self._stop_epoch:
-                _terminate_process_tree(process, windows_job_handle)
+                terminate_process_tree(process, process_lifetime_handle)
                 raise RuntimeError("llama-server startup was cancelled")
             self._process = process
-            self._windows_job_handle = windows_job_handle
+            self._process_lifetime_handle = process_lifetime_handle
             self._state.backend = backend
         self._drain_output(process, api_key)
         timeout = float(self.environment.get("GEIST_LLAMA_STARTUP_TIMEOUT_SECONDS", "180"))
@@ -294,50 +291,14 @@ class LlamaServerManager:
 
     def _stop_locked(self) -> None:
         process = self._process
-        windows_job_handle = self._windows_job_handle
+        process_lifetime_handle = self._process_lifetime_handle
         self._process = None
-        self._windows_job_handle = None
+        self._process_lifetime_handle = None
         self._connection = None
         if process is None:
-            _close_windows_handle(windows_job_handle)
+            close_process_lifetime(process_lifetime_handle)
             return
-        _terminate_process_tree(process, windows_job_handle)
-
-
-def _terminate_process_tree(
-    process: subprocess.Popen[str],
-    windows_job_handle: Any | None,
-) -> None:
-    """Terminate a retained child and every descendant without lifecycle locks."""
-
-    if process.poll() is not None:
-        _close_windows_handle(windows_job_handle)
-        return
-    try:
-        parent = psutil.Process(process.pid)
-        descendants = parent.children(recursive=True)
-    except (psutil.Error, OSError):
-        descendants = []
-    for child in descendants:
-        with contextlib.suppress(psutil.Error):
-            child.terminate()
-    try:
-        process.terminate()
-        process.wait(timeout=3.0)
-    except (OSError, subprocess.TimeoutExpired):
-        for child in descendants:
-            with contextlib.suppress(psutil.Error):
-                child.kill()
-        try:
-            process.kill()
-            process.wait(timeout=1.0)
-        except (OSError, subprocess.TimeoutExpired):
-            logger.warning("Unable to confirm llama-server process termination")
-    _gone, alive = psutil.wait_procs(descendants, timeout=0.5)
-    for child in alive:
-        with contextlib.suppress(psutil.Error):
-            child.kill()
-    _close_windows_handle(windows_job_handle)
+        terminate_process_tree(process, process_lifetime_handle)
 
 
 _default_manager: LlamaServerManager | None = None
@@ -362,96 +323,7 @@ def shutdown_llama_server_manager() -> None:
 atexit.register(shutdown_llama_server_manager)
 
 
-def _assign_windows_kill_on_close_job(process: subprocess.Popen[str]) -> Any | None:
-    """Attach a child to a kill-on-close Job Object when Windows permits it."""
+def process_options_for_platform() -> dict[str, Any]:
+    """Small indirection retained as a test seam for platform process options."""
 
-    if sys.platform != "win32" or not hasattr(process, "_handle"):
-        return None
-
-    import ctypes
-    from ctypes import wintypes
-
-    class _IoCounters(ctypes.Structure):
-        _fields_ = [
-            ("ReadOperationCount", ctypes.c_ulonglong),
-            ("WriteOperationCount", ctypes.c_ulonglong),
-            ("OtherOperationCount", ctypes.c_ulonglong),
-            ("ReadTransferCount", ctypes.c_ulonglong),
-            ("WriteTransferCount", ctypes.c_ulonglong),
-            ("OtherTransferCount", ctypes.c_ulonglong),
-        ]
-
-    class _JobObjectBasicLimitInformation(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class _JobObjectExtendedLimitInformation(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", _JobObjectBasicLimitInformation),
-            ("IoInfo", _IoCounters),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel32.SetInformationJobObject.argtypes = [
-        wintypes.HANDLE,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-    ]
-    kernel32.SetInformationJobObject.restype = wintypes.BOOL
-    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-
-    job_handle = kernel32.CreateJobObjectW(None, None)
-    if not job_handle:
-        logger.warning("Unable to create a Windows Job Object for llama-server")
-        return None
-
-    information = _JobObjectExtendedLimitInformation()
-    information.BasicLimitInformation.LimitFlags = 0x00002000
-    configured = kernel32.SetInformationJobObject(
-        job_handle,
-        9,
-        ctypes.byref(information),
-        ctypes.sizeof(information),
-    )
-    assigned = configured and kernel32.AssignProcessToJobObject(
-        job_handle,
-        wintypes.HANDLE(process._handle),
-    )
-    if not assigned:
-        error_code = ctypes.get_last_error()
-        _close_windows_handle(job_handle)
-        logger.warning(
-            "Unable to assign llama-server to a kill-on-close Job Object (Win32 error %s)",
-            error_code,
-        )
-        return None
-    return job_handle
-
-
-def _close_windows_handle(handle: Any | None) -> None:
-    if sys.platform != "win32" or handle is None:
-        return
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    kernel32.CloseHandle(handle)
+    return process_options()

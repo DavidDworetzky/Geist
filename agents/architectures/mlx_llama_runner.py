@@ -44,6 +44,12 @@ class MLXLlamaRunner(BaseRunner):
                 raise TypeError("weights_dir must be a string")
             return os.path.expanduser(configured)
 
+        artifact_reference = device_config.get("artifact_id")
+        if artifact_reference is not None:
+            if not isinstance(artifact_reference, str):
+                raise TypeError("artifact_id must be a string")
+            return MLXLlamaRunner._resolve_managed_artifact(artifact_reference)
+
         local_root = os.environ.get("LOCAL_WEIGHTS_DIR")
         if local_root:
             local_root = os.path.expanduser(local_root)
@@ -51,11 +57,12 @@ class MLXLlamaRunner(BaseRunner):
                 return local_root
             return os.path.join(local_root, "llama_3_1")
 
+        return MLXLlamaRunner._resolve_managed_artifact(model_id)
+
+    @staticmethod
+    def _resolve_managed_artifact(artifact_reference: str) -> str:
         from app.services.local_models import get_local_model_manager
 
-        artifact_reference = device_config.get("artifact_id") or model_id
-        if not isinstance(artifact_reference, str):
-            raise TypeError("artifact_id must be a string")
         artifact, installed_path = get_local_model_manager().require_installed(artifact_reference)
         if artifact.backend != "mlx_llama":
             raise ValueError(

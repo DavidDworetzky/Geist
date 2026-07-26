@@ -65,6 +65,16 @@ def managers():
         manager.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def make_artifact_manager_tests_platform_independent(monkeypatch):
+    """Exercise manager behavior without inheriting the current host policy."""
+
+    monkeypatch.setattr(
+        "app.services.local_models.local_artifact_supported",
+        lambda _artifact: True,
+    )
+
+
 def test_default_model_home_uses_geist_data_directory(tmp_path):
     data_directory = tmp_path / "Geist"
 
@@ -423,6 +433,7 @@ def test_snapshot_downloader_pins_revision_and_reports_file_progress(
         progress.update()
         progress.update()
 
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
     monkeypatch.setenv("HF_TOKEN", "secret")
     monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
 

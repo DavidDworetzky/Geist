@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 from agents.architectures.llama_server_process import LlamaServerManager
+from agents.architectures.llama_server_process_posix import process_options as posix_options
+from agents.architectures.llama_server_process_windows import process_options as windows_options
 
 
 class FakeProcess:
@@ -40,6 +42,15 @@ def _runtime_tree(tmp_path: Path) -> Path:
         directory.mkdir(parents=True)
         (directory / executable).write_bytes(b"binary")
     return root
+
+
+def test_platform_process_options_are_isolated() -> None:
+    class WindowsSubprocess:
+        CREATE_NEW_PROCESS_GROUP = 0x200
+        CREATE_NO_WINDOW = 0x8000000
+
+    assert posix_options() == {"start_new_session": True}
+    assert windows_options(WindowsSubprocess) == {"creationflags": 0x8000200}
 
 
 def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
@@ -80,6 +91,10 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     assert args[args.index("--ctx-size") + 1] == "32768"
     assert args[args.index("--n-gpu-layers") + 1] == "999"
     assert options["shell"] is False
+    if os.name == "nt":
+        assert options["creationflags"]
+    else:
+        assert options["start_new_session"] is True
     assert probes[0][0] == "http://127.0.0.1:43123"
     assert manager.public_status()["status"] == "ready"
     manager.stop()
