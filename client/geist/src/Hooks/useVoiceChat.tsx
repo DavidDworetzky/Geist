@@ -49,6 +49,44 @@ const useVoiceChat = ({
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const isPlayingRef = useRef(false);
 
+  // Audio playback
+  const playAudioQueue = useCallback(async () => {
+    if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
+      return;
+    }
+
+    isPlayingRef.current = true;
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+    while (audioQueueRef.current.length > 0) {
+      const audioBuffer = audioQueueRef.current.shift()!;
+
+      // Convert Int16 PCM to Float32 for Web Audio
+      const int16Array = new Int16Array(audioBuffer);
+      const float32Array = new Float32Array(int16Array.length);
+
+      for (let i = 0; i < int16Array.length; i++) {
+        float32Array[i] = int16Array[i] / 32768.0;
+      }
+
+      // Create audio buffer
+      const buffer = audioContext.createBuffer(1, float32Array.length, 24000); // 24kHz from Sesame
+      buffer.getChannelData(0).set(float32Array);
+
+      // Play
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+
+      await new Promise<void>(resolve => {
+        source.onended = () => resolve();
+        source.start();
+      });
+    }
+
+    isPlayingRef.current = false;
+  }, []);
+
   // WebSocket setup
   const connectWebSocket = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -166,46 +204,9 @@ const useVoiceChat = ({
     onTranscriptPartial,
     onTranscriptFinal,
     onAssistantText,
-    onError
+    onError,
+    playAudioQueue
   ]);
-
-  // Audio playback
-  const playAudioQueue = useCallback(async () => {
-    if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
-      return;
-    }
-    
-    isPlayingRef.current = true;
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    
-    while (audioQueueRef.current.length > 0) {
-      const audioBuffer = audioQueueRef.current.shift()!;
-      
-      // Convert Int16 PCM to Float32 for Web Audio
-      const int16Array = new Int16Array(audioBuffer);
-      const float32Array = new Float32Array(int16Array.length);
-      
-      for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-      }
-      
-      // Create audio buffer
-      const buffer = audioContext.createBuffer(1, float32Array.length, 24000); // 24kHz from Sesame
-      buffer.getChannelData(0).set(float32Array);
-      
-      // Play
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContext.destination);
-      
-      await new Promise<void>(resolve => {
-        source.onended = () => resolve();
-        source.start();
-      });
-    }
-    
-    isPlayingRef.current = false;
-  }, []);
 
   // Start recording
   const startRecording = useCallback(async () => {
