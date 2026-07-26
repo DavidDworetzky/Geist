@@ -99,6 +99,7 @@ def test_complete_messages_preserves_structured_conversation_roles():
 def test_default_llama_uses_existing_legacy_weights_directory(
     config_cls, tokenizer_cls, model_cls, _find_spec, tmp_path, monkeypatch
 ):
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
     weights_dir = tmp_path / "app" / "model_weights" / "llama_3_1"
     weights_dir.mkdir(parents=True)
     (weights_dir / "config.json").write_text("{}")
@@ -224,6 +225,14 @@ def test_cpu_preserves_checkpoint_dtype_to_avoid_expanding_model_memory():
     runner.device = torch.device("cpu")
 
     assert runner._select_dtype(None) == "auto"
+
+
+def test_cpu_promotes_float16_checkpoint_to_bfloat16():
+    runner = TransformersRunner()
+    runner.device = torch.device("cpu")
+    runner.config = MagicMock(torch_dtype=torch.float16)
+
+    assert runner._select_dtype(None) == torch.bfloat16
 
 
 @patch("agents.architectures.transformers_runner.metadata.version", return_value="4.48.0")

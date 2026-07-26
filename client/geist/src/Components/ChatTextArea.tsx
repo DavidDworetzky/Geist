@@ -35,7 +35,9 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             {element.ai}
           </div>
 
-          {element.model_load && element.model_load.state !== 'ready' && (
+          {element.model_load
+            && (element.model_load.state === 'loading' || element.model_load.state === 'failed')
+            && (
             <div
               aria-live="polite"
               aria-label="Model loading status"

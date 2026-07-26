@@ -67,6 +67,7 @@ export type ActiveTurnStatus =
 
 export interface ActiveChatTurn extends ChatTurnResult {
   status: ActiveTurnStatus;
+  started_at: string;
   model_load?: ModelLoadStatus;
 }
 

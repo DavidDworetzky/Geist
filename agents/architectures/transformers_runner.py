@@ -202,12 +202,12 @@ class TransformersRunner(BaseRunner):
             return torch.device("mps")
         return torch.device("cpu")
 
-    def _select_dtype(self, explicit: Any | None):
+    def _select_dtype(self, explicit: Any | None) -> torch.dtype | str:
         if explicit is not None:
             if isinstance(explicit, torch.dtype):
                 return explicit
             value = str(explicit).replace("torch.", "").lower()
-            dtypes = {
+            dtypes: dict[str, torch.dtype | str] = {
                 "auto": "auto",
                 "float32": torch.float32,
                 "fp32": torch.float32,
@@ -225,9 +225,10 @@ class TransformersRunner(BaseRunner):
             return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         if self.device.type == "mps":
             return torch.float16
-        # Preserve the checkpoint dtype on CPU. Expanding an 8B bf16 checkpoint
-        # to fp32 roughly doubles its resident memory and can OOM before the
-        # first generated token.
+        # Preserve supported checkpoint dtypes on CPU. PyTorch CPU kernels do
+        # not consistently support fp16, so use bf16 for fp16 checkpoints.
+        if getattr(self.config, "torch_dtype", None) == torch.float16:
+            return torch.bfloat16
         return "auto"
 
     def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:

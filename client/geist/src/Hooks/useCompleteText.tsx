@@ -17,7 +17,7 @@ const AGENT_TYPE_MAPPING = {
 }
 
 const DEFAULT_AGENT_TYPE = "LOCALAGENT";
-const MODEL_STATUS_POLL_INTERVAL_MS = 1000;
+const MODEL_STATUS_POLL_DELAYS_MS = [1000, 2000, 5000] as const;
 
 const getAgentTypeFromSettings = (settings: UserSettings | null): string => {
   if (!settings) {
@@ -53,7 +53,7 @@ export interface ChatStreamState {
 }
 
 export type ChatStreamAction =
-  | { type: 'START'; prompt: string; chatId: number | null }
+  | { type: 'START'; prompt: string; chatId: number | null; startedAt?: string }
   | { type: 'RUN_STARTED'; runId: string; chatId?: number | null }
   | { type: 'TEXT_DELTA'; text: string }
   | { type: 'MODEL_LOAD_STATUS'; status: ModelLoadStatus }
@@ -136,6 +136,17 @@ const dedupeArtifacts = (artifacts: WorkArtifact[]): WorkArtifact[] =>
     [],
   );
 
+const isStatusCurrentForTurn = (
+  status: ModelLoadStatus,
+  turnStartedAt: string,
+): boolean => {
+  const statusUpdatedAt = Date.parse(status.updated_at);
+  const startedAt = Date.parse(turnStartedAt);
+  return !Number.isFinite(statusUpdatedAt)
+    || !Number.isFinite(startedAt)
+    || statusUpdatedAt >= startedAt;
+};
+
 export const chatStreamReducer = (
   state: ChatStreamState,
   action: ChatStreamAction,
@@ -150,6 +161,7 @@ export const chatStreamReducer = (
           chat_id: action.chatId,
           origin_chat_id: action.chatId,
           status: 'connecting',
+          started_at: action.startedAt ?? new Date().toISOString(),
           tool_calls: [],
           artifacts: [],
         },
@@ -177,6 +189,7 @@ export const chatStreamReducer = (
       };
     case 'MODEL_LOAD_STATUS':
       if (!state.activeTurn || state.activeTurn.run_id) return state;
+      if (!isStatusCurrentForTurn(action.status, state.activeTurn.started_at)) return state;
       return {
         ...state,
         error: action.status.state === 'failed' ? action.status.detail : state.error,
@@ -185,7 +198,7 @@ export const chatStreamReducer = (
           model_load: action.status,
           status: action.status.state === 'failed'
             ? 'failed'
-            : action.status.state === 'ready'
+            : action.status.state === 'ready' || action.status.state === 'unloaded'
               ? 'connecting'
               : 'model_loading',
         },
@@ -259,7 +272,7 @@ export const chatStreamReducer = (
         loading: false,
         error: action.message,
         activeTurn: state.activeTurn
-          ? { ...state.activeTurn, status: 'failed' }
+          ? { ...state.activeTurn, status: 'failed', model_load: undefined }
           : null,
       };
     case 'CANCELLING':
@@ -288,6 +301,7 @@ export const chatStreamReducer = (
               ...state.activeTurn,
               chat_id: action.chatId ?? state.activeTurn.chat_id,
               status: 'cancelled',
+              model_load: undefined,
               tool_calls: state.activeTurn.tool_calls.map<ToolCallResult>((toolCall) =>
                 ['proposed', 'awaiting_approval', 'running'].includes(toolCall.status)
                   ? { ...toolCall, status: 'cancelled' }
@@ -349,26 +363,28 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   const hasActiveTurn = streamState.activeTurn !== null;
   const activeRunId = streamState.activeTurn?.run_id;
   const currentModelState = streamState.activeTurn?.model_load?.state;
+  const activeTurnStartedAt = streamState.activeTurn?.started_at;
+  const modelStatusIsTerminal = currentModelState === 'ready' || currentModelState === 'failed';
+  const shouldPollModelStatus = Boolean(
+    streamState.loading
+    && hasActiveTurn
+    && !activeRunId
+    && userSettings?.default_agent_type === 'local'
+    && userSettings?.default_local_model
+    && !modelStatusIsTerminal
+  );
 
   useEffect(() => {
-    const isLocalModel = userSettings?.default_agent_type === 'local';
     const modelId = userSettings?.default_local_model;
-    const shouldPoll = Boolean(
-      streamState.loading
-      && hasActiveTurn
-      && !activeRunId
-      && isLocalModel
-      && modelId
-      && currentModelState !== 'ready'
-      && currentModelState !== 'failed'
-    );
-    if (!shouldPoll || !modelId) return undefined;
+    if (!shouldPollModelStatus || !modelId || !activeTurnStartedAt) return undefined;
 
     let stopped = false;
     let pollTimer: number | undefined;
+    let consecutiveFailures = 0;
 
     const poll = async () => {
       let keepPolling = true;
+      let nextDelay: number = MODEL_STATUS_POLL_DELAYS_MS[0];
       try {
         const response = await fetch(
           `/api/v1/models/status/${encodeURIComponent(modelId)}`,
@@ -377,14 +393,28 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         if (response.ok) {
           const status = await response.json() as ModelLoadStatus;
           if (!stopped) dispatch({ type: 'MODEL_LOAD_STATUS', status });
-          keepPolling = status.state !== 'ready' && status.state !== 'failed';
+          const currentForTurn = isStatusCurrentForTurn(status, activeTurnStartedAt);
+          keepPolling = !currentForTurn
+            || (status.state !== 'ready' && status.state !== 'failed');
+          consecutiveFailures = 0;
+        } else if (response.status === 404) {
+          keepPolling = false;
+        } else {
+          nextDelay = MODEL_STATUS_POLL_DELAYS_MS[
+            Math.min(consecutiveFailures, MODEL_STATUS_POLL_DELAYS_MS.length - 1)
+          ];
+          consecutiveFailures += 1;
         }
       } catch {
         // The chat stream remains authoritative. A transient polling failure
         // should not replace its eventual response or error.
+        nextDelay = MODEL_STATUS_POLL_DELAYS_MS[
+          Math.min(consecutiveFailures, MODEL_STATUS_POLL_DELAYS_MS.length - 1)
+        ];
+        consecutiveFailures += 1;
       }
       if (!stopped && keepPolling) {
-        pollTimer = window.setTimeout(poll, MODEL_STATUS_POLL_INTERVAL_MS);
+        pollTimer = window.setTimeout(poll, nextDelay);
       }
     };
 
@@ -394,11 +424,8 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
   }, [
-    streamState.loading,
-    hasActiveTurn,
-    activeRunId,
-    currentModelState,
-    userSettings?.default_agent_type,
+    shouldPollModelStatus,
+    activeTurnStartedAt,
     userSettings?.default_local_model,
   ]);
 

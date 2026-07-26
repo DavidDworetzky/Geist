@@ -1,5 +1,8 @@
 import asyncio
 
+import pytest
+from fastapi import HTTPException
+
 from agents.model_load_status import ModelLoadStatusRegistry, model_load_status_registry
 from app.api.v1.endpoints.models import get_model_load_status
 
@@ -31,17 +34,20 @@ def test_model_load_registry_records_failure() -> None:
 
 def test_model_status_endpoint_reports_process_local_state() -> None:
     model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    model_load_status_registry.clear()
-    try:
-        unloaded = asyncio.run(get_model_load_status(model_id))
-        model_load_status_registry.mark_loading(model_id, "Loading cached weights.")
-        loading = asyncio.run(get_model_load_status(model_id))
+    unloaded = asyncio.run(get_model_load_status(model_id))
+    model_load_status_registry.mark_loading(model_id, "Loading cached weights.")
+    loading = asyncio.run(get_model_load_status(model_id))
 
-        assert unloaded.state == "unloaded"
-        assert loading.state == "loading"
-        assert loading.detail == "Loading cached weights."
-    finally:
-        model_load_status_registry.clear()
+    assert unloaded.state == "unloaded"
+    assert loading.state == "loading"
+    assert loading.detail == "Loading cached weights."
+
+
+def test_model_status_endpoint_rejects_unknown_model() -> None:
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(get_model_load_status("unknown/model"))
+
+    assert error.value.status_code == 404
 
 
 def test_remote_model_status_is_always_ready() -> None:

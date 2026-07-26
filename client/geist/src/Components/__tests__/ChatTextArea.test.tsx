@@ -39,6 +39,26 @@ describe('ChatTextArea loading state', () => {
     );
     expect(screen.queryByText('Turn status: model loading')).not.toBeInTheDocument();
   });
+
+  it('does not claim an unloaded model is actively loading', () => {
+    render(<ChatTextArea chatHistory={[{
+      user: 'Hello',
+      ai: '',
+      status: 'connecting',
+      model_load: {
+        model_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+        state: 'unloaded',
+        detail: 'Model is not loaded in this backend process.',
+        started_at: null,
+        updated_at: '2026-07-26T00:00:01Z',
+      },
+    }]} isLoading />);
+
+    expect(screen.queryByRole('status', { name: 'Model loading status' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Model is not loaded in this backend process.'))
+      .not.toBeInTheDocument();
+    expect(screen.getByText('Turn status: connecting')).toBeInTheDocument();
+  });
 });
 
 describe('ChatTextArea tool activity', () => {
