@@ -9,6 +9,7 @@ import os
 import secrets
 import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -204,7 +205,9 @@ class LlamaServerManager:
             "cwd": str(executable.parent),
             "env": dict(self.environment),
         }
-        if os.name == "nt":
+        # sys.platform, not os.name: mypy narrows platform only on sys.platform,
+        # so os.name guards leave the Windows-only branch type-checked on Linux.
+        if sys.platform == "win32":
             process_options["creationflags"] = (
                 subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
@@ -362,7 +365,7 @@ atexit.register(shutdown_llama_server_manager)
 def _assign_windows_kill_on_close_job(process: subprocess.Popen[str]) -> Any | None:
     """Attach a child to a kill-on-close Job Object when Windows permits it."""
 
-    if os.name != "nt" or not hasattr(process, "_handle"):
+    if sys.platform != "win32" or not hasattr(process, "_handle"):
         return None
 
     import ctypes
@@ -443,7 +446,7 @@ def _assign_windows_kill_on_close_job(process: subprocess.Popen[str]) -> Any | N
 
 
 def _close_windows_handle(handle: Any | None) -> None:
-    if os.name != "nt" or handle is None:
+    if sys.platform != "win32" or handle is None:
         return
     import ctypes
     from ctypes import wintypes
