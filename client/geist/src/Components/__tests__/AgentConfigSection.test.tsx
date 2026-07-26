@@ -6,7 +6,7 @@ describe('AgentConfigSection', () => {
   const originalFetch = global.fetch;
   const defaultProps = {
     agentType: 'online',
-    localModel: 'Meta-Llama-3.1-8B-Instruct',
+    localModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
     onlineProvider: 'openai',
     onlineModel: 'gpt-4',
     onAgentTypeChange: jest.fn(),
@@ -152,8 +152,8 @@ describe('AgentConfigSection', () => {
       const options = modelSelect.querySelectorAll('option');
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
 
-      // STATIC_MODELS.offline only contains Meta-Llama-3.1-8B-Instruct
-      expect(optionValues).toContain('Meta-Llama-3.1-8B-Instruct');
+      // STATIC_MODELS.offline contains the canonical repository-qualified ID.
+      expect(optionValues).toContain('meta-llama/Meta-Llama-3.1-8B-Instruct');
     });
 
     it('shows online provider and model options when agent type is online', () => {
@@ -195,9 +195,9 @@ describe('AgentConfigSection', () => {
       );
 
       const modelSelect = screen.getByLabelText('Local Model');
-      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B-Instruct' } });
+      fireEvent.change(modelSelect, { target: { value: 'meta-llama/Meta-Llama-3.1-8B-Instruct' } });
 
-      expect(onLocalModelChange).toHaveBeenCalledWith('Meta-Llama-3.1-8B-Instruct');
+      expect(onLocalModelChange).toHaveBeenCalledWith('meta-llama/Meta-Llama-3.1-8B-Instruct');
     });
   });
 
