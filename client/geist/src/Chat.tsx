@@ -630,7 +630,6 @@ const Chat = () => {
                         disabled={isLoading}
                         error={memoryError}
                         onScopeChange={scope => void changeMemoryScope(scope)}
-                        onManageFolders={manageFolders}
                       />
                     </div>
 

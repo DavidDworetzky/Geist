@@ -580,7 +580,7 @@ textarea:focus-visible {
 }
 
 .ChatSidebar.stage-panel {
-  --stage-panel-compact-width: 190px;
+  --stage-panel-compact-width: 266px;
 }
 
 .stage-panel-surface {
@@ -1294,6 +1294,18 @@ textarea:focus-visible {
   border-radius: var(--geist-radius-md);
 }
 
+.chat-memory-scope.is-enabled .chat-memory-trigger {
+  color: var(--geist-color-accent-strong);
+  background: color-mix(in srgb, var(--geist-color-accent) 11%, var(--geist-color-surface));
+  border-color: color-mix(in srgb, var(--geist-color-accent) 42%, var(--geist-color-border));
+}
+
+.chat-memory-scope.is-disabled .chat-memory-trigger {
+  color: var(--geist-color-text-muted);
+  background: var(--geist-color-surface-muted);
+  border-color: var(--geist-color-border);
+}
+
 .chat-memory-trigger:hover:not(:disabled),
 .chat-memory-trigger[aria-expanded="true"] {
   color: var(--geist-color-text);
@@ -1324,23 +1336,30 @@ textarea:focus-visible {
 
 .chat-memory-trigger-label {
   overflow: hidden;
-  color: var(--geist-color-text);
+  color: currentColor;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chat-memory-scope.is-compact {
-  flex: 0 0 34px;
-  width: 34px;
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .chat-memory-scope.is-compact .chat-memory-trigger {
-  display: grid;
-  width: 34px;
+  display: inline-flex;
+  gap: 7px;
+  width: auto;
   height: 34px;
   min-height: 34px;
-  padding: 0;
-  place-items: center;
+  padding: 0 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-memory-scope.is-compact .chat-memory-trigger-label {
+  font-size: 0.72rem;
+  font-weight: 720;
 }
 
 .chat-memory-scope.is-compact .chat-memory-trigger > svg:last-child {

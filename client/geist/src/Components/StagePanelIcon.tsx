@@ -1,4 +1,4 @@
-export type StagePanelIconName = 'plus' | 'maximize' | 'search' | 'folder' | 'memory' | 'chevron' | 'more' | 'close' | 'workflow' | 'edit' | 'check' | 'save' | 'play';
+export type StagePanelIconName = 'plus' | 'maximize' | 'search' | 'folder' | 'memory' | 'memory-off' | 'chevron' | 'more' | 'close' | 'workflow' | 'edit' | 'check' | 'save' | 'play';
 
 export default function StagePanelIcon({ name }: { name: StagePanelIconName }): JSX.Element {
   if (name === 'plus') {
@@ -34,8 +34,41 @@ export default function StagePanelIcon({ name }: { name: StagePanelIconName }): 
 
   if (name === 'memory') {
     return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M9.5 3a4.5 4.5 0 0 0-4.28 5.9A4 4 0 0 0 6 16.82V17a4 4 0 0 0 6 3.46A4 4 0 0 0 18 17v-.18a4 4 0 0 0 .78-7.92A4.5 4.5 0 0 0 12 3.77 4.48 4.48 0 0 0 9.5 3Zm0 2c.57 0 1.1.2 1.5.54V9h2V5.54A2.5 2.5 0 0 1 17 7.5c0 .7-.28 1.34-.74 1.8l-1.17 1.18 1.65.24A2 2 0 0 1 16 14.67V13h-2v4a2 2 0 0 1-1 1.73V15h-2v3.73A2 2 0 0 1 8 17v-1.17a3.98 3.98 0 0 0 2-3.46h-2A2 2 0 0 1 6.26 10.4l1.65-.24-1.17-1.18A2.5 2.5 0 0 1 9.5 5Z" />
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        data-icon="memory"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ fill: 'none' }}
+      >
+        <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+        <path d="M4.5 5.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="M4.5 11.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+      </svg>
+    );
+  }
+
+  if (name === 'memory-off') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        data-icon="memory-off"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ fill: 'none' }}
+      >
+        <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+        <path d="M4.5 5.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="M4.5 11.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="m4 4 16 16" strokeWidth="2.4" />
       </svg>
     );
   }

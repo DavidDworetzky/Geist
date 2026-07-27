@@ -127,12 +127,41 @@ describe('ChatMemoryControls', () => {
     expect(screen.queryByRole('menu', { name: 'Memory options' })).not.toBeInTheDocument();
   });
 
-  it('uses an icon-only but labelled trigger in compact mode', () => {
+  it('does not render an empty folder memory section', () => {
+    render(<ChatMemoryControls {...baseProps} folders={[]} />);
+
+    const menu = openMenu();
+    expect(within(menu).queryByRole('group', { name: 'Folder memory' })).not.toBeInTheDocument();
+    expect(within(menu).queryByText('Folder memory')).not.toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Manage folders…' })).toBeInTheDocument();
+  });
+
+  it('shows an explicit enabled label in compact mode', () => {
     render(<ChatMemoryControls {...baseProps} compact />);
 
     const trigger = screen.getByRole('button', { name: 'Memory settings: Memory Enabled' });
     expect(trigger).toHaveAttribute('title', 'Memory Enabled');
-    expect(screen.queryByText('Memory Enabled')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('data-memory-state', 'enabled');
+    expect(screen.getByText('Memory On')).toBeVisible();
+  });
+
+  it('shows an explicit disabled label and state in compact mode', () => {
+    render(
+      <ChatMemoryControls
+        {...baseProps}
+        compact
+        settings={{
+          ...baseProps.settings,
+          memory_enabled: false,
+          effective_scope: 'disabled',
+          status: 'disabled',
+        }}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Memory settings: Memory Disabled' });
+    expect(trigger).toHaveAttribute('data-memory-state', 'disabled');
+    expect(screen.getByText('Memory Off')).toBeVisible();
   });
 
   it('closes on Escape, restores trigger focus, and closes on outside click', () => {

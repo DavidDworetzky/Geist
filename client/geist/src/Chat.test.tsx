@@ -223,6 +223,19 @@ describe('Chat history panel', () => {
     });
   });
 
+  it('omits folder management from the memory menu when the drawer is already open', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Memory settings:/ }));
+
+    expect(screen.queryByRole('menuitem', { name: /Manage folders/ })).not.toBeInTheDocument();
+  });
+
   it('refreshes chat sessions and folder counts when a turn completes', async () => {
     mockCompletedTurn = {
       run_id: 'run-42',

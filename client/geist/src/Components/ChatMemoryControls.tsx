@@ -15,7 +15,7 @@ interface ChatMemoryControlsProps {
   compact?: boolean;
   error: string | null;
   onScopeChange: (scope: MemoryScope) => void;
-  onManageFolders: () => void;
+  onManageFolders?: () => void;
 }
 
 interface ScopeOption {
@@ -76,6 +76,8 @@ export default function ChatMemoryControls({
   const openFocusRef = useRef<'selected' | 'first' | 'last'>('selected');
   const currentScope = getMemoryScope(settings);
   const label = triggerLabel(currentScope, folders);
+  const memoryEnabled = currentScope.kind !== 'disabled';
+  const compactLabel = memoryEnabled ? 'Memory On' : 'Memory Off';
   const interactionDisabled = disabled || loading;
 
   const closeMenu = (restoreFocus = false) => {
@@ -183,7 +185,7 @@ export default function ChatMemoryControls({
   return (
     <div
       ref={rootRef}
-      className={`chat-memory-scope${compact ? ' is-compact' : ''}`}
+      className={`chat-memory-scope ${memoryEnabled ? 'is-enabled' : 'is-disabled'}${compact ? ' is-compact' : ''}`}
       aria-busy={loading || undefined}
     >
       <button
@@ -195,6 +197,7 @@ export default function ChatMemoryControls({
         aria-expanded={open}
         aria-controls={menuId}
         title={compact ? label : undefined}
+        data-memory-state={memoryEnabled ? 'enabled' : 'disabled'}
         disabled={interactionDisabled}
         onClick={() => {
           openFocusRef.current = 'selected';
@@ -208,8 +211,10 @@ export default function ChatMemoryControls({
           }
         }}
       >
-        <StagePanelIcon name="memory" />
-        {!compact && <span className="chat-memory-trigger-label">{label}</span>}
+        <StagePanelIcon name={memoryEnabled ? 'memory' : 'memory-off'} />
+        <span className="chat-memory-trigger-label">
+          {compact ? compactLabel : label}
+        </span>
         <StagePanelIcon name="chevron" />
       </button>
 
@@ -228,32 +233,36 @@ export default function ChatMemoryControls({
             {STANDARD_OPTIONS.map(renderScopeOption)}
           </div>
 
-          <div
-            className="chat-memory-menu-section"
-            role="group"
-            aria-labelledby={folderHeadingId}
-          >
-            <span id={folderHeadingId} className="chat-memory-menu-heading">
-              Folder memory
-            </span>
-            {folders.map(folder => renderScopeOption({
-              scope: { kind: 'folder', folderId: folder.folder_id },
-              label: folder.name,
-              description: `Share memory with chats in ${folder.name}.`,
-            }))}
-          </div>
+          {folders.length > 0 && (
+            <div
+              className="chat-memory-menu-section"
+              role="group"
+              aria-labelledby={folderHeadingId}
+            >
+              <span id={folderHeadingId} className="chat-memory-menu-heading">
+                Folder memory
+              </span>
+              {folders.map(folder => renderScopeOption({
+                scope: { kind: 'folder', folderId: folder.folder_id },
+                label: folder.name,
+                description: `Share memory with chats in ${folder.name}.`,
+              }))}
+            </div>
+          )}
 
-          <button
-            type="button"
-            className="chat-memory-manage"
-            role="menuitem"
-            onClick={() => {
-              closeMenu(true);
-              onManageFolders();
-            }}
-          >
-            Manage folders…
-          </button>
+          {onManageFolders && (
+            <button
+              type="button"
+              className="chat-memory-manage"
+              role="menuitem"
+              onClick={() => {
+                closeMenu(true);
+                onManageFolders();
+              }}
+            >
+              Manage folders…
+            </button>
+          )}
         </div>
       )}
 
