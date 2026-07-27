@@ -183,23 +183,25 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
           className="chat-textarea"
         />
 
-        {enableVoice && (
-          <VoiceButton
-            isRecording={isRecording}
-            isProcessing={isProcessing}
-            onClick={toggleRecording}
-            disabled={disabled}
-          />
-        )}
+        <div className="input-actions">
+          {enableVoice && (
+            <VoiceButton
+              isRecording={isRecording}
+              isProcessing={isProcessing}
+              onClick={toggleRecording}
+              disabled={disabled}
+            />
+          )}
 
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={disabled || !value.trim()}
-          className="send-button"
-        >
-          Send
-        </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={disabled || !value.trim()}
+            className="send-button"
+          >
+            Send
+          </button>
+        </div>
       </div>
 
       {showFileSuggestions && (

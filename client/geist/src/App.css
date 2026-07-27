@@ -612,6 +612,21 @@ textarea:focus-visible {
   overflow: visible;
 }
 
+.ChatSidebar.stage-panel-minimized::before {
+  position: absolute;
+  top: 0;
+  right: var(--chat-scrollbar-lane);
+  left: 0;
+  z-index: 0;
+  height: 58px;
+  pointer-events: none;
+  content: "";
+}
+
+.ChatSidebar.stage-panel-minimized .stage-panel-surface {
+  z-index: 1;
+}
+
 .stage-panel-expanded .stage-panel-surface {
   top: 0;
   left: 0;
@@ -1221,12 +1236,23 @@ textarea:focus-visible {
 
 .ChatContent {
   --chat-composer-clearance: 162px;
+  --chat-toolbar-clearance: 72px;
+  --chat-scrollbar-lane: 0px;
+  --chat-scrollbar-gap: 0px;
+  --chat-glass-fill: color-mix(in srgb, var(--geist-color-surface-strong) 56%, transparent);
+  --chat-glass-highlight: color-mix(in srgb, var(--geist-color-text) 9%, transparent);
+  --chat-glass-control-fill: color-mix(in srgb, var(--geist-color-surface-strong) 28%, transparent);
   position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
   padding: 16px;
   overflow: hidden;
+}
+
+.ChatContainer.chat-scrollbar-visible .ChatContent {
+  --chat-scrollbar-lane: 16px;
+  --chat-scrollbar-gap: 6px;
 }
 
 .chat-stage,
@@ -1251,23 +1277,132 @@ textarea:focus-visible {
   transform: scale(0.995);
 }
 
-.chat-transcript-layer .chat-history {
+.chat-history-scroll {
+  position: relative;
+  z-index: 1;
+  width: 100%;
   height: 100%;
+  min-height: 0;
+  padding-right: var(--chat-scrollbar-gap);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--geist-color-border-strong) transparent;
+  scrollbar-width: thin;
+  scroll-padding-top: var(--chat-toolbar-clearance);
+  scroll-padding-bottom: var(--chat-composer-clearance);
+}
+
+.chat-history-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-history-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-history-scroll::-webkit-scrollbar-thumb {
+  background: var(--geist-color-border-strong);
+  border: 3px solid var(--geist-color-bg);
+  border-radius: 999px;
+}
+
+.chat-history-scroll .chat-history {
+  min-height: 100%;
 }
 
 .chat-composer-dock {
   position: absolute;
-  right: 12px;
+  right: var(--chat-scrollbar-lane);
   bottom: 12px;
   left: 12px;
   z-index: 12;
   display: grid;
   gap: 8px;
+  isolation: isolate;
+  pointer-events: none;
   opacity: 1;
   transform: translateY(0);
   transition:
     opacity var(--geist-motion-fast) var(--geist-ease-standard),
     transform var(--geist-motion-standard) var(--geist-ease-emphasized);
+}
+
+.chat-composer-dock::before {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  inset: -12px 0 -12px -12px;
+}
+
+.ChatSidebar.stage-panel-minimized::before,
+.chat-composer-dock::before {
+  background: var(--geist-color-surface);
+  background:
+    linear-gradient(135deg, var(--chat-glass-highlight), transparent 52%),
+    var(--chat-glass-fill);
+  border: 1px solid color-mix(in srgb, var(--geist-color-border-strong) 58%, transparent);
+  border-radius: var(--geist-radius-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .ChatSidebar.stage-panel-minimized::before,
+  .chat-composer-dock::before {
+    -webkit-backdrop-filter: blur(14px) saturate(145%);
+    backdrop-filter: blur(14px) saturate(145%);
+  }
+}
+
+.chat-composer-dock textarea,
+.chat-composer-dock button,
+.chat-composer-dock input,
+.chat-composer-dock a,
+.chat-composer-dock .suggestion-menu {
+  pointer-events: auto;
+}
+
+.chat-composer-dock .chat-textarea,
+.chat-composer-dock .chat-context-info,
+.chat-composer-dock .input-banner {
+  background: var(--chat-glass-control-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.chat-composer-dock .chat-textarea,
+.chat-composer-dock .chat-context-info {
+  border-color: color-mix(in srgb, var(--geist-color-border) 72%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ChatSidebar.stage-panel-minimized::before,
+  .chat-composer-dock::before {
+    background: var(--geist-color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .chat-composer-dock .chat-textarea,
+  .chat-composer-dock .chat-context-info,
+  .chat-composer-dock .input-banner {
+    background: var(--geist-color-surface-strong);
+  }
+}
+
+@media (forced-colors: active) {
+  .ChatSidebar.stage-panel-minimized::before,
+  .chat-composer-dock::before,
+  .chat-composer-dock .chat-textarea,
+  .chat-composer-dock .chat-context-info,
+  .chat-composer-dock .input-banner {
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 .chat-memory-scope {
@@ -1512,6 +1647,10 @@ textarea:focus-visible {
   transform: translateY(6px);
 }
 
+.ChatContainer.chat-drawer-expanded .chat-composer-dock * {
+  pointer-events: none;
+}
+
 .ChatInputForm {
   display: block;
 }
@@ -1523,7 +1662,6 @@ textarea:focus-visible {
   width: 100%;
   min-height: 0;
   padding: 14px;
-  overflow-y: auto;
   background: var(--geist-color-surface);
   border: 1px solid var(--geist-color-border);
   border-radius: var(--geist-radius-lg);
@@ -1531,6 +1669,7 @@ textarea:focus-visible {
 }
 
 .chat-history:not(.chat-history-empty) {
+  padding-top: var(--chat-toolbar-clearance);
   padding-bottom: var(--chat-composer-clearance);
 }
 
@@ -1872,6 +2011,17 @@ ul.relative {
   gap: 8px;
 }
 
+.input-actions {
+  display: flex;
+  flex: 0 0 72px;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  align-self: flex-end;
+  width: 72px;
+  margin-right: 10px;
+}
+
 .chat-textarea,
 .form-control {
   width: 100%;
@@ -1909,6 +2059,7 @@ ul.relative {
 .icon-button {
   display: grid;
   flex: 0 0 40px;
+  align-self: center;
   place-items: center;
   width: 40px;
   border-radius: 50%;
@@ -1932,7 +2083,8 @@ ul.relative {
 
 .send-button {
   flex: 0 0 auto;
-  padding: 0 16px;
+  width: 100%;
+  padding: 0 12px;
   font-weight: 720;
 }
 
@@ -2121,13 +2273,29 @@ select.form-control {
   }
 
   .ChatContent {
+    --chat-toolbar-clearance: 66px;
     padding: 12px;
   }
 
   .chat-composer-dock {
-    right: 10px;
+    right: var(--chat-scrollbar-lane);
     bottom: 10px;
     left: 10px;
+  }
+
+  .chat-composer-dock::before {
+    inset: -10px 0 -10px -10px;
+  }
+
+  .input-actions {
+    flex-basis: 68px;
+    width: 68px;
+    margin-right: 8px;
+  }
+
+  .ChatSidebar.stage-panel-minimized::before {
+    right: var(--chat-scrollbar-lane);
+    height: 54px;
   }
 
   .stage-panel-surface {

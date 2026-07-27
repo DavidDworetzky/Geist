@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Chat from './Chat';
 
@@ -140,6 +140,61 @@ describe('Chat history panel', () => {
     window.localStorage.clear();
     jest.clearAllMocks();
     mockCompletedTurn = null;
+  });
+
+  it('only reserves the external scrollbar rail while the transcript overflows', () => {
+    let resizeObserverCallback: ResizeObserverCallback | null = null;
+    const originalResizeObserver = window.ResizeObserver;
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallback = callback;
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: MockResizeObserver,
+    });
+
+    try {
+      const { container } = render(
+        <MemoryRouter initialEntries={['/chat']}>
+          <Chat />
+        </MemoryRouter>
+      );
+      const chat = container.querySelector<HTMLDivElement>('.ChatContainer');
+      const transcript = container.querySelector<HTMLDivElement>('.chat-history-scroll');
+      expect(chat).not.toBeNull();
+      expect(transcript).not.toBeNull();
+      expect(chat).not.toHaveClass('chat-scrollbar-visible');
+
+      let scrollHeight = 700;
+      Object.defineProperty(transcript, 'clientHeight', {
+        configurable: true,
+        get: () => 500,
+      });
+      Object.defineProperty(transcript, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+      expect(chat).toHaveClass('chat-scrollbar-visible');
+
+      scrollHeight = 500;
+      act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+      expect(chat).not.toHaveClass('chat-scrollbar-visible');
+    } finally {
+      Object.defineProperty(window, 'ResizeObserver', {
+        configurable: true,
+        writable: true,
+        value: originalResizeObserver,
+      });
+    }
   });
 
   it('morphs from compact chat controls into the chat-sized history panel', () => {

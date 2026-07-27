@@ -152,9 +152,17 @@ const Chat = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [hasChatScrollbar, setHasChatScrollbar] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>(0);
   const shouldRestoreScrollRef = useRef(false);
+  const updateChatScrollbarState = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const nextHasScrollbar = container.scrollHeight > container.clientHeight + 1;
+    setHasChatScrollbar(current => current === nextHasScrollbar ? current : nextHasScrollbar);
+  }, []);
 
   const fetchHistory = useCallback(async (pageNum: number, currentChatId: string) => {
     if (!currentChatId) return;
@@ -545,31 +553,68 @@ const Chat = () => {
     activeTurn?.run_id &&
     (chatHistory?.chatHistory ?? []).some((turn) => turn.run_id === activeTurn.run_id)
   );
-  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
-    ? [
-        ...(chatHistory?.chatHistory ?? []),
-        {
-          run_id: activeTurn!.run_id,
-          user: activeTurn!.prompt,
-          ai: activeTurn!.message,
-          status: activeTurn!.status,
-          model_load: activeTurn!.model_load,
-          tool_calls: activeTurn!.tool_calls,
-          artifacts: activeTurn!.artifacts,
-        },
-      ]
-    : (chatHistory?.chatHistory ?? []);
+  const displayedHistory = useMemo<ChatPair[]>(
+    () => activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
+      ? [
+          ...(chatHistory?.chatHistory ?? []),
+          {
+            run_id: activeTurn!.run_id,
+            user: activeTurn!.prompt,
+            ai: activeTurn!.message,
+            status: activeTurn!.status,
+            model_load: activeTurn!.model_load,
+            tool_calls: activeTurn!.tool_calls,
+            artifacts: activeTurn!.artifacts,
+          },
+        ]
+      : (chatHistory?.chatHistory ?? []),
+    [
+      activeTurn,
+      activeTurnAlreadyPersisted,
+      activeTurnBelongsToCurrentChat,
+      chatHistory?.chatHistory,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    updateChatScrollbarState();
+  }, [chatDrawerState, displayedHistory, isLoading, updateChatScrollbarState]);
+
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return undefined;
+
+    updateChatScrollbarState();
+    window.addEventListener('resize', updateChatScrollbarState);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return () => window.removeEventListener('resize', updateChatScrollbarState);
+    }
+
+    const resizeObserver = new ResizeObserver(updateChatScrollbarState);
+    resizeObserver.observe(container);
+    const content = container.firstElementChild;
+    if (content) {
+      resizeObserver.observe(content);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateChatScrollbarState);
+    };
+  }, [updateChatScrollbarState]);
 
   return (
-    <div className={`ChatContainer chat-drawer-${chatDrawerState}`}>
+    <div className={`ChatContainer chat-drawer-${chatDrawerState}${hasChatScrollbar ? ' chat-scrollbar-visible' : ''}`}>
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
-            <ChatTextArea
-              chatHistory={displayedHistory}
-              isLoading={isLoading}
-              ref={chatContainerRef}
-            />
+            <div className="chat-history-scroll" ref={chatContainerRef}>
+              <ChatTextArea
+                chatHistory={displayedHistory}
+                isLoading={isLoading}
+              />
+            </div>
           </div>
 
           <aside
