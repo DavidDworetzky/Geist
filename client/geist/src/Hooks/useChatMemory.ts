@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface MemoryFolder {
   folder_id: number;
@@ -17,6 +17,10 @@ export interface ChatMemorySettings {
   status?: string;
 }
 
+export type MemoryScope =
+  | { kind: 'disabled' | 'public' | 'private' }
+  | { kind: 'folder'; folderId: number };
+
 const DEFAULT_SETTINGS: ChatMemorySettings = {
   memory_enabled: true,
   memory_mode: 'public',
@@ -25,11 +29,93 @@ const DEFAULT_SETTINGS: ChatMemorySettings = {
   status: 'ready',
 };
 
+type ChatMemoryChanges = {
+  memory_enabled?: boolean;
+  memory_mode?: 'public' | 'private';
+  folder_id?: number;
+  clear_folder?: boolean;
+};
+
+export function getMemoryScope(settings: ChatMemorySettings): MemoryScope {
+  if (!settings.memory_enabled) {
+    return { kind: 'disabled' };
+  }
+  if (settings.folder_id !== null) {
+    return { kind: 'folder', folderId: settings.folder_id };
+  }
+  return { kind: settings.memory_mode };
+}
+
+function changesForScope(scope: MemoryScope): ChatMemoryChanges {
+  if (scope.kind === 'disabled') {
+    return { memory_enabled: false };
+  }
+  if (scope.kind === 'folder') {
+    return {
+      memory_enabled: true,
+      memory_mode: 'private',
+      folder_id: scope.folderId,
+    };
+  }
+  return {
+    memory_enabled: true,
+    memory_mode: scope.kind,
+    clear_folder: true,
+  };
+}
+
+function applyChanges(
+  current: ChatMemorySettings,
+  changes: ChatMemoryChanges,
+): ChatMemorySettings {
+  const next: ChatMemorySettings = { ...current };
+  if (typeof changes.memory_enabled === 'boolean') {
+    next.memory_enabled = changes.memory_enabled;
+  }
+  if (changes.memory_mode) {
+    next.memory_mode = changes.memory_mode;
+  }
+  if (changes.clear_folder) {
+    next.folder_id = null;
+  } else if (typeof changes.folder_id === 'number') {
+    next.folder_id = changes.folder_id;
+  }
+  if (next.folder_id !== null) {
+    next.memory_mode = 'private';
+  }
+  next.effective_scope = !next.memory_enabled
+    ? 'disabled'
+    : (next.folder_id !== null ? 'folder' : next.memory_mode);
+  next.status = next.memory_enabled ? 'ready' : 'disabled';
+  return next;
+}
+
 export default function useChatMemory(chatId: number | null) {
   const [settings, setSettings] = useState<ChatMemorySettings>(DEFAULT_SETTINGS);
   const [folders, setFolders] = useState<MemoryFolder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeChatIdRef = useRef(chatId);
+  const settingsRef = useRef(settings);
+  const draftSettingsRef = useRef(DEFAULT_SETTINGS);
+  const pendingRequestCountRef = useRef(0);
+  const settingsRequestVersionRef = useRef(0);
+  const errorRequestVersionRef = useRef(0);
+
+  activeChatIdRef.current = chatId;
+  settingsRef.current = settings;
+
+  const beginRequest = useCallback(() => {
+    pendingRequestCountRef.current += 1;
+    setLoading(true);
+  }, []);
+
+  const endRequest = useCallback(() => {
+    pendingRequestCountRef.current = Math.max(0, pendingRequestCountRef.current - 1);
+    if (pendingRequestCountRef.current === 0) {
+      setLoading(false);
+    }
+  }, []);
 
   const refreshFolders = useCallback(async () => {
     try {
@@ -45,39 +131,58 @@ export default function useChatMemory(chatId: number | null) {
     void refreshFolders();
   }, [refreshFolders]);
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async (signal?: AbortSignal) => {
     if (chatId === null) {
       return DEFAULT_SETTINGS;
     }
-    const response = await fetch(`/api/v1/memory/chats/${chatId}`);
+    const response = await fetch(`/api/v1/memory/chats/${chatId}`, { signal });
     if (!response.ok) throw new Error('Could not load chat memory settings');
     const data: ChatMemorySettings = await response.json();
     return data;
   }, [chatId]);
 
   useEffect(() => {
+    const settingsRequestVersion = ++settingsRequestVersionRef.current;
+    const errorRequestVersion = ++errorRequestVersionRef.current;
     if (chatId === null) {
-      setSettings(DEFAULT_SETTINGS);
+      setSettings(draftSettingsRef.current);
+      settingsRef.current = draftSettingsRef.current;
+      setError(null);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    fetchSettings()
+    const controller = new AbortController();
+    beginRequest();
+    fetchSettings(controller.signal)
       .then(data => {
-        if (!cancelled) setSettings(data);
+        if (
+          !cancelled
+          && settingsRequestVersionRef.current === settingsRequestVersion
+        ) {
+          settingsRef.current = data;
+          setSettings(data);
+          if (errorRequestVersionRef.current === errorRequestVersion) {
+            setError(null);
+          }
+        }
       })
       .catch(requestError => {
-        if (!cancelled) {
+        if (
+          !cancelled
+          && errorRequestVersionRef.current === errorRequestVersion
+          && !(requestError instanceof DOMException && requestError.name === 'AbortError')
+        ) {
           setError(requestError instanceof Error ? requestError.message : 'Could not load memory settings');
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        endRequest();
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [chatId, fetchSettings]);
+  }, [beginRequest, chatId, endRequest, fetchSettings]);
 
   useEffect(() => {
     if (
@@ -90,9 +195,16 @@ export default function useChatMemory(chatId: number | null) {
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
+      const settingsRequestVersion = ++settingsRequestVersionRef.current;
       void fetchSettings()
         .then(data => {
-          if (!cancelled) setSettings(data);
+          if (
+            !cancelled
+            && settingsRequestVersionRef.current === settingsRequestVersion
+          ) {
+            settingsRef.current = data;
+            setSettings(data);
+          }
         })
         .catch(() => undefined);
     }, 1200);
@@ -102,24 +214,25 @@ export default function useChatMemory(chatId: number | null) {
     };
   }, [chatId, fetchSettings, settings.status]);
 
-  const updateSettings = useCallback(async (changes: Record<string, unknown>) => {
-    const next: ChatMemorySettings = {
-      ...settings,
-      ...changes,
-      folder_id: changes.clear_folder ? null : (
-        typeof changes.folder_id === 'number' ? changes.folder_id : settings.folder_id
-      ),
-    };
-    if (next.folder_id !== null) next.memory_mode = 'private';
-    next.effective_scope = !next.memory_enabled
-      ? 'disabled'
-      : (next.folder_id !== null ? 'folder' : next.memory_mode);
-    setSettings(next);
+  const updateChatSettings = useCallback(async (
+    targetChatId: number,
+    changes: ChatMemoryChanges,
+  ): Promise<boolean> => {
+    const updatesActiveChat = activeChatIdRef.current === targetChatId;
+    const previousSettings = settingsRef.current;
+    const settingsRequestVersion = updatesActiveChat
+      ? ++settingsRequestVersionRef.current
+      : null;
+    const errorRequestVersion = ++errorRequestVersionRef.current;
+    if (updatesActiveChat) {
+      const optimisticSettings = applyChanges(previousSettings, changes);
+      settingsRef.current = optimisticSettings;
+      setSettings(optimisticSettings);
+    }
     setError(null);
-    if (chatId === null) return;
-    setLoading(true);
+    beginRequest();
     try {
-      const response = await fetch(`/api/v1/memory/chats/${chatId}`, {
+      const response = await fetch(`/api/v1/memory/chats/${targetChatId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes),
@@ -128,15 +241,70 @@ export default function useChatMemory(chatId: number | null) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail || 'Could not update memory settings');
       }
-      setSettings(await response.json());
+      const updatedSettings: ChatMemorySettings = await response.json();
+      if (
+        activeChatIdRef.current === targetChatId
+        && settingsRequestVersionRef.current === settingsRequestVersion
+      ) {
+        settingsRef.current = updatedSettings;
+        setSettings(updatedSettings);
+      }
       await refreshFolders();
+      return true;
     } catch (requestError) {
-      setSettings(settings);
-      setError(requestError instanceof Error ? requestError.message : 'Could not update memory settings');
+      if (
+        updatesActiveChat
+        && activeChatIdRef.current === targetChatId
+        && settingsRequestVersionRef.current === settingsRequestVersion
+      ) {
+        settingsRef.current = previousSettings;
+        setSettings(previousSettings);
+      }
+      if (errorRequestVersionRef.current === errorRequestVersion) {
+        setError(requestError instanceof Error ? requestError.message : 'Could not update memory settings');
+      }
+      return false;
     } finally {
-      setLoading(false);
+      endRequest();
     }
-  }, [chatId, refreshFolders, settings]);
+  }, [beginRequest, endRequest, refreshFolders]);
+
+  const setScope = useCallback(async (scope: MemoryScope): Promise<boolean> => {
+    const changes = changesForScope(scope);
+    const targetChatId = activeChatIdRef.current;
+    if (targetChatId === null) {
+      const next = applyChanges(draftSettingsRef.current, changes);
+      draftSettingsRef.current = next;
+      settingsRef.current = next;
+      setSettings(next);
+      setError(null);
+      return true;
+    }
+    return updateChatSettings(targetChatId, changes);
+  }, [updateChatSettings]);
+
+  const prepareNewChat = useCallback((scope: MemoryScope): void => {
+    const next = applyChanges(DEFAULT_SETTINGS, changesForScope(scope));
+    draftSettingsRef.current = next;
+    if (activeChatIdRef.current === null) {
+      settingsRef.current = next;
+      setSettings(next);
+      setError(null);
+    }
+  }, []);
+
+  const setChatFolder = useCallback(async (
+    targetChatId: number,
+    folderId: number | null,
+  ): Promise<boolean> => updateChatSettings(
+    targetChatId,
+    folderId === null
+      ? { memory_mode: 'private', clear_folder: true }
+      : {
+          memory_mode: 'private',
+          folder_id: folderId,
+        },
+  ), [updateChatSettings]);
 
   const createFolder = useCallback(async (name: string) => {
     const response = await fetch('/api/v1/memory/folders', {
@@ -171,16 +339,23 @@ export default function useChatMemory(chatId: number | null) {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Could not delete folder');
-    if (settings.folder_id === folderId) {
-      setSettings(current => ({
-        ...current,
-        folder_id: null,
-        memory_mode: 'private',
-        effective_scope: 'private',
-      }));
+    if (settingsRef.current.folder_id === folderId) {
+      setSettings(current => {
+        const next: ChatMemorySettings = {
+          ...current,
+          folder_id: null,
+          memory_mode: 'private',
+          effective_scope: current.memory_enabled ? 'private' : 'disabled',
+        };
+        settingsRef.current = next;
+        if (activeChatIdRef.current === null) {
+          draftSettingsRef.current = next;
+        }
+        return next;
+      });
     }
     await refreshFolders();
-  }, [refreshFolders, settings.folder_id]);
+  }, [refreshFolders]);
 
   return {
     settings,
@@ -191,13 +366,8 @@ export default function useChatMemory(chatId: number | null) {
     createFolder,
     renameFolder,
     deleteFolder,
-    setMemoryEnabled: (enabled: boolean) => updateSettings({ memory_enabled: enabled }),
-    setPrivate: (isPrivate: boolean) => updateSettings({
-      memory_mode: isPrivate ? 'private' : 'public',
-      ...(isPrivate ? {} : { clear_folder: true }),
-    }),
-    setFolder: (folderId: number | null) => updateSettings(
-      folderId === null ? { clear_folder: true } : { folder_id: folderId, memory_mode: 'private' },
-    ),
+    setScope,
+    prepareNewChat,
+    setChatFolder,
   };
 }

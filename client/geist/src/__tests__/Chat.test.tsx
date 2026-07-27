@@ -5,6 +5,7 @@ import Chat, { turnBelongsToChatSelection } from '../Chat';
 
 const mockCancelGeneration = jest.fn();
 const mockResetChatSession = jest.fn();
+const mockPrepareNewChat = jest.fn();
 const mockChatSessions: never[] = [];
 const mockLoadMore = jest.fn();
 const mockNavigate = jest.fn();
@@ -59,6 +60,17 @@ jest.mock('../Hooks/useUserSettings', () => ({
 
 jest.mock('../Hooks/useChatMemory', () => ({
   __esModule: true,
+  getMemoryScope: (settings: {
+    memory_enabled: boolean;
+    memory_mode: 'public' | 'private';
+    folder_id: number | null;
+  }) => {
+    if (!settings.memory_enabled) return { kind: 'disabled' };
+    if (settings.folder_id !== null) {
+      return { kind: 'folder', folderId: settings.folder_id };
+    }
+    return { kind: settings.memory_mode };
+  },
   default: () => ({
     settings: {
       memory_enabled: true,
@@ -70,12 +82,13 @@ jest.mock('../Hooks/useChatMemory', () => ({
     folders: [],
     loading: false,
     error: null,
+    refreshFolders: jest.fn(),
     createFolder: jest.fn(),
     renameFolder: jest.fn(),
     deleteFolder: jest.fn(),
-    setMemoryEnabled: jest.fn(),
-    setPrivate: jest.fn(),
-    setFolder: jest.fn(),
+    setScope: jest.fn(async () => true),
+    prepareNewChat: mockPrepareNewChat,
+    setChatFolder: jest.fn(async () => true),
   }),
 }));
 
@@ -92,6 +105,7 @@ describe('Chat live run controls', () => {
   beforeEach(() => {
     mockCancelGeneration.mockClear();
     mockResetChatSession.mockClear();
+    mockPrepareNewChat.mockClear();
   });
 
   it('renders a Stop control and cancels the active generation', () => {
@@ -107,6 +121,7 @@ describe('Chat live run controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
+    expect(mockPrepareNewChat).toHaveBeenCalledWith({ kind: 'public' });
     expect(mockResetChatSession).toHaveBeenCalledTimes(1);
     expect(mockNavigate).toHaveBeenCalledWith('/chat');
   });

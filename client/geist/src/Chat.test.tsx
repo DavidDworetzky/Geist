@@ -1,7 +1,20 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Chat from './Chat';
+
+const mockPrepareNewChat = jest.fn();
+const mockSetScope = jest.fn(async () => true);
+const mockSetChatFolder = jest.fn(async () => true);
+const mockRefreshChatSessions = jest.fn();
+const mockRefreshFolders = jest.fn();
+let mockCompletedTurn: {
+  run_id: string;
+  prompt: string;
+  message: string;
+  origin_chat_id: number | null;
+  chat_id: number;
+} | null = null;
 
 jest.mock('./Hooks/useGetChatSessions', () => ({
   __esModule: true,
@@ -10,14 +23,17 @@ jest.mock('./Hooks/useGetChatSessions', () => ({
       {
         chat_id: 42,
         create_date: '2026-07-09T10:00:00.000Z',
-        chat_history: [{ user: 'Plan Geist drawer behavior', ai: 'Done' }]
+        chat_history: [{ user: 'Plan Geist drawer behavior', ai: 'Done' }],
+        folder_id: null,
+        memory_enabled: true,
+        memory_mode: 'public',
       }
     ],
     loading: false,
     error: null,
     hasMore: false,
     loadMore: jest.fn(),
-    refreshChatSessions: jest.fn()
+    refreshChatSessions: mockRefreshChatSessions,
   })
 }));
 
@@ -31,7 +47,7 @@ jest.mock('./Hooks/useCompleteText', () => ({
     loading: false,
     error: null,
     completedText: null,
-    completedTurn: null,
+    completedTurn: mockCompletedTurn,
     activeTurn: null,
     state_chat_id: null
   })
@@ -60,6 +76,17 @@ jest.mock('./Hooks/useUserSettings', () => ({
 
 jest.mock('./Hooks/useChatMemory', () => ({
   __esModule: true,
+  getMemoryScope: (settings: {
+    memory_enabled: boolean;
+    memory_mode: 'public' | 'private';
+    folder_id: number | null;
+  }) => {
+    if (!settings.memory_enabled) return { kind: 'disabled' };
+    if (settings.folder_id !== null) {
+      return { kind: 'folder', folderId: settings.folder_id };
+    }
+    return { kind: settings.memory_mode };
+  },
   default: () => ({
     settings: {
       memory_enabled: true,
@@ -78,12 +105,13 @@ jest.mock('./Hooks/useChatMemory', () => ({
     ],
     loading: false,
     error: null,
+    refreshFolders: mockRefreshFolders,
     createFolder: jest.fn(),
     renameFolder: jest.fn(),
     deleteFolder: jest.fn(),
-    setMemoryEnabled: jest.fn(),
-    setPrivate: jest.fn(),
-    setFolder: jest.fn(),
+    setScope: mockSetScope,
+    prepareNewChat: mockPrepareNewChat,
+    setChatFolder: mockSetChatFolder,
   }),
 }));
 
@@ -102,9 +130,16 @@ jest.mock('./Components/EnhancedChatInput', () => ({
   )
 }));
 
+jest.mock('./Components/MemoryExplorer', () => ({
+  __esModule: true,
+  default: () => <div>Memory explorer</div>,
+}));
+
 describe('Chat history panel', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    jest.clearAllMocks();
+    mockCompletedTurn = null;
   });
 
   it('morphs from compact chat controls into the chat-sized history panel', () => {
@@ -115,13 +150,10 @@ describe('Chat history panel', () => {
     );
 
     const drawer = screen.getByRole('complementary', { name: 'Chat sessions' });
-    const stage = drawer.closest('.chat-stage') as HTMLElement;
-    const composerDock = screen.getByRole('textbox', { name: 'Message' }).closest('.chat-composer-dock') as HTMLElement;
+    const composer = screen.getByRole('textbox', { name: 'Message' });
     expect(drawer).toHaveAttribute('data-state', 'minimized');
     expect(drawer).toHaveClass('stage-panel-minimized');
-    expect(stage).not.toBeNull();
-    expect(stage).toContainElement(composerDock);
-    expect(composerDock).toHaveAttribute('aria-hidden', 'false');
+    expect(composer).toBeInTheDocument();
     const newChatButton = within(drawer).getByRole('button', { name: 'New chat' });
     expect(newChatButton).toBeInTheDocument();
     expect(newChatButton).toHaveTextContent('New Chat');
@@ -133,8 +165,7 @@ describe('Chat history panel', () => {
 
     expect(drawer).toHaveAttribute('data-state', 'expanded');
     expect(drawer).toHaveClass('stage-panel-expanded');
-    expect(composerDock).toHaveAttribute('aria-hidden', 'true');
-    expect(drawer.querySelector('.stage-panel-surface')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Message' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Chats' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search chats')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Research/ })).toBeInTheDocument();
@@ -147,11 +178,11 @@ describe('Chat history panel', () => {
 
     expect(drawer).toHaveAttribute('data-state', 'minimized');
     expect(drawer).toHaveClass('stage-panel-minimized');
-    expect(composerDock).toHaveAttribute('aria-hidden', 'false');
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Chats' })).not.toBeInTheDocument();
     expect(window.localStorage.getItem('geist.chatDrawerState')).toBe('minimized');
-    expect(screen.getByRole('switch', { name: 'Memory enabled' })).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Private' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Memory settings:/ })).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
   it('edits a chat name and persists it locally', () => {
@@ -162,7 +193,10 @@ describe('Chat history panel', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Rename Plan Geist drawer behavior' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Chat options for Plan Geist drawer behavior',
+    }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
 
     const titleInput = screen.getByRole('textbox', { name: 'Chat name' });
     fireEvent.change(titleInput, { target: { value: 'Drawer polish' } });
@@ -170,5 +204,94 @@ describe('Chat history panel', () => {
 
     expect(screen.getByText('Drawer polish')).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem('geist.chatTitles') || '{}')).toEqual({ '42': 'Drawer polish' });
+  });
+
+  it('inherits the selected folder when starting a new chat', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
+    fireEvent.click(screen.getByRole('button', { name: /Research/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+
+    expect(mockPrepareNewChat).toHaveBeenCalledWith({
+      kind: 'folder',
+      folderId: 9,
+    });
+  });
+
+  it('refreshes chat sessions and folder counts when a turn completes', async () => {
+    mockCompletedTurn = {
+      run_id: 'run-42',
+      prompt: 'Remember the launch date',
+      message: 'Saved',
+      origin_chat_id: null,
+      chat_id: 42,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mockRefreshChatSessions).toHaveBeenCalledTimes(1);
+    });
+    expect(mockRefreshFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves a chat into a folder from its row menu after confirmation', async () => {
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    mockSetChatFolder.mockResolvedValueOnce(true);
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Chat options for Plan Geist drawer behavior',
+    }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Research' }));
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining(
+      "existing summary and future saved memory will be available",
+    ));
+    await waitFor(() => {
+      expect(mockSetChatFolder).toHaveBeenCalledWith(42, 9);
+    });
+    await waitFor(() => {
+      expect(mockRefreshChatSessions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('supports keyboard navigation and focus restoration in a chat row menu', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
+    const trigger = screen.getByRole('button', {
+      name: 'Chat options for Plan Geist drawer behavior',
+    });
+    fireEvent.click(trigger);
+
+    const renameItem = screen.getByRole('menuitem', { name: 'Rename' });
+    expect(renameItem).toHaveFocus();
+    fireEvent.keyDown(renameItem, { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitemradio', { name: 'No folder' })).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu', {
+      name: 'Plan Geist drawer behavior options',
+    })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

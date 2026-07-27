@@ -30,6 +30,14 @@ async function search(
   return (await response.json()).results as Array<{ content: string }>;
 }
 
+async function selectMemoryScope(
+  page: import('@playwright/test').Page,
+  name: string,
+) {
+  await page.getByRole('button', { name: /^Memory settings:/ }).click();
+  await page.getByRole('menuitemradio', { name, exact: true }).click();
+}
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/chat');
@@ -57,8 +65,12 @@ test('public chat promotes an explicit durable fact to global memory', async ({ 
 
 
 test('private chat is searchable only inside its own thread', async ({ page }) => {
-  await page.getByRole('switch', { name: 'Private' }).click();
-  await expect(page.getByText('Stored only in this private chat')).toBeVisible();
+  await selectMemoryScope(page, 'Memory Enabled (this chat only)');
+  await expect(
+    page.getByRole('button', {
+      name: 'Memory settings: Memory Enabled (this chat only)',
+    }),
+  ).toBeVisible();
   const chatId = await sendMemoryChat(page, 'Remember obsidian-e2e.');
 
   const globalResults = await search(page, {
@@ -77,8 +89,10 @@ test('private chat is searchable only inside its own thread', async ({ page }) =
 
 
 test('memory disabled prevents chat-derived storage', async ({ page }) => {
-  await page.getByRole('switch', { name: 'Memory enabled' }).click();
-  await expect(page.getByText('Memory is off for this chat')).toBeVisible();
+  await selectMemoryScope(page, 'Memory Disabled');
+  await expect(
+    page.getByRole('button', { name: 'Memory settings: Memory Disabled' }),
+  ).toBeVisible();
   await sendMemoryChat(page, 'Remember vermilion-e2e.', 'disabled');
 
   const globalResults = await search(page, {
@@ -97,17 +111,22 @@ test('folder memory stays inside the selected private folder', async ({ page }) 
   await expect(
     page.getByRole('button', { name: /^E2E Vault \d+ chats? · Private$/ }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Close chat history' }).click();
-
   const folderResponse = await page.request.get('/api/v1/memory/folders');
   const folders = await folderResponse.json();
   const folder = folders.find((item: { name: string }) => item.name === 'E2E Vault');
   expect(folder).toBeTruthy();
-  await page.getByRole('combobox', { name: 'Memory folder' }).selectOption(
-    String(folder.folder_id),
-  );
-  await expect(page.getByText('Stored only in this private folder')).toBeVisible();
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  await expect(
+    page.getByRole('button', {
+      name: 'Memory settings: Memory: E2E Vault',
+    }),
+  ).toBeVisible();
   const chatId = await sendMemoryChat(page, 'Remember topaz-e2e launches Friday.');
+  const inheritedSettings = await (
+    await page.request.get(`/api/v1/memory/chats/${chatId}`)
+  ).json();
+  expect(inheritedSettings.folder_id).toBe(folder.folder_id);
+  expect(inheritedSettings.effective_scope).toBe('folder');
 
   const folderResults = await search(page, {
     query: 'topaz-e2e',
