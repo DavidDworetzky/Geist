@@ -1,7 +1,8 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Settings from './Settings';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
+import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
 const baseSettings = {
   user_settings_id: 1,
@@ -105,6 +106,47 @@ describe('Settings page', () => {
     expect(within(actions).getByRole('button', { name: 'Reset to Defaults' })).toBeInTheDocument();
     expect(within(actions).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(within(actions).getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+  });
+
+  it('aligns the settings actions with content when the scroll region overflows', async () => {
+    const resizeObserver = installResizeObserverMock();
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    const renderResult = renderSettings();
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
+      });
+
+      const { container } = renderResult;
+      const page = container.querySelector<HTMLDivElement>('.settings-page-interactive');
+      const scrollRegion = container.querySelector<HTMLDivElement>('.settings-scroll-region');
+      expect(page).not.toBeNull();
+      expect(scrollRegion).not.toBeNull();
+      expect(page).not.toHaveClass('settings-scrollbar-visible');
+
+      let scrollHeight = 700;
+      Object.defineProperty(scrollRegion, 'clientHeight', {
+        configurable: true,
+        get: () => 500,
+      });
+      Object.defineProperty(scrollRegion, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      act(() => resizeObserver.trigger(scrollRegion as HTMLDivElement));
+      expect(page).toHaveClass('settings-scrollbar-visible');
+
+      scrollHeight = 500;
+      act(() => resizeObserver.trigger(scrollRegion as HTMLDivElement));
+      expect(page).not.toHaveClass('settings-scrollbar-visible');
+    } finally {
+      renderResult.unmount();
+      resizeObserver.restore();
+    }
   });
 
   it('marks unsaved changes when local values change and saves', async () => {

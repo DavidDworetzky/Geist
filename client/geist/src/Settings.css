@@ -5,6 +5,7 @@
 
 .settings-page.settings-page-interactive {
   --settings-action-clearance: 84px;
+  --settings-scrollbar-lane: 0px;
   --settings-glass-fill: color-mix(in srgb, var(--geist-color-surface-strong) 56%, transparent);
   --settings-glass-highlight: color-mix(in srgb, var(--geist-color-text) 9%, transparent);
   position: relative;
@@ -13,6 +14,10 @@
   min-height: 0;
   padding: 0;
   overflow: hidden;
+}
+
+.settings-page.settings-page-interactive.settings-scrollbar-visible {
+  --settings-scrollbar-lane: 10px;
 }
 
 .settings-scroll-region {
@@ -38,7 +43,7 @@
 
 .settings-page-interactive .settings-actions {
   position: absolute;
-  right: 22px;
+  right: calc(22px + var(--settings-scrollbar-lane));
   bottom: 12px;
   left: 22px;
   z-index: 10;
@@ -424,7 +429,7 @@
   }
 
   .settings-page-interactive .settings-actions {
-    right: 12px;
+    right: calc(12px + var(--settings-scrollbar-lane));
     bottom: 10px;
     left: 12px;
   }

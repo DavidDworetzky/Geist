@@ -6,6 +6,7 @@ import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
+import useOverflowObserver from './Hooks/useOverflowObserver';
 
 type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer';
 
@@ -21,6 +22,10 @@ const Settings: React.FC = () => {
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const {
+    ref: settingsScrollRef,
+    hasOverflow: hasSettingsScrollbar,
+  } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings));
 
   useEffect(() => {
     if (settings) {
@@ -141,8 +146,8 @@ const Settings: React.FC = () => {
   }
 
   return (
-    <div className="settings-page page-surface settings-page-interactive">
-      <div className="settings-scroll-region">
+    <div className={`settings-page page-surface settings-page-interactive${hasSettingsScrollbar ? ' settings-scrollbar-visible' : ''}`}>
+      <div className="settings-scroll-region" ref={settingsScrollRef}>
         <header className="settings-header">
           <div>
             <p className="section-eyebrow">Workspace</p>
