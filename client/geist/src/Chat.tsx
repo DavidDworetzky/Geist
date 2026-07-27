@@ -4,6 +4,7 @@ import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
 import useUserSettings from './Hooks/useUserSettings';
 import useChatMemory, { MemoryScope } from './Hooks/useChatMemory';
+import useOverflowObserver from './Hooks/useOverflowObserver';
 import ChatTextArea from './Components/ChatTextArea';
 import EnhancedChatInput from './Components/EnhancedChatInput';
 import ChatMemoryControls from './Components/ChatMemoryControls';
@@ -152,17 +153,16 @@ const Chat = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [hasChatScrollbar, setHasChatScrollbar] = useState(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const {
+    ref: chatContainerRef,
+    hasOverflow: hasChatScrollbar,
+  } = useOverflowObserver<HTMLDivElement>();
+  const {
+    ref: chatDrawerScrollRef,
+    hasOverflow: hasChatDrawerScrollbar,
+  } = useOverflowObserver<HTMLDivElement>(chatDrawerState === 'expanded');
   const prevScrollHeightRef = useRef<number>(0);
   const shouldRestoreScrollRef = useRef(false);
-  const updateChatScrollbarState = useCallback(() => {
-    const container = chatContainerRef.current;
-    if (!container) return;
-
-    const nextHasScrollbar = container.scrollHeight > container.clientHeight + 1;
-    setHasChatScrollbar(current => current === nextHasScrollbar ? current : nextHasScrollbar);
-  }, []);
 
   const fetchHistory = useCallback(async (pageNum: number, currentChatId: string) => {
     if (!currentChatId) return;
@@ -220,7 +220,7 @@ const Chat = () => {
     } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [chatHistory, page, isLoading]);
+  }, [chatContainerRef, chatHistory, page, isLoading]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -233,7 +233,7 @@ const Chat = () => {
         }
       }
     }
-  }, [chatHistory, hasMore, isLoadingHistory, page, chatId, fetchHistory]);
+  }, [chatContainerRef, chatHistory, hasMore, isLoadingHistory, page, chatId, fetchHistory]);
 
   const observer = useRef<IntersectionObserver>();
   const lastItemRef = useCallback(
@@ -263,7 +263,7 @@ const Chat = () => {
         }
       }
     }
-  }, [hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
+  }, [chatContainerRef, hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -271,7 +271,7 @@ const Chat = () => {
       container.addEventListener('scroll', handleScroll);
       return () => container.removeEventListener('scroll', handleScroll);
     }
-  }, [handleScroll]);
+  }, [chatContainerRef, handleScroll]);
 
   const chatWithServer = async (input: string) => {
     const parsedChatId = routeChatId ?? state_chat_id;
@@ -576,34 +576,6 @@ const Chat = () => {
     ],
   );
 
-  useLayoutEffect(() => {
-    updateChatScrollbarState();
-  }, [chatDrawerState, displayedHistory, isLoading, updateChatScrollbarState]);
-
-  useLayoutEffect(() => {
-    const container = chatContainerRef.current;
-    if (!container) return undefined;
-
-    updateChatScrollbarState();
-    window.addEventListener('resize', updateChatScrollbarState);
-
-    if (typeof ResizeObserver === 'undefined') {
-      return () => window.removeEventListener('resize', updateChatScrollbarState);
-    }
-
-    const resizeObserver = new ResizeObserver(updateChatScrollbarState);
-    resizeObserver.observe(container);
-    const content = container.firstElementChild;
-    if (content) {
-      resizeObserver.observe(content);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateChatScrollbarState);
-    };
-  }, [updateChatScrollbarState]);
-
   return (
     <div className={`ChatContainer chat-drawer-${chatDrawerState}${hasChatScrollbar ? ' chat-scrollbar-visible' : ''}`}>
       <section className="ChatContent">
@@ -618,11 +590,11 @@ const Chat = () => {
           </div>
 
           <aside
-            className={`ChatSidebar stage-panel chat-library-panel-host stage-panel-${chatDrawerState}`}
+            className={`ChatSidebar stage-panel chat-library-panel-host stage-panel-${chatDrawerState}${hasChatDrawerScrollbar ? ' stage-panel-scrollbar-visible' : ''}`}
             aria-label="Chat sessions"
             data-state={chatDrawerState}
           >
-            <div className="stage-panel-surface">
+            <div className="stage-panel-surface" ref={chatDrawerScrollRef}>
               {chatDrawerState === 'minimized' ? (
                 <div className="chat-minimized-controls stage-panel-compact-controls" aria-label="Chat shortcuts">
                   <button className="button chat-minimized-new-button stage-panel-primary-button" type="button" onClick={handleNewChat} aria-label="New chat" title="New chat">

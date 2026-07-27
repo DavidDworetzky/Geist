@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Settings from './Settings';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
 
@@ -81,6 +81,30 @@ describe('Settings page', () => {
       expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Developer' })).toBeInTheDocument();
     });
+  });
+
+  it('keeps the settings actions outside the scrollable generation content', async () => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    const { container } = renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+
+    const page = container.querySelector('.settings-page-interactive');
+    const scrollRegion = container.querySelector('.settings-scroll-region');
+    const actions = screen.getByRole('contentinfo', { name: 'Settings actions' });
+    expect(page).not.toBeNull();
+    expect(scrollRegion).not.toBeNull();
+    expect(scrollRegion).toContainElement(screen.getByText('Generation Parameters'));
+    expect(scrollRegion).not.toContainElement(actions);
+    expect(actions.parentElement).toBe(page);
+    expect(within(actions).getByRole('button', { name: 'Reset to Defaults' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
   });
 
   it('marks unsaved changes when local values change and saves', async () => {

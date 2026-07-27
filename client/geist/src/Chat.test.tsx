@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Chat from './Chat';
+import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
 const mockPrepareNewChat = jest.fn();
 const mockSetScope = jest.fn(async () => true);
@@ -143,29 +144,15 @@ describe('Chat history panel', () => {
   });
 
   it('only reserves the external scrollbar rail while the transcript overflows', () => {
-    let resizeObserverCallback: ResizeObserverCallback | null = null;
-    const originalResizeObserver = window.ResizeObserver;
-    class MockResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeObserverCallback = callback;
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-    Object.defineProperty(window, 'ResizeObserver', {
-      configurable: true,
-      writable: true,
-      value: MockResizeObserver,
-    });
+    const resizeObserver = installResizeObserverMock();
+    const renderResult = render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
 
     try {
-      const { container } = render(
-        <MemoryRouter initialEntries={['/chat']}>
-          <Chat />
-        </MemoryRouter>
-      );
+      const { container } = renderResult;
       const chat = container.querySelector<HTMLDivElement>('.ChatContainer');
       const transcript = container.querySelector<HTMLDivElement>('.chat-history-scroll');
       expect(chat).not.toBeNull();
@@ -182,18 +169,53 @@ describe('Chat history panel', () => {
         get: () => scrollHeight,
       });
 
-      act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+      act(() => resizeObserver.trigger(transcript as HTMLDivElement));
       expect(chat).toHaveClass('chat-scrollbar-visible');
 
       scrollHeight = 500;
-      act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+      act(() => resizeObserver.trigger(transcript as HTMLDivElement));
       expect(chat).not.toHaveClass('chat-scrollbar-visible');
     } finally {
-      Object.defineProperty(window, 'ResizeObserver', {
+      renderResult.unmount();
+      resizeObserver.restore();
+    }
+  });
+
+  it('only adds an external scrollbar gap while the chat drawer overflows', () => {
+    const resizeObserver = installResizeObserverMock();
+    const renderResult = render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    try {
+      const drawer = screen.getByRole('complementary', { name: 'Chat sessions' });
+      const drawerScroll = drawer.querySelector<HTMLDivElement>('.stage-panel-surface');
+      expect(drawerScroll).not.toBeNull();
+      expect(drawer).not.toHaveClass('stage-panel-scrollbar-visible');
+
+      fireEvent.click(within(drawer).getByRole('button', { name: 'Expand chat history' }));
+
+      let scrollHeight = 700;
+      Object.defineProperty(drawerScroll, 'clientHeight', {
         configurable: true,
-        writable: true,
-        value: originalResizeObserver,
+        get: () => 500,
       });
+      Object.defineProperty(drawerScroll, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      act(() => resizeObserver.trigger(drawerScroll as HTMLDivElement));
+      expect(drawer).toHaveClass('stage-panel-scrollbar-visible');
+
+      scrollHeight = 500;
+      act(() => resizeObserver.trigger(drawerScroll as HTMLDivElement));
+      expect(drawer).not.toHaveClass('stage-panel-scrollbar-visible');
+    } finally {
+      renderResult.unmount();
+      resizeObserver.restore();
     }
   });
 

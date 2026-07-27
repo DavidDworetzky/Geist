@@ -3,6 +3,28 @@
   margin: 0 auto;
 }
 
+.settings-page.settings-page-interactive {
+  --settings-action-clearance: 84px;
+  --settings-glass-fill: color-mix(in srgb, var(--geist-color-surface-strong) 56%, transparent);
+  --settings-glass-highlight: color-mix(in srgb, var(--geist-color-text) 9%, transparent);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-scroll-region {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 22px 22px var(--settings-action-clearance);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: var(--settings-action-clearance);
+}
+
 .settings-status-message {
   display: flex;
   align-items: center;
@@ -11,7 +33,51 @@
 }
 
 .settings-tab-panel {
-  min-height: 420px;
+  min-height: 0;
+}
+
+.settings-page-interactive .settings-actions {
+  position: absolute;
+  right: 22px;
+  bottom: 12px;
+  left: 22px;
+  z-index: 10;
+  min-height: 56px;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--geist-color-surface);
+  background:
+    linear-gradient(135deg, var(--settings-glass-highlight), transparent 52%),
+    var(--settings-glass-fill);
+  border: 1px solid color-mix(in srgb, var(--geist-color-border-strong) 58%, transparent);
+  border-radius: var(--geist-radius-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .settings-page-interactive .settings-actions {
+    -webkit-backdrop-filter: blur(14px) saturate(145%);
+    backdrop-filter: blur(14px) saturate(145%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .settings-page-interactive .settings-actions {
+    background: var(--geist-color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .settings-page-interactive .settings-actions {
+    background: Canvas;
+    border-color: CanvasText;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 .settings-section {
@@ -349,6 +415,20 @@
 }
 
 @media (max-width: 720px) {
+  .settings-page.settings-page-interactive {
+    --settings-action-clearance: 180px;
+  }
+
+  .settings-scroll-region {
+    padding: 12px 12px var(--settings-action-clearance);
+  }
+
+  .settings-page-interactive .settings-actions {
+    right: 12px;
+    bottom: 10px;
+    left: 12px;
+  }
+
   .settings-field-header,
   .settings-toggle-field,
   .settings-subsection-header,

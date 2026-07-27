@@ -16,6 +16,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import useWorkflows, { WorkflowStep, WorkflowCreate, WorkflowUpdate } from './Hooks/useWorkflows';
+import useOverflowObserver from './Hooks/useOverflowObserver';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import StagePanelIcon from './Components/StagePanelIcon';
 import './WorkflowBuilder.css';
@@ -78,6 +79,10 @@ const WorkflowBuilder: React.FC = () => {
   const [workflowTitleDraft, setWorkflowTitleDraft] = useState('');
   const [workflowTitleError, setWorkflowTitleError] = useState('');
   const [workflowTitleSaving, setWorkflowTitleSaving] = useState(false);
+  const {
+    ref: workflowDrawerScrollRef,
+    hasOverflow: hasWorkflowDrawerScrollbar,
+  } = useOverflowObserver<HTMLDivElement>(workflowPanelState === 'expanded');
 
   const loadWorkflow = useCallback(async (id: number) => {
     const workflow = await getWorkflow(id);
@@ -348,11 +353,11 @@ const WorkflowBuilder: React.FC = () => {
           )}
 
           <aside
-            className={`WorkflowLibrary stage-panel workflow-library-panel-host stage-panel-${workflowPanelState}`}
+            className={`WorkflowLibrary stage-panel workflow-library-panel-host stage-panel-${workflowPanelState}${hasWorkflowDrawerScrollbar ? ' stage-panel-scrollbar-visible' : ''}`}
             aria-label="Workflow library"
             data-state={workflowPanelState}
           >
-            <div className="stage-panel-surface">
+            <div className="stage-panel-surface" ref={workflowDrawerScrollRef}>
               {workflowPanelState === 'minimized' ? (
                 <div className="workflow-minimized-controls stage-panel-compact-controls" aria-label="Workflow shortcuts">
                   <button className="button workflow-minimized-new-button stage-panel-primary-button" type="button" onClick={handleNewWorkflow} aria-label="New workflow" title="New workflow">
