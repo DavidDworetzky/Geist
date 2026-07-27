@@ -482,6 +482,25 @@ textarea:focus-visible {
   border-radius: 999px;
 }
 
+.models-tabs {
+  flex: 0 0 auto;
+}
+
+.models-tab-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.models-providers-loading {
+  flex: 1 1 auto;
+}
+
+.local-model-panel {
+  flex: 0 0 auto;
+}
+
 .provider-panel {
   overflow: hidden;
 }

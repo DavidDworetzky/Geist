@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Settings from './Settings';
+import { UserSettingsProvider } from './Hooks/useUserSettings';
 
 const baseSettings = {
   user_settings_id: 1,
@@ -51,6 +52,12 @@ const createFetchMock = (settingsResponses: any[]) => {
   });
 };
 
+const renderSettings = () => render(
+  <UserSettingsProvider>
+    <Settings />
+  </UserSettingsProvider>,
+);
+
 describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -62,7 +69,7 @@ describe('Settings page', () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
-    render(<Settings />);
+    renderSettings();
     expect(screen.getByText(/Loading settings/i)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -83,7 +90,7 @@ describe('Settings page', () => {
       { ok: true, json: async () => ({ ...baseSettings, default_temperature: 0.8 }) }, // PUT
     ]);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -111,7 +118,7 @@ describe('Settings page', () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -137,7 +144,7 @@ describe('Settings page', () => {
     // confirm window
     jest.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Reset button to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -165,7 +172,7 @@ describe('Settings page', () => {
       return Promise.resolve({ ok: true, json: async () => baseSettings });
     });
 
-    render(<Settings />);
+    renderSettings();
     await waitFor(() => screen.getByText(/Error loading settings/i));
 
     fireEvent.click(screen.getByText('Retry'));
@@ -187,7 +194,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => baseSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
@@ -227,7 +234,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => baseSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
@@ -268,7 +275,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => onlineSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();

@@ -29,6 +29,7 @@ FRONTEND_ROOT = PROJECT_ROOT / "client" / "geist"
 FRONTEND_BUILD = FRONTEND_ROOT / "build"
 ENTRYPOINT = PROJECT_ROOT / "scripts" / "geist_frozen_entrypoint.py"
 DEFAULT_SOURCE_DATE_EPOCH = "315532800"  # 1980-01-01, valid for ZIP timestamps.
+CONFLICTING_WINDOWS_RUNTIME_DLLS = ("MSVCP140.dll",)
 
 
 @dataclass(frozen=True)
@@ -370,7 +371,36 @@ def verify_runtime_output(runtime_dir: Path, target: NativeTarget) -> Path:
         )
     if executable.stat().st_size == 0:
         raise RuntimeError(f"Frozen Geist executable is empty: {executable}")
+    if target.key == "win32-x64":
+        conflicts = [
+            str(internal / filename)
+            for filename in CONFLICTING_WINDOWS_RUNTIME_DLLS
+            if (internal / filename).is_file()
+        ]
+        if conflicts:
+            raise RuntimeError(
+                "Frozen Geist runtime contains host-resolved MSVC DLLs that can "
+                "contaminate external runtimes:\n- " + "\n- ".join(conflicts)
+            )
     return executable
+
+
+def remove_conflicting_windows_runtime_dlls(
+    runtime_dir: Path,
+    target: NativeTarget,
+) -> tuple[Path, ...]:
+    """Remove MSVC libraries that PyInstaller may resolve from unrelated host tools."""
+
+    if target.key != "win32-x64":
+        return ()
+    removed = []
+    internal = runtime_dir / "_internal"
+    for filename in CONFLICTING_WINDOWS_RUNTIME_DLLS:
+        candidate = internal / filename
+        if candidate.is_file():
+            candidate.unlink()
+            removed.append(candidate)
+    return tuple(removed)
 
 
 def build_manifest(
@@ -448,6 +478,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         _run(command, PROJECT_ROOT, deterministic_environment())
 
         runtime_dir = dist_dir / "geist"
+        removed_runtime_dlls = remove_conflicting_windows_runtime_dlls(
+            runtime_dir,
+            target,
+        )
+        for removed in removed_runtime_dlls:
+            print(f"Removed host-resolved runtime DLL: {removed}")
         verify_runtime_output(runtime_dir, target)
         manifest_path = write_manifest(runtime_dir, build_manifest(target))
         print(f"Geist native sidecar: {runtime_dir}")

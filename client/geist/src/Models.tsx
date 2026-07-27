@@ -37,6 +37,8 @@ interface LocalArtifact {
   progress_total?: number | null;
 }
 
+type ModelsTab = 'local' | 'providers';
+
 function formatBytes(value?: number | null): string {
   if (!value) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -50,6 +52,7 @@ export default function Models(): JSX.Element {
   const [localArtifacts, setLocalArtifacts] = useState<LocalArtifact[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ModelsTab>('local');
 
   const refreshLocalArtifacts = useCallback(async () => {
     try {
@@ -139,37 +142,63 @@ export default function Models(): JSX.Element {
   const ggufSupported = visibleLocalArtifacts.some(artifact => artifact.format === 'gguf');
   const mlxSupported = visibleLocalArtifacts.some(artifact => artifact.backend === 'mlx_llama');
 
-  if (loading && !models) {
-    return (
-      <section className="page-surface page-surface-centered">
-        <h2>Loading models</h2>
-        <p>Gathering local and online provider options.</p>
-      </section>
-    );
-  }
-
   return (
     <section className="models-page">
       <div className="page-header">
         <div>
           <p className="section-eyebrow">Providers</p>
-          <h2>Model inventory</h2>
+          <h2>Models</h2>
           <p>
-            Review available models and the current default runtime without leaving the workbench.
+            Manage models installed on this computer or browse available providers.
           </p>
         </div>
-        <button className="button button-secondary" onClick={() => void refetch()}>
+        <button
+          className="button button-secondary"
+          onClick={() => {
+            void refreshLocalArtifacts();
+            void refetch();
+          }}
+        >
           Refresh
         </button>
       </div>
 
-      {error && (
-        <div className="notice notice-warning">
-          Live model discovery failed, so Geist is showing fallback model data. {error}
-        </div>
-      )}
+      <div className="settings-tabs models-tabs" role="tablist" aria-label="Model sections">
+        <button
+          id="local-models-tab"
+          type="button"
+          className={`settings-tab ${activeTab === 'local' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'local'}
+          aria-controls="local-models-panel"
+          onClick={() => setActiveTab('local')}
+        >
+          Local Models
+        </button>
+        <button
+          id="model-providers-tab"
+          type="button"
+          className={`settings-tab ${activeTab === 'providers' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'providers'}
+          aria-controls="model-providers-panel"
+          onClick={() => setActiveTab('providers')}
+        >
+          Model Providers
+        </button>
+      </div>
 
-      <section className="provider-panel" aria-labelledby="local-model-files-heading">
+      {activeTab === 'local' && (
+        <div
+          id="local-models-panel"
+          className="models-tab-panel model-inventory-scroll"
+          role="tabpanel"
+          aria-labelledby="local-models-tab"
+        >
+          <section
+            className="provider-panel local-model-panel"
+            aria-labelledby="local-model-files-heading"
+          >
         <div className="provider-panel-header">
           <div>
             <h3 id="local-model-files-heading">Local model files</h3>
@@ -279,64 +308,90 @@ export default function Models(): JSX.Element {
             );
           })}
         </div>
-      </section>
-
-      <div className="model-summary-grid">
-        <article className="metric-card">
-          <span className="metric-label">Active provider</span>
-          <strong>{activeProvider || 'Not selected'}</strong>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Active model</span>
-          <strong>{activeModel || 'Not selected'}</strong>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Providers</span>
-          <strong>{providers.length}</strong>
-        </article>
-      </div>
-
-      <div className="model-inventory-scroll" role="region" aria-label="Model inventory">
-        <div className="provider-stack">
-          {providers.map((provider) => {
-            const providerModels = models?.providers[provider] ?? [];
-            return (
-              <section className="provider-panel" key={provider}>
-                <div className="provider-panel-header">
-                  <div>
-                    <h3>{provider}</h3>
-                    <p>{providerModels.length} models</p>
-                  </div>
-                </div>
-
-                <div className="model-table">
-                  <div className="model-table-row model-table-heading">
-                    <span>Model</span>
-                    <span>Context</span>
-                    <span>Output</span>
-                    <span>Capabilities</span>
-                  </div>
-                  {providerModels.map((model) => (
-                    <div className="model-table-row" key={`${provider}-${model.id}`}>
-                      <span>
-                        <strong>{model.name}</strong>
-                        <small>{model.id}</small>
-                      </span>
-                      <span>{formatNumber(model.context_window)}</span>
-                      <span>{formatNumber(model.max_output_tokens)}</span>
-                      <span className="capability-list">
-                        {capabilityLabels(model).map((label) => (
-                          <span className="capability-pill" key={label}>{label}</span>
-                        ))}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+          </section>
         </div>
-      </div>
+      )}
+
+      {activeTab === 'providers' && (
+        <div
+          id="model-providers-panel"
+          className="models-tab-panel"
+          role="tabpanel"
+          aria-labelledby="model-providers-tab"
+        >
+          {error && (
+            <div className="notice notice-warning">
+              Live model discovery failed, so Geist is showing fallback model data. {error}
+            </div>
+          )}
+
+          {loading && !models ? (
+            <section className="page-surface page-surface-centered models-providers-loading">
+              <h3>Loading model providers</h3>
+              <p>Gathering local and online provider options.</p>
+            </section>
+          ) : (
+            <>
+              <div className="model-summary-grid">
+                <article className="metric-card">
+                  <span className="metric-label">Active provider</span>
+                  <strong>{activeProvider || 'Not selected'}</strong>
+                </article>
+                <article className="metric-card">
+                  <span className="metric-label">Active model</span>
+                  <strong>{activeModel || 'Not selected'}</strong>
+                </article>
+                <article className="metric-card">
+                  <span className="metric-label">Providers</span>
+                  <strong>{providers.length}</strong>
+                </article>
+              </div>
+
+              <div className="model-inventory-scroll" role="region" aria-label="Model providers">
+                <div className="provider-stack">
+                  {providers.map((provider) => {
+                    const providerModels = models?.providers[provider] ?? [];
+                    return (
+                      <section className="provider-panel" key={provider}>
+                        <div className="provider-panel-header">
+                          <div>
+                            <h3>{provider}</h3>
+                            <p>{providerModels.length} models</p>
+                          </div>
+                        </div>
+
+                        <div className="model-table">
+                          <div className="model-table-row model-table-heading">
+                            <span>Model</span>
+                            <span>Context</span>
+                            <span>Output</span>
+                            <span>Capabilities</span>
+                          </div>
+                          {providerModels.map((model) => (
+                            <div className="model-table-row" key={`${provider}-${model.id}`}>
+                              <span>
+                                <strong>{model.name}</strong>
+                                <small>{model.id}</small>
+                              </span>
+                              <span>{formatNumber(model.context_window)}</span>
+                              <span>{formatNumber(model.max_output_tokens)}</span>
+                              <span className="capability-list">
+                                {capabilityLabels(model).map((label) => (
+                                  <span className="capability-pill" key={label}>{label}</span>
+                                ))}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </section>
   );
 }

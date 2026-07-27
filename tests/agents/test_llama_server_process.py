@@ -90,6 +90,7 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     assert "--jinja" in args
     assert args[args.index("--ctx-size") + 1] == "32768"
     assert args[args.index("--n-gpu-layers") + 1] == "999"
+    assert options["cwd"] == str(runtime / "vulkan")
     assert options["shell"] is False
     if os.name == "nt":
         assert options["creationflags"]

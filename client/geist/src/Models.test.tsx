@@ -78,6 +78,24 @@ beforeEach(() => {
   }) as jest.Mock;
 });
 
+it('separates local models from model providers', async () => {
+  render(<Models />);
+
+  const localModelsTab = screen.getByRole('tab', { name: 'Local Models' });
+  const modelProvidersTab = screen.getByRole('tab', { name: 'Model Providers' });
+
+  expect(localModelsTab).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByRole('region', { name: 'Local model files' })).toBeInTheDocument();
+  expect(screen.queryByText('Active provider')).not.toBeInTheDocument();
+
+  fireEvent.click(modelProvidersTab);
+
+  expect(modelProvidersTab).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('region', { name: 'Local model files' })).not.toBeInTheDocument();
+  expect(screen.getByText('Active provider')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Model providers' })).toBeInTheDocument();
+});
+
 it('shows, selects, and keeps GGUF controls out of the Apple silicon MLX view', async () => {
   availableArtifacts = [
     { ...artifact, supported: false },
@@ -101,6 +119,8 @@ it('shows, selects, and keeps GGUF controls out of the Apple silicon MLX view', 
 it('starts the built-in GGUF download from the Models page', async () => {
   render(<Models />);
 
+  const localModelPanel = await screen.findByRole('region', { name: 'Local model files' });
+  expect(localModelPanel).toHaveClass('local-model-panel');
   const download = await screen.findByRole('button', { name: 'Download' });
   fireEvent.click(download);
   expect(download).toBeDisabled();

@@ -14,6 +14,7 @@ from scripts.build_native_sidecar import (
     deterministic_environment,
     missing_freezer_modules,
     pyinstaller_arguments,
+    remove_conflicting_windows_runtime_dlls,
     verify_inputs,
     verify_runtime_output,
     write_manifest,
@@ -168,6 +169,21 @@ def test_verify_runtime_output_requires_complete_onedir_tree(tmp_path: Path) -> 
     assert "client" in message and "index.html" in message
     assert "alembic.ini" in message
     assert f"versions{os.sep}*.py" in message
+
+
+def test_windows_runtime_removes_host_resolved_msvcp(tmp_path: Path) -> None:
+    runtime = tmp_path / "geist"
+    conflicting = runtime / "_internal" / "MSVCP140.dll"
+    conflicting.parent.mkdir(parents=True)
+    conflicting.write_bytes(b"host JDK runtime")
+
+    removed = remove_conflicting_windows_runtime_dlls(
+        runtime,
+        TARGETS["win32-x64"],
+    )
+
+    assert removed == (conflicting,)
+    assert not conflicting.exists()
 
 
 def test_build_manifest_records_locked_inputs_without_timestamps(tmp_path: Path) -> None:
