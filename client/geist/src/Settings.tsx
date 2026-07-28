@@ -4,11 +4,12 @@ import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
+import McpServersSection from './Components/McpServersSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'mcp' | 'ui' | 'developer';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -118,6 +119,7 @@ const Settings: React.FC = () => {
     { id: 'models' as Tab, label: 'Models and Providers' },
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
+    { id: 'mcp' as Tab, label: 'MCP Servers' },
     { id: 'ui' as Tab, label: 'Appearance' },
     { id: 'developer' as Tab, label: 'Developer' }
   ];
@@ -248,6 +250,8 @@ const Settings: React.FC = () => {
               onFileArchivesChange={(value) => updateLocalSetting('default_file_archives', value)}
             />
           )}
+
+          {activeTab === 'mcp' && <McpServersSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection

@@ -61,8 +61,10 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "workspace.write_markdown",
         "communication.email.send",
         "communication.sms.send",
+        "adapter.JobStatusAdapter.check_async_tool",
     }
     assert catalog["web.search"].enabled_by_default is True
+    assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
     assert catalog["workspace.read_markdown"].enabled_by_default is False
@@ -219,3 +221,111 @@ def test_execute_hides_handler_exception_details(caplog):
     assert result.content == "Tool failed: failing.search"
     assert "provider secret response" not in result.content
     assert "provider secret response" in caplog.text
+
+
+class StaticSource:
+    """Minimal ToolSource for tests."""
+
+    name = "static-source"
+
+    def __init__(self, definitions, fail=False):
+        self._definitions = definitions
+        self.fail = fail
+
+    def definitions(self):
+        if self.fail:
+            raise RuntimeError("source exploded")
+        return list(self._definitions)
+
+
+def _schema_definition(name: str, handler) -> ToolDefinition:
+    return ToolDefinition(
+        name=name,
+        description=f"Schema definition for {name}",
+        arguments_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}, "count": {"type": "integer"}},
+            "required": ["text"],
+        },
+        handler=handler,
+    )
+
+
+def test_source_tools_merge_into_catalog_and_dispatch():
+    def handler(context, arguments):
+        assert isinstance(arguments, dict)
+        return ToolExecutionOutput(content=f"got {arguments['text']}")
+
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([_schema_definition("source.echo", handler)]))
+
+    assert registry.get("source.echo") is not None
+    assert "source.echo" in [definition.name for definition in registry.catalog()]
+    assert "source.echo" in [
+        definition.name for definition in registry.definitions_for_context(_context())
+    ]
+
+    result = registry.execute(ToolCall.create("source.echo", {"text": "hi"}), _context())
+    assert result.status == "succeeded"
+    assert result.content == "got hi"
+
+
+def test_schema_validation_rejects_missing_and_mistyped_arguments():
+    handler = Mock()
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([_schema_definition("source.echo", handler)]))
+
+    missing = registry.execute(ToolCall.create("source.echo", {}), _context())
+    assert missing.status == "failed"
+    assert missing.error == "invalid_arguments"
+
+    mistyped = registry.execute(
+        ToolCall.create("source.echo", {"text": "ok", "count": "three"}), _context()
+    )
+    assert mistyped.status == "failed"
+    assert mistyped.error == "invalid_arguments"
+    handler.assert_not_called()
+
+
+def test_static_registration_wins_source_collisions():
+    static_handler = Mock(return_value=ToolExecutionOutput(content="static"))
+    registry = ToolRegistry()
+    registry.register(_definition("web.search", static_handler))
+    registry.add_source(StaticSource([_schema_definition("web.search", Mock())]))
+
+    definition = registry.get("web.search")
+    assert definition.arguments_model is WebSearchArguments
+    assert len([d for d in registry.catalog() if d.name == "web.search"]) == 1
+
+
+def test_failing_source_does_not_break_catalog():
+    registry = ToolRegistry()
+    registry.register(_definition("web.search", Mock()))
+    registry.add_source(StaticSource([], fail=True))
+
+    assert [definition.name for definition in registry.catalog()] == ["web.search"]
+    assert registry.get("missing.tool") is None
+
+
+def test_duplicate_source_names_rejected():
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([]))
+    with pytest.raises(ValueError, match="already registered"):
+        registry.add_source(StaticSource([]))
+    registry.remove_source("static-source")
+    registry.add_source(StaticSource([]))
+
+
+def test_tool_definition_requires_exactly_one_argument_contract():
+    with pytest.raises(ValueError, match="exactly one"):
+        ToolDefinition(name="broken", description="broken", handler=Mock())
+    with pytest.raises(ValueError, match="exactly one"):
+        ToolDefinition(
+            name="broken",
+            description="broken",
+            handler=Mock(),
+            arguments_model=WebSearchArguments,
+            arguments_schema={"type": "object"},
+        )
+    with pytest.raises(ValueError, match="requires a handler"):
+        ToolDefinition(name="broken", description="broken", arguments_model=WebSearchArguments)

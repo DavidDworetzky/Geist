@@ -105,6 +105,7 @@ class ChatOrchestrator:
         run_controls: RunControlRegistry | None = None,
         max_rounds: int = 6,
         max_tool_calls: int = 10,
+        doom_loop_threshold: int = 3,
         max_history_entries: int = 20,
         max_history_chars: int = 80_000,
         max_tool_result_chars_total: int = 40_000,
@@ -115,6 +116,7 @@ class ChatOrchestrator:
         self.run_controls = run_controls or RunControlRegistry()
         self.max_rounds = max_rounds
         self.max_tool_calls = max_tool_calls
+        self.doom_loop_threshold = doom_loop_threshold
         self.max_history_entries = max_history_entries
         self.max_history_chars = max_history_chars
         self.max_tool_result_chars_total = max_tool_result_chars_total
@@ -276,6 +278,7 @@ class ChatOrchestrator:
                 "Tool call limit exceeded",
                 "Model backend did not complete its turn",
                 "Model backend returned an invalid event",
+                "Doom loop detected",
             )
         ):
             return message
@@ -364,6 +367,9 @@ class ChatOrchestrator:
                 {"run_id": run.run_id, "chat_id": conversation.chat_id},
             )
 
+            doom_signature: str | None = None
+            doom_count = 0
+
             for _round_number in range(self.max_rounds):
                 if cancellation.is_set():
                     yield ChatStreamEvent("cancelled", cancelled_payload())
@@ -400,6 +406,24 @@ class ChatOrchestrator:
                     raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
 
                 for call in completed_turn.tool_calls:
+                    # Interrupt runs stuck re-issuing the same call: the model
+                    # has stopped making progress and each repeat burns tokens
+                    # (and possibly side effects) for an identical answer.
+                    signature = (
+                        f"{call.name}:"
+                        f"{json.dumps(call.arguments, sort_keys=True, default=str)}"
+                    )
+                    if signature == doom_signature:
+                        doom_count += 1
+                    else:
+                        doom_signature = signature
+                        doom_count = 1
+                    if doom_count >= self.doom_loop_threshold:
+                        raise RuntimeError(
+                            f"Doom loop detected: tool '{call.name}' was called "
+                            f"{doom_count} times in a row with identical arguments"
+                        )
+
                     definition = self.registry.get(call.name)
                     requires_approval = bool(definition and definition.requires_approval)
                     proposed = self._tool_state(
