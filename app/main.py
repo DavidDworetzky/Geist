@@ -27,6 +27,7 @@ from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS, TOOL_USE_PROMPT
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
+from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
@@ -50,6 +51,7 @@ from app.runtime_config import application_version
 from app.security.middleware import OperatorAuthenticationMiddleware
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
+from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
@@ -95,8 +97,12 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 run_controls = RunControlRegistry()
+_tool_registry = build_default_tool_registry()
+# Enabled MCP servers contribute their tools through the same registry as the
+# curated defaults; configuration lives behind /api/v1/mcp.
+_tool_registry.add_source(get_mcp_tool_source())
 chat_orchestrator = ChatOrchestrator(
-    build_default_tool_registry(),
+    _tool_registry,
     run_controls=run_controls,
 )
 
@@ -606,6 +612,7 @@ def create_app(
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
+    app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
 
     @app.get("/health", include_in_schema=False)
     def health():

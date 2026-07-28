@@ -6,6 +6,17 @@ executes exact registry handlers, appends normalized tool results to the model
 transcript, and persists the turn once. It does not route through the legacy
 adapter reflection mechanism.
 
+`ToolRegistry` is the single registry for every tool exposed to chat. Besides
+the statically registered defaults below, it accepts pluggable *tool sources*
+(`ToolSource` in `app/services/tool_registry.py`) whose definitions are merged
+into the catalog on every turn: MCP servers (`app/services/mcp_tool_source.py`)
+and bridged adapter actions (`app/services/adapter_tool_source.py`). Statically
+registered names win collisions, and a failing source contributes no tools
+instead of breaking chat. Source-provided tools carry raw JSON schemas
+(`ToolDefinition.arguments_schema`); the registry checks required keys and
+primitive types before dispatch and leaves full constraint enforcement to the
+tool's own backend.
+
 The default registry is intentionally explicit:
 
 | Tool | Backing implementation | Default | Policy |
@@ -68,3 +79,39 @@ remain unavailable.
 A future authenticated approve/reject-and-resume endpoint plus durable
 idempotency is required before filesystem writes, email, or SMS can become
 operational chat tools.
+
+## MCP servers
+
+Operators can mount external tools from MCP (Model Context Protocol) servers,
+configured in Settings → MCP Servers or via `/api/v1/mcp/servers`. Two
+transports are supported: `stdio` (a locally spawned process) and `http`
+(streamable HTTP). Configured servers are persisted in the `mcp_server` table
+and **start disabled**; only explicitly enabled servers contribute tools, and
+a test-connection endpoint (`POST /api/v1/mcp/servers/{id}/test`) lists a
+server's tools without enabling it.
+
+Mounted tools are named `mcp.<server>.<tool>`, labelled with the
+`external_write` side effect, and executed through the same bounded worker
+pool, timeouts, and result budgets as every other chat tool. The client in
+`app/services/mcp_client.py` is a deliberately minimal synchronous JSON-RPC
+implementation (initialize, paginated `tools/list`, `tools/call`); server
+initiated requests such as sampling are declined. Tool descriptions and
+results from MCP servers are untrusted third-party content — enable only
+servers you trust, since their tool output re-enters the model context.
+
+## Bridged adapter actions
+
+`AdapterToolSource` converts adapter reflection schemas
+(`adapters/tool_schema.py`) into ordinary registry definitions named
+`adapter.<Adapter>.<action>`, replacing the need for a second dispatch
+mechanism. Bridged actions are disabled by default and must be opted into by
+name through `GEIST_ENABLED_CHAT_TOOLS`; the default registry bridges only the
+read-only `JobStatusAdapter`. Migrating the legacy agent tick loop onto the
+unified registry is follow-up work.
+
+## Doom-loop interrupt
+
+`ChatOrchestrator` interrupts a run when the model issues the same tool call
+(identical name and arguments) three times consecutively. The repeated call is
+not executed; the run fails with a `Doom loop detected` error so a stuck model
+cannot burn its round and tool budgets on identical requests.

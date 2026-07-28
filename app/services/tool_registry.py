@@ -7,11 +7,12 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from adapters.image_generation_adapter import ImageGenerationAdapter
+from adapters.job_status_adapter import JobStatusAdapter
 from adapters.markdown_file_adapter import MarkdownFileAdapter
 from adapters.search_adapter import SearchAdapter
 from agents.models.tool_calling import (
@@ -76,6 +77,57 @@ class SmsSendArguments(StrictToolArguments):
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
+@runtime_checkable
+class ToolSource(Protocol):
+    """A dynamic provider of tool definitions (MCP servers, adapter bridges).
+
+    Sources are consulted on every catalog/dispatch so their tool lists can
+    change at runtime without rebuilding the registry. A failing source must
+    degrade to an empty list rather than break chat.
+    """
+
+    name: str
+
+    def definitions(self) -> list[ToolDefinition]: ...
+
+
+_JSON_TYPE_CHECKS: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def _schema_argument_errors(arguments: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    """Minimal structural validation for raw-JSON-schema tools.
+
+    Required keys and primitive property types are checked here so obviously
+    malformed calls fail fast with a message the model can act on; full
+    constraint enforcement stays with the tool's own backend.
+    """
+    errors: list[str] = []
+    properties = schema.get("properties") or {}
+    for name in schema.get("required") or []:
+        if name not in arguments:
+            errors.append(f"Missing required argument '{name}'")
+    for name, value in arguments.items():
+        declared = properties.get(name)
+        if not isinstance(declared, dict):
+            continue
+        expected_type = declared.get("type")
+        if not isinstance(expected_type, str):
+            continue
+        expected = _JSON_TYPE_CHECKS.get(expected_type)
+        if expected is None or value is None:
+            continue
+        if isinstance(value, bool) and expected_type in ("integer", "number") or not isinstance(value, expected):
+            errors.append(f"Argument '{name}' must be of type {expected_type}")
+    return errors
+
+
 class ToolRegistry:
     def __init__(
         self,
@@ -83,6 +135,7 @@ class ToolRegistry:
         max_concurrent_executions: int = 4,
     ):
         self._definitions: dict[str, ToolDefinition] = {}
+        self._sources: list[ToolSource] = []
         self._explicitly_enabled = explicitly_enabled or set()
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent_executions,
@@ -94,18 +147,50 @@ class ToolRegistry:
             raise ValueError(f"Tool already registered: {definition.name}")
         self._definitions[definition.name] = definition
 
+    def add_source(self, source: ToolSource) -> None:
+        if any(existing.name == source.name for existing in self._sources):
+            raise ValueError(f"Tool source already registered: {source.name}")
+        self._sources.append(source)
+
+    def remove_source(self, name: str) -> None:
+        self._sources = [source for source in self._sources if source.name != name]
+
+    def _source_definitions(self) -> dict[str, ToolDefinition]:
+        merged: dict[str, ToolDefinition] = {}
+        for source in self._sources:
+            try:
+                definitions = source.definitions()
+            except Exception:
+                logger.exception("Tool source %s failed; skipping its tools", source.name)
+                continue
+            for definition in definitions:
+                if definition.name in self._definitions or definition.name in merged:
+                    logger.warning(
+                        "Tool source %s tool %s collides with an existing tool; skipping",
+                        source.name,
+                        definition.name,
+                    )
+                    continue
+                merged[definition.name] = definition
+        return merged
+
     def get(self, name: str) -> ToolDefinition | None:
-        return self._definitions.get(name)
+        definition = self._definitions.get(name)
+        if definition is not None:
+            return definition
+        if not self._sources:
+            return None
+        return self._source_definitions().get(name)
 
     def catalog(self) -> list[ToolDefinition]:
-        return list(self._definitions.values())
+        return list(self._definitions.values()) + list(self._source_definitions().values())
 
     def is_enabled(self, definition: ToolDefinition) -> bool:
         return definition.enabled_by_default or definition.name in self._explicitly_enabled
 
     def definitions_for_context(self, context: ToolContext) -> list[ToolDefinition]:
         definitions = []
-        for definition in self._definitions.values():
+        for definition in self.catalog():
             enabled = self.is_enabled(definition)
             available = definition.availability is None or definition.availability(context)
             if enabled and available:
@@ -143,17 +228,31 @@ class ToolRegistry:
                 error="approval_required",
             )
 
-        try:
-            arguments = definition.arguments_model.model_validate(call.arguments)
-        except ValidationError as error:
-            return ToolResult(
-                call=call,
-                status="failed",
-                content=f"Invalid arguments for {call.name}: {error}",
-                error="invalid_arguments",
-            )
+        arguments: Any
+        if definition.arguments_model is not None:
+            try:
+                arguments = definition.arguments_model.model_validate(call.arguments)
+            except ValidationError as error:
+                return ToolResult(
+                    call=call,
+                    status="failed",
+                    content=f"Invalid arguments for {call.name}: {error}",
+                    error="invalid_arguments",
+                )
+        else:
+            errors = _schema_argument_errors(call.arguments, definition.parameters_schema())
+            if errors:
+                return ToolResult(
+                    call=call,
+                    status="failed",
+                    content=f"Invalid arguments for {call.name}: {'; '.join(errors)}",
+                    error="invalid_arguments",
+                )
+            arguments = call.arguments
 
-        future = self._executor.submit(definition.handler, context, arguments)
+        handler = definition.handler
+        assert handler is not None  # guaranteed by ToolDefinition.__post_init__
+        future = self._executor.submit(handler, context, arguments)
         try:
             output = future.result(timeout=definition.timeout_seconds)
         except FutureTimeoutError:
@@ -393,4 +492,12 @@ def build_default_tool_registry() -> ToolRegistry:
             availability=lambda context: False,
         )
     )
+
+    # Reflected adapter actions ride through the same registry as the curated
+    # tools above (one registry, several sources) but stay disabled until an
+    # operator opts in by name via GEIST_ENABLED_CHAT_TOOLS, e.g.
+    # adapter.JobStatusAdapter.check_async_tool.
+    from app.services.adapter_tool_source import AdapterToolSource
+
+    registry.add_source(AdapterToolSource([JobStatusAdapter()]))
     return registry
