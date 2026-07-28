@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 
 export interface BackupProvider {
   name: string;
@@ -47,7 +54,7 @@ export interface UserSettingsUpdate {
   ui_preferences?: Record<string, any>;
 }
 
-interface UseUserSettingsReturn {
+export interface UseUserSettingsReturn {
   settings: UserSettings | null;
   loading: boolean;
   error: string | null;
@@ -56,7 +63,9 @@ interface UseUserSettingsReturn {
   refetch: () => Promise<void>;
 }
 
-export const useUserSettings = (): UseUserSettingsReturn => {
+const UserSettingsContext = createContext<UseUserSettingsReturn | null>(null);
+
+const useUserSettingsState = (): UseUserSettingsReturn => {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +160,23 @@ export const useUserSettings = (): UseUserSettingsReturn => {
     resetSettings,
     refetch: fetchSettings,
   };
+};
+
+export function UserSettingsProvider({ children }: { children: ReactNode }): JSX.Element {
+  const value = useUserSettingsState();
+  return (
+    <UserSettingsContext.Provider value={value}>
+      {children}
+    </UserSettingsContext.Provider>
+  );
+}
+
+export const useUserSettings = (): UseUserSettingsReturn => {
+  const context = useContext(UserSettingsContext);
+  if (!context) {
+    throw new Error('useUserSettings must be used within UserSettingsProvider');
+  }
+  return context;
 };
 
 export default useUserSettings;

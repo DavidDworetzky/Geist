@@ -3,7 +3,8 @@ import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
 import useUserSettings from './Hooks/useUserSettings';
-import useChatMemory from './Hooks/useChatMemory';
+import useChatMemory, { MemoryScope } from './Hooks/useChatMemory';
+import useOverflowObserver from './Hooks/useOverflowObserver';
 import ChatTextArea from './Components/ChatTextArea';
 import EnhancedChatInput from './Components/EnhancedChatInput';
 import ChatMemoryControls from './Components/ChatMemoryControls';
@@ -80,6 +81,10 @@ const Chat = () => {
   const [editingFolderId, setEditingFolderId] = useState<number | null>(null);
   const [folderRenameDraft, setFolderRenameDraft] = useState('');
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<number | null>(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState<number | null>(null);
+  const [movingChatId, setMovingChatId] = useState<number | null>(null);
+  const chatMenuHostRef = useRef<HTMLDivElement>(null);
+  const chatMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions, refreshChatSessions } = useGetChatSessions();
   const [userInput, setUserInput] = useState('');
   const [fileContextInfo, setFileContextInfo] = useState<string>('');
@@ -102,13 +107,42 @@ const Chat = () => {
     folders,
     loading: isMemoryLoading,
     error: memoryError,
+    refreshFolders,
     createFolder,
     renameFolder,
     deleteFolder,
-    setMemoryEnabled,
-    setPrivate,
-    setFolder,
+    setScope,
+    prepareNewChat,
+    setChatFolder,
   } = useChatMemory(selectedChatId);
+
+  useEffect(() => {
+    if (openChatMenuId === null) return undefined;
+
+    const firstItem = chatMenuHostRef.current?.querySelector<HTMLButtonElement>(
+      '[role="menu"] button:not(:disabled)',
+    );
+    firstItem?.focus();
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!chatMenuHostRef.current?.contains(event.target as Node)) {
+        setOpenChatMenuId(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpenChatMenuId(null);
+        chatMenuTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [openChatMenuId]);
 
   useEffect(() => {
     if (!chatId && state_chat_id !== null) {
@@ -119,7 +153,14 @@ const Chat = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const {
+    ref: chatContainerRef,
+    hasOverflow: hasChatScrollbar,
+  } = useOverflowObserver<HTMLDivElement>();
+  const {
+    ref: chatDrawerScrollRef,
+    hasOverflow: hasChatDrawerScrollbar,
+  } = useOverflowObserver<HTMLDivElement>(chatDrawerState === 'expanded');
   const prevScrollHeightRef = useRef<number>(0);
   const shouldRestoreScrollRef = useRef(false);
 
@@ -179,7 +220,7 @@ const Chat = () => {
     } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [chatHistory, page, isLoading]);
+  }, [chatContainerRef, chatHistory, page, isLoading]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -192,7 +233,7 @@ const Chat = () => {
         }
       }
     }
-  }, [chatHistory, hasMore, isLoadingHistory, page, chatId, fetchHistory]);
+  }, [chatContainerRef, chatHistory, hasMore, isLoadingHistory, page, chatId, fetchHistory]);
 
   const observer = useRef<IntersectionObserver>();
   const lastItemRef = useCallback(
@@ -222,7 +263,7 @@ const Chat = () => {
         }
       }
     }
-  }, [hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
+  }, [chatContainerRef, hasMore, isLoadingHistory, page, chatId, loadedHistoryLength, fetchHistory]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -230,7 +271,7 @@ const Chat = () => {
       container.addEventListener('scroll', handleScroll);
       return () => container.removeEventListener('scroll', handleScroll);
     }
-  }, [handleScroll]);
+  }, [chatContainerRef, handleScroll]);
 
   const chatWithServer = async (input: string) => {
     const parsedChatId = routeChatId ?? state_chat_id;
@@ -303,11 +344,14 @@ const Chat = () => {
       }
       return { chatHistory: [...existingHistory, newHistory] };
     });
-    void refreshChatSessions();
-  }, [completedTurn, refreshChatSessions, routeChatId, state_chat_id]);
+    void Promise.all([
+      refreshChatSessions(),
+      refreshFolders(),
+    ]);
+  }, [completedTurn, refreshChatSessions, refreshFolders, routeChatId, state_chat_id]);
 
   const handleSubmit = async (message: string) => {
-    if (message.trim()) {
+    if (message.trim() && !isMemoryLoading) {
       await chatWithServer(message);
       setUserInput('');
     }
@@ -316,7 +360,7 @@ const Chat = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (userInput.trim() && !isLoading) {
+      if (userInput.trim() && !isLoading && !isMemoryLoading) {
         void handleSubmit(userInput);
       }
     }
@@ -329,10 +373,15 @@ const Chat = () => {
       setEditingChatId(null);
       setChatTitleDraft('');
       setChatTitleError('');
+      setOpenChatMenuId(null);
     }
   };
 
   const handleNewChat = () => {
+    const newChatScope: MemoryScope = folderFilter === 'all'
+      ? { kind: 'public' }
+      : { kind: 'folder', folderId: folderFilter };
+    prepareNewChat(newChatScope);
     resetChatSession();
     setDrawerState('minimized');
     setChatHistory(undefined);
@@ -341,6 +390,7 @@ const Chat = () => {
     navigate('/chat');
   };
   const startEditingChatTitle = (session: ChatSessionListItem) => {
+    setOpenChatMenuId(null);
     setEditingChatId(session.id);
     setChatTitleDraft(session.name);
     setChatTitleError('');
@@ -410,6 +460,7 @@ const Chat = () => {
   const removeFolder = async (folderId: number) => {
     try {
       await deleteFolder(folderId);
+      await refreshChatSessions();
       setFolderFilter('all');
       setConfirmDeleteFolderId(null);
       setFolderCreateError('');
@@ -418,6 +469,70 @@ const Chat = () => {
         folderError instanceof Error ? folderError.message : 'Could not delete folder.',
       );
     }
+  };
+
+  const changeMemoryScope = async (scope: MemoryScope) => {
+    const updated = await setScope(scope);
+    if (updated && selectedChatId !== null) {
+      await refreshChatSessions();
+    }
+  };
+
+  const moveChatToFolder = async (
+    session: ChatSessionListItem,
+    folderId: number | null,
+  ) => {
+    setOpenChatMenuId(null);
+    if (session.folderId === folderId) return;
+
+    const destination = folderId === null
+      ? null
+      : folders.find(folder => folder.folder_id === folderId) ?? null;
+    const confirmed = window.confirm(
+      destination
+        ? `Move "${session.name}" to "${destination.name}"? While memory is enabled, this chat's existing summary and future saved memory will be available to other chats in this folder.`
+        : `Remove "${session.name}" from its folder? If memory is enabled, its saved memory will stop contributing to the folder and remain available only in this chat.`,
+    );
+    if (!confirmed) return;
+
+    setMovingChatId(session.id);
+    try {
+      const updated = await setChatFolder(session.id, folderId);
+      if (updated) {
+        await refreshChatSessions();
+      }
+    } finally {
+      setMovingChatId(null);
+    }
+  };
+
+  const manageFolders = () => {
+    if (memorySettings.folder_id !== null) {
+      setFolderFilter(memorySettings.folder_id);
+    }
+    setDrawerState('expanded');
+  };
+
+  const moveChatMenuFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Tab') {
+      setOpenChatMenuId(null);
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+    );
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex = currentIndex;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = items.length - 1;
+    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1 + items.length) % items.length;
+    if (event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + items.length) % items.length;
+    }
+    items[nextIndex].focus();
   };
 
   const searchQuery = chatSearch.trim().toLowerCase();
@@ -438,45 +553,64 @@ const Chat = () => {
     activeTurn?.run_id &&
     (chatHistory?.chatHistory ?? []).some((turn) => turn.run_id === activeTurn.run_id)
   );
-  const displayedHistory: ChatPair[] = activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
-    ? [
-        ...(chatHistory?.chatHistory ?? []),
-        {
-          run_id: activeTurn!.run_id,
-          user: activeTurn!.prompt,
-          ai: activeTurn!.message,
-          status: activeTurn!.status,
-          model_load: activeTurn!.model_load,
-          tool_calls: activeTurn!.tool_calls,
-          artifacts: activeTurn!.artifacts,
-        },
-      ]
-    : (chatHistory?.chatHistory ?? []);
+  const displayedHistory = useMemo<ChatPair[]>(
+    () => activeTurnBelongsToCurrentChat && !activeTurnAlreadyPersisted
+      ? [
+          ...(chatHistory?.chatHistory ?? []),
+          {
+            run_id: activeTurn!.run_id,
+            user: activeTurn!.prompt,
+            ai: activeTurn!.message,
+            status: activeTurn!.status,
+            model_load: activeTurn!.model_load,
+            tool_calls: activeTurn!.tool_calls,
+            artifacts: activeTurn!.artifacts,
+          },
+        ]
+      : (chatHistory?.chatHistory ?? []),
+    [
+      activeTurn,
+      activeTurnAlreadyPersisted,
+      activeTurnBelongsToCurrentChat,
+      chatHistory?.chatHistory,
+    ],
+  );
 
   return (
-    <div className={`ChatContainer chat-drawer-${chatDrawerState}`}>
+    <div className={`ChatContainer chat-drawer-${chatDrawerState}${hasChatScrollbar ? ' chat-scrollbar-visible' : ''}`}>
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
-            <ChatTextArea
-              chatHistory={displayedHistory}
-              isLoading={isLoading}
-              ref={chatContainerRef}
-            />
+            <div className="chat-history-scroll" ref={chatContainerRef}>
+              <ChatTextArea
+                chatHistory={displayedHistory}
+                isLoading={isLoading}
+              />
+            </div>
           </div>
 
           <aside
-            className={`ChatSidebar stage-panel chat-library-panel-host stage-panel-${chatDrawerState}`}
+            className={`ChatSidebar stage-panel chat-library-panel-host stage-panel-${chatDrawerState}${hasChatDrawerScrollbar ? ' stage-panel-scrollbar-visible' : ''}`}
             aria-label="Chat sessions"
             data-state={chatDrawerState}
           >
-            <div className="stage-panel-surface">
+            <div className="stage-panel-surface" ref={chatDrawerScrollRef}>
               {chatDrawerState === 'minimized' ? (
                 <div className="chat-minimized-controls stage-panel-compact-controls" aria-label="Chat shortcuts">
                   <button className="button chat-minimized-new-button stage-panel-primary-button" type="button" onClick={handleNewChat} aria-label="New chat" title="New chat">
                     <span>New Chat</span>
                     <StagePanelIcon name="plus" />
                   </button>
+                  <ChatMemoryControls
+                    compact
+                    settings={memorySettings}
+                    folders={folders}
+                    loading={isMemoryLoading}
+                    disabled={isLoading}
+                    error={memoryError}
+                    onScopeChange={scope => void changeMemoryScope(scope)}
+                    onManageFolders={manageFolders}
+                  />
                   <button
                     className="chat-minimized-open-button stage-panel-open-button"
                     type="button"
@@ -501,10 +635,20 @@ const Chat = () => {
                       </button>
                     </header>
 
-                    <button className="button chat-new-button" type="button" onClick={handleNewChat}>
-                      <StagePanelIcon name="plus" />
-                      <span>New Chat</span>
-                    </button>
+                    <div className="chat-new-toolbar">
+                      <button className="button chat-new-button" type="button" onClick={handleNewChat}>
+                        <StagePanelIcon name="plus" />
+                        <span>New Chat</span>
+                      </button>
+                      <ChatMemoryControls
+                        settings={memorySettings}
+                        folders={folders}
+                        loading={isMemoryLoading}
+                        disabled={isLoading}
+                        error={memoryError}
+                        onScopeChange={scope => void changeMemoryScope(scope)}
+                      />
+                    </div>
 
                     <label className="chat-search" htmlFor="chat-session-search">
                       <StagePanelIcon name="search" />
@@ -625,7 +769,7 @@ const Chat = () => {
                         )}
                         {confirmDeleteFolderId === selectedFolder.folder_id && (
                           <div className="chat-folder-delete-confirm" role="alert">
-                            <p>Chats stay private and become unfiled.</p>
+                            <p>Chats stay private and become unfiled. Shared folder facts and the folder summary will be deleted.</p>
                             <button type="button" onClick={() => setConfirmDeleteFolderId(null)}>Cancel</button>
                             <button
                               className="is-danger"
@@ -651,9 +795,6 @@ const Chat = () => {
 
                     <div className="chat-drawer-section-title">
                       <span>Recent chats</span>
-                      <button className="chat-icon-plain" type="button" aria-label="Chat list options" title="Chat list options">
-                        <StagePanelIcon name="more" />
-                      </button>
                     </div>
 
                     {filteredChatSessionLinks.length > 0 ? (
@@ -708,15 +849,72 @@ const Chat = () => {
                                           : session.memoryMode === 'private' ? 'Private' : 'Global memory'}
                                     </span>
                                   </NavLink>
-                                  <button
-                                    className="chat-session-edit-button"
-                                    type="button"
-                                    onClick={() => startEditingChatTitle(session)}
-                                    aria-label={`Rename ${session.name}`}
-                                    title="Rename chat"
+                                  <div
+                                    className="chat-session-menu-host"
+                                    ref={openChatMenuId === session.id ? chatMenuHostRef : undefined}
                                   >
-                                    <StagePanelIcon name="edit" />
-                                  </button>
+                                    <button
+                                      className="chat-session-edit-button"
+                                      type="button"
+                                      onClick={(event) => {
+                                        chatMenuTriggerRef.current = event.currentTarget;
+                                        setOpenChatMenuId(
+                                          openChatMenuId === session.id ? null : session.id,
+                                        );
+                                      }}
+                                      aria-label={`Chat options for ${session.name}`}
+                                      aria-haspopup="menu"
+                                      aria-expanded={openChatMenuId === session.id}
+                                      title="Chat options"
+                                    >
+                                      <StagePanelIcon name="more" />
+                                    </button>
+                                    {openChatMenuId === session.id && (
+                                      <div
+                                        className="chat-session-row-menu"
+                                        role="menu"
+                                        aria-label={`${session.name} options`}
+                                        onKeyDown={moveChatMenuFocus}
+                                      >
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          onClick={() => startEditingChatTitle(session)}
+                                        >
+                                          <StagePanelIcon name="edit" />
+                                          <span>Rename</span>
+                                        </button>
+                                        <span className="chat-session-row-menu-label">Move to</span>
+                                        <button
+                                          type="button"
+                                          role="menuitemradio"
+                                          aria-checked={session.folderId === null}
+                                          disabled={movingChatId === session.id}
+                                          onClick={() => void moveChatToFolder(session, null)}
+                                        >
+                                          <span className="chat-session-menu-check" aria-hidden="true">
+                                            {session.folderId === null ? '✓' : ''}
+                                          </span>
+                                          <span>No folder</span>
+                                        </button>
+                                        {folders.map(folder => (
+                                          <button
+                                            type="button"
+                                            role="menuitemradio"
+                                            aria-checked={session.folderId === folder.folder_id}
+                                            disabled={movingChatId === session.id}
+                                            onClick={() => void moveChatToFolder(session, folder.folder_id)}
+                                            key={folder.folder_id}
+                                          >
+                                            <span className="chat-session-menu-check" aria-hidden="true">
+                                              {session.folderId === folder.folder_id ? '✓' : ''}
+                                            </span>
+                                            <span>{folder.name}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                 </>
                               )}
                             </div>
@@ -738,15 +936,6 @@ const Chat = () => {
           </aside>
 
           <div className="chat-composer-dock" aria-hidden={chatDrawerState === 'expanded'}>
-            <ChatMemoryControls
-              settings={memorySettings}
-              folders={folders}
-              loading={isMemoryLoading}
-              error={memoryError}
-              onMemoryEnabledChange={enabled => void setMemoryEnabled(enabled)}
-              onPrivateChange={isPrivate => void setPrivate(isPrivate)}
-              onFolderChange={folderId => void setFolder(folderId)}
-            />
             {fileContextInfo && (
               <div className="chat-context-info">
                 {fileContextInfo}
@@ -758,7 +947,7 @@ const Chat = () => {
                 value={userInput}
                 onChange={setUserInput}
                 onSubmit={handleSubmit}
-                disabled={isLoading || isProcessingFiles}
+                disabled={isLoading || isProcessingFiles || isMemoryLoading}
                 placeholder="Type your message..."
                 handleKeyDown={handleKeyDown}
                 rows={3}

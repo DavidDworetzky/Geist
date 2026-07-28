@@ -1,4 +1,4 @@
-export type StagePanelIconName = 'plus' | 'maximize' | 'search' | 'folder' | 'more' | 'close' | 'workflow' | 'edit' | 'check' | 'save' | 'play';
+export type StagePanelIconName = 'plus' | 'maximize' | 'search' | 'folder' | 'memory' | 'memory-off' | 'chevron' | 'more' | 'close' | 'workflow' | 'edit' | 'check' | 'save' | 'play';
 
 export default function StagePanelIcon({ name }: { name: StagePanelIconName }): JSX.Element {
   if (name === 'plus') {
@@ -28,6 +28,55 @@ export default function StagePanelIcon({ name }: { name: StagePanelIconName }): 
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M3 6.75C3 5.78 3.78 5 4.75 5h5.1c.46 0 .9.18 1.24.51L12.58 7h6.67c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H4.75C3.78 19 3 18.22 3 17.25V6.75Z" />
+      </svg>
+    );
+  }
+
+  if (name === 'memory') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        data-icon="memory"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ fill: 'none' }}
+      >
+        <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+        <path d="M4.5 5.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="M4.5 11.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+      </svg>
+    );
+  }
+
+  if (name === 'memory-off') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        data-icon="memory-off"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ fill: 'none' }}
+      >
+        <ellipse cx="12" cy="5.5" rx="7.5" ry="2.5" />
+        <path d="M4.5 5.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="M4.5 11.5v6c0 1.38 3.36 2.5 7.5 2.5s7.5-1.12 7.5-2.5v-6" />
+        <path d="m4 4 16 16" strokeWidth="2.4" />
+      </svg>
+    );
+  }
+
+  if (name === 'chevron') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m7.4 8.6 4.6 4.58 4.6-4.58L18 10l-6 6-6-6 1.4-1.4Z" />
       </svg>
     );
   }

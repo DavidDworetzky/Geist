@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import WorkflowBuilder from './WorkflowBuilder';
+import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
 jest.mock('reactflow', () => {
   const React = require('react');
@@ -60,6 +61,44 @@ describe('Workflow library panel', () => {
       name: 'Morning routine',
       steps: [],
     });
+  });
+
+  it('only adds an external scrollbar gap while the workflow drawer overflows', () => {
+    const resizeObserver = installResizeObserverMock();
+    const renderResult = render(
+      <MemoryRouter initialEntries={['/workflows']}>
+        <WorkflowBuilder />
+      </MemoryRouter>
+    );
+
+    try {
+      const library = screen.getByRole('complementary', { name: 'Workflow library' });
+      const libraryScroll = library.querySelector<HTMLDivElement>('.stage-panel-surface');
+      expect(libraryScroll).not.toBeNull();
+      expect(library).not.toHaveClass('stage-panel-scrollbar-visible');
+
+      fireEvent.click(within(library).getByRole('button', { name: 'Expand workflow library' }));
+
+      let scrollHeight = 700;
+      Object.defineProperty(libraryScroll, 'clientHeight', {
+        configurable: true,
+        get: () => 500,
+      });
+      Object.defineProperty(libraryScroll, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      act(() => resizeObserver.trigger(libraryScroll as HTMLDivElement));
+      expect(library).toHaveClass('stage-panel-scrollbar-visible');
+
+      scrollHeight = 500;
+      act(() => resizeObserver.trigger(libraryScroll as HTMLDivElement));
+      expect(library).not.toHaveClass('stage-panel-scrollbar-visible');
+    } finally {
+      renderResult.unmount();
+      resizeObserver.restore();
+    }
   });
 
   it('uses the same compact-to-stage panel interaction and inline renaming as Chat', async () => {

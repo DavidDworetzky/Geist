@@ -1,6 +1,8 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Settings from './Settings';
+import { UserSettingsProvider } from './Hooks/useUserSettings';
+import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
 const baseSettings = {
   user_settings_id: 1,
@@ -51,6 +53,12 @@ const createFetchMock = (settingsResponses: any[]) => {
   });
 };
 
+const renderSettings = () => render(
+  <UserSettingsProvider>
+    <Settings />
+  </UserSettingsProvider>,
+);
+
 describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -62,7 +70,7 @@ describe('Settings page', () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
-    render(<Settings />);
+    renderSettings();
     expect(screen.getByText(/Loading settings/i)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -76,6 +84,71 @@ describe('Settings page', () => {
     });
   });
 
+  it('keeps the settings actions outside the scrollable generation content', async () => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    const { container } = renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+
+    const page = container.querySelector('.settings-page-interactive');
+    const scrollRegion = container.querySelector('.settings-scroll-region');
+    const actions = screen.getByRole('contentinfo', { name: 'Settings actions' });
+    expect(page).not.toBeNull();
+    expect(scrollRegion).not.toBeNull();
+    expect(scrollRegion).toContainElement(screen.getByText('Generation Parameters'));
+    expect(scrollRegion).not.toContainElement(actions);
+    expect(actions.parentElement).toBe(page);
+    expect(within(actions).getByRole('button', { name: 'Reset to Defaults' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+  });
+
+  it('aligns the settings actions with content when the scroll region overflows', async () => {
+    const resizeObserver = installResizeObserverMock();
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    const renderResult = renderSettings();
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
+      });
+
+      const { container } = renderResult;
+      const page = container.querySelector<HTMLDivElement>('.settings-page-interactive');
+      const scrollRegion = container.querySelector<HTMLDivElement>('.settings-scroll-region');
+      expect(page).not.toBeNull();
+      expect(scrollRegion).not.toBeNull();
+      expect(page).not.toHaveClass('settings-scrollbar-visible');
+
+      let scrollHeight = 700;
+      Object.defineProperty(scrollRegion, 'clientHeight', {
+        configurable: true,
+        get: () => 500,
+      });
+      Object.defineProperty(scrollRegion, 'scrollHeight', {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+
+      act(() => resizeObserver.trigger(scrollRegion as HTMLDivElement));
+      expect(page).toHaveClass('settings-scrollbar-visible');
+
+      scrollHeight = 500;
+      act(() => resizeObserver.trigger(scrollRegion as HTMLDivElement));
+      expect(page).not.toHaveClass('settings-scrollbar-visible');
+    } finally {
+      renderResult.unmount();
+      resizeObserver.restore();
+    }
+  });
+
   it('marks unsaved changes when local values change and saves', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([
@@ -83,7 +156,7 @@ describe('Settings page', () => {
       { ok: true, json: async () => ({ ...baseSettings, default_temperature: 0.8 }) }, // PUT
     ]);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -111,7 +184,7 @@ describe('Settings page', () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Generation tab to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -137,7 +210,7 @@ describe('Settings page', () => {
     // confirm window
     jest.spyOn(window, 'confirm').mockReturnValue(true);
 
-    render(<Settings />);
+    renderSettings();
 
     // Wait for the Reset button to be visible (indicating loading is complete)
     await waitFor(() => {
@@ -165,7 +238,7 @@ describe('Settings page', () => {
       return Promise.resolve({ ok: true, json: async () => baseSettings });
     });
 
-    render(<Settings />);
+    renderSettings();
     await waitFor(() => screen.getByText(/Error loading settings/i));
 
     fireEvent.click(screen.getByText('Retry'));
@@ -187,7 +260,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => baseSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
@@ -227,7 +300,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => baseSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
@@ -268,7 +341,7 @@ describe('Settings page', () => {
         return Promise.resolve({ ok: true, json: async () => onlineSettings });
       });
 
-      render(<Settings />);
+      renderSettings();
 
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();

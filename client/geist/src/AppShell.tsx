@@ -104,12 +104,13 @@ function RuntimeSummary(): JSX.Element {
 
   const mode = settings.default_agent_type || 'local';
   const model = mode === 'online' ? settings.default_online_model : settings.default_local_model;
-  const provider = mode === 'online' ? settings.default_online_provider : 'local';
 
   return (
     <div className="runtime-summary" aria-label="Current runtime">
       <span className="runtime-chip">{mode}</span>
-      <span className="runtime-chip">{provider}</span>
+      {mode === 'online' && (
+        <span className="runtime-chip">{settings.default_online_provider}</span>
+      )}
       <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
     </div>
   );
