@@ -434,3 +434,113 @@ def test_persistence_failure_does_not_emit_unpersisted_final():
     assert error_event.payload["message"] == "Chat completion failed"
     assert "database unavailable" not in error_event.payload["message"]
     assert [attempt["status"] for attempt in write_attempts] == ["completed", "failed"]
+
+
+def test_doom_loop_interrupts_repeated_identical_tool_calls():
+    executions = []
+
+    def lookup(context, arguments):
+        executions.append(arguments.query)
+        return ToolExecutionOutput(content='{"answer": "same thing"}')
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lookup,
+        )
+    )
+
+    def repeated_turn(call_id):
+        return ModelTurn(
+            tool_calls=[
+                ToolCall(id=call_id, name="documents.search", arguments={"query": "loop"})
+            ],
+            finish_reason="tool_calls",
+        )
+
+    backend = ScriptedBackend(
+        [repeated_turn("call_1"), repeated_turn("call_2"), repeated_turn("call_3")]
+    )
+    writes = []
+
+    def write_history(**kwargs):
+        writes.append(kwargs)
+        return SimpleNamespace(chat_session_id=42)
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=write_history,
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Loop forever",
+            user_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    # The third identical call is interrupted before execution.
+    assert executions == ["loop", "loop"]
+    error = next(event.payload for event in events if event.event == "error")
+    assert error["message"].startswith("Doom loop detected")
+    assert "documents.search" in error["message"]
+    assert writes[0]["status"] == "failed"
+
+
+def test_doom_loop_not_triggered_by_varied_arguments():
+    def lookup(context, arguments):
+        return ToolExecutionOutput(content='{"answer": "ok"}')
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lookup,
+        )
+    )
+
+    def turn(call_id, query):
+        return ModelTurn(
+            tool_calls=[
+                ToolCall(id=call_id, name="documents.search", arguments={"query": query})
+            ],
+            finish_reason="tool_calls",
+        )
+
+    backend = ScriptedBackend(
+        [
+            turn("call_1", "alpha"),
+            turn("call_2", "beta"),
+            turn("call_3", "alpha"),
+            ModelTurn(text="Done.", finish_reason="stop"),
+        ]
+    )
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=42),
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Search a few things",
+            user_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    completion = next(event.payload for event in events if event.event == "final")
+    assert completion.message == ["Done."]
+    assert not [event for event in events if event.event == "error"]

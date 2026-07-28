@@ -5,6 +5,7 @@ from app.models.database.chat_session import ChatSession
 from app.models.database.file_upload import FileUpload
 from app.models.database.geist_user import GeistUser
 from app.models.database.job import Job
+from app.models.database.mcp_server import McpServer
 from app.models.database.memory import MemoryEmbedding, MemoryFolder, MemoryRecord
 from app.models.database.user_settings import UserSettings
 from app.models.database.workflow import Workflow, WorkflowRun, WorkflowStep, WorkflowStepResult

@@ -136,8 +136,8 @@ ToolAvailability = Callable[[ToolContext], bool]
 class ToolDefinition:
     name: str
     description: str
-    arguments_model: type[BaseModel]
-    handler: ToolHandler
+    arguments_model: type[BaseModel] | None = None
+    handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
     enabled_by_default: bool = True
@@ -145,10 +145,27 @@ class ToolDefinition:
     max_result_chars: int = 20_000
     source_adapter: str | None = None
     availability: ToolAvailability | None = None
+    # Raw JSON-schema alternative to arguments_model for tools whose schemas
+    # arrive at runtime (MCP servers, reflected adapters). Exactly one of the
+    # two must be provided; handlers on this path receive a plain dict.
+    arguments_schema: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.handler is None:
+            raise ValueError(f"Tool '{self.name}' requires a handler")
+        if (self.arguments_model is None) == (self.arguments_schema is None):
+            raise ValueError(
+                f"Tool '{self.name}' requires exactly one of arguments_model or arguments_schema"
+            )
 
     def parameters_schema(self) -> dict[str, Any]:
-        schema = self.arguments_model.model_json_schema()
-        schema.pop("title", None)
+        if self.arguments_model is not None:
+            schema = self.arguments_model.model_json_schema()
+            schema.pop("title", None)
+            return schema
+        schema = dict(self.arguments_schema or {})
+        schema.setdefault("type", "object")
+        schema.setdefault("properties", {})
         return schema
 
     def to_openai(self, provider_name: str | None = None) -> dict[str, Any]:
