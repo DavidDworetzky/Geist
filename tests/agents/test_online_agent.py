@@ -225,6 +225,22 @@ class TestOnlineAgentInitialization:
             assert agent.model == "grok-2"
             assert agent.api_key == "test-grok-key"
 
+    def test_fireworks_initialization(self):
+        """Test initialization with Fireworks AI configuration."""
+        context = create_mock_agent_context()
+
+        with patch.dict('os.environ', {'FIREWORKS_API_KEY': 'test-fireworks-key'}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.fireworks.ai/inference/v1",
+                model="accounts/fireworks/models/llama-v3p3-70b-instruct"
+            )
+
+            assert agent.base_url == "https://api.fireworks.ai/inference/v1"
+            assert agent.model == "accounts/fireworks/models/llama-v3p3-70b-instruct"
+            assert agent.api_key == "test-fireworks-key"
+            assert agent.supports_native_tool_calling is True
+
     def test_explicit_api_key(self):
         """Test initialization with explicitly provided API key."""
         context = create_mock_agent_context()

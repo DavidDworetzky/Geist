@@ -21,6 +21,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   moonshot: 'Moonshot AI',
   zai: 'Z.AI',
   deepseek: 'DeepSeek',
+  fireworks: 'Fireworks AI',
   'self-hosted': 'Self-hosted Server',
   offline: 'Local/Offline',
   custom: 'Custom Provider'

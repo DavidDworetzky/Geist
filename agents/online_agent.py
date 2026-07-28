@@ -55,7 +55,7 @@ class NativeProviderError(CompletionRequestError):
 class OnlineAgent(BaseAgent):
     """
     Online agent implementation that routes requests to OpenAI-compatible HTTP endpoints.
-    Supports multiple providers including OpenAI, Anthropic, Grok, and Groq.
+    Supports multiple providers including OpenAI, Anthropic, Grok, Groq, and Fireworks AI.
     """
 
     supports_native_tool_calling = False
@@ -117,7 +117,13 @@ class OnlineAgent(BaseAgent):
         normalized_url = self.base_url.lower()
         return any(
             provider_host in normalized_url
-            for provider_host in ("openai.com", "anthropic.com", "groq.com", "api.x.ai")
+            for provider_host in (
+                "openai.com",
+                "anthropic.com",
+                "groq.com",
+                "api.x.ai",
+                "fireworks.ai",
+            )
         )
 
     def _get_api_key_from_env(self) -> str | None:

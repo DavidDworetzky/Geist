@@ -74,6 +74,12 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "deepseek": ProviderSpec(
         "deepseek", "DeepSeek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"
     ),
+    "fireworks": ProviderSpec(
+        "fireworks",
+        "Fireworks AI",
+        "https://api.fireworks.ai/inference/v1",
+        "FIREWORKS_API_KEY",
+    ),
     "self-hosted": ProviderSpec(
         "self-hosted",
         "Self-hosted OpenAI-compatible",
@@ -248,6 +254,48 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "Llama 3.3 70B Instruct (Fireworks AI)", "llama", provider="fireworks",
+        backend="openai_compatible", context_window=131072, max_output_tokens=32768,
+        supports_function_calling=True, supports_streaming=True, recommended=True,
+        parameter_count="70B", local=False,
+        performance_note="Served on Fireworks AI's hosted OpenAI-compatible inference API.",
+    ),
+    ModelSpec(
+        "accounts/fireworks/models/qwen3-235b-a22b",
+        "Qwen 3 235B A22B (Fireworks AI)", "qwen", provider="fireworks",
+        backend="openai_compatible", context_window=131072, max_output_tokens=32768,
+        supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, parameter_count="235B",
+        activated_parameters="22B", local=False,
+        performance_note="Hosted MoE deployment; use non-thinking mode for lower latency.",
+    ),
+    ModelSpec(
+        "accounts/fireworks/models/deepseek-v3",
+        "DeepSeek V3 (Fireworks AI)", "deepseek", provider="fireworks",
+        backend="openai_compatible", context_window=131072, max_output_tokens=32768,
+        supports_function_calling=True, supports_streaming=True,
+        parameter_count="671B", activated_parameters="37B", local=False,
+        performance_note="Hosted DeepSeek V3 checkpoint on Fireworks AI serverless inference.",
+    ),
+    ModelSpec(
+        "accounts/fireworks/models/kimi-k2-instruct",
+        "Kimi K2 Instruct (Fireworks AI)", "kimi", provider="fireworks",
+        backend="openai_compatible", context_window=131072, max_output_tokens=32768,
+        supports_function_calling=True, supports_streaming=True,
+        parameter_count="1T", activated_parameters="32B", local=False,
+        performance_note="Hosted Kimi K2 open-weight checkpoint served by Fireworks AI.",
+    ),
+    ModelSpec(
+        "accounts/fireworks/models/gpt-oss-120b",
+        "gpt-oss 120B (Fireworks AI)", "gpt-oss", provider="fireworks",
+        backend="openai_compatible", context_window=131072, max_output_tokens=32768,
+        supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, parameter_count="117B",
+        activated_parameters="5.1B", local=False,
+        performance_note="Hosted alternative to self-hosting the gpt-oss 120B checkpoint.",
+    ),
+    ModelSpec(
         "deepseek-reasoner", "DeepSeek R1", "deepseek", provider="deepseek",
         backend="openai_compatible", context_window=131072, max_output_tokens=32768,
         supports_function_calling=True, supports_reasoning=True, supports_streaming=True,
@@ -283,6 +331,21 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         return get_model_spec("deepseek-reasoner")
     if "gpt-oss-120b" in value:
         return get_model_spec("openai/gpt-oss-120b")
+    # Fireworks AI serves namespaced checkpoints (accounts/<org>/models/<id>).
+    # Route them to the hosted provider before family prefixes can misclassify
+    # them as local checkpoints.
+    if value.startswith(("accounts/fireworks/", "fireworks/")):
+        return ModelSpec(
+            id=model_id,
+            name=f"{model_id} (Fireworks AI)",
+            family="fireworks",
+            provider="fireworks",
+            backend="openai_compatible",
+            supports_function_calling=True,
+            supports_streaming=True,
+            local=False,
+            performance_note="Served on Fireworks AI's hosted OpenAI-compatible inference API.",
+        )
     heavyweight_parameters = _heavyweight_parameter_count(value)
     if heavyweight_parameters is not None:
         return ModelSpec(

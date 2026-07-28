@@ -14,6 +14,12 @@ Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
 
+Fireworks AI is available as a hosted OpenAI-compatible provider for
+open-weight checkpoints (Llama 3.3 70B, Qwen 3 235B, DeepSeek V3, Kimi K2,
+and gpt-oss 120B). Set `FIREWORKS_API_KEY` and select the `fireworks`
+provider; any `accounts/<org>/models/<id>` Fireworks model ID routes to the
+hosted endpoint automatically.
+
 ## Adding a model or provider
 
 1. Add a `ModelSpec` to `agents/model_catalog.py`.

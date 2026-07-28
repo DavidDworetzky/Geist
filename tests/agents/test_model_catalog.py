@@ -59,6 +59,56 @@ def test_heavyweight_models_are_server_backed():
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
 
 
+def test_fireworks_models_are_server_backed():
+    llama = get_model_spec("accounts/fireworks/models/llama-v3p3-70b-instruct")
+    assert llama.backend == "openai_compatible"
+    assert llama.local is False
+    assert llama.provider == "fireworks"
+    assert (
+        get_provider_endpoint(llama.provider) == "https://api.fireworks.ai/inference/v1"
+    )
+    assert PROVIDERS["fireworks"].api_key_env == "FIREWORKS_API_KEY"
+
+    from agents.architectures.registry import get_all_models, provider_from_string
+
+    assert provider_from_string("fireworks") == "fireworks"
+    assert "fireworks" in get_all_models()
+
+
+def test_uncataloged_fireworks_id_routes_to_hosted_provider():
+    spec = infer_model_spec("accounts/fireworks/models/future-model-v2")
+    assert spec.provider == "fireworks"
+    assert spec.backend == "openai_compatible"
+    assert spec.local is False
+
+    # Namespaced Fireworks IDs must not be misclassified by family prefixes
+    # or the heavyweight self-hosted fallback.
+    qwen = infer_model_spec("accounts/fireworks/models/qwen3-30b-a3b")
+    assert qwen.provider == "fireworks"
+    assert qwen.local is False
+
+
+def test_fireworks_model_infers_provider_endpoint():
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent(
+            "online",
+            context,
+            model="accounts/fireworks/models/llama-v3p3-70b-instruct",
+        )
+    assert (
+        online_agent.call_args.kwargs["base_url"]
+        == "https://api.fireworks.ai/inference/v1"
+    )
+
+
+def test_fireworks_model_cannot_be_accidentally_loaded_locally():
+    with pytest.raises(ValueError, match="server-backed"):
+        AgentFactory._infer_runner_type(
+            "accounts/fireworks/models/llama-v3p3-70b-instruct"
+        )
+
+
 @pytest.mark.parametrize("model_id", [
     "Qwen/Qwen2.5-3B-Instruct",
     "Qwen/Qwen3-4B",
