@@ -45,6 +45,10 @@ class UserSettings(Base):
     # UI preferences
     ui_preferences = Column(JSON, default=dict)  # General UI preferences
 
+    # Agent permission settings: {"mode": "default"|"auto_approve"|"require_approval",
+    # "always_allow": [tool names]}
+    agent_permissions = Column(JSON, default=dict)
+
     # Timestamps
     create_date = Column(DateTime, default=datetime.datetime.utcnow)
     update_date = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -73,6 +77,7 @@ class UserSettingsModel:
     default_presence_penalty: float
     backup_providers: list[dict[str, Any]]
     ui_preferences: dict[str, Any]
+    agent_permissions: dict[str, Any]
     create_date: datetime.datetime
     update_date: datetime.datetime
 
@@ -106,6 +111,7 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 default_presence_penalty=settings.default_presence_penalty,
                 backup_providers=settings.backup_providers or [],
                 ui_preferences=settings.ui_preferences or {},
+                agent_permissions=settings.agent_permissions or {},
                 create_date=settings.create_date,
                 update_date=settings.update_date
             )
@@ -137,7 +143,8 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_frequency_penalty=0.0,
             default_presence_penalty=0.0,
             backup_providers=[],
-            ui_preferences={}
+            ui_preferences={},
+            agent_permissions={}
         )
         session.add(settings)
         session.commit()
@@ -160,6 +167,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_presence_penalty=settings.default_presence_penalty,
             backup_providers=settings.backup_providers or [],
             ui_preferences=settings.ui_preferences or {},
+            agent_permissions=settings.agent_permissions or {},
             create_date=settings.create_date,
             update_date=settings.update_date
         )
@@ -206,6 +214,7 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             default_presence_penalty=settings.default_presence_penalty,
             backup_providers=settings.backup_providers or [],
             ui_preferences=settings.ui_preferences or {},
+            agent_permissions=settings.agent_permissions or {},
             create_date=settings.create_date,
             update_date=settings.update_date
         )

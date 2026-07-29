@@ -19,8 +19,10 @@ from agents.models.tool_calling import (
     ModelRequestConfig,
     ToolCall,
     ToolContext,
+    tool_requires_approval,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.services.agent_permissions import AgentPermissions, load_agent_permissions
 from app.services.tool_registry import ToolRegistry
 
 
@@ -110,8 +112,10 @@ class ChatOrchestrator:
         max_tool_result_chars_total: int = 40_000,
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
+        permissions_loader: Callable[[int], AgentPermissions] = load_agent_permissions,
     ) -> None:
         self.registry = registry
+        self.permissions_loader = permissions_loader
         self.run_controls = run_controls or RunControlRegistry()
         self.max_rounds = max_rounds
         self.max_tool_calls = max_tool_calls
@@ -303,7 +307,14 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
-        context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
+        permissions = self.permissions_loader(user_id)
+        context = ToolContext(
+            user_id=user_id,
+            chat_id=chat_id,
+            run_id=run.run_id,
+            permission_mode=permissions.mode,
+            always_allow_tools=frozenset(permissions.always_allow),
+        )
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
             self.registry.definitions_for_context(context) if enable_tools and native_tools else []
@@ -401,7 +412,9 @@ class ChatOrchestrator:
 
                 for call in completed_turn.tool_calls:
                     definition = self.registry.get(call.name)
-                    requires_approval = bool(definition and definition.requires_approval)
+                    requires_approval = bool(
+                        definition and tool_requires_approval(definition, context)
+                    )
                     proposed = self._tool_state(
                         call,
                         "proposed",

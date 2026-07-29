@@ -31,6 +31,7 @@ const mockSettings: UserSettings = {
   default_presence_penalty: 0,
   backup_providers: [],
   ui_preferences: { theme: 'light' },
+  agent_permissions: { mode: 'default', always_allow: [] },
   create_date: '2025-01-01T00:00:00Z',
   update_date: '2025-01-01T00:00:00Z'
 };
