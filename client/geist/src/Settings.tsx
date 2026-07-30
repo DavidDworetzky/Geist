@@ -6,9 +6,10 @@ import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
+import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -119,7 +120,8 @@ const Settings: React.FC = () => {
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'ui' as Tab, label: 'Appearance' },
-    { id: 'developer' as Tab, label: 'Developer' }
+    { id: 'developer' as Tab, label: 'Developer' },
+    { id: 'about' as Tab, label: 'About' }
   ];
 
   if (loading && !localSettings) {
@@ -146,7 +148,7 @@ const Settings: React.FC = () => {
   }
 
   return (
-    <div className={`settings-page page-surface settings-page-interactive${hasSettingsScrollbar ? ' settings-scrollbar-visible' : ''}`}>
+    <div className={`settings-page page-surface settings-page-interactive${activeTab === 'about' ? ' settings-page-about' : ''}${hasSettingsScrollbar ? ' settings-scrollbar-visible' : ''}`}>
       <div className="settings-scroll-region" ref={settingsScrollRef}>
         <header className="settings-header">
           <div>
@@ -274,20 +276,24 @@ const Settings: React.FC = () => {
               </div>
             </section>
           )}
+
+          {activeTab === 'about' && <AboutSection />}
         </div>
       </div>
 
-      <footer className="settings-actions" aria-label="Settings actions">
-        <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
-          Reset to Defaults
-        </button>
-        <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
-          Cancel
-        </button>
-        <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
-          {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
-        </button>
-      </footer>
+      {activeTab !== 'about' && (
+        <footer className="settings-actions" aria-label="Settings actions">
+          <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
+            Reset to Defaults
+          </button>
+          <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
+            Cancel
+          </button>
+          <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
+            {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
+          </button>
+        </footer>
+      )}
     </div>
   );
 };

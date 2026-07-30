@@ -2,6 +2,7 @@ import dataclasses
 import json
 import logging
 import os
+import platform
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -628,6 +629,15 @@ def create_app(
             "version": application_version(),
             "apiVersion": f"{api_version}",
             "spa": web_dir is not None,
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+            },
+            "python": {
+                "version": platform.python_version(),
+            },
+            "inference": _configured_inference_info(),
         }
 
     if web_dir is None:
@@ -640,6 +650,57 @@ def create_app(
         app.state.web_dir = install_spa(app, web_dir)
 
     return app
+
+
+def _configured_inference_info() -> dict[str, str | None]:
+    try:
+        settings = UserSettingsService.get_default_user_settings()
+        factory_config = AgentFactoryConfig.from_user_settings(settings)
+    except Exception as error:
+        logger.warning("Unable to read configured inference settings: %s", error)
+        runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
+        runner_type = runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
+        return {
+            "mode": "local",
+            "engine": runner_type,
+            "model": DEFAULT_LOCAL_MODEL,
+            "provider": None,
+            "acceleration": _llama_acceleration(runner_type),
+        }
+
+    if factory_config.agent_type == "online":
+        return {
+            "mode": "online",
+            "engine": "Remote API",
+            "model": factory_config.model,
+            "provider": settings.default_online_provider,
+            "acceleration": None,
+        }
+
+    runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip() or factory_config.runner_type
+    artifact_id = settings.default_local_artifact_id
+    if artifact_id:
+        try:
+            from app.services.local_models import get_local_model_manager
+
+            runner_type = get_local_model_manager().get_artifact(artifact_id).backend
+        except KeyError:
+            logger.warning("Configured local artifact %s is not available", artifact_id)
+
+    runner_type = runner_type or AgentFactory._infer_runner_type(factory_config.model)
+    return {
+        "mode": "local",
+        "engine": runner_type,
+        "model": factory_config.model,
+        "provider": None,
+        "acceleration": _llama_acceleration(runner_type),
+    }
+
+
+def _llama_acceleration(runner_type: str) -> str | None:
+    if runner_type != "llama_server":
+        return None
+    return (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
 
 
 def _parse_agent_type(agent_type: str) -> AgentType:
