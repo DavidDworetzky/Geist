@@ -658,14 +658,14 @@ def _configured_inference_info() -> dict[str, str | None]:
         factory_config = AgentFactoryConfig.from_user_settings(settings)
     except Exception as error:
         logger.warning("Unable to read configured inference settings: %s", error)
-        runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-        runner_type = runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
+        fallback_runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
+        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
         return {
             "mode": "local",
-            "engine": runner_type,
+            "engine": fallback_runner_type,
             "model": DEFAULT_LOCAL_MODEL,
             "provider": None,
-            "acceleration": _llama_acceleration(runner_type),
+            "acceleration": _llama_acceleration(fallback_runner_type),
         }
 
     if factory_config.agent_type == "online":
