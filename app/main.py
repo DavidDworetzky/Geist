@@ -30,6 +30,7 @@ from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.routines import router as routines_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -57,6 +58,7 @@ from app.services.job_queue import start_worker, stop_worker
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.routine_scheduler import RoutineScheduler
 from app.services.tool_approvals import approval_registry as tool_approval_registry
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
@@ -494,6 +496,40 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
         yield sse_event("done", {"run_id": None, "chat_id": chat_id})
 
 
+def run_routine(routine) -> None:
+    """Execute one scheduled routine through the orchestrator, unattended.
+
+    interactive=False makes the orchestrator deny approval-gated tools
+    immediately instead of waiting for a user who is not present. The run
+    persists as a normal chat session, so results are visible in the UI.
+    """
+    agent = get_active_agent(default_agent_type)
+    if not hasattr(agent, "stream_model_turn"):
+        logger.warning(
+            "Routine %s skipped: active agent has no native tool loop",
+            routine.routine_id,
+        )
+        return
+    user_id = int(get_default_user().user_id)
+    params = CompleteTextParams(
+        prompt=routine.prompt, max_tokens=1024, enable_tools=True
+    )
+    for _ in chat_orchestrator.stream(
+        backend=agent,
+        prompt=routine.prompt,
+        user_id=user_id,
+        chat_id=None,
+        config=model_request_config(params),
+        system_prompt=chat_system_prompt(True, ""),
+        enable_tools=True,
+        interactive=False,
+    ):
+        pass
+
+
+routine_scheduler = RoutineScheduler(run_routine)
+
+
 # App factory function
 def create_app(
     web_dir: str | Path | None = None,
@@ -504,6 +540,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         try:
             app.state.job_worker = start_worker()
+            routine_scheduler.start()
             app.state.ready = True
             yield
         finally:
@@ -676,6 +713,7 @@ def create_app(
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
+    app.include_router(routines_router, prefix="/api/v1/routines", tags=["routines"])
 
     @app.get("/health", include_in_schema=False)
     def health():
@@ -938,6 +976,11 @@ def _database_is_ready() -> bool:
 
 
 def _stop_runtime_services() -> None:
+    try:
+        routine_scheduler.stop()
+    except Exception:
+        logger.exception("Failed to stop the routine scheduler")
+
     try:
         stop_worker()
     except Exception:

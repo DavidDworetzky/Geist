@@ -6,6 +6,7 @@ import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSe
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import AgentPermissionsSection from './Components/AgentPermissionsSection';
+import RoutinesSection from './Components/RoutinesSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import AboutSection from './Components/AboutSection';
@@ -15,7 +16,7 @@ import {
   useHostDevelopmentEnabled,
 } from './plugins/runtime';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'routines' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -277,6 +278,7 @@ const Settings: React.FC = () => {
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'permissions' as Tab, label: 'Permissions' },
+    { id: 'routines' as Tab, label: 'Routines' },
     { id: 'ui' as Tab, label: 'Appearance' },
     ...(hostDevelopmentEnabled
       ? [{ id: 'developer' as Tab, label: 'Developer' }]
@@ -432,6 +434,8 @@ const Settings: React.FC = () => {
               onChange={(value) => updateLocalSetting('agent_permissions', value)}
             />
           )}
+
+          {activeTab === 'routines' && <RoutinesSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection
