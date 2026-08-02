@@ -5,12 +5,13 @@ import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import AgentPermissionsSection from './Components/AgentPermissionsSection';
+import RoutinesSection from './Components/RoutinesSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'routines' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -122,6 +123,7 @@ const Settings: React.FC = () => {
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'permissions' as Tab, label: 'Permissions' },
+    { id: 'routines' as Tab, label: 'Routines' },
     { id: 'ui' as Tab, label: 'Appearance' },
     { id: 'developer' as Tab, label: 'Developer' },
     { id: 'about' as Tab, label: 'About' }
@@ -260,6 +262,8 @@ const Settings: React.FC = () => {
               onChange={(value) => updateLocalSetting('agent_permissions', value)}
             />
           )}
+
+          {activeTab === 'routines' && <RoutinesSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection
