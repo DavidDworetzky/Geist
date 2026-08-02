@@ -1,5 +1,5 @@
-import React, { forwardRef } from 'react';
-import { ChatHistory, ToolCallStatus } from '../chatTypes';
+import React, { forwardRef, useState } from 'react';
+import { ChatHistory, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
 const statusLabel = (status: ToolCallStatus | string): string =>
@@ -12,12 +12,26 @@ const statusTone = (status: ToolCallStatus): string => {
   return '';
 };
 
+const approvalChoices: { decision: ToolApprovalDecision; label: string }[] = [
+  { decision: 'approve', label: 'Approve once' },
+  { decision: 'session', label: 'Allow for session' },
+  { decision: 'always', label: 'Always allow' },
+  { decision: 'deny', label: 'Deny' }
+];
+
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
+  onToolApproval?: (runId: string, callId: string, decision: ToolApprovalDecision) => void;
 }
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
   const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+  const [answeredCallIds, setAnsweredCallIds] = useState<Set<string>>(new Set());
+
+  const answerApproval = (runId: string, callId: string, decision: ToolApprovalDecision) => {
+    setAnsweredCallIds((prev) => new Set(prev).add(callId));
+    props.onToolApproval?.(runId, callId, decision);
+  };
 
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
@@ -93,6 +107,28 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 {needsApproval && (
                   <div role="status" className="status-badge warning" style={{ marginTop: 8 }}>
                     Approval required
+                  </div>
+                )}
+                {toolCall.status === 'awaiting_approval'
+                  && element.run_id
+                  && props.onToolApproval
+                  && (
+                  <div
+                    role="group"
+                    aria-label={`Approve ${toolCall.name}`}
+                    style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}
+                  >
+                    {approvalChoices.map((choice) => (
+                      <button
+                        key={choice.decision}
+                        type="button"
+                        className={`button button-small ${choice.decision === 'deny' ? 'button-danger' : 'button-secondary'}`}
+                        disabled={answeredCallIds.has(toolCall.id)}
+                        onClick={() => answerApproval(element.run_id as string, toolCall.id, choice.decision)}
+                      >
+                        {choice.label}
+                      </button>
+                    ))}
                   </div>
                 )}
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}
