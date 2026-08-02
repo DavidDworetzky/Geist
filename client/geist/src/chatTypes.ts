@@ -84,3 +84,5 @@ export interface ChatPair {
 export interface ChatHistory {
   chatHistory: ChatPair[];
 }
+
+export type ToolApprovalDecision = 'approve' | 'session' | 'always' | 'deny';

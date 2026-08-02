@@ -10,7 +10,7 @@ import EnhancedChatInput from './Components/EnhancedChatInput';
 import ChatMemoryControls from './Components/ChatMemoryControls';
 import MemoryExplorer from './Components/MemoryExplorer';
 import StagePanelIcon from './Components/StagePanelIcon';
-import { ChatPair, ChatHistory, ChatTurnResult } from './chatTypes';
+import { ChatPair, ChatHistory, ChatTurnResult, ToolApprovalDecision } from './chatTypes';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 
 const PAGE_SIZE = 20;
@@ -377,6 +377,24 @@ const Chat = () => {
     }
   };
 
+  const handleToolApproval = useCallback(
+    async (runId: string, callId: string, decision: ToolApprovalDecision) => {
+      try {
+        const response = await fetch(`/agent/runs/${runId}/tool_approval`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ call_id: callId, decision })
+        });
+        if (!response.ok) {
+          console.error(`Tool approval failed: ${response.statusText}`);
+        }
+      } catch (err) {
+        console.error('Tool approval failed:', err);
+      }
+    },
+    []
+  );
+
   const handleNewChat = () => {
     const newChatScope: MemoryScope = folderFilter === 'all'
       ? { kind: 'public' }
@@ -585,6 +603,7 @@ const Chat = () => {
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
+                onToolApproval={handleToolApproval}
               />
             </div>
           </div>

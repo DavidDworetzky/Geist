@@ -7,7 +7,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agents.models.agent_completion import AgentCompletion
@@ -19,11 +19,38 @@ from agents.models.tool_calling import (
     ModelRequestConfig,
     ToolCall,
     ToolContext,
+    ToolResult,
     tool_requires_approval,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
 from app.services.agent_permissions import AgentPermissions, load_agent_permissions
+from app.services.tool_approvals import (
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    SessionGrantRegistry,
+    ToolApprovalRegistry,
+    approval_registry,
+    persist_always_allow,
+    session_grants,
+)
 from app.services.tool_registry import ToolRegistry
+
+
+UNATTENDED_DENY_MESSAGE = (
+    "BLOCKED: this tool requires user approval, but the run is unattended "
+    "(no user is present to approve it). Find an approach that avoids this "
+    "tool, and do NOT retry the call."
+)
+
+DENIED_MESSAGE = (
+    "BLOCKED: the user denied this tool call. The user has NOT consented to "
+    "this action. Do NOT retry it, and do NOT attempt the same outcome "
+    "through a different tool."
+)
+
+TIMEOUT_MESSAGE = (
+    "BLOCKED: the approval request timed out without a user response. "
+    "Silence is not consent. Do NOT retry the call."
+)
 
 
 logger = logging.getLogger(__name__)
@@ -113,9 +140,17 @@ class ChatOrchestrator:
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
         permissions_loader: Callable[[int], AgentPermissions] = load_agent_permissions,
+        approvals: ToolApprovalRegistry = approval_registry,
+        grants: SessionGrantRegistry = session_grants,
+        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        always_allow_persister: Callable[[int, str], None] = persist_always_allow,
     ) -> None:
         self.registry = registry
         self.permissions_loader = permissions_loader
+        self.approvals = approvals
+        self.grants = grants
+        self.approval_timeout_seconds = approval_timeout_seconds
+        self.always_allow_persister = always_allow_persister
         self.run_controls = run_controls or RunControlRegistry()
         self.max_rounds = max_rounds
         self.max_tool_calls = max_tool_calls
@@ -298,6 +333,7 @@ class ChatOrchestrator:
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,
+        interactive: bool = True,
     ) -> Iterator[ChatStreamEvent]:
         conversation = ConversationState(chat_id=chat_id, user_id=user_id)
         conversation.add_system_prompt(system_prompt)
@@ -308,6 +344,7 @@ class ChatOrchestrator:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
         permissions = self.permissions_loader(user_id)
+        approved_call_ids: set[str] = set()
         context = ToolContext(
             user_id=user_id,
             chat_id=chat_id,
@@ -412,8 +449,16 @@ class ChatOrchestrator:
 
                 for call in completed_turn.tool_calls:
                     definition = self.registry.get(call.name)
+                    grant_scope = (
+                        f"chat:{conversation.chat_id}"
+                        if conversation.chat_id is not None
+                        else f"run:{run.run_id}"
+                    )
                     requires_approval = bool(
-                        definition and tool_requires_approval(definition, context)
+                        definition
+                        and tool_requires_approval(definition, context)
+                        and call.name not in self.grants.granted(grant_scope)
+                        and call.id not in approved_call_ids
                     )
                     proposed = self._tool_state(
                         call,
@@ -429,10 +474,69 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    if not requires_approval:
-                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                    denial_message: str | None = None
+                    if requires_approval:
+                        if not interactive:
+                            denial_message = UNATTENDED_DENY_MESSAGE
+                        else:
+                            yield ChatStreamEvent(
+                                "tool_call",
+                                self._tool_state(
+                                    call, "awaiting_approval", requires_approval=True
+                                ),
+                            )
+                            pending = self.approvals.request(
+                                run.run_id, call.id, call.name
+                            )
+                            decision = self.approvals.wait(
+                                pending,
+                                self.approval_timeout_seconds,
+                                cancellation=cancellation,
+                            )
+                            if cancellation.is_set():
+                                cancelled = self._tool_state(call, "cancelled")
+                                run.record_tool_call(cancelled)
+                                yield ChatStreamEvent("tool_call", cancelled)
+                                yield ChatStreamEvent("cancelled", cancelled_payload())
+                                return
+                            if decision == "deny":
+                                denial_message = (
+                                    DENIED_MESSAGE
+                                    if pending.decision is not None
+                                    else TIMEOUT_MESSAGE
+                                )
+                            else:
+                                approved_call_ids.add(call.id)
+                                if decision == "session":
+                                    self.grants.grant(grant_scope, call.name)
+                                elif decision == "always":
+                                    try:
+                                        self.always_allow_persister(user_id, call.name)
+                                    except Exception:
+                                        logger.exception(
+                                            "Could not persist always-allow for %s",
+                                            call.name,
+                                        )
 
-                    result = self.registry.execute(call, context)
+                    if denial_message is not None:
+                        result = ToolResult(
+                            call=call,
+                            status="failed",
+                            content=denial_message,
+                            summary="Tool call denied",
+                            error="approval_denied",
+                        )
+                    else:
+                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                        result = self.registry.execute(
+                            call,
+                            replace(
+                                context,
+                                approved_call_ids=frozenset(approved_call_ids),
+                                always_allow_tools=context.always_allow_tools
+                                | self.grants.granted(grant_scope),
+                            ),
+                        )
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -517,6 +621,7 @@ class ChatOrchestrator:
                 {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
         finally:
+            self.approvals.cancel_run(run.run_id)
             self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:
