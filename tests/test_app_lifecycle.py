@@ -38,7 +38,16 @@ def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
             "version": main.application_version(),
             "checks": {"lifespan": "ok", "database": "ok"},
         }
-        assert client.get("/api/v1/system").json()["spa"] is False
+        system = client.get("/api/v1/system").json()
+        assert system["spa"] is False
+        assert system["version"] == main.application_version()
+        assert system["platform"]["system"]
+        assert system["platform"]["release"]
+        assert system["platform"]["machine"]
+        assert system["python"]["version"]
+        assert system["inference"]["mode"] in {"local", "online"}
+        assert system["inference"]["engine"]
+        assert system["inference"]["model"]
         assert client.get("/").json() == {"Version": "1.0"}
 
     assert events == ["start", "stop", "models", "llama"]

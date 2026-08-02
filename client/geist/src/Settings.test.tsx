@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Settings from './Settings';
+import { BrandingProvider } from './branding';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
 import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
@@ -59,9 +60,18 @@ const renderSettings = () => render(
   </UserSettingsProvider>,
 );
 
+const renderBrandedSettings = () => render(
+  <BrandingProvider>
+    <UserSettingsProvider>
+      <Settings />
+    </UserSettingsProvider>
+  </BrandingProvider>,
+);
+
 describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
+    delete window.__GEIST_BRANDING__;
     // @ts-ignore
     global.fetch = jest.fn();
   });
@@ -81,6 +91,92 @@ describe('Settings page', () => {
       expect(screen.getByRole('tab', { name: 'Files and RAG' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Developer' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
+    });
+  });
+
+  it('shows host, Geist, machine, and inference details on the About tab', async () => {
+    window.__GEIST_BRANDING__ = {
+      productName: 'Pitchblend',
+      productVersion: '2.3.4',
+      logoUrl: 'data:image/png;base64,cGl0Y2hibGVuZA==',
+    };
+    const systemInfo = {
+      version: '0.4.2',
+      spa: true,
+      platform: {
+        system: 'Windows',
+        release: '11',
+        machine: 'AMD64',
+      },
+      python: {
+        version: '3.11.9',
+      },
+      inference: {
+        mode: 'local',
+        engine: 'llama_server',
+        model: 'Qwen/Qwen3-4B',
+        provider: null,
+        acceleration: 'vulkan',
+      },
+    };
+
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/system') {
+        return Promise.resolve({ ok: true, json: async () => systemInfo });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderBrandedSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'About' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Pitchblend.*v2\.3\.4/i })).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'Pitchblend logo' })).toBeInTheDocument();
+      expect(screen.getByText(/Powered by Geist/i)).toHaveTextContent('v0.4.2');
+      expect(screen.getByText('Windows 11')).toBeInTheDocument();
+      expect(screen.getByText('AMD64')).toBeInTheDocument();
+      expect(screen.getByText('llama.cpp')).toBeInTheDocument();
+      expect(screen.getByText('vulkan')).toBeInTheDocument();
+      expect(screen.queryByText('Geist API')).not.toBeInTheDocument();
+      expect(screen.queryByText('Inference Mode')).not.toBeInTheDocument();
+      expect(screen.queryByText('Model')).not.toBeInTheDocument();
+      expect(screen.queryByText('Provider')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole('contentinfo', { name: 'Settings actions' })).not.toBeInTheDocument();
+  });
+
+  it('keeps About usable when connected to an older Geist system endpoint', async () => {
+    window.__GEIST_BRANDING__ = {
+      productName: 'Pitchblend',
+      productVersion: '2.3.4',
+    };
+
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/system') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '0.3.0', spa: true }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderBrandedSettings();
+    await waitFor(() => screen.getByRole('tab', { name: 'About' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'About' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Pitchblend.*v2\.3\.4/i })).toBeInTheDocument();
+      expect(screen.getByText(/Powered by Geist/i)).toHaveTextContent('v0.3.0');
+      expect(screen.getByText(/Restart Geist to load detailed machine/i)).toBeInTheDocument();
     });
   });
 
