@@ -2,8 +2,14 @@
 
 Environment variables (all optional; unset backend disables execution):
 
-- ``GEIST_EXEC_BACKEND``: ``docker`` | ``local``. Anything else (or unset)
-  means no execution backend, and the terminal tool is not registered.
+- ``GEIST_EXEC_BACKEND``: ``docker`` | ``podman`` | ``local``. Anything else
+  (or unset) means no execution backend, and the terminal tool is not
+  registered. ``podman`` is the docker backend pinned to the podman CLI —
+  same sandbox hardening, daemonless runtime.
+- ``GEIST_EXEC_RUNTIME``: pin the container runtime CLI (a PATH name like
+  ``podman`` or an absolute binary path), mirroring Hermes-agent's
+  ``HERMES_DOCKER_BINARY``. When the pinned runtime is missing, sandbox
+  execution is unavailable rather than silently using another runtime.
 - ``GEIST_EXEC_DOCKER_IMAGE``: sandbox image (default ``python:3.11-slim``).
 - ``GEIST_EXEC_DOCKER_NETWORK``: ``1``/``true`` to give the sandbox network
   access (default: no network).
@@ -37,18 +43,22 @@ def create_execution_environment() -> ExecutionEnvironment | None:
     backend = os.getenv("GEIST_EXEC_BACKEND", "").strip().lower()
     workspace = os.getenv("GEIST_EXEC_WORKSPACE", "").strip() or None
 
-    if backend == "docker":
+    if backend in ("docker", "podman"):
+        runtime_preference = os.getenv("GEIST_EXEC_RUNTIME", "").strip() or None
+        if backend == "podman" and runtime_preference is None:
+            runtime_preference = "podman"
         return DockerExecutionEnvironment(
             image=os.getenv("GEIST_EXEC_DOCKER_IMAGE", "").strip() or DEFAULT_IMAGE,
             network=_env_flag("GEIST_EXEC_DOCKER_NETWORK"),
             workspace=workspace,
+            runtime_preference=runtime_preference,
         )
     if backend == "local":
         return LocalExecutionEnvironment(workdir=workspace)
     if backend:
         logger.warning(
             "Unknown GEIST_EXEC_BACKEND %r; tool execution disabled "
-            "(valid: docker, local)",
+            "(valid: docker, podman, local)",
             backend,
         )
     return None

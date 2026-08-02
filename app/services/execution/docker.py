@@ -15,6 +15,8 @@ terminal tool register with ``requires_approval=True`` (the Hermes
 
 from __future__ import annotations
 
+import logging
+import os
 import shutil
 import subprocess
 import time
@@ -50,8 +52,31 @@ _BASE_SECURITY_ARGS = [
 ]
 
 
-def find_container_runtime() -> str | None:
-    """Locate docker (or podman, drop-in compatible for these args) on PATH."""
+logger = logging.getLogger(__name__)
+
+
+def find_container_runtime(preferred: str | None = None) -> str | None:
+    """Locate a container runtime CLI.
+
+    ``preferred`` pins a specific runtime — a name resolved on PATH
+    (``podman``) or an absolute binary path — mirroring Hermes-agent's
+    ``HERMES_DOCKER_BINARY`` override. When the pinned runtime cannot be
+    found this fails closed (no silent fallback to a runtime the user
+    explicitly chose against); without a preference, docker then podman
+    are probed on PATH (podman is drop-in compatible for these args).
+    """
+    if preferred:
+        found = shutil.which(preferred)
+        if found:
+            return found
+        if os.path.isfile(preferred) and os.access(preferred, os.X_OK):
+            return preferred
+        logger.warning(
+            "Pinned container runtime %r not found or not executable; "
+            "sandbox execution unavailable",
+            preferred,
+        )
+        return None
     for executable in ("docker", "podman"):
         found = shutil.which(executable)
         if found:
@@ -94,11 +119,13 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         network: bool = False,
         workspace: str | None = None,
         runtime_path: str | None = None,
+        runtime_preference: str | None = None,
     ):
         self.image = image
         self.network = network
         self.workspace = workspace
         self._runtime_path = runtime_path
+        self.runtime_preference = runtime_preference
 
     @property
     def has_host_access(self) -> bool:
@@ -110,7 +137,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
 
     def runtime(self) -> str | None:
         if self._runtime_path is None:
-            self._runtime_path = find_container_runtime()
+            self._runtime_path = find_container_runtime(self.runtime_preference)
         return self._runtime_path
 
     def is_available(self) -> bool:
