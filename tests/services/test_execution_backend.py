@@ -273,3 +273,65 @@ def test_registry_host_reaching_backends_require_approval(monkeypatch, tmp_path)
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path))
     assert build_default_tool_registry().get("terminal.run").requires_approval is True
+
+
+# ---------------------------------------------------------------------------
+# runtime pinning (podman as opt-in sandbox runtime)
+
+
+def test_find_runtime_prefers_pinned_name_on_path():
+    from app.services.execution.docker import find_container_runtime
+
+    with patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+        assert find_container_runtime("podman") == "/usr/bin/podman"
+
+
+def test_find_runtime_pinned_missing_fails_closed():
+    from app.services.execution.docker import find_container_runtime
+
+    with patch("shutil.which", return_value=None), patch(
+        "os.path.isfile", return_value=False
+    ):
+        # A pinned-but-missing runtime must NOT fall back to docker.
+        assert find_container_runtime("podman") is None
+
+
+def test_find_runtime_accepts_absolute_binary_path():
+    from app.services.execution.docker import find_container_runtime
+
+    with patch("shutil.which", return_value=None), patch(
+        "os.path.isfile", return_value=True
+    ), patch("os.access", return_value=True):
+        assert find_container_runtime("/opt/podman/bin/podman") == "/opt/podman/bin/podman"
+
+
+def test_factory_podman_backend_pins_podman(monkeypatch):
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "podman")
+    monkeypatch.delenv("GEIST_EXEC_RUNTIME", raising=False)
+    monkeypatch.delenv("GEIST_EXEC_WORKSPACE", raising=False)
+    env = create_execution_environment()
+    assert isinstance(env, DockerExecutionEnvironment)
+    assert env.runtime_preference == "podman"
+    assert env.is_sandboxed is True
+
+
+def test_factory_runtime_env_overrides_backend_alias(monkeypatch):
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "podman")
+    monkeypatch.setenv("GEIST_EXEC_RUNTIME", "/opt/podman/bin/podman")
+    env = create_execution_environment()
+    assert env.runtime_preference == "/opt/podman/bin/podman"
+
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
+    monkeypatch.setenv("GEIST_EXEC_RUNTIME", "podman")
+    env = create_execution_environment()
+    assert env.runtime_preference == "podman"
+
+
+def test_environment_runtime_uses_preference():
+    env = DockerExecutionEnvironment(runtime_preference="podman")
+    with patch(
+        "app.services.execution.docker.find_container_runtime",
+        return_value="/usr/bin/podman",
+    ) as mock_find:
+        assert env.runtime() == "/usr/bin/podman"
+    mock_find.assert_called_once_with("podman")
