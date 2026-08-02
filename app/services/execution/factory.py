@@ -17,6 +17,11 @@ Environment variables (all optional; unset backend disables execution):
   bind-mounted at /workspace and makes the environment host-reaching (the
   tool then requires approval); for the local backend it is the working
   directory.
+- ``GEIST_EXEC_PERSISTENT``: ``1``/``true`` to keep one long-lived sandbox
+  container per chat session (docker backend only), so filesystem state
+  survives between terminal.run calls.
+- ``GEIST_EXEC_SESSION_TTL_SECONDS``: idle lifetime for persistent session
+  containers (default 1800).
 """
 
 from __future__ import annotations
@@ -62,3 +67,26 @@ def create_execution_environment() -> ExecutionEnvironment | None:
             backend,
         )
     return None
+
+
+def create_session_manager(environment: ExecutionEnvironment | None):
+    """Build the persistent-session manager when configured (docker only)."""
+    if not _env_flag("GEIST_EXEC_PERSISTENT"):
+        return None
+    if not isinstance(environment, DockerExecutionEnvironment):
+        if environment is not None:
+            logger.warning(
+                "GEIST_EXEC_PERSISTENT requires the docker backend; "
+                "persistent sessions disabled"
+            )
+        return None
+    from app.services.execution.session import (
+        DEFAULT_SESSION_TTL_SECONDS,
+        DockerSessionManager,
+    )
+
+    try:
+        ttl = float(os.getenv("GEIST_EXEC_SESSION_TTL_SECONDS", ""))
+    except ValueError:
+        ttl = DEFAULT_SESSION_TTL_SECONDS
+    return DockerSessionManager(environment, ttl_seconds=ttl)
