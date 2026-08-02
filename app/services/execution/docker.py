@@ -1,0 +1,176 @@
+"""Hardened one-shot Docker sandbox for agent commands.
+
+Each run is a fresh ``docker run --rm`` with the hardening posture ported
+from Hermes-agent's Docker environment: all capabilities dropped, privilege
+escalation blocked, a non-root user, size-limited tmpfs for every writable
+path, no network by default, and PID/memory/CPU ceilings. The container
+receives an empty environment, so host credentials cannot leak by
+construction.
+
+The sandbox claim only holds while nothing is bind-mounted: configuring a
+host ``workspace`` flips ``is_sandboxed`` to False, which in turn makes the
+terminal tool register with ``requires_approval=True`` (the Hermes
+"host access" rule).
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import time
+
+from app.services.execution.base import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    ExecutionEnvironment,
+    ExecutionResult,
+    clamp_timeout,
+    truncate_output,
+)
+
+
+DEFAULT_IMAGE = "python:3.11-slim"
+
+# Grace period added to the subprocess timeout so docker's own startup and
+# teardown never masquerade as a command timeout.
+_DOCKER_OVERHEAD_SECONDS = 20
+
+# nobody:nogroup — the container never runs as root, so no capability
+# add-backs are needed at all (stricter than images that drop privileges
+# after starting as root).
+_SANDBOX_USER = "65534:65534"
+
+_BASE_SECURITY_ARGS = [
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--user", _SANDBOX_USER,
+    "--pids-limit", "256",
+    "--memory", "512m",
+    "--cpus", "1",
+    "--tmpfs", "/tmp:rw,nosuid,size=256m",
+]
+
+
+def find_container_runtime() -> str | None:
+    """Locate docker (or podman, drop-in compatible for these args) on PATH."""
+    for executable in ("docker", "podman"):
+        found = shutil.which(executable)
+        if found:
+            return found
+    return None
+
+
+def build_docker_run_args(
+    *,
+    image: str,
+    command: str,
+    network: bool = False,
+    workspace: str | None = None,
+) -> list[str]:
+    """Assemble the argv (after the runtime executable) for one sandboxed run.
+
+    Kept as a pure function so the hardening posture is unit-testable without
+    a container runtime present.
+    """
+    args = ["run", "--rm", *_BASE_SECURITY_ARGS]
+    if not network:
+        args += ["--network", "none"]
+    if workspace:
+        args += ["--volume", f"{workspace}:/workspace"]
+    else:
+        # mode=0777 lets the non-root sandbox user write; the tmpfs is
+        # per-run and size-bounded so this grants nothing on the host.
+        args += ["--tmpfs", "/workspace:rw,nosuid,size=256m,mode=0777"]
+    args += ["--workdir", "/workspace", image, "bash", "-c", command]
+    return args
+
+
+class DockerExecutionEnvironment(ExecutionEnvironment):
+    name = "docker"
+
+    def __init__(
+        self,
+        image: str = DEFAULT_IMAGE,
+        *,
+        network: bool = False,
+        workspace: str | None = None,
+        runtime_path: str | None = None,
+    ):
+        self.image = image
+        self.network = network
+        self.workspace = workspace
+        self._runtime_path = runtime_path
+
+    @property
+    def has_host_access(self) -> bool:
+        return bool(self.workspace)
+
+    @property
+    def is_sandboxed(self) -> bool:
+        return not self.has_host_access
+
+    def runtime(self) -> str | None:
+        if self._runtime_path is None:
+            self._runtime_path = find_container_runtime()
+        return self._runtime_path
+
+    def is_available(self) -> bool:
+        return self.runtime() is not None
+
+    def run(
+        self,
+        command: str,
+        timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    ) -> ExecutionResult:
+        runtime = self.runtime()
+        if runtime is None:
+            return ExecutionResult(
+                exit_code=127,
+                stdout="",
+                stderr="No container runtime (docker/podman) is available on this host",
+                duration_seconds=0.0,
+            )
+
+        timeout = clamp_timeout(timeout_seconds)
+        # ``timeout`` inside the container bounds the command itself; the
+        # outer subprocess timeout only guards a wedged runtime.
+        bounded_command = f"timeout {timeout} bash -c {_shell_quote(command)}"
+        args = build_docker_run_args(
+            image=self.image,
+            command=bounded_command,
+            network=self.network,
+            workspace=self.workspace,
+        )
+
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                [runtime, *args],
+                capture_output=True,
+                text=True,
+                timeout=timeout + _DOCKER_OVERHEAD_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                exit_code=124,
+                stdout="",
+                stderr=f"Sandbox did not finish within {timeout} seconds",
+                duration_seconds=time.monotonic() - started,
+                timed_out=True,
+            )
+
+        stdout, stdout_truncated = truncate_output(completed.stdout)
+        stderr, stderr_truncated = truncate_output(completed.stderr)
+        # GNU timeout reports 124 when the inner command exceeded its bound.
+        timed_out = completed.returncode == 124
+        return ExecutionResult(
+            exit_code=completed.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=time.monotonic() - started,
+            timed_out=timed_out,
+            truncated=stdout_truncated or stderr_truncated,
+        )
+
+
+def _shell_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
