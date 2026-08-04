@@ -117,7 +117,13 @@ class OnlineAgent(BaseAgent):
         normalized_url = self.base_url.lower()
         return any(
             provider_host in normalized_url
-            for provider_host in ("openai.com", "anthropic.com", "groq.com", "api.x.ai")
+            for provider_host in (
+                "openai.com",
+                "anthropic.com",
+                "groq.com",
+                "api.x.ai",
+                "openrouter.ai",
+            )
         )
 
     def _get_api_key_from_env(self) -> str | None:

@@ -58,6 +58,23 @@ def test_heavyweight_models_are_server_backed():
     assert hosted_glm.local is False
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
 
+    qwen_max = get_model_spec("qwen/qwen3.8-max")
+    assert qwen_max.backend == "openai_compatible"
+    assert qwen_max.local is False
+    assert get_provider_endpoint(qwen_max.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
+    from agents.architectures.registry import get_all_models, provider_from_string
+
+    assert provider_from_string("openrouter") == "openrouter"
+    assert "openrouter" in get_all_models()
+
+    for model_id in ("qwen3.8-max", "alibaba/qwen3.8-max", "Qwen/Qwen3.8-Max"):
+        spec = infer_model_spec(model_id)
+        assert spec.provider == "openrouter"
+        assert spec.local is False
+
 
 @pytest.mark.parametrize("model_id", [
     "Qwen/Qwen2.5-3B-Instruct",
@@ -162,6 +179,8 @@ def test_existing_llama_id_preserves_optimized_runner():
     "openai/gpt-oss-120b",
     "zai-org/GLM-5.2",
     "deepseek-ai/DeepSeek-R1",
+    "qwen/qwen3.8-max",
+    "qwen3.8-max",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -181,6 +200,14 @@ def test_hosted_glm_infers_zai_endpoint():
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model="glm-4.7-flash")
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
+
+
+@pytest.mark.parametrize("model_id", ["qwen/qwen3.8-max", "qwen3.8-max"])
+def test_qwen_max_infers_openrouter_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
 
 
 def test_self_hosted_model_requires_endpoint_or_environment():
