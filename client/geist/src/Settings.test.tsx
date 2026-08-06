@@ -21,6 +21,7 @@ const baseSettings = {
   default_presence_penalty: 0,
   backup_providers: [],
   ui_preferences: {},
+  agent_permissions: { mode: 'default', always_allow: [] },
   create_date: '2025-01-01T00:00:00Z',
   update_date: '2025-01-01T00:00:00Z'
 };
@@ -89,6 +90,7 @@ describe('Settings page', () => {
       expect(screen.getByRole('tab', { name: 'Models and Providers' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Files and RAG' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Permissions' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Developer' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();

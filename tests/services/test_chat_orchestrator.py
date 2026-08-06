@@ -12,6 +12,7 @@ from agents.models.tool_calling import (
     ToolDefinition,
     ToolExecutionOutput,
 )
+from app.services.agent_permissions import AgentPermissions
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.tool_registry import ToolRegistry
 
@@ -434,3 +435,142 @@ def test_persistence_failure_does_not_emit_unpersisted_final():
     assert error_event.payload["message"] == "Chat completion failed"
     assert "database unavailable" not in error_event.payload["message"]
     assert [attempt["status"] for attempt in write_attempts] == ["completed", "failed"]
+
+
+def test_auto_approve_permissions_execute_approval_gated_tool():
+    def send(context, arguments):
+        return ToolExecutionOutput(content="sent")
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="communication.email.send",
+            description="Send email",
+            arguments_model=LookupArguments,
+            handler=send,
+            requires_approval=True,
+        )
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="communication.email.send", arguments={"query": "hi"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Sent.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+        permissions_loader=lambda user_id: AgentPermissions(mode="auto_approve"),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="send it",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == ["proposed", "running", "succeeded"]
+    assert all(state.requires_approval is False for state in tool_states)
+
+
+def test_require_approval_permissions_gate_read_only_tool():
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lambda context, arguments: ToolExecutionOutput(content="found"),
+        )
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Waiting on approval.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+        permissions_loader=lambda user_id: AgentPermissions(mode="require_approval"),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == ["proposed", "awaiting_approval"]
+    assert all(state.requires_approval is True for state in tool_states)
+
+
+def test_always_allow_permissions_skip_approval_for_listed_tool():
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="workspace.write_markdown",
+            description="Write markdown",
+            arguments_model=LookupArguments,
+            handler=lambda context, arguments: ToolExecutionOutput(content="written"),
+            requires_approval=True,
+        )
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="workspace.write_markdown", arguments={"query": "x"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Done.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+        permissions_loader=lambda user_id: AgentPermissions(
+            mode="require_approval",
+            always_allow=frozenset({"workspace.write_markdown"}),
+        ),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="write",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == ["proposed", "running", "succeeded"]

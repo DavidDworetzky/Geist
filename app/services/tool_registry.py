@@ -20,6 +20,7 @@ from agents.models.tool_calling import (
     ToolDefinition,
     ToolExecutionOutput,
     ToolResult,
+    tool_requires_approval,
 )
 from app.services.document_search import DocumentSearchService
 
@@ -135,7 +136,7 @@ class ToolRegistry:
                 content=f"Tool is not configured: {call.name}",
                 error="tool_unavailable",
             )
-        if definition.requires_approval and call.id not in context.approved_call_ids:
+        if tool_requires_approval(definition, context) and call.id not in context.approved_call_ids:
             return ToolResult(
                 call=call,
                 status="awaiting_approval",

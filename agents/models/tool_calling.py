@@ -23,6 +23,24 @@ ToolCallStatus = Literal[
 ]
 ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"]
 
+# User-configurable approval posture for agentic tool execution.
+#   default          — per-tool requires_approval flags decide (side-effecting
+#                      tools ask, read-only tools run).
+#   auto_approve     — no tool ever waits for approval.
+#   require_approval — every tool call waits for approval unless the tool is
+#                      on the user's always-allow list.
+PermissionMode = Literal["default", "auto_approve", "require_approval"]
+PERMISSION_MODE_DEFAULT: PermissionMode = "default"
+PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
+PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
+VALID_PERMISSION_MODES: frozenset[str] = frozenset(
+    (
+        PERMISSION_MODE_DEFAULT,
+        PERMISSION_MODE_AUTO_APPROVE,
+        PERMISSION_MODE_REQUIRE_APPROVAL,
+    )
+)
+
 
 @dataclass(frozen=True)
 class ModelRequestConfig:
@@ -116,6 +134,8 @@ class ToolContext:
     chat_id: int | None
     run_id: str
     approved_call_ids: frozenset[str] = frozenset()
+    permission_mode: str = PERMISSION_MODE_DEFAULT
+    always_allow_tools: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -167,6 +187,23 @@ class ToolDefinition:
             "description": self.description,
             "input_schema": self.parameters_schema(),
         }
+
+
+def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
+    """Effective approval requirement for one call under the user's permissions.
+
+    The user's always-allow list is a standing grant, so it wins over both the
+    per-tool flag and require_approval mode; auto_approve waives everything
+    else; require_approval asks for every remaining tool; default falls back
+    to the tool's own requires_approval flag.
+    """
+    if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
+        return False
+    if definition.name in context.always_allow_tools:
+        return False
+    if context.permission_mode == PERMISSION_MODE_REQUIRE_APPROVAL:
+        return True
+    return definition.requires_approval
 
 
 @dataclass

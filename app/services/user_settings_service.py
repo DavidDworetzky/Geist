@@ -15,12 +15,23 @@ from app.models.database.user_settings import (
 from app.models.user_settings import (
     AgentConfigRequest,
     AgentFactoryConfig,
+    AgentPermissionsSettings,
     UserSettingsResponse,
     UserSettingsUpdate,
 )
+from app.services.agent_permissions import normalize_agent_permissions
 
 
 logger = logging.getLogger(__name__)
+
+
+def _permissions_from_stored(raw: object) -> AgentPermissionsSettings:
+    """Tolerantly hydrate stored agent permissions; malformed rows fall back to defaults."""
+    try:
+        return AgentPermissionsSettings.model_validate(raw or {})
+    except Exception:
+        logger.warning("Malformed stored agent_permissions %r; using defaults", raw)
+        return AgentPermissionsSettings()
 
 class UserSettingsService:
     """Service for managing user settings and agent configuration."""
@@ -55,6 +66,7 @@ class UserSettingsService:
                 default_presence_penalty=settings_model.default_presence_penalty,
                 backup_providers=settings_model.backup_providers,
                 ui_preferences=settings_model.ui_preferences,
+                agent_permissions=_permissions_from_stored(settings_model.agent_permissions),
                 create_date=settings_model.create_date,
                 update_date=settings_model.update_date
             )
@@ -89,6 +101,7 @@ class UserSettingsService:
             default_presence_penalty=settings_model.default_presence_penalty,
             backup_providers=settings_model.backup_providers,
             ui_preferences=settings_model.ui_preferences,
+            agent_permissions=_permissions_from_stored(settings_model.agent_permissions),
             create_date=settings_model.create_date,
             update_date=settings_model.update_date
         )
@@ -111,6 +124,13 @@ class UserSettingsService:
         current_settings = get_user_settings(user_id)
         if current_settings is None:
             return None
+
+        if "agent_permissions" in update_dict:
+            # Canonicalize (dedupe/sort/strip tool names) before hitting the
+            # JSON column; raises ValueError -> 422 on malformed payloads.
+            update_dict["agent_permissions"] = normalize_agent_permissions(
+                update_dict["agent_permissions"]
+            )
 
         if (
             "default_local_model" in update_dict
@@ -176,6 +196,7 @@ class UserSettingsService:
                 default_presence_penalty=settings_model.default_presence_penalty,
                 backup_providers=settings_model.backup_providers,
                 ui_preferences=settings_model.ui_preferences,
+                agent_permissions=_permissions_from_stored(settings_model.agent_permissions),
                 create_date=settings_model.create_date,
                 update_date=settings_model.update_date
             )
