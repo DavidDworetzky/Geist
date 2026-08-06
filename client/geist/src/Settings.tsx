@@ -8,6 +8,10 @@ import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
+import {
+  useGeistPluginDiagnostics,
+  useHostDevelopmentEnabled,
+} from './plugins/runtime';
 
 type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
 
@@ -23,6 +27,8 @@ const Settings: React.FC = () => {
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const hostDevelopmentEnabled = useHostDevelopmentEnabled();
+  const pluginDiagnostics = useGeistPluginDiagnostics();
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
@@ -33,6 +39,12 @@ const Settings: React.FC = () => {
       setLocalSettings(settings);
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (!hostDevelopmentEnabled && activeTab === 'developer') {
+      setActiveTab('general');
+    }
+  }, [activeTab, hostDevelopmentEnabled]);
 
   const updateLocalSetting = (key: string, value: any) => {
     setLocalSettings((prev: any) => ({
@@ -120,7 +132,9 @@ const Settings: React.FC = () => {
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'ui' as Tab, label: 'Appearance' },
-    { id: 'developer' as Tab, label: 'Developer' },
+    ...(hostDevelopmentEnabled
+      ? [{ id: 'developer' as Tab, label: 'Developer' }]
+      : []),
     { id: 'about' as Tab, label: 'About' }
   ];
 
@@ -258,11 +272,11 @@ const Settings: React.FC = () => {
             />
           )}
 
-          {activeTab === 'developer' && (
+          {hostDevelopmentEnabled && activeTab === 'developer' && (
             <section className="settings-section">
               <header className="settings-section-header">
                 <h3>Developer</h3>
-                <p>Inspect host branding and runtime integration defaults.</p>
+                <p>Inspect host integration and plugins active in this page.</p>
               </header>
               <div className="settings-readonly-grid">
                 <div className="settings-readonly-item">
@@ -274,6 +288,47 @@ const Settings: React.FC = () => {
                   <span className="settings-description">Semantic CSS variables</span>
                 </div>
               </div>
+              <div className="settings-subsection-header">
+                <div>
+                  <h4>Active Plugins</h4>
+                  <p className="settings-description">
+                    Full-trust host plugins registered with host API 1.
+                  </p>
+                </div>
+                <span className="settings-value-pill">{pluginDiagnostics.length}</span>
+              </div>
+              {pluginDiagnostics.length === 0 ? (
+                <p className="settings-description">No host plugins are active.</p>
+              ) : (
+                <div className="plugin-diagnostic-list">
+                  {pluginDiagnostics.map((plugin) => {
+                    const mountedCount = plugin.contributions.filter(
+                      (contribution) => contribution.mounted
+                    ).length;
+                    return (
+                      <article className="plugin-diagnostic-item" key={plugin.id}>
+                        <div>
+                          <span className="settings-label">{plugin.name}</span>
+                          <span className="settings-description plugin-diagnostic-id">
+                            {plugin.provider} - {plugin.id} v{plugin.version} - API {plugin.apiVersion}
+                          </span>
+                        </div>
+                        <div className="plugin-diagnostic-summary">
+                          <span className={`plugin-status plugin-status-${plugin.status}`}>
+                            {plugin.status}
+                          </span>
+                          <span className="settings-description">
+                            {mountedCount}/{plugin.contributions.length} mounted
+                          </span>
+                        </div>
+                        <p className={`settings-description${plugin.lastError ? ' plugin-diagnostic-error' : ''}`}>
+                          Last error: {plugin.lastError ?? 'None'}
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           )}
 
