@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ChatTextArea from '../ChatTextArea';
 import { ChatPair } from '../../chatTypes';
 
@@ -129,5 +129,42 @@ describe('ChatTextArea tool activity', () => {
       'href',
       'https://example.com/notes.txt',
     );
+  });
+});
+
+describe('ChatTextArea approval decisions', () => {
+  const awaitingTurn = (): ChatPair => ({
+    run_id: 'run_9',
+    user: 'Write the file',
+    ai: '',
+    status: 'awaiting_approval',
+    tool_calls: [
+      {
+        id: 'call_gated',
+        name: 'workspace.write_markdown',
+        arguments: { path: 'notes.md' },
+        status: 'awaiting_approval',
+        requires_approval: true,
+      },
+    ],
+  });
+
+  it('offers the four decision tiers and reports the choice', () => {
+    const onToolApproval = jest.fn();
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} onToolApproval={onToolApproval} />);
+
+    const group = screen.getByRole('group', { name: 'Approve workspace.write_markdown' });
+    expect(group).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow for session' }));
+    expect(onToolApproval).toHaveBeenCalledWith('run_9', 'call_gated', 'session');
+
+    // Buttons disable after a decision to prevent double submission.
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+  });
+
+  it('renders no decision buttons without a handler', () => {
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} />);
+    expect(screen.queryByRole('button', { name: 'Approve once' })).not.toBeInTheDocument();
   });
 });

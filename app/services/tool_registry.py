@@ -23,7 +23,10 @@ from agents.models.tool_calling import (
     tool_requires_approval,
 )
 from app.services.document_search import DocumentSearchService
-from app.services.execution import create_execution_environment
+from app.services.execution import (
+    create_execution_environment,
+    create_session_manager,
+)
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
     MAX_COMMAND_TIMEOUT_SECONDS,
@@ -402,13 +405,21 @@ def build_default_tool_registry() -> ToolRegistry:
     # budget, so a backend must hold at least one of them.
     execution_environment = create_execution_environment()
     if execution_environment is not None:
+        session_manager = create_session_manager(execution_environment)
 
         def terminal_run(
             context: ToolContext, arguments: TerminalRunArguments
         ) -> ToolExecutionOutput:
-            result = execution_environment.run(
-                arguments.command, timeout_seconds=arguments.timeout_seconds
-            )
+            if session_manager is not None and context.chat_id is not None:
+                result = session_manager.run_in_session(
+                    f"chat-{context.chat_id}",
+                    arguments.command,
+                    timeout_seconds=arguments.timeout_seconds,
+                )
+            else:
+                result = execution_environment.run(
+                    arguments.command, timeout_seconds=arguments.timeout_seconds
+                )
             summary = (
                 f"exit {result.exit_code}"
                 + (" (timed out)" if result.timed_out else "")

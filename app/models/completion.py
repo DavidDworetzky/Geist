@@ -29,3 +29,11 @@ class CompleteTextParams(BaseModel):
 class InitializeAgentParams(BaseModel):
     prompt: str
     agent_type: str | None = None
+
+
+class ToolApprovalParams(BaseModel):
+    """Decision for a tool call blocked on user approval."""
+
+    call_id: str
+    # 'approve' (once) | 'session' (this chat) | 'always' (persist) | 'deny'
+    decision: str
