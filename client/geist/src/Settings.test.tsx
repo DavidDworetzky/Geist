@@ -4,6 +4,11 @@ import Settings from './Settings';
 import { BrandingProvider } from './branding';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
 import { installResizeObserverMock } from './testUtils/mockResizeObserver';
+import {
+  GEIST_HOST_DEVELOPMENT_UPDATED_EVENT,
+  GEIST_PLUGIN_API_VERSION,
+  geistPluginRuntime,
+} from './plugins/runtime';
 
 const baseSettings = {
   user_settings_id: 1,
@@ -72,6 +77,7 @@ describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     delete window.__GEIST_BRANDING__;
+    delete window.__GEIST_HOST_DEVELOPMENT__;
     // @ts-ignore
     global.fetch = jest.fn();
   });
@@ -90,9 +96,46 @@ describe('Settings page', () => {
       expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Files and RAG' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: 'Developer' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Developer' })).not.toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
     });
+  });
+
+  it('shows active plugins only after an explicit host-development update', async () => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+    const unregister = geistPluginRuntime.register({
+      apiVersion: GEIST_PLUGIN_API_VERSION,
+      id: 'example.host-plugin',
+      name: 'Example Host Plugin',
+      provider: 'Example Host',
+      version: '1.2.3',
+      activate: () => undefined,
+    });
+
+    try {
+      renderSettings();
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('tab', { name: 'Developer' })).not.toBeInTheDocument();
+
+      act(() => {
+        window.__GEIST_HOST_DEVELOPMENT__ = true;
+        window.dispatchEvent(new Event(GEIST_HOST_DEVELOPMENT_UPDATED_EVENT));
+      });
+
+      fireEvent.click(await screen.findByRole('tab', { name: 'Developer' }));
+      expect(screen.getByRole('heading', { name: 'Active Plugins' })).toBeInTheDocument();
+      expect(screen.getByText('Example Host Plugin')).toBeInTheDocument();
+      expect(
+        screen.getByText('Example Host - example.host-plugin v1.2.3 - API 1')
+      ).toBeInTheDocument();
+      expect(screen.getByText('0/0 mounted')).toBeInTheDocument();
+      expect(screen.getByText('Last error: None')).toBeInTheDocument();
+    } finally {
+      act(() => unregister());
+    }
   });
 
   it('shows host, Geist, machine, and inference details on the About tab', async () => {
