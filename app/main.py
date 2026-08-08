@@ -29,6 +29,7 @@ from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.plugins import router as plugins_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -53,6 +54,7 @@ from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -99,6 +101,9 @@ _tool_registry = build_default_tool_registry()
 # Enabled MCP servers contribute their tools through the same registry as the
 # curated defaults; configuration lives behind /api/v1/mcp.
 _tool_registry.add_source(get_mcp_tool_source())
+# Installed agent plugins contribute skills (via skills.load) and, for plugins
+# named in GEIST_ENABLED_PLUGINS, their declared MCP servers.
+install_plugin_support(_tool_registry)
 chat_orchestrator = ChatOrchestrator(
     _tool_registry,
     run_controls=run_controls,
@@ -280,6 +285,10 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
     sections = [DEFAULT_PROMPT]
     if enable_tools:
         sections.append(TOOL_USE_PROMPT)
+        # Skills are only actionable when the model can call skills.load.
+        skills_context = build_plugin_skills_context()
+        if skills_context:
+            sections.append(skills_context)
     if memory_context:
         sections.append(memory_context)
     return "\n\n".join(sections)
@@ -610,6 +619,7 @@ def create_app(
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
     app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+    app.include_router(plugins_router, prefix="/api/v1/plugins", tags=["plugins"])
 
     @app.get("/health", include_in_schema=False)
     def health():
