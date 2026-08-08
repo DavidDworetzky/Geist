@@ -153,6 +153,29 @@ completion = local_agent.complete_with_tools("What is 7 + 8?")
 - Every dispatch is journaled to the agent context's `function_log`, which is
   captured by state snapshots
 
+## RLM Agent (experimental)
+
+`RlmAgent` (`agents/rlm_agent.py`) is a code-first execution layer inspired by
+Recursive Language Models (Prime Intellect's Prime Agent / `alexzhang13/rlm`).
+It wraps any `BaseAgent`: instead of the JSON tool-call protocol, the model
+writes Python that runs in a persistent REPL. Supplemental context is a REPL
+variable (`context`) rather than prompt text, `llm_query(...)` calls the
+wrapped model, `rlm_query(...)` recursively delegates a subtask to a child
+agent with its own REPL (depth-limited), and `call_tool("Adapter__action",
+...)` dispatches through the existing structured tool-calling stack.
+
+```python
+from agents.rlm_agent import RlmAgent
+
+rlm = RlmAgent(agent, max_iterations=8, max_depth=2)
+result = rlm.run("Find every TODO owner in this dump.", context=huge_text)
+print(result.answer, result.iterations)
+```
+
+Generated code executes via `exec` in-process — the same trust level as
+adapter execution, not a sandbox. Keep it away from untrusted inputs until an
+isolated `RlmEnvironment` lands. Design notes: `plans/157-RLM-AGENT.md`.
+
 ## User Settings
 
 ### Configuration
