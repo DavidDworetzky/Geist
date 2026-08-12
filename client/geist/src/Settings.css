@@ -465,6 +465,56 @@
   border-radius: var(--geist-radius-md);
 }
 
+.plugin-diagnostic-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plugin-diagnostic-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: 12px;
+  background: var(--geist-color-surface-muted);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.plugin-diagnostic-id {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.plugin-diagnostic-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.plugin-status {
+  padding: 3px 7px;
+  font-size: 0.7rem;
+  font-weight: 760;
+  text-transform: uppercase;
+  border: 1px solid var(--geist-color-border);
+  border-radius: 999px;
+}
+
+.plugin-status-active {
+  color: var(--geist-color-success);
+}
+
+.plugin-status-error,
+.plugin-diagnostic-error {
+  color: var(--geist-color-danger);
+}
+
+.plugin-diagnostic-error {
+  grid-column: 1 / -1;
+}
+
 .about-section {
   display: grid;
   gap: 18px;

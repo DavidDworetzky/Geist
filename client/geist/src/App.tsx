@@ -9,6 +9,7 @@ import Models from './Models';
 import Settings from './Settings';
 import { BrandingProvider } from './branding';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
+import { GeistPluginHost } from './plugins/runtime';
 import './Motion.css';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
     <BrandingProvider>
       <UserSettingsProvider>
         <BrowserRouter>
+          <GeistPluginHost />
           <AppShell>
             <Routes>
               <Route path="/" element={<Navigate to="/chat" replace />} />
