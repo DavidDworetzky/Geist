@@ -93,9 +93,12 @@ export default function LlamaComputeSection({
   }
 
   const locked = inventory.managed_by_environment;
-  const selectedValue = backend ?? 'auto';
   const devices = inventory.devices ?? [];
   const gpuAvailable = devices.length > 0;
+  const selectedBackend = backend ?? inventory.recommended_backend;
+  const selectedDeviceIds = backend === null
+    ? inventory.recommended_device_ids
+    : deviceIds;
   const selectBackend = (value: string) => {
     if (value === 'cpu') {
       onDeviceIdsChange([]);
@@ -114,11 +117,14 @@ export default function LlamaComputeSection({
     }
   };
   const toggleDevice = (deviceId: string) => {
-    const currentAvailable = deviceIds.filter(value => availableDeviceIds.has(value));
+    const currentAvailable = selectedDeviceIds.filter(value => availableDeviceIds.has(value));
     const next = currentAvailable.includes(deviceId)
       ? currentAvailable.filter(value => value !== deviceId)
       : [...currentAvailable, deviceId];
-    if (next.length > 0) onDeviceIdsChange(next);
+    if (next.length > 0) {
+      onDeviceIdsChange(next);
+      onBackendChange('gpu');
+    }
   };
 
   return (
@@ -143,15 +149,14 @@ export default function LlamaComputeSection({
             Compute Backend
           </label>
           <p className="settings-description">
-            {backend === null ? `Automatic detection pending. ${inventory.reason}` : inventory.reason}
+            {inventory.reason}
           </p>
           <select
             id="settings-select-llama-backend"
             className="form-control settings-select-control"
-            value={selectedValue}
+            value={selectedBackend}
             onChange={event => selectBackend(event.target.value)}
           >
-            {backend === null && <option value="auto">Automatic detection pending</option>}
             <option value="cpu">CPU</option>
             <option value="gpu" disabled={!gpuAvailable}>GPU</option>
           </select>
@@ -162,7 +167,7 @@ export default function LlamaComputeSection({
         <div className="notice notice-warning">{inventory.error || requestError}</div>
       )}
 
-      {!locked && backend === 'gpu' && (
+      {!locked && selectedBackend === 'gpu' && (
         <fieldset className="llama-device-picker">
           <legend className="settings-label">GPU Devices</legend>
           <p className="settings-description">
@@ -172,7 +177,7 @@ export default function LlamaComputeSection({
             <label className="llama-device-option" key={device.id}>
               <input
                 type="checkbox"
-                checked={deviceIds.includes(device.id)}
+                checked={selectedDeviceIds.includes(device.id)}
                 onChange={() => toggleDevice(device.id)}
               />
               <span>

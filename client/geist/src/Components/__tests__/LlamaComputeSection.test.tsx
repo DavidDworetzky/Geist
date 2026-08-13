@@ -77,9 +77,38 @@ describe('LlamaComputeSection', () => {
 
     render(<LlamaComputeSection {...props} />);
     const select = await screen.findByLabelText('Compute Backend');
-    expect(select).toHaveValue('auto');
+    expect(select).toHaveValue('cpu');
     expect(screen.getByRole('option', { name: 'CPU' })).not.toBeDisabled();
     expect(screen.getByRole('option', { name: 'GPU' })).toBeDisabled();
+  });
+
+  it('presents the automatic recommendation as the selected backend', async () => {
+    // @ts-ignore
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({
+        available: true,
+        managed_by_environment: false,
+        forced_backend: null,
+        devices: [{
+          id: 'gpu-recommended',
+          name: 'Recommended GPU',
+          total_memory_mib: 8192,
+          free_memory_mib: 6144,
+          kind: 'discrete',
+          recommended: true,
+        }],
+        recommended_backend: 'gpu',
+        recommended_device_ids: ['gpu-recommended'],
+        reason: 'Recommended GPU is the recommended discrete GPU.',
+        error: null,
+      }),
+    }));
+
+    render(<LlamaComputeSection {...props} />);
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
+    expect(screen.getByRole('checkbox', { name: /Recommended GPU/i })).toBeChecked();
+    expect(screen.queryByText(/pending|verified|verification/i)).not.toBeInTheDocument();
   });
 
   it('warns when a saved GPU is no longer available', async () => {

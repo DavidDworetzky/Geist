@@ -374,7 +374,7 @@ describe('Settings page', () => {
     });
   });
 
-  it('previews first-use detection and saves one or more explicit GPUs', async () => {
+  it('selects the recommended backend and saves one or more explicit GPUs', async () => {
     let savedUpdates: any = null;
     // @ts-ignore
     global.fetch = jest.fn((url: string, options?: any) => {
@@ -394,8 +394,7 @@ describe('Settings page', () => {
     renderSettings();
     fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
 
-    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('auto');
-    fireEvent.change(screen.getByLabelText('Compute Backend'), { target: { value: 'gpu' } });
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
 
     const nvidia = screen.getByRole('checkbox', { name: /NVIDIA GeForce RTX 3080/i });
     const intel = screen.getByRole('checkbox', { name: /Intel\(R\) UHD Graphics/i });
@@ -408,6 +407,33 @@ describe('Settings page', () => {
       expect(savedUpdates.llama_backend).toBe('gpu');
     });
     expect(savedUpdates.llama_gpu_device_ids).toEqual(['gpu-nvidia', 'gpu-intel']);
+  });
+
+  it('preserves unresolved compute detection when saving without opening Models', async () => {
+    let savedUpdates: any = null;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string, options?: any) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (options?.method === 'PUT') {
+        savedUpdates = JSON.parse(options.body);
+        return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Generation' }));
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(savedUpdates).not.toBeNull());
+    expect(savedUpdates).not.toHaveProperty('llama_backend');
+    expect(savedUpdates).not.toHaveProperty('llama_gpu_device_ids');
+    expect(global.fetch).not.toHaveBeenCalledWith('/api/v1/models/local/runtime/devices');
   });
 
   it('refreshes a backend selection persisted after the provider first loaded', async () => {
@@ -446,8 +472,7 @@ describe('Settings page', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
     expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
-    expect(screen.queryByRole('option', { name: /automatic detection pending/i }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByText(/pending|verified|verification/i)).not.toBeInTheDocument();
   });
 
   it('cancel reverts local changes', async () => {
@@ -498,7 +523,7 @@ describe('Settings page', () => {
     });
 
     fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
-    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('auto');
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
   });
 
   it('shows error with Retry on initial fetch failure', async () => {

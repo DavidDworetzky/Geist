@@ -90,8 +90,10 @@ const Settings: React.FC = () => {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
         default_local_artifact_id: localSettings.default_local_artifact_id,
-        llama_backend: localSettings.llama_backend,
-        llama_gpu_device_ids: localSettings.llama_gpu_device_ids,
+        ...(localSettings.llama_backend === null ? {} : {
+          llama_backend: localSettings.llama_backend,
+          llama_gpu_device_ids: localSettings.llama_gpu_device_ids,
+        }),
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,

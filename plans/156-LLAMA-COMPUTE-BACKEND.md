@@ -22,6 +22,8 @@ MLX behavior unchanged.
   remain authoritative and lock the user-facing control.
 - A full settings reset clears the detected backend and device selection so the
   next llama.cpp use detects again.
+- Settings presents the current hardware recommendation directly as CPU or GPU;
+  the internal unresolved state is not exposed as pending or unverified UI.
 
 ## Persistence and API
 
