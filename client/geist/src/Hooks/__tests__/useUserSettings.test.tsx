@@ -20,6 +20,8 @@ const mockSettings: UserSettings = {
   default_agent_type: 'local',
   default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   default_local_artifact_id: 'meta-llama-3.1-8b-instruct',
+  llama_backend: 'gpu',
+  llama_gpu_device_ids: ['gpu-nvidia'],
   default_online_model: 'gpt-4',
   default_online_provider: 'openai',
   default_file_archives: [101, 102],

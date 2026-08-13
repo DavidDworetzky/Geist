@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
@@ -27,18 +27,42 @@ const Settings: React.FC = () => {
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const refreshedOnMount = useRef(false);
+  const mounted = useRef(true);
+  const [refreshingOnMount, setRefreshingOnMount] = useState(true);
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
-  } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings));
+  } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings) && !refreshingOnMount);
 
   useEffect(() => {
-    if (settings) {
+    if (settings && !hasUnsavedChanges) {
       setLocalSettings(settings);
     }
-  }, [settings]);
+  }, [settings, hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (loading || refreshedOnMount.current) {
+      return;
+    }
+    refreshedOnMount.current = true;
+    if (!settings) {
+      setRefreshingOnMount(false);
+      return;
+    }
+    void refetch().finally(() => {
+      if (mounted.current) setRefreshingOnMount(false);
+    });
+  }, [loading, refetch, settings]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hostDevelopmentEnabled && activeTab === 'developer') {
@@ -66,6 +90,8 @@ const Settings: React.FC = () => {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
         default_local_artifact_id: localSettings.default_local_artifact_id,
+        llama_backend: localSettings.llama_backend,
+        llama_gpu_device_ids: localSettings.llama_gpu_device_ids,
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
@@ -138,7 +164,7 @@ const Settings: React.FC = () => {
     { id: 'about' as Tab, label: 'About' }
   ];
 
-  if (loading && !localSettings) {
+  if ((loading && !localSettings) || refreshingOnMount) {
     return (
       <div className="settings-page page-surface page-surface-centered">
         <div className="empty-state">Loading settings...</div>
@@ -219,6 +245,8 @@ const Settings: React.FC = () => {
               localModel={localSettings.default_local_model}
               onlineProvider={localSettings.default_online_provider}
               onlineModel={localSettings.default_online_model}
+              llamaBackend={localSettings.llama_backend}
+              llamaGpuDeviceIds={localSettings.llama_gpu_device_ids}
               onLocalModelChange={(value) => {
                 updateLocalSetting('default_local_model', value);
                 updateLocalSetting('default_local_artifact_id', null);
@@ -238,6 +266,8 @@ const Settings: React.FC = () => {
                   updateLocalSetting('default_agent_type', 'online');
                 }
               }}
+              onLlamaBackendChange={(value) => updateLocalSetting('llama_backend', value)}
+              onLlamaGpuDeviceIdsChange={(value) => updateLocalSetting('llama_gpu_device_ids', value)}
             />
           )}
 

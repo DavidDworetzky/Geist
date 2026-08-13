@@ -15,6 +15,9 @@ const baseSettings = {
   user_id: 1,
   default_agent_type: 'local',
   default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+  default_local_artifact_id: null,
+  llama_backend: null,
+  llama_gpu_device_ids: [],
   default_online_model: 'gpt-4',
   default_online_provider: 'openai',
   default_file_archives: [],
@@ -28,6 +31,34 @@ const baseSettings = {
   ui_preferences: {},
   create_date: '2025-01-01T00:00:00Z',
   update_date: '2025-01-01T00:00:00Z'
+};
+
+const mockDeviceInventory = {
+  available: true,
+  managed_by_environment: false,
+  forced_backend: null,
+  devices: [
+    {
+      id: 'gpu-nvidia',
+      name: 'NVIDIA GeForce RTX 3080',
+      total_memory_mib: 16384,
+      free_memory_mib: 12000,
+      kind: 'discrete',
+      recommended: true,
+    },
+    {
+      id: 'gpu-intel',
+      name: 'Intel(R) UHD Graphics',
+      total_memory_mib: 2048,
+      free_memory_mib: 1024,
+      kind: 'integrated',
+      recommended: false,
+    },
+  ],
+  recommended_backend: 'gpu',
+  recommended_device_ids: ['gpu-nvidia'],
+  reason: 'NVIDIA GeForce RTX 3080 is the recommended discrete GPU.',
+  error: null,
 };
 
 const mockModelsResponse = {
@@ -48,14 +79,18 @@ const mockModelsResponse = {
 };
 
 // Helper to create fetch mock that handles both settings and models endpoints
-const createFetchMock = (settingsResponses: any[]) => {
-  let settingsCallIndex = 0;
-  return jest.fn((url: string) => {
+const createFetchMock = (settingsResponses: any[], inventory = mockDeviceInventory) => {
+  let mutationCallIndex = 1;
+  return jest.fn((url: string, options?: RequestInit) => {
     if (url === '/api/v1/models/') {
       return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
     }
-    // Settings endpoints
-    const response = settingsResponses[settingsCallIndex++];
+    if (url === '/api/v1/models/local/runtime/devices') {
+      return Promise.resolve({ ok: true, json: async () => inventory });
+    }
+    const response = !options?.method || options.method === 'GET'
+      ? settingsResponses[0]
+      : settingsResponses[mutationCallIndex++];
     return Promise.resolve(response);
   });
 };
@@ -339,6 +374,82 @@ describe('Settings page', () => {
     });
   });
 
+  it('previews first-use detection and saves one or more explicit GPUs', async () => {
+    let savedUpdates: any = null;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string, options?: any) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
+      }
+      if (options?.method === 'PUT') {
+        savedUpdates = JSON.parse(options.body);
+        return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('auto');
+    fireEvent.change(screen.getByLabelText('Compute Backend'), { target: { value: 'gpu' } });
+
+    const nvidia = screen.getByRole('checkbox', { name: /NVIDIA GeForce RTX 3080/i });
+    const intel = screen.getByRole('checkbox', { name: /Intel\(R\) UHD Graphics/i });
+    expect(nvidia).toBeChecked();
+    expect(screen.getByText(/integrated.*not recommended/i)).toBeInTheDocument();
+    fireEvent.click(intel);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(savedUpdates.llama_backend).toBe('gpu');
+    });
+    expect(savedUpdates.llama_gpu_device_ids).toEqual(['gpu-nvidia', 'gpu-intel']);
+  });
+
+  it('refreshes a backend selection persisted after the provider first loaded', async () => {
+    let settingsGets = 0;
+    let resolveRefresh: ((response: any) => void) | null = null;
+    const resolvedSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: ['gpu-nvidia'],
+    };
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
+      }
+      settingsGets += 1;
+      if (settingsGets === 1) {
+        return Promise.resolve({ ok: true, json: async () => baseSettings });
+      }
+      return new Promise((resolve) => {
+        resolveRefresh = resolve;
+      });
+    });
+
+    renderSettings();
+    await waitFor(() => expect(settingsGets).toBe(2));
+    expect(screen.getByText(/Loading settings/i)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Models and Providers' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefresh?.({ ok: true, json: async () => resolvedSettings });
+    });
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
+    expect(screen.queryByRole('option', { name: /automatic detection pending/i }))
+      .not.toBeInTheDocument();
+  });
+
   it('cancel reverts local changes', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
@@ -360,9 +471,14 @@ describe('Settings page', () => {
   });
 
   it('reset triggers API and shows success', async () => {
+    const resolvedSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: ['gpu-nvidia'],
+    };
     // @ts-ignore
     global.fetch = createFetchMock([
-      { ok: true, json: async () => baseSettings }, // initial GET
+      { ok: true, json: async () => resolvedSettings }, // initial GET
       { ok: true, json: async () => baseSettings }, // POST reset
     ]);
 
@@ -380,6 +496,9 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(screen.getByText(/Settings reset to defaults successfully/i)).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('auto');
   });
 
   it('shows error with Retry on initial fetch failure', async () => {

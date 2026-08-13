@@ -96,6 +96,17 @@ class LocalAgent(BaseAgent):
         )
         model_load_status_registry.mark_ready(self.model_id)
 
+    def runtime_selection(self) -> tuple[str, tuple[str, ...]] | None:
+        """Return the effective managed llama.cpp selection when applicable."""
+
+        if self.runner_type != "llama_server" or self.runner is None:
+            return None
+        backend = getattr(self.runner, "effective_backend", None)
+        if backend not in {"cpu", "gpu"}:
+            return None
+        device_ids = tuple(getattr(self.runner, "effective_device_ids", ()))
+        return backend, device_ids
+
     def _create_generation_config(
         self,
         max_tokens: int | None = None,

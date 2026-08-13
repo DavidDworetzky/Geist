@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +19,8 @@ def _settings(**overrides) -> UserSettingsModel:
         "default_agent_type": "local",
         "default_local_model": "old/model",
         "default_local_artifact_id": "old-artifact",
+        "llama_backend": None,
+        "llama_gpu_device_ids": [],
         "default_online_model": "gpt-4",
         "default_online_provider": "openai",
         "default_file_archives": [],
@@ -97,3 +100,102 @@ def test_artifact_selection_must_match_model_and_be_installed():
                 default_local_artifact_id="new-artifact",
             ),
         )
+
+
+def test_explicit_gpu_selection_requires_current_inventory_devices():
+    current = _settings(llama_backend="cpu")
+    updated = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-integrated"])
+    inventory = SimpleNamespace(
+        managed_by_environment=False,
+        available=True,
+        devices=[SimpleNamespace(id="gpu-integrated")],
+    )
+    service = MagicMock()
+    service.inventory.return_value = inventory
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch("app.services.user_settings_service.update_user_settings", return_value=updated),
+        patch(
+            "agents.architectures.llama_devices.get_llama_device_service",
+            return_value=service,
+        ),
+    ):
+        result = UserSettingsService.update_user_settings_by_id(
+            1,
+            UserSettingsUpdate(
+                llama_backend="gpu",
+                llama_gpu_device_ids=["gpu-integrated"],
+            ),
+        )
+
+    assert result is not None
+    assert result.llama_backend == "gpu"
+    assert result.llama_gpu_device_ids == ["gpu-integrated"]
+
+
+def test_regular_update_cannot_rearm_detection_after_resolution():
+    current = _settings(llama_backend="cpu")
+    inventory = SimpleNamespace(managed_by_environment=False, available=True, devices=[])
+    service = MagicMock()
+    service.inventory.return_value = inventory
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch(
+            "agents.architectures.llama_devices.get_llama_device_service",
+            return_value=service,
+        ),
+        pytest.raises(ValueError, match="Reset to Defaults"),
+    ):
+        UserSettingsService.update_user_settings_by_id(
+            1,
+            UserSettingsUpdate(llama_backend=None, llama_gpu_device_ids=[]),
+        )
+
+
+def test_full_reset_rearms_detection_without_consulting_environment_lock():
+    current = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-old"])
+    updated = _settings(llama_backend=None, llama_gpu_device_ids=[])
+    inventory = SimpleNamespace(managed_by_environment=False, available=True, devices=[])
+    service = MagicMock()
+    service.inventory.return_value = inventory
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch(
+            "app.services.user_settings_service.update_user_settings", return_value=updated
+        ) as update,
+        patch(
+            "agents.architectures.llama_devices.get_llama_device_service",
+            return_value=service,
+        ),
+    ):
+        result = UserSettingsService.update_user_settings_by_id(
+            1,
+            UserSettingsUpdate(llama_backend=None, llama_gpu_device_ids=[]),
+            allow_llama_redetection=True,
+        )
+
+    assert result is not None
+    assert result.llama_backend is None
+    assert result.llama_gpu_device_ids == []
+    assert update.call_args.args[1]["llama_backend"] is None
+    service.inventory.assert_not_called()
+
+
+def test_first_use_persistence_does_not_overwrite_a_resolved_choice():
+    resolved = _settings(llama_backend="cpu")
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=resolved),
+        patch.object(
+            UserSettingsService,
+            "get_user_settings_by_id",
+            return_value=MagicMock(llama_backend="cpu"),
+        ) as get_response,
+        patch(
+            "app.services.user_settings_service.update_detected_llama_backend_if_unset"
+        ) as update,
+    ):
+        result = UserSettingsService.persist_detected_llama_backend(1, "gpu", ("gpu-best",))
+
+    assert result is not None
+    get_response.assert_called_once_with(1)
+    update.assert_not_called()

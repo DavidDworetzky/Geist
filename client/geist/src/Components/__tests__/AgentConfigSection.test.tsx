@@ -9,10 +9,14 @@ describe('AgentConfigSection', () => {
     localModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
     onlineProvider: 'openai',
     onlineModel: 'gpt-4',
+    llamaBackend: null,
+    llamaGpuDeviceIds: [],
     onAgentTypeChange: jest.fn(),
     onLocalModelChange: jest.fn(),
     onOnlineProviderChange: jest.fn(),
     onOnlineModelChange: jest.fn(),
+    onLlamaBackendChange: jest.fn(),
+    onLlamaGpuDeviceIdsChange: jest.fn(),
   };
 
   beforeEach(() => {

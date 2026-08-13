@@ -7,6 +7,9 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
+from agents.architectures.llama_devices import LlamaDevice, LlamaDeviceInventory
 from agents.architectures.llama_server_process import LlamaServerManager
 from agents.architectures.llama_server_process_posix import process_options as posix_options
 from agents.architectures.llama_server_process_windows import process_options as windows_options
@@ -44,6 +47,40 @@ def _runtime_tree(tmp_path: Path) -> Path:
     return root
 
 
+class StaticDeviceService:
+    def __init__(self, *, device_count: int = 1):
+        self.devices = tuple(
+            LlamaDevice(
+                id=f"gpu-{index}",
+                runtime_id=f"Vulkan{index}",
+                name=f"Discrete GPU {index}",
+                total_memory_mib=8192 + index,
+                free_memory_mib=4096 + index,
+                kind="discrete",
+                recommended=index == 0,
+            )
+            for index in range(device_count)
+        )
+
+    def inventory(self):
+        return LlamaDeviceInventory(
+            available=True,
+            managed_by_environment=False,
+            forced_backend=None,
+            devices=self.devices,
+            recommended_backend="gpu" if self.devices else "cpu",
+            recommended_device_ids=(self.devices[0].id,) if self.devices else (),
+            reason="test inventory",
+        )
+
+    def resolve_runtime_ids(self, device_ids):
+        by_id = {device.id: device.runtime_id for device in self.devices}
+        missing = [device_id for device_id in device_ids if device_id not in by_id]
+        if missing:
+            raise ValueError("unavailable")
+        return tuple(by_id[device_id] for device_id in device_ids)
+
+
 def test_platform_process_options_are_isolated() -> None:
     class WindowsSubprocess:
         CREATE_NEW_PROCESS_GROUP = 0x200
@@ -75,6 +112,7 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
         process_factory=process_factory,
         health_probe=health_probe,
         port_factory=lambda: 43123,
+        device_service=StaticDeviceService(),
     )
 
     connection = manager.start(model, "test/model")
@@ -121,6 +159,7 @@ def test_auto_falls_back_to_cpu_when_vulkan_fails_health(tmp_path):
         process_factory=process_factory,
         health_probe=health_probe,
         port_factory=iter((43123, 43124)).__next__,
+        device_service=StaticDeviceService(),
     )
 
     connection = manager.start(model, "test/model")
@@ -129,6 +168,240 @@ def test_auto_falls_back_to_cpu_when_vulkan_fails_health(tmp_path):
     assert calls[0].terminated is True
     executable = "llama-server.exe" if os.name == "nt" else "llama-server"
     assert calls[1].args[0] == str(runtime / "cpu" / executable)
+    manager.stop()
+
+
+def test_explicit_cpu_starts_without_gpu_flags_and_reuses_same_runtime(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=StaticDeviceService(),
+    )
+
+    first = manager.start(model, "test/model", backend="cpu")
+    second = manager.start(
+        model,
+        "test/model",
+        backend="cpu",
+        device_ids=("ignored-for-cpu",),
+    )
+
+    assert first is second
+    assert first.backend == "cpu"
+    assert len(calls) == 1
+    assert "--device" not in calls[0].args
+    assert "--n-gpu-layers" not in calls[0].args
+    manager.stop()
+
+
+def test_explicit_multiple_gpus_pass_exact_device_list(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=StaticDeviceService(device_count=2),
+    )
+
+    connection = manager.start(
+        model,
+        "test/model",
+        backend="gpu",
+        device_ids=("gpu-0", "gpu-1"),
+    )
+
+    assert connection.backend == "vulkan"
+    assert connection.device_ids == ("gpu-0", "gpu-1")
+    assert calls[0].args[calls[0].args.index("--device") + 1] == "Vulkan0,Vulkan1"
+    manager.stop()
+
+
+def test_operator_forced_vulkan_ignores_saved_devices_and_reuses_runtime(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={
+            "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+            "GEIST_LLAMA_ACCELERATION": "vulkan",
+        },
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=StaticDeviceService(),
+    )
+
+    first = manager.start(
+        model,
+        "test/model",
+        backend="cpu",
+        device_ids=("gpu-stale",),
+    )
+    second = manager.start(
+        model,
+        "test/model",
+        backend="gpu",
+        device_ids=("gpu-other",),
+    )
+
+    assert first is second
+    assert first.backend == "vulkan"
+    assert first.device_ids == ()
+    assert len(calls) == 1
+    assert "--device" not in calls[0].args
+    manager.stop()
+
+
+def test_explicit_gpu_does_not_fall_back_to_cpu(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    def fail_health(*_args):
+        raise RuntimeError("driver rejected startup")
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=fail_health,
+        port_factory=lambda: 43123,
+        device_service=StaticDeviceService(),
+    )
+
+    try:
+        manager.start(model, "test/model", backend="gpu", device_ids=("gpu-0",))
+    except RuntimeError as error:
+        assert "driver rejected startup" in str(error)
+    else:
+        raise AssertionError("explicit GPU startup should fail")
+
+    assert len(calls) == 1
+    assert "vulkan" in calls[0].args[0]
+
+
+def test_unavailable_saved_gpu_fails_and_sets_error_status(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+
+    def process_factory(*_args, **_options):
+        raise AssertionError("unavailable selection must fail before process startup")
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        device_service=StaticDeviceService(),
+    )
+
+    with pytest.raises(ValueError, match="unavailable"):
+        manager.start(model, "test/model", backend="gpu", device_ids=("gpu-missing",))
+
+    status = manager.public_status()
+    assert status["status"] == "error"
+    assert "unavailable" in status["detail"]
+
+
+def test_stop_during_device_discovery_preserves_stopped_status(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    entered_inventory = threading.Event()
+    release_inventory = threading.Event()
+    result = []
+
+    class BlockingFailedDeviceService:
+        def inventory(self):
+            entered_inventory.set()
+            assert release_inventory.wait(timeout=2)
+            raise RuntimeError("inventory failed")
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=lambda *_args, **_options: None,
+        health_probe=lambda *_args: None,
+        device_service=BlockingFailedDeviceService(),
+    )
+
+    def start_and_capture_error():
+        try:
+            manager.start(model, "test/model")
+        except RuntimeError as error:
+            result.append(error)
+
+    starter = threading.Thread(target=start_and_capture_error)
+    starter.start()
+    assert entered_inventory.wait(timeout=2)
+
+    manager.stop()
+    release_inventory.set()
+    starter.join(timeout=2)
+
+    assert not starter.is_alive()
+    assert result and "cancelled" in str(result[0])
+    assert manager.public_status()["status"] == "stopped"
+
+
+def test_same_model_and_artifact_restart_when_device_selection_changes(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=iter((43123, 43124)).__next__,
+        device_service=StaticDeviceService(device_count=2),
+    )
+
+    manager.start(model, "test/model", backend="gpu", device_ids=("gpu-0",))
+    manager.start(model, "test/model", backend="gpu", device_ids=("gpu-1",))
+
+    assert len(calls) == 2
+    assert calls[0].terminated is True
+    assert calls[1].args[calls[1].args.index("--device") + 1] == "Vulkan1"
     manager.stop()
 
 

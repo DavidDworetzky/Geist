@@ -22,6 +22,8 @@ export interface UserSettings {
   default_agent_type: string;
   default_local_model: string;
   default_local_artifact_id: string | null;
+  llama_backend: 'cpu' | 'gpu' | null;
+  llama_gpu_device_ids: string[];
   default_online_model: string;
   default_online_provider: string;
   default_file_archives: number[];
@@ -41,6 +43,8 @@ export interface UserSettingsUpdate {
   default_agent_type?: string;
   default_local_model?: string;
   default_local_artifact_id?: string | null;
+  llama_backend?: 'cpu' | 'gpu' | null;
+  llama_gpu_device_ids?: string[];
   default_online_model?: string;
   default_online_provider?: string;
   default_file_archives?: number[];

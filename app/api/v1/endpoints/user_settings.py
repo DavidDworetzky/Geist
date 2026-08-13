@@ -1,6 +1,7 @@
 """
 API endpoints for user settings management.
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 def get_current_user():
     """
     Get current user (placeholder - should integrate with actual auth system).
@@ -22,8 +24,9 @@ def get_current_user():
     """
     return get_default_user()
 
+
 @router.get("/", response_model=UserSettingsResponse)
-async def get_user_settings(current_user = Depends(get_current_user)):
+async def get_user_settings(current_user=Depends(get_current_user)):
     """
     Get user settings for the current user.
 
@@ -36,6 +39,7 @@ async def get_user_settings(current_user = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error getting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
 
 @router.get("/{user_id}", response_model=UserSettingsResponse)
 async def get_user_settings_by_id(user_id: int):
@@ -59,11 +63,9 @@ async def get_user_settings_by_id(user_id: int):
         logger.error(f"Error getting user settings for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.put("/", response_model=UserSettingsResponse)
-async def update_user_settings(
-    updates: UserSettingsUpdate,
-    current_user = Depends(get_current_user)
-):
+async def update_user_settings(updates: UserSettingsUpdate, current_user=Depends(get_current_user)):
     """
     Update user settings for the current user.
 
@@ -93,11 +95,9 @@ async def update_user_settings(
         logger.error(f"Error updating user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.put("/{user_id}", response_model=UserSettingsResponse)
-async def update_user_settings_by_id(
-    user_id: int,
-    updates: UserSettingsUpdate
-):
+async def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate):
     """
     Update user settings by user ID.
 
@@ -121,8 +121,9 @@ async def update_user_settings_by_id(
         logger.error(f"Error updating user settings for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.post("/reset", response_model=UserSettingsResponse)
-async def reset_user_settings(current_user = Depends(get_current_user)):
+async def reset_user_settings(current_user=Depends(get_current_user)):
     """
     Reset user settings to defaults for the current user.
 
@@ -135,6 +136,8 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_agent_type="local",
             default_local_model=default_local_model_id(),
             default_local_artifact_id=None,
+            llama_backend=None,
+            llama_gpu_device_ids=[],
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
@@ -145,10 +148,14 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_frequency_penalty=0.0,
             default_presence_penalty=0.0,
             backup_providers=[],
-            ui_preferences={}
+            ui_preferences={},
         )
 
-        settings = UserSettingsService.update_user_settings_by_id(current_user.user_id, default_updates)
+        settings = UserSettingsService.update_user_settings_by_id(
+            current_user.user_id,
+            default_updates,
+            allow_llama_redetection=True,
+        )
         if not settings:
             # Create default settings if user doesn't exist
             settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)
@@ -158,13 +165,14 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
         logger.error(f"Error resetting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.get("/agent-config/preview")
 async def preview_agent_config(
     agent_type: str | None = None,
     model: str | None = None,
     endpoint: str | None = None,
     runner_type: str | None = None,
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
     """
     Preview agent configuration with optional overrides.
@@ -184,14 +192,12 @@ async def preview_agent_config(
 
         # Create overrides
         overrides = AgentConfigRequest(
-            agent_type=agent_type,
-            model=model,
-            endpoint=endpoint,
-            runner_type=runner_type
+            agent_type=agent_type, model=model, endpoint=endpoint, runner_type=runner_type
         )
 
         # Generate config preview
         from app.models.user_settings import AgentFactoryConfig
+
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
 
         return {
@@ -200,7 +206,7 @@ async def preview_agent_config(
             "endpoint": factory_config.endpoint,
             "runner_type": factory_config.runner_type,
             "backup_providers": [provider.dict() for provider in factory_config.backup_providers],
-            "generation_config": factory_config.generation_config
+            "generation_config": factory_config.generation_config,
         }
     except Exception as e:
         logger.error(f"Error previewing agent config: {e}")
