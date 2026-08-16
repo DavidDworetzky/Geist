@@ -60,11 +60,12 @@ export const useLocalModels = (): UseLocalModelsReturn => {
         throw new Error(`Failed to fetch local models: ${response.statusText}`);
       }
       const data: LocalModelsResponse = await response.json();
-      setLocalModels(data.models);
+      const models = Array.isArray(data.models) ? data.models : [];
+      setLocalModels(models);
       setDetectedDirectories(data.detected_directories);
       setWeightsRoot(data.weights_root);
 
-      const hasActiveDownload = data.models.some(
+      const hasActiveDownload = models.some(
         (model) => model.download_status && ACTIVE_STATUSES.includes(model.download_status)
       );
       if (pollTimer.current) {
