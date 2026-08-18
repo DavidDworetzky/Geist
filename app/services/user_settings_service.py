@@ -11,6 +11,7 @@ from agents.factory import AgentFactory
 from agents.model_ids import canonicalize_local_model_id
 from app.models.database.geist_user import get_default_user
 from app.models.database.user_settings import (
+    UserSettingsModel,
     get_or_create_user_settings,
     get_user_settings,
     update_detected_llama_backend_if_unset,
@@ -25,6 +26,13 @@ from app.models.user_settings import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSettingsResponse:
+    response = UserSettingsResponse.model_validate(settings_model)
+    return response.model_copy(
+        update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
+    )
 
 
 class UserSettingsService:
@@ -43,28 +51,7 @@ class UserSettingsService:
         """
         settings_model = get_user_settings(user_id)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                llama_backend=settings_model.llama_backend,
-                llama_gpu_device_ids=settings_model.llama_gpu_device_ids,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date,
-            )
+            return _to_user_settings_response(settings_model)
         return None
 
     @staticmethod
@@ -79,28 +66,7 @@ class UserSettingsService:
             UserSettingsResponse
         """
         settings_model = get_or_create_user_settings(user_id)
-        return UserSettingsResponse(
-            user_settings_id=settings_model.user_settings_id,
-            user_id=settings_model.user_id,
-            default_agent_type=settings_model.default_agent_type,
-            default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-            default_local_artifact_id=settings_model.default_local_artifact_id,
-            llama_backend=settings_model.llama_backend,
-            llama_gpu_device_ids=settings_model.llama_gpu_device_ids,
-            default_online_model=settings_model.default_online_model,
-            default_online_provider=settings_model.default_online_provider,
-            default_file_archives=settings_model.default_file_archives,
-            enable_rag_by_default=settings_model.enable_rag_by_default,
-            default_max_tokens=settings_model.default_max_tokens,
-            default_temperature=settings_model.default_temperature,
-            default_top_p=settings_model.default_top_p,
-            default_frequency_penalty=settings_model.default_frequency_penalty,
-            default_presence_penalty=settings_model.default_presence_penalty,
-            backup_providers=settings_model.backup_providers,
-            ui_preferences=settings_model.ui_preferences,
-            create_date=settings_model.create_date,
-            update_date=settings_model.update_date,
-        )
+        return _to_user_settings_response(settings_model)
 
     @staticmethod
     def update_user_settings_by_id(
@@ -227,28 +193,7 @@ class UserSettingsService:
 
         settings_model = update_user_settings(user_id, update_dict)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                llama_backend=settings_model.llama_backend,
-                llama_gpu_device_ids=settings_model.llama_gpu_device_ids,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date,
-            )
+            return _to_user_settings_response(settings_model)
         return None
 
     @staticmethod

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitForElementToBeRemoved } from '@testing-library/react';
+import { fireEvent, render, screen, waitForElementToBeRemoved } from '@testing-library/react';
 import LlamaComputeSection from '../LlamaComputeSection';
 
 
@@ -38,6 +38,27 @@ describe('LlamaComputeSection', () => {
     expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
   });
 
+  it('shows the inventory error when the managed CPU runtime is broken', async () => {
+    // @ts-ignore
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({
+        available: false,
+        managed_by_environment: false,
+        forced_backend: null,
+        devices: [],
+        recommended_backend: 'cpu',
+        recommended_device_ids: [],
+        reason: 'The managed CPU llama.cpp runtime is unavailable.',
+        error: 'The CPU llama-server executable is required',
+      }),
+    }));
+
+    render(<LlamaComputeSection {...props} />);
+    expect(await screen.findByText(/CPU llama-server executable is required/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
+  });
+
   it('shows a locked state for operator-managed acceleration', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({
@@ -59,7 +80,7 @@ describe('LlamaComputeSection', () => {
     expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
   });
 
-  it('keeps CPU selectable while disabling GPU when no devices exist', async () => {
+  it('keeps an automatic CPU recommendation selectable while disabling GPU', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -77,12 +98,13 @@ describe('LlamaComputeSection', () => {
 
     render(<LlamaComputeSection {...props} />);
     const select = await screen.findByLabelText('Compute Backend');
-    expect(select).toHaveValue('cpu');
+    expect(select).toHaveValue('automatic');
+    expect(screen.getByRole('option', { name: 'Automatic (CPU recommended)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'CPU' })).not.toBeDisabled();
     expect(screen.getByRole('option', { name: 'GPU' })).toBeDisabled();
   });
 
-  it('presents the automatic recommendation as the selected backend', async () => {
+  it('distinguishes an automatic GPU recommendation from an explicit GPU choice', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -106,9 +128,15 @@ describe('LlamaComputeSection', () => {
     }));
 
     render(<LlamaComputeSection {...props} />);
-    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
+    const select = await screen.findByLabelText('Compute Backend');
+    expect(select).toHaveValue('automatic');
+    expect(screen.getByRole('option', { name: 'Automatic (GPU recommended)' })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Recommended GPU/i })).toBeChecked();
-    expect(screen.queryByText(/pending|verified|verification/i)).not.toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'gpu' } });
+
+    expect(props.onDeviceIdsChange).toHaveBeenCalledWith(['gpu-recommended']);
+    expect(props.onBackendChange).toHaveBeenCalledWith('gpu');
   });
 
   it('warns when a saved GPU is no longer available', async () => {
@@ -136,6 +164,7 @@ describe('LlamaComputeSection', () => {
 
     render(<LlamaComputeSection {...props} backend="gpu" deviceIds={['gpu-missing']} />);
     expect(await screen.findByText(/previously selected GPU is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Automatic/i })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Current GPU/i })).not.toBeChecked();
   });
 });

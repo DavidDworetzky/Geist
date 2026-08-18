@@ -374,7 +374,7 @@ describe('Settings page', () => {
     });
   });
 
-  it('selects the recommended backend and saves one or more explicit GPUs', async () => {
+  it('selects GPU explicitly from automatic and saves one or more devices', async () => {
     let savedUpdates: any = null;
     // @ts-ignore
     global.fetch = jest.fn((url: string, options?: any) => {
@@ -394,7 +394,10 @@ describe('Settings page', () => {
     renderSettings();
     fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
 
-    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
+    const computeBackend = await screen.findByLabelText('Compute Backend');
+    expect(computeBackend).toHaveValue('automatic');
+    fireEvent.change(computeBackend, { target: { value: 'gpu' } });
+    expect(computeBackend).toHaveValue('gpu');
 
     const nvidia = screen.getByRole('checkbox', { name: /NVIDIA GeForce RTX 3080/i });
     const intel = screen.getByRole('checkbox', { name: /Intel\(R\) UHD Graphics/i });
@@ -523,7 +526,7 @@ describe('Settings page', () => {
     });
 
     fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
-    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
+    expect(await screen.findByLabelText('Compute Backend')).toHaveValue('automatic');
   });
 
   it('shows error with Retry on initial fetch failure', async () => {

@@ -190,9 +190,15 @@ def test_environment_runner_override_precedes_catalog_inference():
             "local",
             context,
             model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            device_config={
+                "device": "cpu",
+                "llama_backend": "gpu",
+                "llama_gpu_device_ids": ["gpu-inert"],
+            },
         )
 
     assert local_agent.call_args.kwargs["runner_type"] == "transformers"
+    assert local_agent.call_args.kwargs["device_config"] == {"device": "cpu"}
 
 
 def test_explicit_runner_argument_precedes_environment_override():

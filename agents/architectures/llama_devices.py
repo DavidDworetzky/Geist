@@ -7,6 +7,7 @@ import os
 import re
 import subprocess  # nosec B404 -- runs a fixed flag against a verified managed binary
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -17,6 +18,23 @@ DEVICE_LINE = re.compile(
     r"^\s*(?P<runtime_id>Vulkan\d+):\s+(?P<name>.+?)"
     r"(?:\s+\((?P<total>\d+)\s+MiB,\s+(?P<free>\d+)\s+MiB free\))?\s*$"
 )
+DEVICE_UUID = re.compile(
+    r"\s*(?:[\[(]\s*)?(?:device[\s_-]*)?uuid\s*[:=]\s*"
+    r"(?P<identity>[0-9a-f]{8}(?:-?[0-9a-f]{4}){3}-?[0-9a-f]{12})"
+    r"(?:\s*[\])])?",
+    re.IGNORECASE,
+)
+DEVICE_PCI_ADDRESS = re.compile(
+    r"\s*(?:[\[(]\s*)?(?:pci(?:e)?(?:\s+(?:bus(?:\s+id)?|address))?|bdf)"
+    r"\s*[:=]?\s*(?P<identity>(?:[0-9a-f]{4}:)?[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])"
+    r"(?:\s*[\])])?",
+    re.IGNORECASE,
+)
+BARE_DEVICE_PCI_ADDRESS = re.compile(
+    r"\s*[\[(]\s*(?P<identity>(?:[0-9a-f]{4}:)?[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])" r"\s*[\])]",
+    re.IGNORECASE,
+)
+DEFAULT_INVENTORY_CACHE_TTL_SECONDS = 5.0
 SOFTWARE_PATTERNS = (
     "llvmpipe",
     "lavapipe",
@@ -83,6 +101,21 @@ class LlamaDeviceInventory:
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+Clock = Callable[[], float]
+
+
+class AmbiguousLlamaDeviceError(ValueError):
+    """Raised when runtime enumeration cannot identify duplicate GPUs safely."""
+
+
+@dataclass(frozen=True)
+class _ParsedDevice:
+    runtime_id: str
+    name: str
+    normalized_name: str
+    stable_identity: str | None
+    total_memory_mib: int | None
+    free_memory_mib: int | None
 
 
 def llama_server_filename() -> str:
@@ -100,42 +133,127 @@ def classify_device(name: str) -> str:
     return "unknown"
 
 
+def _normalized_uuid(value: str) -> str:
+    return value.replace("-", "").casefold()
+
+
+def _normalized_pci_address(value: str) -> str:
+    normalized = value.casefold()
+    return normalized if normalized.count(":") == 2 else f"0000:{normalized}"
+
+
+def _extract_stable_identity(name: str) -> tuple[str, str | None]:
+    uuid_match = DEVICE_UUID.search(name)
+    pci_match = DEVICE_PCI_ADDRESS.search(name) or BARE_DEVICE_PCI_ADDRESS.search(name)
+    stable_identity: str | None = None
+    if uuid_match is not None:
+        stable_identity = f"uuid:{_normalized_uuid(uuid_match.group('identity'))}"
+    elif pci_match is not None:
+        stable_identity = f"pci:{_normalized_pci_address(pci_match.group('identity'))}"
+
+    display_name = DEVICE_UUID.sub(" ", name)
+    display_name = DEVICE_PCI_ADDRESS.sub(" ", display_name)
+    display_name = BARE_DEVICE_PCI_ADDRESS.sub(" ", display_name)
+    display_name = " ".join(display_name.split()).strip(" -|,;")
+    return display_name or name, stable_identity
+
+
 def parse_device_inventory(output: str) -> tuple[LlamaDevice, ...]:
-    devices: list[LlamaDevice] = []
-    name_counts: dict[str, int] = {}
+    parsed: list[_ParsedDevice] = []
     for line in output.splitlines():
         match = DEVICE_LINE.match(line)
         if match is None:
             continue
-        name = match.group("name").strip()
+        name, stable_identity = _extract_stable_identity(match.group("name").strip())
         normalized_name = " ".join(name.casefold().split())
-        ordinal = name_counts.get(normalized_name, 0)
-        name_counts[normalized_name] = ordinal + 1
-        digest = hashlib.sha256(f"{normalized_name}\0{ordinal}".encode()).hexdigest()[:16]
+        parsed.append(
+            _ParsedDevice(
+                runtime_id=match.group("runtime_id"),
+                name=name,
+                normalized_name=normalized_name,
+                stable_identity=stable_identity,
+                total_memory_mib=(int(match.group("total")) if match.group("total") else None),
+                free_memory_mib=(int(match.group("free")) if match.group("free") else None),
+            )
+        )
+
+    stable_identities = [
+        device.stable_identity for device in parsed if device.stable_identity is not None
+    ]
+    if len(stable_identities) != len(set(stable_identities)):
+        raise AmbiguousLlamaDeviceError("llama-server reported duplicate stable GPU identities")
+
+    devices_by_name: dict[str, list[_ParsedDevice]] = {}
+    for device in parsed:
+        devices_by_name.setdefault(device.normalized_name, []).append(device)
+    ambiguous_names = sorted(
+        devices[0].name
+        for devices in devices_by_name.values()
+        if len(devices) > 1 and any(device.stable_identity is None for device in devices)
+    )
+    if ambiguous_names:
+        raise AmbiguousLlamaDeviceError(
+            "llama-server reported duplicate GPU names without stable UUID or PCI identities: "
+            + ", ".join(ambiguous_names)
+        )
+
+    devices: list[LlamaDevice] = []
+    for device in parsed:
+        identity = (
+            f"stable\0{device.stable_identity}"
+            if device.stable_identity is not None
+            else f"{device.normalized_name}\0{0}"
+        )
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
         devices.append(
             LlamaDevice(
                 id=f"gpu-{digest}",
-                runtime_id=match.group("runtime_id"),
-                name=name,
-                total_memory_mib=(int(match.group("total")) if match.group("total") else None),
-                free_memory_mib=(int(match.group("free")) if match.group("free") else None),
-                kind=classify_device(name),
+                runtime_id=device.runtime_id,
+                name=device.name,
+                total_memory_mib=device.total_memory_mib,
+                free_memory_mib=device.free_memory_mib,
+                kind=classify_device(device.name),
             )
         )
     return tuple(devices)
 
 
 def recommend_device(devices: Sequence[LlamaDevice]) -> LlamaDevice | None:
-    suitable = [device for device in devices if device.kind not in {"integrated", "software"}]
+    suitable = [
+        (index, device)
+        for index, device in enumerate(devices)
+        if device.kind not in {"integrated", "software"}
+    ]
     if not suitable:
         return None
     return max(
         suitable,
-        key=lambda device: (
-            device.free_memory_mib if device.free_memory_mib is not None else -1,
-            device.total_memory_mib if device.total_memory_mib is not None else -1,
-            -devices.index(device),
+        key=lambda item: (
+            item[1].free_memory_mib if item[1].free_memory_mib is not None else -1,
+            item[1].total_memory_mib if item[1].total_memory_mib is not None else -1,
+            -item[0],
         ),
+    )[1]
+
+
+def _cpu_inventory(
+    *,
+    available: bool,
+    reason: str,
+    managed_by_environment: bool = False,
+    forced_backend: str | None = None,
+    devices: tuple[LlamaDevice, ...] = (),
+    error: str | None = None,
+) -> LlamaDeviceInventory:
+    return LlamaDeviceInventory(
+        available=available,
+        managed_by_environment=managed_by_environment,
+        forced_backend=forced_backend,
+        devices=devices,
+        recommended_backend="cpu",
+        recommended_device_ids=(),
+        reason=reason,
+        error=error,
     )
 
 
@@ -148,41 +266,61 @@ class LlamaDeviceService:
         environment: Mapping[str, str] | None = None,
         command_runner: CommandRunner = subprocess.run,
         timeout_seconds: float = 10.0,
+        cache_ttl_seconds: float = DEFAULT_INVENTORY_CACHE_TTL_SECONDS,
+        clock: Clock = time.monotonic,
     ) -> None:
         self.environment = environment if environment is not None else os.environ
         self.command_runner = command_runner
         self.timeout_seconds = timeout_seconds
+        self.cache_ttl_seconds = max(0.0, cache_ttl_seconds)
+        self.clock = clock
         self._lock = threading.Lock()
         self._cached_inventory: LlamaDeviceInventory | None = None
+        self._cached_inventory_expires_at = 0.0
 
-    def inventory(self) -> LlamaDeviceInventory:
+    def inventory(self, *, refresh: bool = False) -> LlamaDeviceInventory:
         with self._lock:
-            if self._cached_inventory is None:
-                self._cached_inventory = self._discover_inventory()
-            return self._cached_inventory
+            if (
+                not refresh
+                and self._cached_inventory is not None
+                and self.clock() < self._cached_inventory_expires_at
+            ):
+                return self._cached_inventory
+
+            inventory = self._discover_inventory()
+            if inventory.error is None and inventory.devices:
+                self._cached_inventory = inventory
+                self._cached_inventory_expires_at = self.clock() + self.cache_ttl_seconds
+            else:
+                self._cached_inventory = None
+                self._cached_inventory_expires_at = 0.0
+            return inventory
 
     def _discover_inventory(self) -> LlamaDeviceInventory:
-        explicit = self.environment.get("GEIST_LLAMA_SERVER_PATH")
-        if explicit:
-            return LlamaDeviceInventory(
+        configured_runner = self.environment.get("GEIST_LOCAL_RUNNER", "").strip()
+        if configured_runner and configured_runner != "llama_server":
+            return _cpu_inventory(
                 available=False,
                 managed_by_environment=True,
-                forced_backend=None,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
+                reason=(
+                    f"GEIST_LOCAL_RUNNER selects {configured_runner}, so llama.cpp compute "
+                    "settings are unavailable."
+                ),
+            )
+
+        explicit = self.environment.get("GEIST_LLAMA_SERVER_PATH")
+        if explicit:
+            return _cpu_inventory(
+                available=False,
+                managed_by_environment=True,
                 reason="An explicit llama-server binary is configured by the environment.",
             )
 
         acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
         if acceleration not in {"auto", "cpu", "vulkan"}:
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=False,
                 managed_by_environment=True,
-                forced_backend=None,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="The llama.cpp acceleration environment override is invalid.",
                 error="GEIST_LLAMA_ACCELERATION must be auto, cpu, or vulkan",
             )
@@ -190,13 +328,10 @@ class LlamaDeviceService:
 
         root_value = self.environment.get("GEIST_LLAMA_RUNTIME_ROOT")
         if not root_value:
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=False,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="A managed llama.cpp runtime is not installed on this platform.",
             )
 
@@ -204,24 +339,18 @@ class LlamaDeviceService:
         cpu_executable = root / "cpu" / llama_server_filename()
         vulkan_executable = root / "vulkan" / llama_server_filename()
         if not cpu_executable.is_file():
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=False,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="The managed CPU llama.cpp runtime is unavailable.",
                 error="The CPU llama-server executable is required",
             )
         if not vulkan_executable.is_file():
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="The Vulkan llama.cpp runtime is unavailable, so CPU is recommended.",
                 error="The Vulkan llama-server executable is unavailable",
             )
@@ -240,40 +369,41 @@ class LlamaDeviceService:
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="GPU discovery failed, so CPU is recommended.",
                 error=str(error),
             )
 
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         if result.returncode != 0:
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                devices=(),
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason="The Vulkan runtime did not report usable GPUs, so CPU is recommended.",
                 error=f"llama-server --list-devices exited with code {result.returncode}",
             )
 
-        devices = parse_device_inventory(output)
+        try:
+            devices = parse_device_inventory(output)
+        except AmbiguousLlamaDeviceError as error:
+            return _cpu_inventory(
+                available=True,
+                managed_by_environment=forced_backend is not None,
+                forced_backend=forced_backend,
+                reason="GPU discovery returned ambiguous device identities, so CPU is recommended.",
+                error=str(error),
+            )
         recommended = recommend_device(devices)
         if recommended is None:
-            return LlamaDeviceInventory(
+            return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
                 devices=devices,
-                recommended_backend="cpu",
-                recommended_device_ids=(),
                 reason=(
                     "Only integrated or software-rendered GPUs were detected, so CPU is recommended."
                     if devices

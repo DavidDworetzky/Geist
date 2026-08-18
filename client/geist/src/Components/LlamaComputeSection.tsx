@@ -89,13 +89,16 @@ export default function LlamaComputeSection({
     return requestError ? <div className="notice notice-warning">{requestError}</div> : null;
   }
   if (!inventory.available && !inventory.managed_by_environment) {
-    return null;
+    return inventory.error
+      ? <div className="notice notice-warning">{inventory.error}</div>
+      : null;
   }
 
   const locked = inventory.managed_by_environment;
   const devices = inventory.devices ?? [];
   const gpuAvailable = devices.length > 0;
-  const selectedBackend = backend ?? inventory.recommended_backend;
+  const selectedBackend = backend ?? 'automatic';
+  const effectiveBackend = backend ?? inventory.recommended_backend;
   const selectedDeviceIds = backend === null
     ? inventory.recommended_device_ids
     : deviceIds;
@@ -157,6 +160,11 @@ export default function LlamaComputeSection({
             value={selectedBackend}
             onChange={event => selectBackend(event.target.value)}
           >
+            {backend === null && (
+              <option value="automatic">
+                Automatic ({inventory.recommended_backend.toUpperCase()} recommended)
+              </option>
+            )}
             <option value="cpu">CPU</option>
             <option value="gpu" disabled={!gpuAvailable}>GPU</option>
           </select>
@@ -167,7 +175,7 @@ export default function LlamaComputeSection({
         <div className="notice notice-warning">{inventory.error || requestError}</div>
       )}
 
-      {!locked && selectedBackend === 'gpu' && (
+      {!locked && effectiveBackend === 'gpu' && (
         <fieldset className="llama-device-picker">
           <legend className="settings-label">GPU Devices</legend>
           <p className="settings-description">

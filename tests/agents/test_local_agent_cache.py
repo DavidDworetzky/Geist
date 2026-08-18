@@ -165,6 +165,62 @@ def test_first_use_persists_effective_backend_and_caches_final_signature() -> No
                 geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
 
 
+def test_cached_auto_agent_retries_backend_persistence_after_transient_failure() -> None:
+    saved_cache = {
+        agent_type: geist_main.agent_cache[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+    saved_signatures = {
+        agent_type: geist_main._agent_cache_signatures[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+
+    class DetectedAgent(RecordingLocalAgent):
+        def runtime_selection(self):
+            return "gpu", ("gpu-best",)
+
+    persisted = type(
+        "Settings",
+        (),
+        {"llama_backend": "gpu", "llama_gpu_device_ids": ["gpu-best"]},
+    )()
+    try:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+        with (
+            patch(
+                "app.main._get_local_agent_factory_config",
+                side_effect=lambda: _factory_config("artifact-a", backend="auto"),
+            ),
+            patch(
+                "app.main._create_local_agent",
+                return_value=DetectedAgent("artifact-a", []),
+            ) as create,
+            patch("app.main._llama_selection_managed_by_environment", return_value=False),
+            patch("app.main.get_default_user", return_value=type("User", (), {"user_id": 1})()),
+            patch(
+                "app.main.UserSettingsService.persist_detected_llama_backend",
+                side_effect=[RuntimeError("database unavailable"), persisted],
+            ) as persist,
+        ):
+            first = geist_main.get_active_agent(AgentType.LLAMA)
+            second = geist_main.get_active_agent(AgentType.LLAMA)
+
+        assert second is first
+        assert create.call_count == 1
+        assert persist.call_count == 2
+        final_config = _factory_config("artifact-a", backend="gpu", device_ids=("gpu-best",))
+        assert geist_main._agent_cache_signatures[AgentType.LLAMA] == (
+            geist_main._local_agent_configuration_signature(final_config)
+        )
+    finally:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+            for agent_type in geist_main._LOCAL_AGENT_TYPES:
+                geist_main.agent_cache[agent_type] = saved_cache[agent_type]
+                geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
+
+
 def test_concurrent_manual_choice_is_not_cached_as_the_auto_runtime() -> None:
     saved_cache = {
         agent_type: geist_main.agent_cache[agent_type]

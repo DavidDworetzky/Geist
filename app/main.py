@@ -156,6 +156,11 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 entry_agent is cached_agent and entry_signature == signature
                 for entry_agent, entry_signature in local_entries
             ):
+                signature = _persist_first_use_llama_backend(
+                    cached_agent,
+                    factory_config,
+                    signature,
+                )
                 _set_local_agent_cache(cached_agent, signature)
                 return cached_agent
 
@@ -164,31 +169,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
-        if (
-            factory_config.device_config.get("llama_backend") == "auto"
-            and not _llama_selection_managed_by_environment()
-        ):
-            runtime_selection = getattr(new_agent, "runtime_selection", None)
-            selection = runtime_selection() if callable(runtime_selection) else None
-            if selection is not None:
-                backend, device_ids = selection
-                try:
-                    default_user = get_default_user()
-                    persisted = UserSettingsService.persist_detected_llama_backend(
-                        default_user.user_id,
-                        backend,
-                        device_ids,
-                    )
-                    if persisted is not None and persisted.llama_backend is not None:
-                        # A user can save a manual choice while automatic startup
-                        # is in flight. Cache this agent under what it actually
-                        # loaded; a different persisted choice will then force a
-                        # restart on the next model use.
-                        factory_config.device_config["llama_backend"] = backend
-                        factory_config.device_config["llama_gpu_device_ids"] = list(device_ids)
-                        signature = _local_agent_configuration_signature(factory_config)
-                except Exception:
-                    logger.exception("Unable to persist detected llama.cpp compute backend")
+        signature = _persist_first_use_llama_backend(new_agent, factory_config, signature)
         _set_local_agent_cache(new_agent, signature)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
@@ -205,6 +186,42 @@ def _get_local_agent_factory_config() -> AgentFactoryConfig:
         settings,
         AgentConfigRequest(agent_type="local"),
     )
+
+
+def _persist_first_use_llama_backend(
+    agent,
+    factory_config: AgentFactoryConfig,
+    signature: str,
+) -> str:
+    if (
+        factory_config.device_config.get("llama_backend") != "auto"
+        or _llama_selection_managed_by_environment()
+    ):
+        return signature
+
+    runtime_selection = getattr(agent, "runtime_selection", None)
+    selection = runtime_selection() if callable(runtime_selection) else None
+    if selection is None:
+        return signature
+
+    backend, device_ids = selection
+    try:
+        default_user = get_default_user()
+        persisted = UserSettingsService.persist_detected_llama_backend(
+            default_user.user_id,
+            backend,
+            device_ids,
+        )
+        if persisted is not None and persisted.llama_backend is not None:
+            # A user can save a manual choice while automatic startup is in
+            # flight. Cache this agent under what it actually loaded; a
+            # different persisted choice will force a restart on the next use.
+            factory_config.device_config["llama_backend"] = backend
+            factory_config.device_config["llama_gpu_device_ids"] = list(device_ids)
+            return _local_agent_configuration_signature(factory_config)
+    except Exception:
+        logger.exception("Unable to persist detected llama.cpp compute backend")
+    return signature
 
 
 def _local_agent_configuration_signature(factory_config: AgentFactoryConfig) -> str:
