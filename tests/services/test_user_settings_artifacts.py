@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import datetime
+import subprocess
+import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agents.architectures.llama_devices import LlamaDevice, LlamaDeviceInventory
+from agents.architectures.llama_devices import (
+    LlamaDevice,
+    LlamaDeviceInventory,
+    LlamaDeviceService,
+    llama_server_filename,
+)
 from app.models.database.user_settings import UserSettingsModel
 from app.models.user_settings import UserSettingsUpdate
 from app.services.user_settings_service import UserSettingsService
@@ -67,6 +75,15 @@ def _inventory(*devices: LlamaDevice) -> LlamaDeviceInventory:
         recommended_device_ids=(),
         reason="Test inventory",
     )
+
+
+def _runtime_tree(tmp_path: Path) -> Path:
+    root = tmp_path / "runtime"
+    for backend in ("cpu", "vulkan"):
+        directory = root / backend
+        directory.mkdir(parents=True)
+        (directory / llama_server_filename()).write_bytes(b"binary")
+    return root
 
 
 def test_changing_local_model_clears_stale_artifact_selection():
@@ -161,6 +178,123 @@ def test_explicit_gpu_selection_requires_current_inventory_devices():
     assert result.llama_gpu_device_ids == ["gpu-stable"]
     assert update.call_args.args[1]["llama_gpu_device_ids"] == ["gpu-stable"]
     service.inventory.assert_called_once_with()
+
+
+def test_gpu_selection_save_waits_for_inflight_refresh_snapshot(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    probe_calls = []
+    refresh_probe_entered = threading.Event()
+    release_refresh_probe = threading.Event()
+    observe_settings_call = threading.Event()
+    settings_inventory_entered = threading.Event()
+    settings_returned = threading.Event()
+    device_output = "Available devices:\n  Vulkan0: NVIDIA RTX 4090\n"
+
+    def probe(*_args, **_kwargs):
+        probe_calls.append(True)
+        if len(probe_calls) == 2:
+            refresh_probe_entered.set()
+            assert release_refresh_probe.wait(timeout=3)
+        return subprocess.CompletedProcess([], 0, stdout=device_output, stderr="")
+
+    class ObservedDeviceService(LlamaDeviceService):
+        def inventory(
+            self,
+            *,
+            refresh: bool = False,
+            allow_in_progress: bool = False,
+        ) -> LlamaDeviceInventory:
+            if observe_settings_call.is_set() and not allow_in_progress:
+                settings_inventory_entered.set()
+            return super().inventory(
+                refresh=refresh,
+                allow_in_progress=allow_in_progress,
+            )
+
+    service = ObservedDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=probe,
+        minimum_refresh_interval_seconds=0,
+    )
+    settled_inventory = service.inventory()
+    selected_device_id = settled_inventory.devices[0].id
+    current = _settings(llama_backend="cpu")
+    updated = _settings(
+        llama_backend="gpu",
+        llama_gpu_device_ids=[selected_device_id],
+    )
+    refresh_results: list[LlamaDeviceInventory] = []
+    refresh_errors: list[BaseException] = []
+
+    def refresh_inventory() -> None:
+        try:
+            refresh_results.append(service.inventory(refresh=True, allow_in_progress=True))
+        except BaseException as error:  # pragma: no cover - asserted below
+            refresh_errors.append(error)
+
+    refresh_thread = threading.Thread(target=refresh_inventory)
+    refresh_thread.start()
+    assert refresh_probe_entered.wait(timeout=2)
+
+    save_results = []
+    save_errors: list[BaseException] = []
+
+    def save_settings() -> None:
+        try:
+            save_results.append(
+                UserSettingsService.update_user_settings_by_id(
+                    1,
+                    UserSettingsUpdate(
+                        llama_backend="gpu",
+                        llama_gpu_device_ids=[selected_device_id],
+                    ),
+                )
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            save_errors.append(error)
+        finally:
+            settings_returned.set()
+
+    try:
+        with (
+            patch(
+                "app.services.user_settings_service.get_user_settings",
+                return_value=current,
+            ),
+            patch(
+                "app.services.user_settings_service.update_user_settings",
+                return_value=updated,
+            ) as update,
+            patch(
+                "agents.architectures.llama_devices.get_llama_device_service",
+                return_value=service,
+            ),
+        ):
+            observe_settings_call.set()
+            save_thread = threading.Thread(target=save_settings)
+            save_thread.start()
+            assert settings_inventory_entered.wait(timeout=2)
+            assert settings_returned.wait(timeout=0.1) is False
+
+            release_refresh_probe.set()
+            save_thread.join(timeout=2)
+            assert not save_thread.is_alive()
+
+        refresh_thread.join(timeout=2)
+    finally:
+        release_refresh_probe.set()
+        refresh_thread.join(timeout=2)
+
+    assert not refresh_thread.is_alive()
+    assert refresh_errors == []
+    assert save_errors == []
+    assert len(refresh_results) == 1
+    assert len(save_results) == 1
+    assert save_results[0] is not None
+    assert update.call_args.args[1]["llama_gpu_device_ids"] == [selected_device_id]
+    assert probe_calls == [True, True]
 
 
 def test_explicit_gpu_selection_canonicalizes_unique_legacy_device_id():

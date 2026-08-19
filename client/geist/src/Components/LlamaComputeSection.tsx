@@ -29,12 +29,26 @@ interface LlamaComputeSectionProps {
   deviceIds: string[];
   onBackendChange: (backend: LlamaBackend) => void;
   onDeviceIdsChange: (deviceIds: string[]) => void;
-  onValidityChange: (valid: boolean, settled: boolean) => void;
+  onValidityChange: (
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => void;
 }
 
 export const LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'llama-compute-selection-validation';
 
-const DISCOVERY_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 4000] as const;
+const DISCOVERY_RETRY_DELAYS_MS = [
+  250,
+  500,
+  1000,
+  2000,
+  2000,
+  2000,
+  2000,
+  2000,
+  2000,
+] as const;
 
 function waitForDiscoveryRetry(delayMs: number, signal: AbortSignal): Promise<boolean> {
   return new Promise(resolve => {
@@ -75,6 +89,7 @@ export default function LlamaComputeSection({
   const [inventory, setInventory] = useState<LlamaDeviceInventory | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const mounted = useRef(true);
   const activeRequest = useRef<AbortController | null>(null);
@@ -85,8 +100,10 @@ export default function LlamaComputeSection({
     activeRequest.current = controller;
     if (refresh) {
       setRefreshing(true);
+      setRefreshFeedback('Refreshing device discovery…');
     } else {
       setLoading(true);
+      setRefreshFeedback(null);
     }
     setRequestError(null);
     try {
@@ -111,6 +128,11 @@ export default function LlamaComputeSection({
         if (!payload.discovery_in_progress) {
           break;
         }
+        if (refresh && mounted.current && !controller.signal.aborted) {
+          setRefreshFeedback(
+            'Device discovery is in progress. Waiting for the current results…',
+          );
+        }
         if (
           !await waitForDiscoveryRetry(delayMs, controller.signal)
           || controller.signal.aborted
@@ -127,9 +149,15 @@ export default function LlamaComputeSection({
       }
       if (mounted.current && !controller.signal.aborted) {
         setInventory(payload);
+        if (refresh) {
+          setRefreshFeedback('Device list is current.');
+        }
       }
     } catch (error) {
       if (mounted.current && !controller.signal.aborted) {
+        if (refresh) {
+          setRefreshFeedback(null);
+        }
         setRequestError(error instanceof Error ? error.message : 'Device inventory failed');
       }
     } finally {
@@ -223,8 +251,12 @@ export default function LlamaComputeSection({
   const inventorySettled = !loading && inventory !== null;
 
   useEffect(() => {
-    onValidityChange(computeSelectionValid, inventorySettled);
-  }, [computeSelectionValid, inventorySettled, onValidityChange]);
+    onValidityChange(
+      computeSelectionValid,
+      inventorySettled,
+      inventory === null && backend === 'gpu' ? requestError : null,
+    );
+  }, [backend, computeSelectionValid, inventory, inventorySettled, onValidityChange, requestError]);
 
   const gpuSelectionValidation = backend === 'gpu' && !computeSelectionValid && !loading ? (
     <div
@@ -261,11 +293,17 @@ export default function LlamaComputeSection({
       </button>
     </div>
   );
+  const refreshStatus = refreshFeedback ? (
+    <p className="settings-description" role="status" aria-live="polite">
+      {refreshFeedback}
+    </p>
+  ) : null;
 
   if (loading) {
     return (
       <div className="llama-compute-section" aria-label="llama.cpp compute backend">
         {sectionHeader}
+        {refreshStatus}
         <p
           id={backend === 'gpu' ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID : undefined}
           className="settings-description"
@@ -281,10 +319,16 @@ export default function LlamaComputeSection({
     return (
       <div className="llama-compute-section" aria-label="llama.cpp compute backend">
         {sectionHeader}
+        {refreshStatus}
         {requestError && (
-          <div className="notice notice-warning" role="alert">{requestError}</div>
+          <div
+            id={backend === 'gpu' ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID : undefined}
+            className="notice notice-warning"
+            role="alert"
+          >
+            {requestError}
+          </div>
         )}
-        {gpuSelectionValidation}
       </div>
     );
   }
@@ -295,6 +339,7 @@ export default function LlamaComputeSection({
     return (
       <div className="llama-compute-section" aria-label="llama.cpp compute backend">
         {sectionHeader}
+        {refreshStatus}
         <p className="settings-description">{inventory.reason}</p>
         {inventory.error && (
           <div className="notice notice-warning" role="alert">
@@ -366,6 +411,7 @@ export default function LlamaComputeSection({
   return (
     <div className="llama-compute-section" aria-label="llama.cpp compute backend">
       {sectionHeader}
+      {refreshStatus}
 
       {locked ? (
         <div className="notice">

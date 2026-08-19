@@ -143,6 +143,8 @@ class LlamaDeviceInventory:
             raise ValueError("Selected llama.cpp GPU device IDs must resolve to unique devices")
         runtime_by_id = {device.id: device.runtime_id for device in self.devices}
         runtime_ids = tuple(runtime_by_id[device_id] for device_id in canonical_ids)
+        # Parsed inventories are bijective today, but caller-constructed snapshots
+        # must not turn distinct public IDs into duplicate process arguments.
         if len(runtime_ids) != len(set(runtime_ids)):
             raise ValueError("Selected llama.cpp GPU device IDs must resolve to unique devices")
         return canonical_ids
@@ -388,16 +390,25 @@ class LlamaDeviceService:
         self.minimum_refresh_interval_seconds = max(0.0, minimum_refresh_interval_seconds)
         self.clock = clock
         self._lock = threading.Lock()
+        self._probe_completed = threading.Condition(self._lock)
         self._cached_inventory: LlamaDeviceInventory | None = None
         self._cached_inventory_expires_at = 0.0
         self._next_refresh_allowed_at = 0.0
         self._probe_in_flight = False
 
-    def inventory(self, *, refresh: bool = False) -> LlamaDeviceInventory:
-        with self._lock:
+    def inventory(
+        self,
+        *,
+        refresh: bool = False,
+        allow_in_progress: bool = False,
+    ) -> LlamaDeviceInventory:
+        with self._probe_completed:
             now = self.clock()
-            if self._probe_in_flight:
-                return self._cached_inventory or self._discovery_in_progress_inventory()
+            while self._probe_in_flight:
+                if allow_in_progress:
+                    return self._discovery_in_progress_inventory(self._cached_inventory)
+                self._probe_completed.wait()
+                now = self.clock()
             if self._cached_inventory is not None:
                 if refresh and now < self._next_refresh_allowed_at:
                     return self._cached_inventory
@@ -409,11 +420,12 @@ class LlamaDeviceService:
             inventory = self._discover_inventory()
             completed_at = self.clock()
         except BaseException:
-            with self._lock:
+            with self._probe_completed:
                 self._probe_in_flight = False
+                self._probe_completed.notify_all()
             raise
 
-        with self._lock:
+        with self._probe_completed:
             try:
                 ttl_seconds = (
                     self.negative_cache_ttl_seconds
@@ -426,19 +438,48 @@ class LlamaDeviceService:
                 return inventory
             finally:
                 self._probe_in_flight = False
+                self._probe_completed.notify_all()
 
-    def _discovery_in_progress_inventory(self) -> LlamaDeviceInventory:
+    def _discovery_in_progress_inventory(
+        self,
+        cached_inventory: LlamaDeviceInventory | None,
+    ) -> LlamaDeviceInventory:
+        if cached_inventory is not None:
+            return replace(
+                cached_inventory,
+                reason="GPU discovery is in progress; showing the previous device inventory.",
+                error=DISCOVERY_IN_PROGRESS_ERROR,
+                cache_policy="negative",
+                selection_detection_error=DISCOVERY_IN_PROGRESS_ERROR,
+                discovery_in_progress=True,
+            )
+
         acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
         return _cpu_inventory(
-            available=True,
+            available=self._runtime_available_without_probe(),
             managed_by_environment=llama_compute_managed_by_environment(self.environment),
             forced_backend={"cpu": "cpu", "vulkan": "gpu"}.get(acceleration),
-            reason="GPU discovery is already in progress, so CPU is recommended for this startup.",
+            reason="GPU discovery is already in progress.",
             error=DISCOVERY_IN_PROGRESS_ERROR,
             cache_policy="negative",
             selection_detection_error=DISCOVERY_IN_PROGRESS_ERROR,
             discovery_in_progress=True,
         )
+
+    def _runtime_available_without_probe(self) -> bool:
+        configured_runner = self.environment.get("GEIST_LOCAL_RUNNER", "").strip()
+        if configured_runner and configured_runner != "llama_server":
+            return False
+        if self.environment.get("GEIST_LLAMA_SERVER_PATH", "").strip():
+            return False
+        acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
+        if acceleration not in {"auto", "cpu", "vulkan"}:
+            return False
+        root_value = self.environment.get("GEIST_LLAMA_RUNTIME_ROOT")
+        if not root_value:
+            return False
+        root = Path(root_value).expanduser().resolve()
+        return (root / "cpu" / llama_server_filename()).is_file()
 
     def _discover_inventory(self) -> LlamaDeviceInventory:
         managed_by_environment = llama_compute_managed_by_environment(self.environment)
@@ -610,17 +651,6 @@ class LlamaDeviceService:
 
         snapshot = inventory if inventory is not None else self.inventory()
         return snapshot.resolve_runtime_ids(device_ids)
-
-    def resolve_device_ids(
-        self,
-        device_ids: Sequence[str],
-        *,
-        inventory: LlamaDeviceInventory | None = None,
-    ) -> tuple[str, ...]:
-        """Resolve IDs to canonical public IDs in one inventory snapshot."""
-
-        snapshot = inventory if inventory is not None else self.inventory()
-        return snapshot.resolve_device_ids(device_ids)
 
 
 _default_service: LlamaDeviceService | None = None

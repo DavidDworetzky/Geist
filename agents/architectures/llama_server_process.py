@@ -115,7 +115,10 @@ class LlamaServerManager:
             return self._state.public_dict()
 
     def device_inventory(self, *, refresh: bool = False) -> dict[str, Any]:
-        return self._device_service.inventory(refresh=refresh).public_dict()
+        return self._device_service.inventory(
+            refresh=refresh,
+            allow_in_progress=True,
+        ).public_dict()
 
     def _selection_identity(
         self,
@@ -187,7 +190,6 @@ class LlamaServerManager:
                         root / "vulkan" / filename,
                         inventory.resolve_runtime_ids(recommended_ids),
                         recommended_ids,
-                        detection_error=inventory.selection_detection_error,
                     ),
                     LlamaServerCandidate("cpu", root / "cpu" / filename),
                 ]

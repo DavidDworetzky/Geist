@@ -71,8 +71,8 @@ class StaticDeviceService:
             for index in range(device_count)
         )
 
-    def inventory(self, *, refresh=False):
-        self.refresh_requests.append(refresh)
+    def inventory(self, *, refresh=False, allow_in_progress=False):
+        self.refresh_requests.append((refresh, allow_in_progress))
         return LlamaDeviceInventory(
             available=True,
             managed_by_environment=False,
@@ -110,7 +110,7 @@ def test_device_inventory_forwards_refresh_to_service() -> None:
     inventory = manager.device_inventory(refresh=True)
 
     assert inventory["recommended_backend"] == "gpu"
-    assert device_service.refresh_requests == [True]
+    assert device_service.refresh_requests == [(True, True)]
 
 
 def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
@@ -159,9 +159,106 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     else:
         assert options["start_new_session"] is True
     assert probes[0][0] == "http://127.0.0.1:43123"
-    assert device_service.refresh_requests == [False]
+    assert device_service.refresh_requests == [(False, False)]
     assert device_service.resolve_requests == []
     assert manager.public_status()["status"] == "ready"
+    manager.stop()
+
+
+def test_auto_start_waits_for_inflight_http_inventory_and_uses_discovered_gpu(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    probe_entered = threading.Event()
+    release_probe = threading.Event()
+    runtime_inventory_entered = threading.Event()
+    process_started = threading.Event()
+
+    def probe(*_args, **_kwargs):
+        probe_entered.set()
+        assert release_probe.wait(timeout=3)
+        return subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="Available devices:\n  Vulkan0: NVIDIA RTX 4090\n",
+            stderr="",
+        )
+
+    class ObservedDeviceService(LlamaDeviceService):
+        def inventory(
+            self,
+            *,
+            refresh: bool = False,
+            allow_in_progress: bool = False,
+        ) -> LlamaDeviceInventory:
+            if not allow_in_progress:
+                runtime_inventory_entered.set()
+            return super().inventory(
+                refresh=refresh,
+                allow_in_progress=allow_in_progress,
+            )
+
+    device_service = ObservedDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=probe,
+    )
+    http_results: list[LlamaDeviceInventory] = []
+    http_errors: list[BaseException] = []
+
+    def fetch_http_inventory() -> None:
+        try:
+            http_results.append(device_service.inventory(allow_in_progress=True))
+        except BaseException as error:  # pragma: no cover - asserted below
+            http_errors.append(error)
+
+    http_thread = threading.Thread(target=fetch_http_inventory)
+    http_thread.start()
+    assert probe_entered.wait(timeout=2)
+
+    processes = []
+
+    def process_factory(args, **_options):
+        process_started.set()
+        process = FakeProcess(args)
+        processes.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=device_service,
+    )
+    connections = []
+    start_errors: list[BaseException] = []
+
+    def start_runtime() -> None:
+        try:
+            connections.append(manager.start(model, "test/model"))
+        except BaseException as error:  # pragma: no cover - asserted below
+            start_errors.append(error)
+
+    starter = threading.Thread(target=start_runtime)
+    starter.start()
+    assert runtime_inventory_entered.wait(timeout=2)
+    assert process_started.wait(timeout=0.1) is False
+
+    release_probe.set()
+    http_thread.join(timeout=2)
+    starter.join(timeout=2)
+
+    assert not http_thread.is_alive()
+    assert not starter.is_alive()
+    assert http_errors == []
+    assert start_errors == []
+    assert len(http_results) == 1
+    assert http_results[0].recommended_backend == "gpu"
+    assert len(connections) == 1
+    assert connections[0].backend == "vulkan"
+    assert len(processes) == 1
     manager.stop()
 
 
@@ -192,7 +289,7 @@ def test_auto_cpu_carries_exact_inventory_error_provenance(
     assert connection.selection_backend == "auto"
     assert connection.selection_device_ids == ()
     assert connection.detection_error == expected_detection_error
-    assert device_service.refresh_requests == [False]
+    assert device_service.refresh_requests == [(False, False)]
     assert device_service.resolve_requests == []
     manager.stop()
 

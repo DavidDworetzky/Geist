@@ -13,6 +13,7 @@ import pytest
 
 from agents.architectures.llama_devices import (
     DISCOVERY_IN_PROGRESS_ERROR,
+    LlamaDeviceInventory,
     LlamaDeviceService,
     classify_device,
     llama_compute_managed_by_environment,
@@ -459,7 +460,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
 
     def second_refresh() -> None:
         second_refresh_started.set()
-        second_results.append(service.inventory(refresh=True))
+        second_results.append(service.inventory(refresh=True, allow_in_progress=True))
         second_refresh_returned.set()
 
     second = threading.Thread(target=second_refresh)
@@ -468,6 +469,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     second.start()
     assert second_refresh_started.wait(timeout=2)
     returned_before_release = second_refresh_returned.wait(timeout=1)
+    polled_while_refreshing = service.inventory(allow_in_progress=True)
     release_refresh_probe.set()
     first.join(timeout=2)
     second.join(timeout=2)
@@ -476,7 +478,14 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     assert not second.is_alive()
     assert returned_before_release is True
     assert len(calls) == 2
-    assert second_results == [ordinary]
+    assert len(second_results) == 1
+    coalesced_refresh = second_results[0]
+    assert coalesced_refresh is not ordinary
+    assert coalesced_refresh.devices == ordinary.devices
+    assert coalesced_refresh.error == DISCOVERY_IN_PROGRESS_ERROR
+    assert coalesced_refresh.discovery_in_progress is True
+    assert polled_while_refreshing.devices == ordinary.devices
+    assert polled_while_refreshing.discovery_in_progress is True
     assert len(first_results) == 1
     refreshed = first_results[0]
     assert refreshed is not ordinary
@@ -488,7 +497,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     assert len(calls) == 3
 
 
-def test_concurrent_cold_caller_returns_transient_result_without_waiting(
+def test_concurrent_http_cold_caller_returns_transient_result_without_waiting(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
@@ -512,7 +521,7 @@ def test_concurrent_cold_caller_returns_transient_result_without_waiting(
     first = threading.Thread(target=lambda: discovered.append(service.inventory()))
 
     def second_inventory() -> None:
-        transient.append(service.inventory())
+        transient.append(service.inventory(allow_in_progress=True))
         second_returned.set()
 
     second = threading.Thread(target=second_inventory)
@@ -530,6 +539,7 @@ def test_concurrent_cold_caller_returns_transient_result_without_waiting(
     assert len(calls) == 1
     assert len(transient) == 1
     in_progress = transient[0]
+    assert in_progress.available is True
     assert in_progress.recommended_backend == "cpu"
     assert in_progress.error == DISCOVERY_IN_PROGRESS_ERROR
     assert in_progress.selection_detection_error == DISCOVERY_IN_PROGRESS_ERROR
@@ -540,6 +550,36 @@ def test_concurrent_cold_caller_returns_transient_result_without_waiting(
     assert discovered[0].discovery_in_progress is False
     assert service.inventory() is discovered[0]
     assert service.inventory() is not in_progress
+
+
+def test_cold_in_progress_inventory_reports_missing_runtime_as_unavailable() -> None:
+    probe_entered = threading.Event()
+    release_probe = threading.Event()
+
+    class BlockingDeviceService(LlamaDeviceService):
+        def _discover_inventory(self) -> LlamaDeviceInventory:
+            probe_entered.set()
+            assert release_probe.wait(timeout=2)
+            return super()._discover_inventory()
+
+    service = BlockingDeviceService(environment={})
+    discovered = []
+    first = threading.Thread(target=lambda: discovered.append(service.inventory()))
+    first.start()
+    assert probe_entered.wait(timeout=2)
+
+    in_progress = service.inventory(allow_in_progress=True)
+
+    assert in_progress.available is False
+    assert in_progress.discovery_in_progress is True
+    assert in_progress.error == DISCOVERY_IN_PROGRESS_ERROR
+
+    release_probe.set()
+    first.join(timeout=2)
+    assert not first.is_alive()
+    assert len(discovered) == 1
+    assert discovered[0].available is False
+    assert discovered[0].discovery_in_progress is False
 
 
 @pytest.mark.parametrize("runner", ["transformers", "mlx_llama"])

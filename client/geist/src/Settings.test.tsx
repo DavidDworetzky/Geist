@@ -517,12 +517,68 @@ describe('Settings page', () => {
     expect(savedUpdates.llama_gpu_device_ids).toEqual(['gpu-integrated']);
   });
 
-  it('keeps an unresolved GPU validation error after cancelling unrelated edits', async () => {
+  it('allows an unrelated save after observing an invalid persisted compute selection', async () => {
     const invalidPersistedSettings = {
       ...baseSettings,
       llama_backend: 'gpu' as const,
       llama_gpu_device_ids: [],
     };
+    const manualDeviceInventory = {
+      ...mockDeviceInventory,
+      devices: [{
+        id: 'gpu-integrated',
+        compatibility_ids: [],
+        name: 'Integrated GPU',
+        total_memory_mib: 4096,
+        free_memory_mib: 2048,
+        kind: 'integrated',
+        recommended: false,
+      }],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'Only integrated Vulkan devices were detected, so CPU is recommended.',
+    };
+    let savedUpdates: any = null;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string, options?: RequestInit) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
+      }
+      if (options?.method === 'PUT') {
+        savedUpdates = JSON.parse(options.body as string);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...invalidPersistedSettings, ...savedUpdates }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => invalidPersistedSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    expect(await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    )).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-describedby');
+    fireEvent.click(save);
+
+    await waitFor(() => expect(savedUpdates).not.toBeNull());
+    expect(savedUpdates).not.toHaveProperty('llama_backend');
+    expect(savedUpdates).not.toHaveProperty('llama_gpu_device_ids');
+  });
+
+  it('describes a dirty invalid compute edit when Models is showing the online agent', async () => {
     const manualDeviceInventory = {
       ...mockDeviceInventory,
       devices: [{
@@ -546,50 +602,15 @@ describe('Settings page', () => {
       if (url === '/api/v1/models/local/runtime/devices') {
         return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
       }
-      return Promise.resolve({ ok: true, json: async () => invalidPersistedSettings });
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
     });
 
     renderSettings();
     fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
     await waitForSettingsRefresh();
-    expect(await screen.findByText(
-      /choose at least one available GPU device before saving/i,
-    )).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
-    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
-      target: { value: '0.8' },
+    fireEvent.change(await screen.findByLabelText('Compute Backend'), {
+      target: { value: 'gpu' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-
-    const validation = screen.getByRole('alert');
-    expect(validation).toHaveTextContent(/resolve the GPU device selection before saving/i);
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toHaveAttribute(
-      'aria-describedby',
-      validation.id,
-    );
-  });
-
-  it('describes invalid compute state when Models is showing the online agent', async () => {
-    const invalidPersistedSettings = {
-      ...baseSettings,
-      llama_backend: 'gpu' as const,
-      llama_gpu_device_ids: [],
-    };
-    // @ts-ignore
-    global.fetch = jest.fn((url: string) => {
-      if (url === '/api/v1/models/') {
-        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
-      }
-      if (url === '/api/v1/models/local/runtime/devices') {
-        return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
-      }
-      return Promise.resolve({ ok: true, json: async () => invalidPersistedSettings });
-    });
-
-    renderSettings();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
-    await waitForSettingsRefresh();
     expect(await screen.findByText(
       /choose at least one available GPU device before saving/i,
     )).toBeInTheDocument();
@@ -664,7 +685,7 @@ describe('Settings page', () => {
     expect(save).toBeEnabled();
   });
 
-  it('does not cache an unresolved loading result after Models is unmounted', async () => {
+  it('does not gate an unrelated edit on an unresolved inventory request', async () => {
     const persistedGpuSettings = {
       ...baseSettings,
       llama_backend: 'gpu' as const,
@@ -690,10 +711,9 @@ describe('Settings page', () => {
     await waitForSettingsRefresh();
     expect(await screen.findByText(/Detecting llama\.cpp compute devices/i)).toBeInTheDocument();
     const save = screen.getByRole('button', { name: 'Save Changes' });
-    await waitFor(() => expect(save).toHaveAttribute('aria-describedby'));
+    expect(save).not.toHaveAttribute('aria-describedby');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
-    await waitFor(() => expect(save).not.toHaveAttribute('aria-describedby'));
     fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
       target: { value: '0.8' },
     });
@@ -705,7 +725,7 @@ describe('Settings page', () => {
     });
   });
 
-  it('keeps settled validity during a same-selection remount until discovery settles', async () => {
+  it('does not let refreshed compute validity block an unrelated dirty save', async () => {
     const persistedGpuSettings = {
       ...baseSettings,
       llama_backend: 'gpu' as const,
@@ -769,8 +789,108 @@ describe('Settings page', () => {
       /^Resolve the GPU device selection before saving\.$/i,
     );
     expect(validation).toHaveTextContent(/resolve the GPU device selection before saving/i);
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('uses a failed inventory request to describe a blocked dirty compute edit', async () => {
+    const manualDeviceInventory = {
+      ...mockDeviceInventory,
+      devices: [{
+        id: 'gpu-integrated',
+        compatibility_ids: [],
+        name: 'Integrated GPU',
+        total_memory_mib: 4096,
+        free_memory_mib: 2048,
+        kind: 'integrated',
+        recommended: false,
+      }],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'Only integrated Vulkan devices were detected, so CPU is recommended.',
+    };
+    let inventoryCalls = 0;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        inventoryCalls += 1;
+        if (inventoryCalls === 1) {
+          return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
+        }
+        return Promise.resolve({
+          ok: false,
+          statusText: 'Device service unavailable',
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(await screen.findByLabelText('Compute Backend'), {
+      target: { value: 'gpu' },
+    });
+    expect(await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    )).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+
+    const requestAlert = await screen.findByRole('alert');
+    expect(requestAlert).toHaveTextContent(/device service unavailable/i);
+    expect(requestAlert).toHaveAttribute('id', 'llama-compute-selection-validation');
+    expect(screen.queryByText(/previously selected GPU is unavailable/i))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(/^Resolve the GPU device selection before saving\.$/i))
+      .not.toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'Save Changes' });
     expect(save).toBeDisabled();
-    expect(save).toHaveAttribute('aria-describedby', validation.id);
+    expect(save).toHaveAttribute('aria-describedby', requestAlert.id);
+    expect(document.getElementById(save.getAttribute('aria-describedby') ?? ''))
+      .toBe(requestAlert);
+  });
+
+  it('keeps a dirty CPU selection valid when a later inventory request fails', async () => {
+    let inventoryCalls = 0;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        inventoryCalls += 1;
+        if (inventoryCalls === 1) {
+          return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
+        }
+        return Promise.resolve({
+          ok: false,
+          statusText: 'Device service unavailable',
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(await screen.findByLabelText('Compute Backend'), {
+      target: { value: 'cpu' },
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+
+    const requestAlert = await screen.findByRole('alert');
+    expect(requestAlert).toHaveTextContent(/device service unavailable/i);
+    expect(requestAlert).not.toHaveAttribute('id');
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-describedby');
   });
 
   it('omits stale persisted compute settings from an unrelated save', async () => {

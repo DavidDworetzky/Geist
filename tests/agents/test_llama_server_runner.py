@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -259,7 +258,6 @@ def test_auto_vulkan_startup_failure_remains_pending_through_persistence_guard(
         "missing-vulkan",
         "transient-probe",
         "ambiguous-devices",
-        "discovery-in-progress",
     ],
 )
 def test_auto_cpu_persistence_follows_internal_selection_signal(
@@ -269,8 +267,6 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
     runtime = _runtime_tree(tmp_path)
     if scenario == "missing-vulkan":
         (runtime / "vulkan" / llama_server_filename()).unlink()
-    probe_entered = threading.Event()
-    release_probe = threading.Event()
 
     def probe(*_args, **_kwargs):
         if scenario == "transient-probe":
@@ -286,15 +282,6 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
                 ),
                 stderr="",
             )
-        if scenario == "discovery-in-progress":
-            probe_entered.set()
-            assert release_probe.wait(timeout=10)
-            return subprocess.CompletedProcess(
-                [],
-                0,
-                stdout="Available devices:\n  Vulkan0: NVIDIA RTX 4090\n",
-                stderr="",
-            )
         pytest.fail("A missing Vulkan executable must not run device discovery")
 
     environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
@@ -302,14 +289,9 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
         environment=environment,
         command_runner=probe,
     )
-    discovery_thread = None
-    if scenario == "discovery-in-progress":
-        discovery_thread = threading.Thread(target=device_service.inventory)
-        discovery_thread.start()
-        assert probe_entered.wait(timeout=2)
     inventory = device_service.inventory()
     assert inventory.error is not None
-    assert inventory.discovery_in_progress is (scenario == "discovery-in-progress")
+    assert inventory.discovery_in_progress is False
 
     processes = []
 
@@ -385,10 +367,6 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
             get_user.assert_not_called()
             persist.assert_not_called()
     finally:
-        release_probe.set()
-        if discovery_thread is not None:
-            discovery_thread.join(timeout=2)
-            assert not discovery_thread.is_alive()
         manager.stop()
 
 
@@ -434,11 +412,7 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
         {
             "choices": [
                 {
-                    "delta": {
-                        "tool_calls": [
-                            {"index": 0, "function": {"arguments": "7}"}}
-                        ]
-                    },
+                    "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "7}"}}]},
                     "finish_reason": "tool_calls",
                 }
             ]

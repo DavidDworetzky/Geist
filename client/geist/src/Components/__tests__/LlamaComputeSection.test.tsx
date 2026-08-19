@@ -200,6 +200,7 @@ describe('LlamaComputeSection', () => {
       expect.objectContaining({ signal: expect.any(Object) }),
     );
     expect(screen.getByRole('button', { name: 'Refreshing devices…' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(/refreshing device discovery/i);
 
     await act(async () => {
       resolveRefresh?.({
@@ -211,8 +212,81 @@ describe('LlamaComputeSection', () => {
     });
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Device probe timed out/i);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh devices' })).toBeEnabled();
     expect(screen.getByLabelText('Compute Backend')).toBeInTheDocument();
+  });
+
+  it('acknowledges a coalesced refresh and reports when the device list is current', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        statusText: 'OK',
+        json: async () => discoveredGpuInventory,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        statusText: 'OK',
+        json: async () => discoveryInProgressInventory,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        statusText: 'OK',
+        json: async () => discoveredGpuInventory,
+      });
+    // @ts-ignore
+    global.fetch = fetchMock;
+
+    render(<LlamaComputeSection {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh devices' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        /device discovery is in progress.*waiting for the current results/i,
+      );
+    });
+    expect(await screen.findByText(/device list is current/i)).toHaveAttribute(
+      'role',
+      'status',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/models/local/runtime/devices',
+      expect.objectContaining({ signal: expect.any(Object) }),
+    );
+    const refreshSignal = (fetchMock.mock.calls[1][1] as RequestInit).signal;
+    expect((fetchMock.mock.calls[2][1] as RequestInit).signal).toBe(refreshSignal);
+  });
+
+  it('attributes an unresolved saved GPU to the failed inventory request', async () => {
+    // @ts-ignore
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: false,
+      statusText: 'Device service unavailable',
+    }));
+
+    render(
+      <LlamaComputeSection
+        {...props}
+        backend="gpu"
+        deviceIds={['gpu-saved']}
+      />,
+    );
+
+    const requestAlert = await screen.findByRole('alert');
+    expect(requestAlert).toHaveTextContent(/device service unavailable/i);
+    expect(requestAlert).toHaveAttribute('id', 'llama-compute-selection-validation');
+    expect(screen.queryByText(/previously selected GPU is unavailable/i))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(/resolve the GPU device selection/i)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(
+        false,
+        false,
+        'Device inventory failed: Device service unavailable',
+      );
+    });
   });
 
   it('aborts a pending manual refresh when the section unmounts', async () => {
@@ -312,9 +386,11 @@ describe('LlamaComputeSection', () => {
       '/api/v1/models/local/runtime/devices',
       expect.objectContaining({ signal: expect.any(Object) }),
     );
-    expect(props.onValidityChange).not.toHaveBeenCalledWith(false, true);
+    expect(props.onValidityChange.mock.calls.some(
+      ([valid, settled]) => valid === false && settled === true,
+    )).toBe(false);
     await waitFor(() => {
-      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true, null);
     });
     expect(screen.queryByText(/device discovery is already in progress/i))
       .not.toBeInTheDocument();
@@ -323,11 +399,15 @@ describe('LlamaComputeSection', () => {
   it('stops retrying a persistent discovery marker and keeps it unsettled', async () => {
     jest.useFakeTimers();
     const retryStartedAt = Date.now();
-    const fetchMock = jest.fn((_url: string, _options?: RequestInit) => Promise.resolve({
-      ok: true,
-      statusText: 'OK',
-      json: async () => discoveryInProgressInventory,
-    }));
+    const requestTimes: number[] = [];
+    const fetchMock = jest.fn((_url: string, _options?: RequestInit) => {
+      requestTimes.push(Date.now());
+      return Promise.resolve({
+        ok: true,
+        statusText: 'OK',
+        json: async () => discoveryInProgressInventory,
+      });
+    });
     // @ts-ignore
     global.fetch = fetchMock;
 
@@ -343,7 +423,7 @@ describe('LlamaComputeSection', () => {
       await Promise.resolve();
     });
 
-    for (let retry = 0; retry < 6; retry += 1) {
+    for (let retry = 0; retry < 9; retry += 1) {
       await act(async () => {
         jest.runOnlyPendingTimers();
         await Promise.resolve();
@@ -351,11 +431,21 @@ describe('LlamaComputeSection', () => {
       });
     }
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
     expect(Date.now() - retryStartedAt).toBeGreaterThan(10000);
+    const requestGaps = requestTimes.slice(1).map(
+      (requestTime, index) => requestTime - requestTimes[index],
+    );
+    expect(Math.max(...requestGaps)).toBeLessThan(3000);
+    const requestSignals = fetchMock.mock.calls.map(
+      call => (call[1] as RequestInit).signal,
+    );
+    expect(new Set(requestSignals).size).toBe(1);
     expect(screen.getByText(/device discovery is already in progress/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh devices' })).toBeEnabled();
-    expect(props.onValidityChange).not.toHaveBeenCalledWith(false, true);
+    expect(props.onValidityChange.mock.calls.some(
+      ([valid, settled]) => valid === false && settled === true,
+    )).toBe(false);
   });
 
   it('cancels a pending discovery-marker retry when unmounted', async () => {
@@ -479,7 +569,7 @@ describe('LlamaComputeSection', () => {
       /choose at least one available GPU device/i,
     );
     await waitFor(() => {
-      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true, null);
     });
     const integratedGpu = screen.getByRole('checkbox', { name: /Integrated GPU/i });
     const softwareGpu = screen.getByRole('checkbox', { name: /Software Vulkan Device/i });
@@ -499,7 +589,7 @@ describe('LlamaComputeSection', () => {
       <LlamaComputeSection {...props} backend="gpu" deviceIds={['gpu-integrated']} />,
     );
     await waitFor(() => {
-      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true, null);
     });
   });
 
@@ -539,7 +629,7 @@ describe('LlamaComputeSection', () => {
     expect(stableGpu).toBeDisabled();
     expect(screen.queryByText(/previously selected GPU is unavailable/i)).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true, null);
     });
 
     rerender(
@@ -555,7 +645,7 @@ describe('LlamaComputeSection', () => {
       'alert',
     );
     await waitFor(() => {
-      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true, null);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Use available devices' }));
     expect(props.onDeviceIdsChange).toHaveBeenLastCalledWith(['gpu-stable']);

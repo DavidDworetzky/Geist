@@ -15,7 +15,11 @@ interface AgentConfigSectionProps {
   onOnlineModelChange: (value: string) => void;
   onLlamaBackendChange: (value: 'cpu' | 'gpu' | null) => void;
   onLlamaGpuDeviceIdsChange: (value: string[]) => void;
-  onLlamaComputeValidityChange: (valid: boolean, settled: boolean) => void;
+  onLlamaComputeValidityChange: (
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => void;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {

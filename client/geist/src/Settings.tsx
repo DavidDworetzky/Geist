@@ -47,6 +47,7 @@ const Settings: React.FC = () => {
   const [pendingLlamaComputeValidity, setPendingLlamaComputeValidity] = useState<{
     signature: string;
     valid: boolean;
+    validationError: string | null;
   } | null>(null);
   const refreshedOnMount = useRef(false);
   const mounted = useRef(true);
@@ -54,23 +55,38 @@ const Settings: React.FC = () => {
   const [mountRefreshSettled, setMountRefreshSettled] = useState(false);
   const lastMergedSettings = useRef<any>(null);
   const hasUnsavedChanges = dirtyKeys.size > 0;
+  const llamaComputeDirty = dirtyKeys.has('llama_backend')
+    || dirtyKeys.has('llama_gpu_device_ids');
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
   const llamaComputeSignature = llamaComputeSelectionSignature(localSettings);
   const cachedLlamaComputeValidity = llamaComputeValidityBySignature.get(llamaComputeSignature);
   const pendingCurrentLlamaComputeValidity = (
     pendingLlamaComputeValidity?.signature === llamaComputeSignature
-      ? pendingLlamaComputeValidity.valid
+      ? pendingLlamaComputeValidity
       : undefined
   );
-  const llamaComputeValid = cachedLlamaComputeValidity
-    ?? pendingCurrentLlamaComputeValidity
-    ?? fallbackLlamaComputeValidity(localSettings);
+  const llamaComputeValidationError = pendingCurrentLlamaComputeValidity?.validationError
+    ?? null;
+  const llamaComputeValid = llamaComputeValidationError
+    ? false
+    : cachedLlamaComputeValidity
+      ?? pendingCurrentLlamaComputeValidity?.valid
+      ?? fallbackLlamaComputeValidity(localSettings);
+  const llamaComputeSaveBlocked = llamaComputeDirty && !llamaComputeValid;
   const llamaComputeSectionMounted = activeTab === 'models'
     && localSettings?.default_agent_type === 'local';
-  const handleLlamaComputeValidityChange = useCallback((valid: boolean, settled: boolean) => {
+  const handleLlamaComputeValidityChange = useCallback((
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => {
     if (!settled) {
-      setPendingLlamaComputeValidity({ signature: llamaComputeSignature, valid });
+      setPendingLlamaComputeValidity({
+        signature: llamaComputeSignature,
+        valid,
+        validationError,
+      });
       return;
     }
     setLlamaComputeValidityBySignature(current => {
@@ -146,7 +162,9 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     if (!llamaComputeSectionMounted) {
-      setPendingLlamaComputeValidity(current => (current === null ? current : null));
+      setPendingLlamaComputeValidity(current => (
+        current?.validationError ? current : null
+      ));
     }
   }, [llamaComputeSectionMounted]);
 
@@ -165,9 +183,12 @@ const Settings: React.FC = () => {
 
   const handleSave = async () => {
     if (refreshingOnMount || !localSettings) return;
-    if (!llamaComputeValid) {
+    if (llamaComputeSaveBlocked) {
       setSaveStatus('error');
-      setStatusMessage('Resolve the GPU device selection before saving.');
+      setStatusMessage(
+        llamaComputeValidationError
+        || 'Resolve the GPU device selection before saving.',
+      );
       return;
     }
 
@@ -475,13 +496,14 @@ const Settings: React.FC = () => {
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
-          {!llamaComputeValid && !llamaComputeSectionMounted && (
+          {llamaComputeSaveBlocked && !llamaComputeSectionMounted && (
             <span
               id={SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
               className="settings-description settings-action-validation"
               role="alert"
             >
-              Resolve the GPU device selection before saving.
+              {llamaComputeValidationError
+                || 'Resolve the GPU device selection before saving.'}
             </span>
           )}
           <button className="button button-danger" onClick={handleReset} disabled={refreshingOnMount || saveStatus === 'saving'}>
@@ -493,8 +515,8 @@ const Settings: React.FC = () => {
           <button
             className="button"
             onClick={handleSave}
-            disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || !llamaComputeValid}
-            aria-describedby={!llamaComputeValid
+            disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || llamaComputeSaveBlocked}
+            aria-describedby={llamaComputeSaveBlocked
               ? (llamaComputeSectionMounted
                 ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID
                 : SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID)
