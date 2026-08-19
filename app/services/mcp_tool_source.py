@@ -9,6 +9,8 @@ tools instead of breaking chat.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -32,10 +34,32 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
         command=server.command,
         args=tuple(server.args or []),
         env=dict(server.env or {}),
+        working_directory=server.working_directory,
         url=server.url,
         headers=dict(server.headers or {}),
         timeout_seconds=server.timeout_seconds,
     )
+
+
+def _idempotency_key(
+    context: ToolContext,
+    config: McpServerConfig,
+    tool_name: str,
+    arguments: dict,
+) -> str:
+    payload = json.dumps(
+        {
+            "user_id": context.user_id,
+            "run_id": context.run_id,
+            "server_id": config.server_id,
+            "tool": tool_name,
+            "arguments": arguments,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class McpToolSource:
@@ -109,7 +133,12 @@ class McpToolSource:
             _config: McpServerConfig = config,
             _tool: str = tool_name,
         ) -> ToolExecutionOutput:
-            content = self._manager.call_tool(_config, _tool, arguments)
+            content = self._manager.call_tool(
+                _config,
+                _tool,
+                arguments,
+                idempotency_key=_idempotency_key(context, _config, _tool, arguments),
+            )
             return ToolExecutionOutput(
                 content=content or "(empty tool result)",
                 summary=f"Called {_tool} on MCP server {_config.name}",

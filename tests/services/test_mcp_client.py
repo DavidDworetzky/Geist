@@ -109,6 +109,21 @@ def test_stdio_initialize_list_and_call():
         connection.close()
 
 
+def test_stdio_tool_call_sends_idempotency_metadata():
+    connection = McpConnection(_stdio_config())
+    try:
+        assert (
+            connection.call_tool(
+                "echo",
+                {"text": "once"},
+                idempotency_key="stable-key",
+            )
+            == "echo: once"
+        )
+    finally:
+        connection.close()
+
+
 def test_stdio_tool_error_raises():
     connection = McpConnection(_stdio_config())
     try:

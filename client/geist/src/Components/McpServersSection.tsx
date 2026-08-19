@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import SettingsSelect from './SettingsSelect';
 import SettingsToggle from './SettingsToggle';
 import {
+  ConnectorKind,
+  EmailConnectorProfile,
   McpServer,
   McpServerInput,
   McpTestResult,
@@ -19,8 +21,13 @@ interface FormState {
   command: string;
   args: string;
   env: string;
+  working_directory: string;
   url: string;
   headers: string;
+  connector_kind: ConnectorKind;
+  account_label: string;
+  recipient_allowlist: string;
+  max_writes_per_hour: string;
   timeout_seconds: string;
 }
 
@@ -30,8 +37,13 @@ const emptyForm: FormState = {
   command: '',
   args: '',
   env: '',
+  working_directory: '',
   url: '',
   headers: '',
+  connector_kind: 'custom',
+  account_label: '',
+  recipient_allowlist: '',
+  max_writes_per_hour: '20',
   timeout_seconds: '30',
 };
 
@@ -63,8 +75,13 @@ const formFromServer = (server: McpServer): FormState => ({
   command: server.command ?? '',
   args: (server.args || []).join('\n'),
   env: recordToLines(server.env || {}),
+  working_directory: server.working_directory ?? '',
   url: server.url ?? '',
   headers: recordToLines(server.headers || {}),
+  connector_kind: server.connector_kind ?? 'custom',
+  account_label: server.account_label ?? '',
+  recipient_allowlist: (server.recipient_allowlist || []).join('\n'),
+  max_writes_per_hour: String(server.max_writes_per_hour ?? 20),
   timeout_seconds: String(server.timeout_seconds),
 });
 
@@ -74,17 +91,24 @@ const inputFromForm = (form: FormState): McpServerInput => ({
   command: form.transport === 'stdio' ? form.command.trim() : null,
   args: form.transport === 'stdio' ? linesToList(form.args) : [],
   env: form.transport === 'stdio' ? linesToRecord(form.env) : {},
+  working_directory: form.transport === 'stdio' ? form.working_directory.trim() || null : null,
   url: form.transport === 'http' ? form.url.trim() : null,
   headers: form.transport === 'http' ? linesToRecord(form.headers) : {},
+  connector_kind: form.connector_kind,
+  account_label: form.account_label.trim() || null,
+  recipient_allowlist: linesToList(form.recipient_allowlist),
+  max_writes_per_hour: Number(form.max_writes_per_hour) || 20,
   timeout_seconds: Number(form.timeout_seconds) || 30,
 });
 
 const McpServersSection: React.FC = () => {
   const {
     servers,
+    connectorProfiles,
     loading,
     error,
     createServer,
+    createEmailConnector,
     updateServer,
     deleteServer,
     testServer,
@@ -104,6 +128,17 @@ const McpServersSection: React.FC = () => {
 
   const openCreateForm = () => {
     setForm(emptyForm);
+    setEditingId(null);
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const openConnectorForm = (profile: EmailConnectorProfile) => {
+    setForm({
+      ...emptyForm,
+      connector_kind: profile.kind,
+      name: `${profile.kind}-mail`,
+    });
     setEditingId(null);
     setFormError(null);
     setFormOpen(true);
@@ -139,6 +174,8 @@ const McpServersSection: React.FC = () => {
       }
       if (editingId !== null) {
         await updateServer(editingId, input);
+      } else if (input.connector_kind !== 'custom') {
+        await createEmailConnector(input);
       } else {
         await createServer(input);
       }
@@ -198,6 +235,28 @@ const McpServersSection: React.FC = () => {
         </p>
       </header>
 
+      {connectorProfiles.length > 0 && (
+        <div className="settings-field">
+          <span className="settings-label">Email connector profiles</span>
+          <p className="settings-description">
+            Geist stores the account policy and launch settings. Install and vet the MCP server
+            separately; email connectors remain disabled until security inspection is configured.
+          </p>
+          <div className="mcp-server-actions">
+            {connectorProfiles.map((profile) => (
+              <button
+                className="button button-small"
+                key={profile.kind}
+                type="button"
+                onClick={() => openConnectorForm(profile)}
+              >
+                Add {profile.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && <div className="notice notice-error">{error}</div>}
       {formError && !formOpen && <div className="notice notice-error">{formError}</div>}
 
@@ -215,6 +274,9 @@ const McpServersSection: React.FC = () => {
                   <div className="mcp-server-copy">
                     <span className="settings-label">{server.name}</span>
                     <p className="settings-description">
+                      {server.connector_kind && server.connector_kind !== 'custom'
+                        ? `${server.connector_kind.replace('_', ' ')} · ${server.account_label || 'account not labeled'} · `
+                        : ''}
                       {server.transport === 'stdio'
                         ? `${server.command ?? ''} ${(server.args || []).join(' ')}`.trim()
                         : server.url}
@@ -249,7 +311,9 @@ const McpServersSection: React.FC = () => {
                   label="Enabled"
                   checked={server.enabled}
                   onChange={(checked) => void handleToggleEnabled(server, checked)}
-                  description="Only enabled servers expose tools to chat."
+                  description={server.security_required
+                    ? 'Email connectors require the Security stack before they can expose tools.'
+                    : 'Only enabled servers expose tools to chat.'}
                 />
                 {testResult && (
                   <div
@@ -297,6 +361,48 @@ const McpServersSection: React.FC = () => {
             />
           </div>
 
+          {form.connector_kind !== 'custom' && (
+            <>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="mcp-account-label">Account</label>
+                <input
+                  id="mcp-account-label"
+                  className="form-control"
+                  type="text"
+                  placeholder="name@example.com"
+                  value={form.account_label}
+                  onChange={(e) => updateForm('account_label', e.target.value)}
+                />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="mcp-recipients">
+                  Allowed recipients (one address per line)
+                </label>
+                <textarea
+                  id="mcp-recipients"
+                  className="form-control"
+                  rows={3}
+                  value={form.recipient_allowlist}
+                  onChange={(e) => updateForm('recipient_allowlist', e.target.value)}
+                />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="mcp-rate-limit">
+                  Maximum writes per hour
+                </label>
+                <input
+                  id="mcp-rate-limit"
+                  className="form-control"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={form.max_writes_per_hour}
+                  onChange={(e) => updateForm('max_writes_per_hour', e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
           <SettingsSelect
             label="Transport"
             value={form.transport}
@@ -316,6 +422,18 @@ const McpServersSection: React.FC = () => {
                   placeholder="npx"
                   value={form.command}
                   onChange={(e) => updateForm('command', e.target.value)}
+                />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="mcp-working-directory">
+                  Working directory (optional)
+                </label>
+                <input
+                  id="mcp-working-directory"
+                  className="form-control"
+                  type="text"
+                  value={form.working_directory}
+                  onChange={(e) => updateForm('working_directory', e.target.value)}
                 />
               </div>
               <div className="settings-field">

@@ -35,6 +35,48 @@ router = APIRouter()
 
 _NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 _REDACTED = "<redacted>"
+EmailConnectorKind = Literal["gmail", "google_workspace", "outlook", "proton"]
+ConnectorKind = Literal["custom", "gmail", "google_workspace", "outlook", "proton"]
+
+_EMAIL_CONNECTOR_PROFILES = (
+    {
+        "kind": "gmail",
+        "label": "Gmail",
+        "account_scope": "Personal Google Account",
+        "authentication": "OAuth 2.0 delegated authorization",
+        "requirements": ["A separately installed, operator-vetted Gmail MCP server"],
+    },
+    {
+        "kind": "google_workspace",
+        "label": "Google Workspace",
+        "account_scope": "Managed Google Workspace account",
+        "authentication": "OAuth 2.0 under Workspace administrator policy",
+        "requirements": [
+            "A separately installed, operator-vetted Gmail MCP server",
+            "Workspace administrator approval when organizational policy requires it",
+        ],
+    },
+    {
+        "kind": "outlook",
+        "label": "Outlook / Microsoft 365",
+        "account_scope": "Personal Outlook or managed Microsoft 365 account",
+        "authentication": "Microsoft identity platform OAuth 2.0 delegated authorization",
+        "requirements": [
+            "A separately installed, operator-vetted Outlook MCP server",
+            "Tenant administrator consent when organizational policy requires it",
+        ],
+    },
+    {
+        "kind": "proton",
+        "label": "Proton Mail",
+        "account_scope": "Paid Proton account using Proton Mail Bridge",
+        "authentication": "Bridge-issued local IMAP/SMTP credentials",
+        "requirements": [
+            "Proton Mail Bridge installed, running, and signed in",
+            "A separately installed, operator-vetted IMAP/SMTP MCP server",
+        ],
+    },
+)
 
 
 def get_current_user():
@@ -58,8 +100,14 @@ class McpServerCreate(BaseModel):
     command: str | None = Field(default=None, max_length=1024)
     args: list[str] = Field(default_factory=list, max_length=64)
     env: dict[str, str] = Field(default_factory=dict)
+    working_directory: str | None = Field(default=None, max_length=2048)
     url: str | None = Field(default=None, max_length=2048)
     headers: dict[str, str] = Field(default_factory=dict)
+    connector_kind: ConnectorKind = "custom"
+    account_label: str | None = Field(default=None, max_length=320)
+    trusted: bool = False
+    recipient_allowlist: list[str] = Field(default_factory=list, max_length=200)
+    max_writes_per_hour: int = Field(default=20, ge=1, le=1000)
     enabled: bool = False
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=600.0)
 
@@ -77,8 +125,13 @@ class McpServerUpdate(BaseModel):
     command: str | None = Field(default=None, max_length=1024)
     args: list[str] | None = Field(default=None, max_length=64)
     env: dict[str, str] | None = None
+    working_directory: str | None = Field(default=None, max_length=2048)
     url: str | None = Field(default=None, max_length=2048)
     headers: dict[str, str] | None = None
+    account_label: str | None = Field(default=None, max_length=320)
+    trusted: bool | None = None
+    recipient_allowlist: list[str] | None = Field(default=None, max_length=200)
+    max_writes_per_hour: int | None = Field(default=None, ge=1, le=1000)
     enabled: bool | None = None
     timeout_seconds: float | None = Field(default=None, ge=1.0, le=600.0)
 
@@ -91,8 +144,15 @@ class McpServerResponse(BaseModel):
     command: str | None
     args: list[str]
     env: dict[str, str]
+    working_directory: str | None
     url: str | None
     headers: dict[str, str]
+    connector_kind: str
+    account_label: str | None
+    trusted: bool
+    security_required: bool
+    recipient_allowlist: list[str]
+    max_writes_per_hour: int
     enabled: bool
     timeout_seconds: float
     create_date: Any
@@ -108,6 +168,26 @@ class McpServerTestResponse(BaseModel):
     ok: bool
     error: str | None = None
     tools: list[McpToolInfo] = Field(default_factory=list)
+
+
+class EmailConnectorProfile(BaseModel):
+    kind: EmailConnectorKind
+    label: str
+    account_scope: str
+    authentication: str
+    requirements: list[str]
+
+
+class EmailConnectorCreate(McpServerCreate):
+    connector_kind: EmailConnectorKind
+
+
+def _validate_email_policy(values: dict[str, Any]) -> None:
+    if values.get("connector_kind") != "custom" and values.get("enabled"):
+        raise HTTPException(
+            status_code=409,
+            detail="Email connectors cannot be enabled until MCP security inspection is configured",
+        )
 
 
 def _response(server: McpServerModel) -> McpServerResponse:
@@ -163,7 +243,10 @@ async def create_server(request: McpServerCreate):
             raise HTTPException(
                 status_code=409, detail=f"An MCP server named '{request.name}' already exists"
             )
-        server = create_mcp_server(user.user_id, request.model_dump())
+        values = request.model_dump()
+        _validate_email_policy(values)
+        values["security_required"] = request.connector_kind != "custom"
+        server = create_mcp_server(user.user_id, values)
         _invalidate()
         return _response(server)
     except HTTPException:
@@ -187,6 +270,12 @@ async def update_server(mcp_server_id: int, request: McpServerUpdate):
         existing = _owned_server_or_404(mcp_server_id, user.user_id)
         updates = request.model_dump(exclude_unset=True)
         _preserve_redacted_secrets(updates, existing)
+        _validate_email_policy(
+            {
+                "connector_kind": existing.connector_kind,
+                "enabled": updates.get("enabled", existing.enabled),
+            }
+        )
 
         merged_transport = updates.get("transport", existing.transport)
         merged_command = updates.get("command", existing.command)
@@ -216,6 +305,29 @@ async def update_server(mcp_server_id: int, request: McpServerUpdate):
     except Exception as e:
         logger.error(f"Error updating MCP server {mcp_server_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+@router.get("/email-connectors/profiles", response_model=list[EmailConnectorProfile])
+async def list_email_connector_profiles():
+    """Return supported account profiles without selecting a third-party server."""
+    return [EmailConnectorProfile.model_validate(profile) for profile in _EMAIL_CONNECTOR_PROFILES]
+
+
+@router.post("/email-connectors", response_model=McpServerResponse, status_code=201)
+async def create_email_connector(request: EmailConnectorCreate):
+    """Create a disabled, untrusted email connector owned by the default user."""
+    values = request.model_dump()
+    values["enabled"] = False
+    values["trusted"] = False
+    values["security_required"] = True
+    user = get_current_user()
+    if any(server.name == request.name for server in list_mcp_servers(user.user_id)):
+        raise HTTPException(
+            status_code=409, detail=f"An MCP server named '{request.name}' already exists"
+        )
+    server = create_mcp_server(user.user_id, values)
+    _invalidate()
+    return _response(server)
 
 
 @router.delete("/servers/{mcp_server_id}", status_code=204)
