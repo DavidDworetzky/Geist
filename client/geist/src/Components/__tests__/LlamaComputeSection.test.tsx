@@ -14,6 +14,7 @@ const props = {
   deviceIds: [],
   onBackendChange: jest.fn(),
   onDeviceIdsChange: jest.fn(),
+  onValidityChange: jest.fn(),
 };
 
 describe('LlamaComputeSection', () => {
@@ -21,7 +22,7 @@ describe('LlamaComputeSection', () => {
     jest.clearAllMocks();
   });
 
-  it('explains when no managed llama.cpp runtime is available', async () => {
+  it('hides compute settings when the platform has no managed llama.cpp runtime', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -41,9 +42,9 @@ describe('LlamaComputeSection', () => {
     await waitForElementToBeRemoved(() => (
       screen.queryByText(/detecting llama\.cpp compute devices/i)
     ));
-    expect(screen.getByRole('heading', { name: 'llama.cpp Compute' })).toBeInTheDocument();
-    expect(screen.getByText(/managed llama\.cpp runtime is not installed/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Refresh devices' })).toBeEnabled();
+    expect(screen.queryByRole('heading', { name: 'llama.cpp Compute' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/managed llama\.cpp runtime is not installed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh devices' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
   });
 
@@ -67,6 +68,7 @@ describe('LlamaComputeSection', () => {
     expect(await screen.findByText(/CPU llama-server executable is required/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'llama.cpp Compute' })).toBeInTheDocument();
     expect(screen.getByText(/managed CPU llama\.cpp runtime is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh devices' })).toBeEnabled();
     expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
   });
 
@@ -314,7 +316,10 @@ describe('LlamaComputeSection', () => {
     expect(props.onBackendChange).toHaveBeenCalledWith('gpu');
 
     rerender(<LlamaComputeSection {...props} backend="gpu" deviceIds={[]} />);
-    expect(screen.getByRole('alert')).toHaveTextContent(/choose at least one GPU device/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /choose at least one available GPU device/i,
+    );
+    expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
     const integratedGpu = screen.getByRole('checkbox', { name: /Integrated GPU/i });
     const softwareGpu = screen.getByRole('checkbox', { name: /Software Vulkan Device/i });
     const nonRecommendedDiscrete = screen.getByRole('checkbox', {
@@ -327,6 +332,66 @@ describe('LlamaComputeSection', () => {
 
     fireEvent.click(integratedGpu);
     expect(props.onDeviceIdsChange).toHaveBeenLastCalledWith(['gpu-integrated']);
+    expect(props.onBackendChange).toHaveBeenLastCalledWith('gpu');
+
+    rerender(
+      <LlamaComputeSection {...props} backend="gpu" deviceIds={['gpu-integrated']} />,
+    );
+    expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+  });
+
+  it('maps legacy IDs to one canonical checked device and normalizes on interaction', async () => {
+    // @ts-ignore
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({
+        available: true,
+        managed_by_environment: false,
+        forced_backend: null,
+        devices: [{
+          id: 'gpu-stable',
+          compatibility_ids: ['gpu-legacy'],
+          name: 'Stable GPU',
+          total_memory_mib: 12288,
+          free_memory_mib: 10000,
+          kind: 'discrete',
+          recommended: true,
+        }],
+        recommended_backend: 'gpu',
+        recommended_device_ids: ['gpu-stable'],
+        reason: 'Stable GPU is recommended.',
+        error: null,
+      }),
+    }));
+
+    const { rerender } = render(
+      <LlamaComputeSection
+        {...props}
+        backend="gpu"
+        deviceIds={['gpu-legacy']}
+      />,
+    );
+    const stableGpu = await screen.findByRole('checkbox', { name: /Stable GPU/i });
+    expect(stableGpu).toBeChecked();
+    expect(stableGpu).toBeDisabled();
+    expect(screen.queryByText(/previously selected GPU is unavailable/i)).not.toBeInTheDocument();
+    expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+
+    rerender(
+      <LlamaComputeSection
+        {...props}
+        backend="gpu"
+        deviceIds={['gpu-legacy', 'gpu-stable']}
+      />,
+    );
+    expect(await screen.findByText(/previously selected GPU is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/resolve the GPU device selection before saving/i)).toHaveAttribute(
+      'role',
+      'alert',
+    );
+    expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Use available devices' }));
+    expect(props.onDeviceIdsChange).toHaveBeenLastCalledWith(['gpu-stable']);
     expect(props.onBackendChange).toHaveBeenLastCalledWith('gpu');
   });
 

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from agents.architectures.llama_devices import LlamaDevice, LlamaDeviceInventory
+from agents.architectures.llama_devices import (
+    LlamaDevice,
+    LlamaDeviceInventory,
+    LlamaDeviceService,
+    llama_server_filename,
+)
 from agents.architectures.llama_server_process import LlamaServerManager
 from agents.architectures.llama_server_process_posix import process_options as posix_options
 from agents.architectures.llama_server_process_windows import process_options as windows_options
@@ -182,6 +188,8 @@ def test_auto_cpu_carries_exact_inventory_error_provenance(
     connection = manager.start(model, "test/model")
 
     assert connection.backend == "cpu"
+    assert connection.selection_backend == "auto"
+    assert connection.selection_device_ids == ()
     assert connection.detection_error == expected_detection_error
     assert device_service.refresh_requests == [False]
     assert device_service.resolve_requests == []
@@ -214,9 +222,63 @@ def test_auto_falls_back_to_cpu_when_vulkan_fails_health(tmp_path):
     connection = manager.start(model, "test/model")
 
     assert connection.backend == "cpu"
+    assert connection.device_ids == ()
+    assert connection.selection_backend == "auto"
+    assert connection.selection_device_ids == ()
+    assert connection.detection_error == "driver unavailable"
     assert calls[0].terminated is True
     executable = "llama-server.exe" if os.name == "nt" else "llama-server"
     assert calls[1].args[0] == str(runtime / "cpu" / executable)
+    manager.stop()
+
+
+def test_auto_cached_gpu_recommendation_carries_missing_vulkan_error_to_cpu(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    device_service = LlamaDeviceService(
+        environment=environment,
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="Available devices:\n  Vulkan0: NVIDIA RTX 4090\n",
+            stderr="",
+        ),
+    )
+    cached_inventory = device_service.inventory()
+    assert cached_inventory.recommended_backend == "gpu"
+
+    vulkan_executable = runtime / "vulkan" / llama_server_filename()
+    vulkan_executable.unlink()
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=device_service,
+    )
+
+    connection = manager.start(model, "test/model")
+
+    expected_error = f"llama-server executable does not exist: {vulkan_executable}"
+    assert connection.backend == "cpu"
+    assert connection.device_ids == ()
+    assert connection.selection_backend == "auto"
+    assert connection.selection_device_ids == ()
+    assert connection.detection_error == expected_error
+    assert device_service.inventory() is cached_inventory
+    assert len(calls) == 1
+    assert Path(calls[0].args[0]).parent.name == "cpu"
     manager.stop()
 
 
@@ -249,6 +311,9 @@ def test_explicit_cpu_starts_without_gpu_flags_and_reuses_same_runtime(tmp_path)
 
     assert first is second
     assert first.backend == "cpu"
+    assert first.selection_backend == "cpu"
+    assert first.selection_device_ids == ()
+    assert first.detection_error is None
     assert len(calls) == 1
     assert "--device" not in calls[0].args
     assert "--n-gpu-layers" not in calls[0].args

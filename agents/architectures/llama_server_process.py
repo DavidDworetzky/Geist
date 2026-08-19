@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -199,6 +199,16 @@ class LlamaServerManager:
                     )
                 ]
 
+        if (
+            effective_backend == "auto"
+            and len(candidates) > 1
+            and candidates[-1].executable.is_file()
+        ):
+            # Let the startup loop observe a preferred runtime that vanished
+            # after discovery so its exact error is attached to the available
+            # fallback. Otherwise retain the fail-closed executable filtering.
+            return candidates
+
         existing = [candidate for candidate in candidates if candidate.executable.is_file()]
         if not existing:
             expected = ", ".join(str(candidate.executable) for candidate in candidates)
@@ -260,10 +270,16 @@ class LlamaServerManager:
                 raise
 
             errors: list[str] = []
+            prior_startup_error: str | None = None
             for candidate in candidates:
+                startup_candidate = (
+                    replace(candidate, detection_error=prior_startup_error)
+                    if prior_startup_error is not None and candidate.detection_error is None
+                    else candidate
+                )
                 try:
                     return self._start_candidate(
-                        candidate,
+                        startup_candidate,
                         resolved_model,
                         model_id,
                         requested_epoch,
@@ -275,6 +291,7 @@ class LlamaServerManager:
                         if requested_epoch != self._stop_epoch:
                             raise RuntimeError("llama-server startup was cancelled") from error
                         self._stop_locked()
+                    prior_startup_error = str(error)
                     errors.append(f"{candidate.backend}: {error}")
                     logger.warning("llama-server %s startup failed: %s", candidate.backend, error)
 

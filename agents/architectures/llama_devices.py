@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 DEVICE_LINE = re.compile(r"^\s*(?P<runtime_id>Vulkan\d+):\s+(?P<description>.+?)\s*$")
@@ -39,6 +39,7 @@ BARE_DEVICE_PCI_ADDRESS = re.compile(
 )
 DEFAULT_INVENTORY_CACHE_TTL_SECONDS = 45.0
 DEFAULT_NEGATIVE_INVENTORY_CACHE_TTL_SECONDS = 3.0
+DEFAULT_MINIMUM_REFRESH_INTERVAL_SECONDS = 2.0
 SOFTWARE_PATTERNS = (
     "llvmpipe",
     "lavapipe",
@@ -81,7 +82,7 @@ class LlamaDevice:
     def public_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value.pop("runtime_id")
-        value.pop("compatibility_ids")
+        value["compatibility_ids"] = list(self.compatibility_ids)
         return value
 
 
@@ -95,6 +96,7 @@ class LlamaDeviceInventory:
     recommended_device_ids: tuple[str, ...]
     reason: str
     error: str | None = None
+    cache_policy: Literal["positive", "negative"] = "positive"
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -132,7 +134,10 @@ class LlamaDeviceInventory:
             raise ValueError(
                 "Selected llama.cpp GPU devices are unavailable: " + ", ".join(missing)
             )
-        return tuple(by_id[device_id] for device_id in device_ids)
+        runtime_ids = tuple(by_id[device_id] for device_id in device_ids)
+        if len(runtime_ids) != len(set(runtime_ids)):
+            raise ValueError("Selected llama.cpp GPU device IDs must resolve to unique devices")
+        return runtime_ids
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -327,6 +332,7 @@ def _cpu_inventory(
     forced_backend: str | None = None,
     devices: tuple[LlamaDevice, ...] = (),
     error: str | None = None,
+    cache_policy: Literal["positive", "negative"] = "positive",
 ) -> LlamaDeviceInventory:
     return LlamaDeviceInventory(
         available=available,
@@ -337,6 +343,7 @@ def _cpu_inventory(
         recommended_device_ids=(),
         reason=reason,
         error=error,
+        cache_policy=cache_policy,
     )
 
 
@@ -351,6 +358,7 @@ class LlamaDeviceService:
         timeout_seconds: float = 10.0,
         cache_ttl_seconds: float = DEFAULT_INVENTORY_CACHE_TTL_SECONDS,
         negative_cache_ttl_seconds: float = DEFAULT_NEGATIVE_INVENTORY_CACHE_TTL_SECONDS,
+        minimum_refresh_interval_seconds: float = DEFAULT_MINIMUM_REFRESH_INTERVAL_SECONDS,
         clock: Clock = time.monotonic,
     ) -> None:
         self.environment = environment if environment is not None else os.environ
@@ -358,28 +366,41 @@ class LlamaDeviceService:
         self.timeout_seconds = timeout_seconds
         self.cache_ttl_seconds = max(0.0, cache_ttl_seconds)
         self.negative_cache_ttl_seconds = max(0.0, negative_cache_ttl_seconds)
+        self.minimum_refresh_interval_seconds = max(0.0, minimum_refresh_interval_seconds)
         self.clock = clock
         self._lock = threading.Lock()
         self._cached_inventory: LlamaDeviceInventory | None = None
         self._cached_inventory_expires_at = 0.0
+        self._cached_inventory_was_refresh = False
+        self._next_refresh_allowed_at = 0.0
 
     def inventory(self, *, refresh: bool = False) -> LlamaDeviceInventory:
         with self._lock:
-            if (
-                not refresh
-                and self._cached_inventory is not None
-                and self.clock() < self._cached_inventory_expires_at
-            ):
-                return self._cached_inventory
+            now = self.clock()
+            if self._cached_inventory is not None:
+                # A normal cached result can be bypassed once. The result of
+                # that forced probe then gates queued/repeated refreshes.
+                if (
+                    refresh
+                    and self._cached_inventory_was_refresh
+                    and now < self._next_refresh_allowed_at
+                ):
+                    return self._cached_inventory
+                if not refresh and now < self._cached_inventory_expires_at:
+                    return self._cached_inventory
 
             inventory = self._discover_inventory()
+            completed_at = self.clock()
             ttl_seconds = (
-                self.cache_ttl_seconds
-                if inventory.error is None
-                else self.negative_cache_ttl_seconds
+                self.negative_cache_ttl_seconds
+                if inventory.cache_policy == "negative"
+                else self.cache_ttl_seconds
             )
             self._cached_inventory = inventory
-            self._cached_inventory_expires_at = self.clock() + ttl_seconds
+            self._cached_inventory_expires_at = completed_at + ttl_seconds
+            self._cached_inventory_was_refresh = refresh
+            if refresh:
+                self._next_refresh_allowed_at = completed_at + self.minimum_refresh_interval_seconds
             return inventory
 
     def _discover_inventory(self) -> LlamaDeviceInventory:
@@ -463,6 +484,7 @@ class LlamaDeviceService:
                 forced_backend=forced_backend,
                 reason="GPU discovery failed, so CPU is recommended.",
                 error=str(error),
+                cache_policy="negative",
             )
 
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
@@ -477,6 +499,7 @@ class LlamaDeviceService:
                 forced_backend=forced_backend,
                 reason="The Vulkan runtime did not report usable GPUs, so CPU is recommended.",
                 error=f"llama-server --list-devices exited with code {result.returncode}",
+                cache_policy="negative",
             )
 
         try:

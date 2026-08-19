@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
+import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
@@ -20,6 +21,19 @@ const agentTypeOptions = [
   { value: 'online', label: 'Online Model' }
 ];
 
+const SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'settings-llama-compute-validation';
+
+const llamaComputeSelectionSignature = (value: any): string => JSON.stringify([
+  value?.llama_backend ?? null,
+  [...(value?.llama_gpu_device_ids ?? [])].sort(),
+]);
+
+const fallbackLlamaComputeValidity = (value: any): boolean => {
+  const deviceIds = value?.llama_gpu_device_ids ?? [];
+  return value?.llama_backend !== 'gpu'
+    || (deviceIds.length > 0 && new Set(deviceIds).size === deviceIds.length);
+};
+
 const Settings: React.FC = () => {
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
   const [activeTab, setActiveTab] = useState<Tab>('general');
@@ -27,6 +41,13 @@ const Settings: React.FC = () => {
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [llamaComputeValidityBySignature, setLlamaComputeValidityBySignature] = useState(
+    () => new Map<string, boolean>(),
+  );
+  const [pendingLlamaComputeValidity, setPendingLlamaComputeValidity] = useState<{
+    signature: string;
+    valid: boolean;
+  } | null>(null);
   const refreshedOnMount = useRef(false);
   const mounted = useRef(true);
   const [refreshingOnMount, setRefreshingOnMount] = useState(true);
@@ -35,6 +56,33 @@ const Settings: React.FC = () => {
   const hasUnsavedChanges = dirtyKeys.size > 0;
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
+  const llamaComputeSignature = llamaComputeSelectionSignature(localSettings);
+  const cachedLlamaComputeValidity = llamaComputeValidityBySignature.get(llamaComputeSignature);
+  const pendingCurrentLlamaComputeValidity = (
+    pendingLlamaComputeValidity?.signature === llamaComputeSignature
+      ? pendingLlamaComputeValidity.valid
+      : undefined
+  );
+  const llamaComputeValid = pendingCurrentLlamaComputeValidity
+    ?? cachedLlamaComputeValidity
+    ?? fallbackLlamaComputeValidity(localSettings);
+  const handleLlamaComputeValidityChange = useCallback((valid: boolean, settled: boolean) => {
+    if (!settled) {
+      setPendingLlamaComputeValidity({ signature: llamaComputeSignature, valid });
+      return;
+    }
+    setLlamaComputeValidityBySignature(current => {
+      if (current.get(llamaComputeSignature) === valid) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(llamaComputeSignature, valid);
+      return next;
+    });
+    setPendingLlamaComputeValidity(current => (
+      current?.signature === llamaComputeSignature ? null : current
+    ));
+  }, [llamaComputeSignature]);
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
@@ -94,6 +142,12 @@ const Settings: React.FC = () => {
     }
   }, [activeTab, hostDevelopmentEnabled]);
 
+  useEffect(() => {
+    if (activeTab !== 'models' || localSettings?.default_agent_type !== 'local') {
+      setPendingLlamaComputeValidity(current => (current === null ? current : null));
+    }
+  }, [activeTab, localSettings?.default_agent_type]);
+
   const updateLocalSetting = (key: string, value: any) => {
     setLocalSettings((prev: any) => ({
       ...prev,
@@ -109,6 +163,11 @@ const Settings: React.FC = () => {
 
   const handleSave = async () => {
     if (refreshingOnMount || !localSettings) return;
+    if (!llamaComputeValid) {
+      setSaveStatus('error');
+      setStatusMessage('Resolve the GPU device selection before saving.');
+      return;
+    }
 
     try {
       setSaveStatus('saving');
@@ -170,6 +229,8 @@ const Settings: React.FC = () => {
       setStatusMessage('');
       await resetSettings();
       setDirtyKeys(new Set());
+      setLlamaComputeValidityBySignature(new Map());
+      setPendingLlamaComputeValidity(null);
       setSaveStatus('success');
       setStatusMessage('Settings reset to defaults successfully.');
 
@@ -309,6 +370,7 @@ const Settings: React.FC = () => {
               }}
               onLlamaBackendChange={(value) => updateLocalSetting('llama_backend', value)}
               onLlamaGpuDeviceIdsChange={(value) => updateLocalSetting('llama_gpu_device_ids', value)}
+              onLlamaComputeValidityChange={handleLlamaComputeValidityChange}
             />
           )}
 
@@ -409,13 +471,31 @@ const Settings: React.FC = () => {
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
+          {!llamaComputeValid && activeTab !== 'models' && (
+            <span
+              id={SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
+              className="settings-description settings-action-validation"
+              role="alert"
+            >
+              Resolve the GPU device selection before saving.
+            </span>
+          )}
           <button className="button button-danger" onClick={handleReset} disabled={refreshingOnMount || saveStatus === 'saving'}>
             Reset to Defaults
           </button>
           <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
             Cancel
           </button>
-          <button className="button" onClick={handleSave} disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving'}>
+          <button
+            className="button"
+            onClick={handleSave}
+            disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || !llamaComputeValid}
+            aria-describedby={!llamaComputeValid
+              ? (activeTab === 'models'
+                ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID
+                : SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID)
+              : undefined}
+          >
             {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </footer>

@@ -53,6 +53,12 @@
   margin-bottom: 10px;
 }
 
+.settings-action-validation {
+  max-width: 34rem;
+  margin-right: auto;
+  color: var(--geist-color-danger);
+}
+
 .settings-page-interactive .settings-actions {
   position: absolute;
   right: calc(22px + var(--settings-scrollbar-lane));

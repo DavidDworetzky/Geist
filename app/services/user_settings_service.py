@@ -136,15 +136,10 @@ class UserSettingsService:
                         raise ValueError("llama.cpp GPU device selections must be unique")
                     if not inventory.available:
                         raise ValueError("Managed llama.cpp GPU selection is unavailable")
-                    available_ids = {device.id for device in inventory.devices}
-                    missing_ids = [
-                        device_id for device_id in next_device_ids if device_id not in available_ids
-                    ]
-                    if missing_ids:
-                        raise ValueError(
-                            "Selected llama.cpp GPU devices are unavailable: "
-                            + ", ".join(missing_ids)
-                        )
+                    # Validate against the exact snapshot used for the rest of this
+                    # update. Its resolver also accepts unambiguous compatibility
+                    # IDs from settings written before stable hardware IDs existed.
+                    inventory.resolve_runtime_ids(next_device_ids)
                 elif next_backend == "cpu":
                     update_dict["llama_gpu_device_ids"] = []
         if (

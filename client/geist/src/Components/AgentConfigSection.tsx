@@ -15,6 +15,7 @@ interface AgentConfigSectionProps {
   onOnlineModelChange: (value: string) => void;
   onLlamaBackendChange: (value: 'cpu' | 'gpu' | null) => void;
   onLlamaGpuDeviceIdsChange: (value: string[]) => void;
+  onLlamaComputeValidityChange: (valid: boolean, settled: boolean) => void;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -44,6 +45,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   onOnlineModelChange,
   onLlamaBackendChange,
   onLlamaGpuDeviceIdsChange,
+  onLlamaComputeValidityChange,
 }) => {
   const {
     getModelById,
@@ -119,6 +121,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             deviceIds={llamaGpuDeviceIds}
             onBackendChange={onLlamaBackendChange}
             onDeviceIdsChange={onLlamaGpuDeviceIdsChange}
+            onValidityChange={onLlamaComputeValidityChange}
           />
         </>
       ) : (

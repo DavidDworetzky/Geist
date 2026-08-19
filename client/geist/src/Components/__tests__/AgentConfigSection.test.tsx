@@ -17,6 +17,7 @@ describe('AgentConfigSection', () => {
     onOnlineModelChange: jest.fn(),
     onLlamaBackendChange: jest.fn(),
     onLlamaGpuDeviceIdsChange: jest.fn(),
+    onLlamaComputeValidityChange: jest.fn(),
   };
 
   beforeEach(() => {

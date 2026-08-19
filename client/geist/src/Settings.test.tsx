@@ -40,6 +40,7 @@ const mockDeviceInventory = {
   devices: [
     {
       id: 'gpu-nvidia',
+      compatibility_ids: [],
       name: 'NVIDIA GeForce RTX 3080',
       total_memory_mib: 16384,
       free_memory_mib: 12000,
@@ -48,6 +49,7 @@ const mockDeviceInventory = {
     },
     {
       id: 'gpu-intel',
+      compatibility_ids: [],
       name: 'Intel(R) UHD Graphics',
       total_memory_mib: 2048,
       free_memory_mib: 1024,
@@ -420,6 +422,217 @@ describe('Settings page', () => {
       expect(savedUpdates.llama_backend).toBe('gpu');
     });
     expect(savedUpdates.llama_gpu_device_ids).toEqual(['gpu-nvidia', 'gpu-intel']);
+  });
+
+  it('blocks an empty explicit GPU selection until an available device is chosen', async () => {
+    const manualDeviceInventory = {
+      ...mockDeviceInventory,
+      devices: [{
+        id: 'gpu-integrated',
+        compatibility_ids: [],
+        name: 'Integrated GPU',
+        total_memory_mib: 4096,
+        free_memory_mib: 2048,
+        kind: 'integrated',
+        recommended: false,
+      }],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'Only integrated Vulkan devices were detected, so CPU is recommended.',
+    };
+    let savedUpdates: any = null;
+    let putCalls = 0;
+    // @ts-ignore
+    global.fetch = jest.fn((url: string, options?: any) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
+      }
+      if (options?.method === 'PUT') {
+        putCalls += 1;
+        savedUpdates = JSON.parse(options.body);
+        return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(await screen.findByLabelText('Compute Backend'), {
+      target: { value: 'gpu' },
+    });
+
+    await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    );
+    const validation = screen.getByRole('alert');
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute('aria-describedby', validation.id);
+    fireEvent.click(save);
+    expect(putCalls).toBe(0);
+
+    const integratedGpu = screen.getByRole('checkbox', { name: /Integrated GPU/i });
+    expect(integratedGpu).toBeEnabled();
+    fireEvent.click(integratedGpu);
+
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(save).not.toHaveAttribute('aria-describedby');
+    fireEvent.click(save);
+    await waitFor(() => expect(putCalls).toBe(1));
+    expect(savedUpdates.llama_backend).toBe('gpu');
+    expect(savedUpdates.llama_gpu_device_ids).toEqual(['gpu-integrated']);
+  });
+
+  it('keeps an unresolved GPU validation error after cancelling unrelated edits', async () => {
+    const invalidPersistedSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: [],
+    };
+    const manualDeviceInventory = {
+      ...mockDeviceInventory,
+      devices: [{
+        id: 'gpu-integrated',
+        compatibility_ids: [],
+        name: 'Integrated GPU',
+        total_memory_mib: 4096,
+        free_memory_mib: 2048,
+        kind: 'integrated',
+        recommended: false,
+      }],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'Only integrated Vulkan devices were detected, so CPU is recommended.',
+    };
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
+      }
+      return Promise.resolve({ ok: true, json: async () => invalidPersistedSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    expect(await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    )).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    const validation = screen.getByRole('alert');
+    expect(validation).toHaveTextContent(/resolve the GPU device selection before saving/i);
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toHaveAttribute(
+      'aria-describedby',
+      validation.id,
+    );
+  });
+
+  it('restores cached valid compute state when cancelling an invalid GPU edit off-tab', async () => {
+    const manualDeviceInventory = {
+      ...mockDeviceInventory,
+      devices: [{
+        id: 'gpu-integrated',
+        compatibility_ids: [],
+        name: 'Integrated GPU',
+        total_memory_mib: 4096,
+        free_memory_mib: 2048,
+        kind: 'integrated',
+        recommended: false,
+      }],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'Only integrated Vulkan devices were detected, so CPU is recommended.',
+    };
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => manualDeviceInventory });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(await screen.findByLabelText('Compute Backend'), {
+      target: { value: 'gpu' },
+    });
+    expect(await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    )).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /resolve the GPU device selection before saving/i,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText(
+      /resolve the GPU device selection before saving/i,
+    )).not.toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).not.toHaveAttribute('aria-describedby');
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    expect(save).toBeEnabled();
+  });
+
+  it('does not cache an unresolved loading result after Models is unmounted', async () => {
+    const persistedGpuSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: ['gpu-nvidia'],
+    };
+    let resolveInventory: ((response: any) => void) | null = null;
+    const inventoryResponse = new Promise((resolve) => {
+      resolveInventory = resolve;
+    });
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return inventoryResponse;
+      }
+      return Promise.resolve({ ok: true, json: async () => persistedGpuSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    expect(await screen.findByText(/Detecting llama\.cpp compute devices/i)).toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    await waitFor(() => expect(save).toHaveAttribute('aria-describedby'));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    await waitFor(() => expect(save).not.toHaveAttribute('aria-describedby'));
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    expect(save).toBeEnabled();
+
+    await act(async () => {
+      resolveInventory?.({ ok: true, json: async () => mockDeviceInventory });
+      await inventoryResponse;
+    });
   });
 
   it('preserves unresolved compute detection when saving without opening Models', async () => {

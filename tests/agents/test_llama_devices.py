@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,29 @@ def test_unique_legacy_name_id_resolves_after_stable_identity_appears(
 
     assert inventory.devices[0].id != legacy.id
     assert service.resolve_runtime_ids((legacy.id,), inventory=inventory) == ("Vulkan7",)
+    with pytest.raises(ValueError, match="resolve to unique devices"):
+        service.resolve_runtime_ids(
+            (legacy.id, inventory.devices[0].id),
+            inventory=inventory,
+        )
+
+
+def test_public_device_contract_exposes_safe_compatibility_ids_only() -> None:
+    stable_identity = "UUID=11111111-1111-1111-1111-111111111111"
+    device = parse_device_inventory(
+        "Available devices:\n"
+        f"  Vulkan7: NVIDIA GeForce RTX 4090 [{stable_identity}] "
+        "(24564 MiB, 22000 MiB free)\n"
+    )[0]
+
+    payload = device.public_dict()
+
+    assert payload["compatibility_ids"] == list(device.compatibility_ids)
+    assert set(payload["compatibility_ids"]) == {
+        _pre_stable_id("NVIDIA GeForce RTX 4090"),
+        _pre_stable_id(f"NVIDIA GeForce RTX 4090 [{stable_identity}]"),
+    }
+    assert "runtime_id" not in payload
 
 
 @pytest.mark.parametrize(
@@ -222,6 +246,12 @@ def test_legacy_name_id_never_aliases_duplicate_stable_devices(tmp_path: Path) -
         "Vulkan0",
         "Vulkan1",
     )
+    public_aliases = [
+        set(device["compatibility_ids"]) for device in inventory.public_dict()["devices"]
+    ]
+    assert public_aliases[0].isdisjoint(public_aliases[1])
+    assert all(legacy_id not in aliases for aliases in public_aliases)
+    assert all("runtime_id" not in device for device in inventory.public_dict()["devices"])
 
 
 def test_identical_devices_without_stable_identities_fail_safe_when_reordered() -> None:
@@ -314,6 +344,7 @@ def test_failed_probe_backs_off_and_successful_empty_probe_uses_positive_ttl(
 
     failed = service.inventory()
     assert failed.error is not None
+    assert failed.cache_policy == "negative"
     now[0] = 102.9
     assert service.inventory() is failed
     assert len(calls) == 1
@@ -322,6 +353,7 @@ def test_failed_probe_backs_off_and_successful_empty_probe_uses_positive_ttl(
     empty = service.inventory()
     assert empty.devices == ()
     assert empty.error is None
+    assert empty.cache_policy == "positive"
     now[0] = 147.9
     assert service.inventory() is empty
     assert len(calls) == 2
@@ -353,10 +385,11 @@ def test_environment_management_predicate(
     assert llama_compute_managed_by_environment(environment) is expected
 
 
-def test_failed_forced_refresh_replaces_previous_success_until_next_refresh(
+def test_forced_refresh_bypasses_ordinary_cache_then_obeys_minimum_interval(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
+    now = [100.0]
     responses = [
         subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr=""),
         subprocess.CompletedProcess([], 1, stdout="", stderr="driver unavailable"),
@@ -366,14 +399,73 @@ def test_failed_forced_refresh_replaces_previous_success_until_next_refresh(
     service = LlamaDeviceService(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
         command_runner=lambda *_args, **_kwargs: responses.pop(0),
+        clock=lambda: now[0],
     )
 
     assert service.inventory().devices
     failed = service.inventory(refresh=True)
     assert failed.error is not None
     assert service.inventory() is failed
+    assert service.inventory(refresh=True) is failed
+    now[0] = 101.999
+    assert service.inventory(refresh=True) is failed
+    now[0] = 102.0
     assert service.inventory(refresh=True).devices
     assert responses == []
+
+
+def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    now = [100.0]
+    refresh_probe_entered = threading.Event()
+    release_refresh_probe = threading.Event()
+    second_refresh_started = threading.Event()
+    calls = []
+
+    def run(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            refresh_probe_entered.set()
+            assert release_refresh_probe.wait(timeout=2)
+        return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
+
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=run,
+        clock=lambda: now[0],
+    )
+    ordinary = service.inventory()
+    results = []
+
+    first = threading.Thread(target=lambda: results.append(service.inventory(refresh=True)))
+
+    def second_refresh() -> None:
+        second_refresh_started.set()
+        results.append(service.inventory(refresh=True))
+
+    second = threading.Thread(target=second_refresh)
+    first.start()
+    assert refresh_probe_entered.wait(timeout=2)
+    second.start()
+    assert second_refresh_started.wait(timeout=2)
+    release_refresh_probe.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(calls) == 2
+    assert len(results) == 2
+    assert all(result is results[0] for result in results)
+    assert results[0] is not ordinary
+    assert service.inventory(refresh=True) is results[0]
+    assert len(calls) == 2
+
+    now[0] = 102.0
+    assert service.inventory(refresh=True) is not results[0]
+    assert len(calls) == 3
 
 
 @pytest.mark.parametrize("runner", ["transformers", "mlx_llama"])
@@ -492,11 +584,18 @@ Available devices:
     assert inventory.devices == ()
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.reason
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.error
+    assert inventory.cache_policy == "positive"
     assert "device discovery was ambiguous" in caplog.text
     now[0] = 102.9
     assert service.inventory() is inventory
     assert len(calls) == 1
     now[0] = 103.0
+    assert service.inventory() is inventory
+    assert len(calls) == 1
+    now[0] = 144.999
+    assert service.inventory() is inventory
+    assert len(calls) == 1
+    now[0] = 145.0
     assert service.inventory() is not inventory
     assert len(calls) == 2
 
@@ -519,12 +618,21 @@ Available devices:
 def test_cpu_only_partial_runtime_remains_available(tmp_path: Path) -> None:
     runtime = _runtime_tree(tmp_path)
     (runtime / "vulkan" / llama_server_filename()).unlink()
+    now = [100.0]
 
-    inventory = LlamaDeviceService(
-        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
-    ).inventory()
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        clock=lambda: now[0],
+    )
+    inventory = service.inventory()
 
     assert inventory.available is True
     assert inventory.devices == ()
     assert inventory.recommended_backend == "cpu"
     assert inventory.error == "The Vulkan llama-server executable is unavailable"
+    assert inventory.cache_policy == "positive"
+    assert "cache_policy" not in inventory.public_dict()
+    now[0] = 103.0
+    assert service.inventory() is inventory
+    now[0] = 145.0
+    assert service.inventory() is not inventory

@@ -4,6 +4,7 @@ type LlamaBackend = 'cpu' | 'gpu' | null;
 
 interface LlamaDevice {
   id: string;
+  compatibility_ids: string[];
   name: string;
   total_memory_mib: number | null;
   free_memory_mib: number | null;
@@ -27,7 +28,10 @@ interface LlamaComputeSectionProps {
   deviceIds: string[];
   onBackendChange: (backend: LlamaBackend) => void;
   onDeviceIdsChange: (deviceIds: string[]) => void;
+  onValidityChange: (valid: boolean, settled: boolean) => void;
 }
+
+export const LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'llama-compute-selection-validation';
 
 function memoryLabel(device: LlamaDevice): string {
   if (device.free_memory_mib !== null) {
@@ -44,6 +48,7 @@ export default function LlamaComputeSection({
   deviceIds,
   onBackendChange,
   onDeviceIdsChange,
+  onValidityChange,
 }: LlamaComputeSectionProps): JSX.Element | null {
   const [inventory, setInventory] = useState<LlamaDeviceInventory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,10 +110,87 @@ export default function LlamaComputeSection({
     };
   }, [loadInventory]);
 
-  const availableDeviceIds = useMemo(
-    () => new Set(inventory?.devices?.map(device => device.id) ?? []),
-    [inventory],
+  const devices = useMemo(() => inventory?.devices ?? [], [inventory]);
+  const canonicalDeviceIdsBySelectionId = useMemo(() => {
+    const canonicalIds = new Set(devices.map(device => device.id));
+    const aliases = new Map<string, Set<string>>();
+    const result = new Map<string, string>();
+
+    devices.forEach(device => {
+      result.set(device.id, device.id);
+      (device.compatibility_ids ?? []).forEach(alias => {
+        if (!alias || canonicalIds.has(alias)) {
+          return;
+        }
+        const owners = aliases.get(alias) ?? new Set<string>();
+        owners.add(device.id);
+        aliases.set(alias, owners);
+      });
+    });
+    aliases.forEach((owners, alias) => {
+      if (owners.size === 1) {
+        result.set(alias, Array.from(owners)[0]);
+      }
+    });
+    return result;
+  }, [devices]);
+  const normalizeAvailableDeviceIds = (selectionIds: string[]) => {
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    selectionIds.forEach(selectionId => {
+      const canonicalId = canonicalDeviceIdsBySelectionId.get(selectionId);
+      if (canonicalId && !seen.has(canonicalId)) {
+        seen.add(canonicalId);
+        normalized.push(canonicalId);
+      }
+    });
+    return normalized;
+  };
+  const selectedDeviceIds = backend === null
+    ? inventory?.recommended_device_ids ?? []
+    : deviceIds;
+  const selectedAvailableDeviceIds = normalizeAvailableDeviceIds(selectedDeviceIds);
+  const selectedAvailableDeviceIdSet = new Set(selectedAvailableDeviceIds);
+  const unavailableSelections = Array.from(new Set(selectedDeviceIds.filter(
+    deviceId => !canonicalDeviceIdsBySelectionId.has(deviceId),
+  )));
+  const mappedSelectionCount = selectedDeviceIds.filter(
+    deviceId => canonicalDeviceIdsBySelectionId.has(deviceId),
+  ).length;
+  const hasRedundantSelections = mappedSelectionCount > selectedAvailableDeviceIds.length;
+  const unsupportedPlatform = Boolean(
+    inventory
+    && !inventory.available
+    && !inventory.managed_by_environment
+    && !inventory.error,
   );
+  const computeSelectionValid = backend !== 'gpu'
+    || Boolean(inventory?.managed_by_environment)
+    || unsupportedPlatform
+    || Boolean(
+      inventory?.available
+      && selectedAvailableDeviceIds.length > 0
+      && unavailableSelections.length === 0
+      && !hasRedundantSelections
+    );
+  const hasInvalidSelectedDeviceIds = unavailableSelections.length > 0 || hasRedundantSelections;
+  const inventorySettled = !loading && inventory !== null;
+
+  useEffect(() => {
+    onValidityChange(computeSelectionValid, inventorySettled);
+  }, [computeSelectionValid, inventorySettled, onValidityChange]);
+
+  const gpuSelectionValidation = backend === 'gpu' && !computeSelectionValid && !loading ? (
+    <div
+      id={LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
+      className="notice notice-warning"
+      role="alert"
+    >
+      {hasInvalidSelectedDeviceIds
+        ? 'Resolve the GPU device selection before saving.'
+        : 'Choose at least one available GPU device before saving.'}
+    </div>
+  ) : null;
 
   const sectionHeader = (
     <div className="settings-subsection-header">
@@ -138,9 +220,14 @@ export default function LlamaComputeSection({
     return (
       <div className="llama-compute-section" aria-label="llama.cpp compute backend">
         {sectionHeader}
-        <p className="settings-description" aria-live="polite">
+        <p
+          id={backend === 'gpu' ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID : undefined}
+          className="settings-description"
+          aria-live="polite"
+        >
           Detecting llama.cpp compute devices…
         </p>
+        {gpuSelectionValidation}
       </div>
     );
   }
@@ -151,8 +238,12 @@ export default function LlamaComputeSection({
         {requestError && (
           <div className="notice notice-warning" role="alert">{requestError}</div>
         )}
+        {gpuSelectionValidation}
       </div>
     );
+  }
+  if (unsupportedPlatform) {
+    return null;
   }
   if (!inventory.available && !inventory.managed_by_environment) {
     return (
@@ -167,24 +258,15 @@ export default function LlamaComputeSection({
         {requestError && (
           <div className="notice notice-warning" role="alert">{requestError}</div>
         )}
+        {gpuSelectionValidation}
       </div>
     );
   }
 
   const locked = inventory.managed_by_environment;
-  const devices = inventory.devices ?? [];
   const gpuAvailable = devices.length > 0;
   const selectedBackend = backend ?? 'automatic';
   const effectiveBackend = backend ?? inventory.recommended_backend;
-  const selectedDeviceIds = backend === null
-    ? inventory.recommended_device_ids
-    : deviceIds;
-  const selectedAvailableDeviceIds = selectedDeviceIds.filter(
-    deviceId => availableDeviceIds.has(deviceId),
-  );
-  const unavailableSelections = selectedDeviceIds.filter(
-    deviceId => !availableDeviceIds.has(deviceId),
-  );
   const onlySelectedDeviceId = selectedAvailableDeviceIds.length === 1
     ? selectedAvailableDeviceIds[0]
     : null;
@@ -195,8 +277,10 @@ export default function LlamaComputeSection({
       return;
     }
     if (value === 'gpu') {
-      const validCurrent = deviceIds.filter(deviceId => availableDeviceIds.has(deviceId));
-      const validRecommended = inventory.recommended_device_ids.filter(
+      const validCurrent = normalizeAvailableDeviceIds(deviceIds);
+      const validRecommended = normalizeAvailableDeviceIds(
+        inventory.recommended_device_ids,
+      ).filter(
         deviceId => devices.some(device => (
           device.id === deviceId
           && device.recommended
@@ -220,7 +304,7 @@ export default function LlamaComputeSection({
     }
   };
   const toggleDevice = (deviceId: string) => {
-    const next = selectedAvailableDeviceIds.includes(deviceId)
+    const next = selectedAvailableDeviceIdSet.has(deviceId)
       ? selectedAvailableDeviceIds.filter(value => value !== deviceId)
       : [...selectedAvailableDeviceIds, deviceId];
     if (next.length > 0) {
@@ -283,11 +367,7 @@ export default function LlamaComputeSection({
           <p className="settings-description">
             Select one or more devices. llama.cpp splits model layers across multiple GPUs.
           </p>
-          {selectedAvailableDeviceIds.length === 0 && (
-            <div className="notice notice-warning" role="alert">
-              Choose at least one GPU device before saving.
-            </div>
-          )}
+          {gpuSelectionValidation}
           {devices.map(device => (
             <label
               className={`llama-device-option${device.id === onlySelectedDeviceId ? ' llama-device-option-disabled' : ''}`}
@@ -295,7 +375,7 @@ export default function LlamaComputeSection({
             >
               <input
                 type="checkbox"
-                checked={selectedDeviceIds.includes(device.id)}
+                checked={selectedAvailableDeviceIdSet.has(device.id)}
                 disabled={device.id === onlySelectedDeviceId}
                 onChange={() => toggleDevice(device.id)}
               />
@@ -309,9 +389,10 @@ export default function LlamaComputeSection({
               </span>
             </label>
           ))}
-          {unavailableSelections.length > 0 && (
+          {(unavailableSelections.length > 0 || hasRedundantSelections) && (
             <div className="notice notice-error" role="alert">
-              A previously selected GPU is unavailable. Choose the desired devices before saving.
+              A previously selected GPU is unavailable, duplicated, or no longer uniquely
+              identifiable. Choose the desired devices before saving.
               {selectedAvailableDeviceIds.length > 0 && (
                 <div>
                   <button
