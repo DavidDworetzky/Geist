@@ -119,6 +119,10 @@ class McpToolSource:
             arguments_schema=schema,
             handler=handler,
             side_effect="external_write",
+            # MCP does not expose a trustworthy read/write classification for
+            # arbitrary server tools. Fail closed and require a user decision
+            # before dispatching anything discovered at runtime.
+            requires_approval=True,
             timeout_seconds=config.timeout_seconds + 5.0,
             source_adapter=f"mcp:{config.name}",
         )

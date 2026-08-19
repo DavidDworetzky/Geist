@@ -59,6 +59,15 @@ def _context() -> ToolContext:
     return ToolContext(user_id=1, chat_id=None, run_id="run-test")
 
 
+def _approved_context(call: ToolCall) -> ToolContext:
+    return ToolContext(
+        user_id=1,
+        chat_id=None,
+        run_id="run-test",
+        approved_call_ids=frozenset({call.id}),
+    )
+
+
 def test_definitions_namespace_and_schema_passthrough():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
     source = McpToolSource(manager, servers_loader=lambda: [_server_model()])
@@ -69,6 +78,7 @@ def test_definitions_namespace_and_schema_passthrough():
     assert definition.arguments_schema == ECHO_TOOL["inputSchema"]
     assert definition.parameters_schema()["required"] == ["text"]
     assert definition.side_effect == "external_write"
+    assert definition.requires_approval is True
     assert "[MCP: fake]" in definition.description
 
 
@@ -79,7 +89,13 @@ def test_registry_executes_mcp_tool_through_source():
     registry.add_source(source)
 
     call = ToolCall.create("mcp.fake.echo", {"text": "hello"})
-    result = registry.execute(call, _context())
+    unapproved = registry.execute(call, _context())
+
+    assert unapproved.status == "awaiting_approval"
+    assert unapproved.error == "approval_required"
+    assert manager.calls == []
+
+    result = registry.execute(call, _approved_context(call))
 
     assert result.status == "succeeded"
     assert result.content == "echo says: hello"
@@ -92,7 +108,8 @@ def test_registry_rejects_missing_required_argument():
     registry = ToolRegistry()
     registry.add_source(source)
 
-    result = registry.execute(ToolCall.create("mcp.fake.echo", {}), _context())
+    call = ToolCall.create("mcp.fake.echo", {})
+    result = registry.execute(call, _approved_context(call))
 
     assert result.status == "failed"
     assert result.error == "invalid_arguments"
@@ -105,7 +122,8 @@ def test_registry_rejects_wrong_argument_type():
     registry = ToolRegistry()
     registry.add_source(source)
 
-    result = registry.execute(ToolCall.create("mcp.fake.echo", {"text": 7}), _context())
+    call = ToolCall.create("mcp.fake.echo", {"text": 7})
+    result = registry.execute(call, _approved_context(call))
 
     assert result.status == "failed"
     assert result.error == "invalid_arguments"
