@@ -143,6 +143,15 @@ def list_enabled_mcp_servers(user_id: int | None = None) -> list[McpServerModel]
         if user_id is not None:
             query = query.filter_by(user_id=user_id)
         servers = query.order_by(McpServer.mcp_server_id).all()
+        if user_id is not None:
+            from app.models.database.mcp_security_policy import (
+                get_or_create_mcp_security_policy,
+            )
+
+            security_enabled = get_or_create_mcp_security_policy(user_id).enabled
+            servers = [
+                server for server in servers if not server.security_required or security_enabled
+            ]
         return [_to_model(server) for server in servers]
 
 

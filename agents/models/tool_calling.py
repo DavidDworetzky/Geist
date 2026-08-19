@@ -144,6 +144,11 @@ class ToolDefinition:
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
     source_adapter: str | None = None
+    untrusted_external: bool = False
+    always_untrusted_content: bool = False
+    security_source_id: int | None = None
+    recipient_allowlist: tuple[str, ...] = ()
+    max_writes_per_hour: int = 20
     availability: ToolAvailability | None = None
     # Raw JSON-schema alternative to arguments_model for tools whose schemas
     # arrive at runtime (MCP servers, reflected adapters). Exactly one of the
@@ -194,6 +199,7 @@ class ToolResult:
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
     error: str | None = None
+    blocked_content_id: str | None = None
 
     @property
     def succeeded(self) -> bool:

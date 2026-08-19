@@ -68,6 +68,7 @@ class ToolCallResult:
     result_summary: str | None = None
     artifact_ids: list[str] = field(default_factory=list)
     error: str | None = None
+    blocked_content_id: str | None = None
     requires_approval: bool = False
 
     @classmethod
@@ -81,6 +82,7 @@ class ToolCallResult:
         result_summary: str | None = None,
         artifact_ids: list[str] | None = None,
         error: str | None = None,
+        blocked_content_id: str | None = None,
         requires_approval: bool = False,
     ) -> "ToolCallResult":
         return cls(
@@ -91,6 +93,7 @@ class ToolCallResult:
             result_summary=result_summary,
             artifact_ids=artifact_ids or [],
             error=error,
+            blocked_content_id=blocked_content_id,
             requires_approval=requires_approval,
         )
 

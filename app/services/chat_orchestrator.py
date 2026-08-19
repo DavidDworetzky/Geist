@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import threading
@@ -22,6 +23,8 @@ from agents.models.tool_calling import (
     ToolResult,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.models.database.mcp_security_policy import McpSecurityPolicyModel
+from app.services.mcp_security import McpSecurityInspector, security_inspector
 from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     ToolApprovalRegistry,
@@ -31,6 +34,22 @@ from app.services.tool_registry import ToolRegistry
 
 
 logger = logging.getLogger(__name__)
+
+
+def _default_security_policy(user_id: int) -> McpSecurityPolicyModel:
+    now = datetime.datetime.utcnow()
+    return McpSecurityPolicyModel(
+        mcp_security_policy_id=0,
+        user_id=user_id,
+        enabled=True,
+        inspect_tool_metadata=True,
+        inspect_outbound_arguments=True,
+        inspect_inbound_results=True,
+        deterministic_scanner=True,
+        model_mode="mirror",
+        create_date=now,
+        update_date=now,
+    )
 
 
 @dataclass(frozen=True)
@@ -119,6 +138,8 @@ class ChatOrchestrator:
         history_writer: Callable[..., Any] = update_chat_history,
         approvals: ToolApprovalRegistry = approval_registry,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        security: McpSecurityInspector = security_inspector,
+        security_policy_loader: Callable[[int], McpSecurityPolicyModel] = _default_security_policy,
     ) -> None:
         self.registry = registry
         self.run_controls = run_controls or RunControlRegistry()
@@ -132,6 +153,8 @@ class ChatOrchestrator:
         self.history_writer = history_writer
         self.approvals = approvals
         self.approval_timeout_seconds = approval_timeout_seconds
+        self.security = security
+        self.security_policy_loader = security_policy_loader
 
     @staticmethod
     def _entry_messages(entry: Any) -> list[ChatMessage]:
@@ -254,6 +277,7 @@ class ChatOrchestrator:
         result_summary: str | None = None,
         artifact_ids: list[str] | None = None,
         error: str | None = None,
+        blocked_content_id: str | None = None,
         requires_approval: bool = False,
     ) -> ToolCallResult:
         return ToolCallResult.create(
@@ -264,6 +288,7 @@ class ChatOrchestrator:
             result_summary=result_summary,
             artifact_ids=artifact_ids,
             error=error,
+            blocked_content_id=blocked_content_id,
             requires_approval=requires_approval,
         )
 
@@ -319,10 +344,33 @@ class ChatOrchestrator:
         run = conversation.begin_run(prompt)
         approved_call_ids: set[str] = set()
         context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
+        security_policy = self.security_policy_loader(user_id)
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
             self.registry.definitions_for_context(context) if enable_tools and native_tools else []
         )
+        untrusted_tools = [tool for tool in tools if tool.untrusted_external]
+        if security_policy.enabled and security_policy.inspect_tool_metadata and untrusted_tools:
+            metadata_inspection = self.security.inspect(
+                backend=backend,
+                model_config=config,
+                policy=security_policy,
+                surface="tool_metadata",
+                payload=[
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "arguments_schema": tool.parameters_schema(),
+                    }
+                    for tool in untrusted_tools
+                ],
+                user_id=user_id,
+                run_id=run.run_id,
+                source="mcp-catalog",
+            )
+            if not metadata_inspection.allowed:
+                tools = [tool for tool in tools if not tool.untrusted_external]
+        offered_tool_names = {tool.name for tool in tools}
 
         def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
             with run.persistence_lock:
@@ -451,7 +499,58 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    if requires_approval:
+                    security_block: ToolResult | None = None
+                    if call.name not in offered_tool_names:
+                        security_block = ToolResult(
+                            call=call,
+                            status="failed",
+                            content=f"BLOCKED: tool was not offered to this model turn: {call.name}",
+                            error="tool_not_offered",
+                        )
+                    if (
+                        security_block is None
+                        and definition
+                        and definition.untrusted_external
+                        and security_policy.enabled
+                    ):
+                        if security_policy.inspect_outbound_arguments:
+                            outbound_inspection = self.security.inspect(
+                                backend=backend,
+                                model_config=config,
+                                policy=security_policy,
+                                surface="outbound_arguments",
+                                payload={"tool": call.name, "arguments": call.arguments},
+                                user_id=user_id,
+                                run_id=run.run_id,
+                                source=definition.source_adapter or call.name,
+                            )
+                            if not outbound_inspection.allowed:
+                                security_block = ToolResult(
+                                    call=call,
+                                    status="failed",
+                                    content=(
+                                        "BLOCKED: MCP security inspection rejected this tool call "
+                                        f"({outbound_inspection.verdict})."
+                                    ),
+                                    error=outbound_inspection.verdict,
+                                )
+                        if security_block is None:
+                            policy_error = self.security.write_policy.check_and_record(
+                                user_id,
+                                definition,
+                                call.arguments,
+                            )
+                            if policy_error:
+                                security_block = ToolResult(
+                                    call=call,
+                                    status="failed",
+                                    content=f"BLOCKED: {policy_error}",
+                                    error=policy_error.split(":", 1)[0],
+                                )
+
+                    if security_block is not None:
+                        result = security_block
+                    elif requires_approval:
                         yield ChatStreamEvent(
                             "tool_call",
                             self._tool_state(
@@ -497,6 +596,38 @@ class ChatOrchestrator:
                     else:
                         yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
                         result = self.registry.execute(call, context)
+
+                    if (
+                        result.succeeded
+                        and definition
+                        and definition.untrusted_external
+                        and security_policy.enabled
+                        and security_policy.inspect_inbound_results
+                    ):
+                        inbound_inspection = self.security.inspect(
+                            backend=backend,
+                            model_config=config,
+                            policy=security_policy,
+                            surface="inbound_result",
+                            payload=result.content,
+                            user_id=user_id,
+                            run_id=run.run_id,
+                            source=definition.source_adapter or call.name,
+                        )
+                        if inbound_inspection.allowed:
+                            result.content = inbound_inspection.safe_text or "(empty safe result)"
+                        else:
+                            result = ToolResult(
+                                call=call,
+                                status="failed",
+                                content=(
+                                    "BLOCKED: MCP security inspection rejected the tool result "
+                                    f"({inbound_inspection.verdict}; "
+                                    f"blocked_id={inbound_inspection.blocked_id})."
+                                ),
+                                error=inbound_inspection.verdict,
+                                blocked_content_id=inbound_inspection.blocked_id,
+                            )
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -522,6 +653,7 @@ class ChatOrchestrator:
                         result_summary=result.summary,
                         artifact_ids=[artifact.id for artifact in result.artifacts],
                         error=result.error,
+                        blocked_content_id=result.blocked_content_id,
                         requires_approval=requires_approval,
                     )
                     run.record_tool_call(state)

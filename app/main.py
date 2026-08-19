@@ -30,6 +30,7 @@ from app.api.v1.endpoints.jobs import router as jobs_router
 from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.security import router as security_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -45,6 +46,7 @@ from app.models.database.chat_session import (
 )
 from app.models.database.database import SessionLocal
 from app.models.database.geist_user import get_default_user
+from app.models.database.mcp_security_policy import get_or_create_mcp_security_policy
 from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
@@ -104,6 +106,7 @@ _tool_registry.add_source(get_mcp_tool_source())
 chat_orchestrator = ChatOrchestrator(
     _tool_registry,
     run_controls=run_controls,
+    security_policy_loader=get_or_create_mcp_security_policy,
 )
 
 if enhanced_logging:
@@ -627,6 +630,7 @@ def create_app(
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
     app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+    app.include_router(security_router, prefix="/api/v1/security", tags=["security"])
 
     @app.get("/health", include_in_schema=False)
     def health():

@@ -5,13 +5,15 @@ interface SettingsToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   description?: string;
+  disabled?: boolean;
 }
 
 const SettingsToggle: React.FC<SettingsToggleProps> = ({
   label,
   checked,
   onChange,
-  description
+  description,
+  disabled = false
 }) => {
   return (
     <div className="settings-field settings-toggle-field">
@@ -23,7 +25,9 @@ const SettingsToggle: React.FC<SettingsToggleProps> = ({
       <button
         type="button"
         className={`settings-toggle ${checked ? 'settings-toggle-on' : ''}`}
+        aria-label={label}
         aria-pressed={checked}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
       >
         <span className="settings-toggle-thumb" />

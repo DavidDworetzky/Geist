@@ -189,6 +189,29 @@ def test_manager_reconnects_when_fingerprint_changes():
         manager.shutdown()
 
 
+def test_manager_replays_completed_idempotent_tool_call(monkeypatch):
+    manager = McpClientManager()
+    calls = []
+
+    class Connection:
+        def call_tool(self, name, arguments, *, idempotency_key=None):
+            calls.append((name, arguments, idempotency_key))
+            return "sent once"
+
+    monkeypatch.setattr(manager, "_connection", lambda config: Connection())
+    config = _stdio_config()
+
+    assert (
+        manager.call_tool(config, "send", {"to": "a@example.com"}, idempotency_key="same")
+        == "sent once"
+    )
+    assert (
+        manager.call_tool(config, "send", {"to": "a@example.com"}, idempotency_key="same")
+        == "sent once"
+    )
+    assert len(calls) == 1
+
+
 def test_unwrap_response_surfaces_server_errors():
     with pytest.raises(McpError, match="boom .code -32000."):
         _unwrap_response(
