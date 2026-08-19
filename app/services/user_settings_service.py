@@ -2,6 +2,7 @@
 Service layer for user settings management.
 """
 import logging
+from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
@@ -217,7 +218,7 @@ class UserSettingsService:
 
         logger.info(f"Creating agent with config: {factory_config}")
 
-        factory_kwargs = {
+        factory_kwargs: dict[str, Any] = {
             "agent_type": factory_config.agent_type,
             "agent_context": agent_context,
             "model": factory_config.model,
