@@ -49,6 +49,7 @@ class LlamaServerRunner(BaseRunner):
         self.headers: dict[str, str] = {"Content-Type": "application/json"}
         self.effective_backend: Literal["cpu", "gpu"] | None = None
         self.effective_device_ids: tuple[str, ...] = ()
+        self.selection_detection_error: str | None = None
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         config = dict(device_config or {})
@@ -80,6 +81,7 @@ class LlamaServerRunner(BaseRunner):
         else:
             self.effective_backend = None
         self.effective_device_ids = connection.device_ids
+        self.selection_detection_error = connection.detection_error
         self.supports_native_tool_calling = bool(getattr(artifact, "supports_tool_calling", False))
         self.base_url = f"{connection.base_url}/v1"
         self.headers = {

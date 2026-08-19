@@ -43,6 +43,7 @@ class LlamaServerConnection:
     device_ids: tuple[str, ...] = ()
     selection_backend: str = "auto"
     selection_device_ids: tuple[str, ...] = ()
+    detection_error: str | None = None
 
 
 @dataclass
@@ -67,6 +68,7 @@ class LlamaServerCandidate:
     executable: Path
     runtime_device_ids: tuple[str, ...] = ()
     public_device_ids: tuple[str, ...] = ()
+    detection_error: str | None = None
 
 
 def _free_loopback_port() -> int:
@@ -183,13 +185,19 @@ class LlamaServerManager:
                     LlamaServerCandidate(
                         "vulkan",
                         root / "vulkan" / filename,
-                        self._device_service.resolve_runtime_ids(recommended_ids),
+                        inventory.resolve_runtime_ids(recommended_ids),
                         recommended_ids,
                     ),
                     LlamaServerCandidate("cpu", root / "cpu" / filename),
                 ]
             else:
-                candidates = [LlamaServerCandidate("cpu", root / "cpu" / filename)]
+                candidates = [
+                    LlamaServerCandidate(
+                        "cpu",
+                        root / "cpu" / filename,
+                        detection_error=inventory.error,
+                    )
+                ]
 
         existing = [candidate for candidate in candidates if candidate.executable.is_file()]
         if not existing:
@@ -358,6 +366,7 @@ class LlamaServerManager:
                 candidate.public_device_ids,
                 selection_backend,
                 selection_device_ids,
+                candidate.detection_error,
             )
             self._connection = connection
             self._state = LlamaServerState(

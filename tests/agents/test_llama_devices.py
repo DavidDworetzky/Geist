@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 from agents.architectures.llama_devices import (
     LlamaDeviceService,
     classify_device,
+    llama_compute_managed_by_environment,
     llama_server_filename,
     parse_device_inventory,
     recommend_device,
@@ -33,6 +35,12 @@ def _runtime_tree(tmp_path: Path) -> Path:
         directory.mkdir(parents=True)
         (directory / filename).write_bytes(b"binary")
     return root
+
+
+def _pre_stable_id(name: str, ordinal: int = 0) -> str:
+    normalized_name = " ".join(name.casefold().split())
+    digest = hashlib.sha256(f"{normalized_name}\0{ordinal}".encode()).hexdigest()[:16]
+    return f"gpu-{digest}"
 
 
 def test_device_output_parses_stable_ids_memory_and_kinds() -> None:
@@ -118,6 +126,104 @@ def test_stable_identity_before_or_after_memory_preserves_memory(
     assert before_memory.free_memory_mib == after_memory.free_memory_mib == 22000
 
 
+def test_unique_legacy_name_id_resolves_after_stable_identity_appears(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    legacy = parse_device_inventory(
+        "Available devices:\n" "  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)\n"
+    )[0]
+    stable_output = (
+        "Available devices:\n"
+        "  Vulkan7: NVIDIA GeForce RTX 4090 "
+        "[UUID=11111111-1111-1111-1111-111111111111] "
+        "(24564 MiB, 22000 MiB free)\n"
+    )
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=stable_output, stderr=""
+        ),
+    )
+
+    inventory = service.inventory()
+
+    assert inventory.devices[0].id != legacy.id
+    assert service.resolve_runtime_ids((legacy.id,), inventory=inventory) == ("Vulkan7",)
+
+
+@pytest.mark.parametrize(
+    "stable_identity",
+    [
+        "UUID=11111111-1111-1111-1111-111111111111",
+        "PCI=0000:01:00.0",
+    ],
+)
+@pytest.mark.parametrize("identity_after_memory", [False, True])
+def test_pre_stable_parser_id_with_identity_annotation_still_resolves(
+    tmp_path: Path,
+    stable_identity: str,
+    identity_after_memory: bool,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    base_name = "NVIDIA GeForce RTX 4090"
+    memory = "(24564 MiB, 22000 MiB free)"
+    if identity_after_memory:
+        old_parser_name = f"{base_name} {memory} [{stable_identity}]"
+        description = old_parser_name
+    else:
+        old_parser_name = f"{base_name} [{stable_identity}]"
+        description = f"{old_parser_name} {memory}"
+    legacy_id = _pre_stable_id(old_parser_name)
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=f"Available devices:\n  Vulkan7: {description}\n",
+            stderr="",
+        ),
+    )
+
+    inventory = service.inventory()
+
+    assert inventory.devices[0].id != legacy_id
+    assert inventory.resolve_runtime_ids((legacy_id,)) == ("Vulkan7",)
+
+
+def test_legacy_name_id_never_aliases_duplicate_stable_devices(tmp_path: Path) -> None:
+    runtime = _runtime_tree(tmp_path)
+    legacy_id = parse_device_inventory(
+        "Available devices:\n" "  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)\n"
+    )[0].id
+    stable_output = """Available devices:
+  Vulkan0: NVIDIA GeForce RTX 4090 [UUID=11111111-1111-1111-1111-111111111111]
+  Vulkan1: NVIDIA GeForce RTX 4090 [UUID=22222222-2222-2222-2222-222222222222]
+"""
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=stable_output, stderr=""
+        ),
+    )
+    inventory = service.inventory()
+
+    with pytest.raises(ValueError, match="unavailable"):
+        service.resolve_runtime_ids((legacy_id,), inventory=inventory)
+
+    assert all(legacy_id not in device.compatibility_ids for device in inventory.devices)
+    first_raw_id = _pre_stable_id(
+        "NVIDIA GeForce RTX 4090 [UUID=11111111-1111-1111-1111-111111111111]"
+    )
+    second_raw_id = _pre_stable_id(
+        "NVIDIA GeForce RTX 4090 [UUID=22222222-2222-2222-2222-222222222222]"
+    )
+    assert inventory.resolve_runtime_ids((first_raw_id, second_raw_id)) == (
+        "Vulkan0",
+        "Vulkan1",
+    )
+
+
 def test_identical_devices_without_stable_identities_fail_safe_when_reordered() -> None:
     outputs = (
         """Available devices:
@@ -182,7 +288,7 @@ def test_inventory_recommends_best_single_non_integrated_gpu(tmp_path: Path) -> 
     assert len(calls) == 3
 
 
-def test_failed_and_empty_probes_back_off_then_refresh_recovers(
+def test_failed_probe_backs_off_and_successful_empty_probe_uses_positive_ttl(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -204,7 +310,7 @@ def test_failed_and_empty_probes_back_off_then_refresh_recovers(
         command_runner=run,
         clock=lambda: now[0],
     )
-    caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
+    caplog.set_level(logging.INFO, logger="agents.architectures.llama_devices")
 
     failed = service.inventory()
     assert failed.error is not None
@@ -215,7 +321,8 @@ def test_failed_and_empty_probes_back_off_then_refresh_recovers(
     now[0] = 103.0
     empty = service.inventory()
     assert empty.devices == ()
-    now[0] = 105.9
+    assert empty.error is None
+    now[0] = 147.9
     assert service.inventory() is empty
     assert len(calls) == 2
 
@@ -225,6 +332,25 @@ def test_failed_and_empty_probes_back_off_then_refresh_recovers(
     assert len(calls) == 3
     assert "device discovery exited with code 1" in caplog.text
     assert "returned no parsed Vulkan devices" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({}, False),
+        ({"GEIST_LOCAL_RUNNER": "llama_server"}, False),
+        ({"GEIST_LOCAL_RUNNER": "transformers"}, True),
+        ({"GEIST_LLAMA_SERVER_PATH": "/operator/llama-server"}, True),
+        ({"GEIST_LLAMA_ACCELERATION": "cpu"}, True),
+        ({"GEIST_LLAMA_ACCELERATION": "vulkan"}, True),
+        ({"GEIST_LLAMA_ACCELERATION": "invalid"}, True),
+    ],
+)
+def test_environment_management_predicate(
+    environment: dict[str, str],
+    expected: bool,
+) -> None:
+    assert llama_compute_managed_by_environment(environment) is expected
 
 
 def test_failed_forced_refresh_replaces_previous_success_until_next_refresh(
@@ -348,19 +474,31 @@ Available devices:
   Vulkan1: NVIDIA GeForce RTX 4090 (24564 MiB, 21000 MiB free)
 """
     caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
+    now = [100.0]
+    calls = []
 
-    inventory = LlamaDeviceService(
+    def ambiguous_probe(*_args, **_kwargs):
+        calls.append(True)
+        return subprocess.CompletedProcess([], 0, stdout=production_output, stderr="")
+
+    service = LlamaDeviceService(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
-        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 0, stdout=production_output, stderr=""
-        ),
-    ).inventory()
+        command_runner=ambiguous_probe,
+        clock=lambda: now[0],
+    )
+    inventory = service.inventory()
 
     assert inventory.recommended_backend == "cpu"
     assert inventory.devices == ()
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.reason
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.error
     assert "device discovery was ambiguous" in caplog.text
+    now[0] = 102.9
+    assert service.inventory() is inventory
+    assert len(calls) == 1
+    now[0] = 103.0
+    assert service.inventory() is not inventory
+    assert len(calls) == 2
 
     forced_inventory = LlamaDeviceService(
         environment={

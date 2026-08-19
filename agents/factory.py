@@ -131,6 +131,8 @@ class AgentFactory:
 
             if runner_type != "llama_server":
                 device_config = kwargs.pop("device_config", None) or {}
+                # app/main.py inspects this caller-owned mapping after creation
+                # to recognize non-llama runners and skip llama persistence.
                 device_config.pop("llama_backend", None)
                 device_config.pop("llama_gpu_device_ids", None)
                 if device_config:

@@ -11,6 +11,8 @@ from agents.architectures.llama_server_process import LlamaServerConnection
 from agents.architectures.llama_server_runner import LlamaServerRunner
 from agents.local_agent import LocalAgent
 from agents.models.tool_calling import ChatMessage, ModelRequestConfig
+from app import main as geist_main
+from app.models.user_settings import AgentFactoryConfig
 
 
 class StreamResponse:
@@ -30,7 +32,7 @@ class StreamResponse:
         return iter(self.lines)
 
 
-def _loaded_runner(tmp_path, *, backend="cpu"):
+def _loaded_runner(tmp_path, *, backend="cpu", detection_error=None):
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"GGUFtest")
     artifact = SimpleNamespace(id="artifact-id", model_id="test/model")
@@ -43,6 +45,7 @@ def _loaded_runner(tmp_path, *, backend="cpu"):
         backend,
         "test/model",
         str(model_path),
+        detection_error=detection_error,
     )
     client = MagicMock()
     with patch("agents.architectures.llama_server_runner.httpx.Client", return_value=client):
@@ -73,6 +76,46 @@ def test_explicit_server_does_not_report_a_managed_runtime_selection(tmp_path):
 
     assert runner.effective_backend is None
     assert agent.runtime_selection() is None
+
+
+def test_auto_cpu_discovery_error_is_exposed_without_changing_selection_contract(tmp_path):
+    runner, _client, _model_manager, _server_manager = _loaded_runner(
+        tmp_path,
+        detection_error="device probe timed out",
+    )
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "llama_server"
+    agent.runner = runner
+
+    assert agent.runtime_selection() == ("cpu", ())
+    assert agent.runtime_selection_detection_error() == "device probe timed out"
+
+    factory_config = AgentFactoryConfig(
+        agent_type="local",
+        model="test/model",
+        runner_type="llama_server",
+        device_config={
+            "artifact_id": "artifact-id",
+            "llama_backend": "auto",
+            "llama_gpu_device_ids": [],
+        },
+        generation_config={},
+    )
+    signature = geist_main._local_agent_configuration_signature(factory_config)
+    with (
+        patch("app.main._llama_selection_managed_by_environment", return_value=False),
+        patch("app.main.get_default_user") as get_user,
+        patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+    ):
+        final_signature = geist_main._persist_first_use_llama_backend(
+            agent,
+            factory_config,
+            signature,
+        )
+
+    assert final_signature == signature
+    get_user.assert_not_called()
+    persist.assert_not_called()
 
 
 def test_complete_messages_adapts_openai_response(tmp_path):

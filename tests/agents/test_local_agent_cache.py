@@ -165,6 +165,109 @@ def test_first_use_persists_effective_backend_and_caches_final_signature() -> No
                 geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
 
 
+def test_first_use_persists_clean_cpu_detection() -> None:
+    saved_cache = {
+        agent_type: geist_main.agent_cache[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+    saved_signatures = {
+        agent_type: geist_main._agent_cache_signatures[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+    config = _factory_config("artifact-a", backend="auto")
+
+    class DetectedCpuAgent(RecordingLocalAgent):
+        def runtime_selection(self):
+            return "cpu", ()
+
+        def runtime_selection_detection_error(self):
+            return None
+
+    try:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+        with (
+            patch("app.main._get_local_agent_factory_config", return_value=config),
+            patch(
+                "app.main._create_local_agent",
+                return_value=DetectedCpuAgent("artifact-a", []),
+            ),
+            patch("app.main._llama_selection_managed_by_environment", return_value=False),
+            patch("app.main.get_default_user", return_value=type("User", (), {"user_id": 1})()),
+            patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+        ):
+            persist.return_value = type(
+                "Settings",
+                (),
+                {"llama_backend": "cpu", "llama_gpu_device_ids": []},
+            )()
+            geist_main.get_active_agent(AgentType.LLAMA)
+
+        persist.assert_called_once_with(1, "cpu", ())
+        final_config = _factory_config("artifact-a", backend="cpu")
+        assert geist_main._agent_cache_signatures[AgentType.LLAMA] == (
+            geist_main._local_agent_configuration_signature(final_config)
+        )
+    finally:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+            for agent_type in geist_main._LOCAL_AGENT_TYPES:
+                geist_main.agent_cache[agent_type] = saved_cache[agent_type]
+                geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
+
+
+def test_failed_auto_cpu_discovery_remains_pending_without_persistence() -> None:
+    saved_cache = {
+        agent_type: geist_main.agent_cache[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+    saved_signatures = {
+        agent_type: geist_main._agent_cache_signatures[agent_type]
+        for agent_type in geist_main._LOCAL_AGENT_TYPES
+    }
+
+    class FailedDetectionCpuAgent(RecordingLocalAgent):
+        def runtime_selection(self):
+            return "cpu", ()
+
+        def runtime_selection_detection_error(self):
+            return "llama-server --list-devices timed out"
+
+    try:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+        with (
+            patch(
+                "app.main._get_local_agent_factory_config",
+                side_effect=lambda: _factory_config("artifact-a", backend="auto"),
+            ),
+            patch(
+                "app.main._create_local_agent",
+                return_value=FailedDetectionCpuAgent("artifact-a", []),
+            ) as create,
+            patch("app.main._llama_selection_managed_by_environment", return_value=False),
+            patch("app.main.get_default_user") as get_user,
+            patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+        ):
+            first = geist_main.get_active_agent(AgentType.LLAMA)
+            second = geist_main.get_active_agent(AgentType.LLAMA)
+
+        assert second is first
+        assert create.call_count == 1
+        get_user.assert_not_called()
+        persist.assert_not_called()
+        automatic_config = _factory_config("artifact-a", backend="auto")
+        assert geist_main._agent_cache_signatures[AgentType.LLAMA] == (
+            geist_main._local_agent_configuration_signature(automatic_config)
+        )
+    finally:
+        with geist_main._agent_cache_lock:
+            geist_main._clear_local_agent_cache()
+            for agent_type in geist_main._LOCAL_AGENT_TYPES:
+                geist_main.agent_cache[agent_type] = saved_cache[agent_type]
+                geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
+
+
 def test_cached_auto_agent_retries_backend_persistence_after_transient_failure() -> None:
     saved_cache = {
         agent_type: geist_main.agent_cache[agent_type]

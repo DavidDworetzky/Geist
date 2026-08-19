@@ -18,6 +18,7 @@ from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
+from agents.architectures.llama_devices import llama_compute_managed_by_environment
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
@@ -205,6 +206,15 @@ def _persist_first_use_llama_backend(
         return signature
 
     backend, device_ids = selection
+    detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
+    detection_error = detection_error_reader() if callable(detection_error_reader) else None
+    if backend == "cpu" and detection_error is not None:
+        logger.warning(
+            "Keeping llama.cpp compute selection automatic after device discovery failed: %s",
+            detection_error,
+        )
+        return signature
+
     try:
         default_user = get_default_user()
         persisted = UserSettingsService.persist_detected_llama_backend(
@@ -756,12 +766,7 @@ def _llama_acceleration(
 
 
 def _llama_selection_managed_by_environment() -> bool:
-    if os.getenv("GEIST_LLAMA_SERVER_PATH"):
-        return True
-    return (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower() in {
-        "cpu",
-        "vulkan",
-    }
+    return llama_compute_managed_by_environment(os.environ)
 
 
 def _parse_agent_type(agent_type: str) -> AgentType:

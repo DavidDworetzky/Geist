@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type LlamaBackend = 'cpu' | 'gpu' | null;
 
@@ -47,50 +47,128 @@ export default function LlamaComputeSection({
 }: LlamaComputeSectionProps): JSX.Element | null {
   const [inventory, setInventory] = useState<LlamaDeviceInventory | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  const activeRequest = useRef<AbortController | null>(null);
+
+  const loadInventory = useCallback(async (refresh: boolean) => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    if (refresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setRequestError(null);
+    try {
+      const url = refresh
+        ? '/api/v1/models/local/runtime/devices?refresh=true'
+        : '/api/v1/models/local/runtime/devices';
+      const response = await fetch(url, { signal: controller.signal });
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Device inventory failed: ${response.statusText}`);
+      }
+      const payload = await response.json();
+      if (mounted.current && !controller.signal.aborted) {
+        setInventory(payload);
+      }
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) {
+        setRequestError(error instanceof Error ? error.message : 'Device inventory failed');
+      }
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+      }
+      if (mounted.current && !controller.signal.aborted) {
+        if (refresh) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await fetch('/api/v1/models/local/runtime/devices');
-        if (!response.ok) {
-          throw new Error(`Device inventory failed: ${response.statusText}`);
-        }
-        const payload = await response.json();
-        if (!cancelled) {
-          setInventory(payload);
-          setRequestError(null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setRequestError(error instanceof Error ? error.message : 'Device inventory failed');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void load();
+    mounted.current = true;
+    void loadInventory(false);
     return () => {
-      cancelled = true;
+      mounted.current = false;
+      activeRequest.current?.abort();
+      activeRequest.current = null;
     };
-  }, []);
+  }, [loadInventory]);
 
   const availableDeviceIds = useMemo(
     () => new Set(inventory?.devices?.map(device => device.id) ?? []),
     [inventory],
   );
 
+  const sectionHeader = (
+    <div className="settings-subsection-header">
+      <div>
+        <h4>llama.cpp Compute</h4>
+        <p className="settings-description">
+          Choose CPU or Vulkan GPU acceleration for local GGUF models.
+        </p>
+      </div>
+      <button
+        type="button"
+        className="button button-secondary button-small"
+        disabled={loading || refreshing}
+        aria-busy={loading || refreshing}
+        onClick={() => void loadInventory(true)}
+      >
+        {loading
+          ? 'Detecting devices…'
+          : refreshing
+            ? 'Refreshing devices…'
+            : 'Refresh devices'}
+      </button>
+    </div>
+  );
+
   if (loading) {
-    return <p className="settings-description">Detecting llama.cpp compute devices…</p>;
+    return (
+      <div className="llama-compute-section" aria-label="llama.cpp compute backend">
+        {sectionHeader}
+        <p className="settings-description" aria-live="polite">
+          Detecting llama.cpp compute devices…
+        </p>
+      </div>
+    );
   }
   if (!inventory) {
-    return requestError ? <div className="notice notice-warning">{requestError}</div> : null;
+    return (
+      <div className="llama-compute-section" aria-label="llama.cpp compute backend">
+        {sectionHeader}
+        {requestError && (
+          <div className="notice notice-warning" role="alert">{requestError}</div>
+        )}
+      </div>
+    );
   }
   if (!inventory.available && !inventory.managed_by_environment) {
-    return inventory.error
-      ? <div className="notice notice-warning">{inventory.error}</div>
-      : null;
+    return (
+      <div className="llama-compute-section" aria-label="llama.cpp compute backend">
+        {sectionHeader}
+        <p className="settings-description">{inventory.reason}</p>
+        {inventory.error && (
+          <div className="notice notice-warning" role="alert">
+            {inventory.error}
+          </div>
+        )}
+        {requestError && (
+          <div className="notice notice-warning" role="alert">{requestError}</div>
+        )}
+      </div>
+    );
   }
 
   const locked = inventory.managed_by_environment;
@@ -119,13 +197,24 @@ export default function LlamaComputeSection({
     if (value === 'gpu') {
       const validCurrent = deviceIds.filter(deviceId => availableDeviceIds.has(deviceId));
       const validRecommended = inventory.recommended_device_ids.filter(
-        deviceId => availableDeviceIds.has(deviceId),
+        deviceId => devices.some(device => (
+          device.id === deviceId
+          && device.recommended
+          && device.kind !== 'integrated'
+          && device.kind !== 'software'
+        )),
       );
+      const discoveredRecommended = devices
+        .filter(device => (
+          device.recommended
+          && device.kind !== 'integrated'
+          && device.kind !== 'software'
+          && !validRecommended.includes(device.id)
+        ))
+        .map(device => device.id);
       const initial = validCurrent.length > 0
         ? validCurrent
-        : validRecommended.length > 0
-          ? validRecommended
-          : devices.slice(0, 1).map(device => device.id);
+        : [...validRecommended, ...discoveredRecommended];
       onDeviceIdsChange(initial);
       onBackendChange('gpu');
     }
@@ -146,14 +235,7 @@ export default function LlamaComputeSection({
 
   return (
     <div className="llama-compute-section" aria-label="llama.cpp compute backend">
-      <div className="settings-subsection-header">
-        <div>
-          <h4>llama.cpp Compute</h4>
-          <p className="settings-description">
-            Choose CPU or Vulkan GPU acceleration for local GGUF models.
-          </p>
-        </div>
-      </div>
+      {sectionHeader}
 
       {locked ? (
         <div className="notice">
@@ -188,8 +270,11 @@ export default function LlamaComputeSection({
         </div>
       )}
 
-      {(inventory.error || requestError) && (
-        <div className="notice notice-warning">{inventory.error || requestError}</div>
+      {inventory.error && (
+        <div className="notice notice-warning" role="alert">{inventory.error}</div>
+      )}
+      {requestError && (
+        <div className="notice notice-warning" role="alert">{requestError}</div>
       )}
 
       {!locked && effectiveBackend === 'gpu' && (
@@ -198,6 +283,11 @@ export default function LlamaComputeSection({
           <p className="settings-description">
             Select one or more devices. llama.cpp splits model layers across multiple GPUs.
           </p>
+          {selectedAvailableDeviceIds.length === 0 && (
+            <div className="notice notice-warning" role="alert">
+              Choose at least one GPU device before saving.
+            </div>
+          )}
           {devices.map(device => (
             <label
               className={`llama-device-option${device.id === onlySelectedDeviceId ? ' llama-device-option-disabled' : ''}`}
@@ -220,7 +310,7 @@ export default function LlamaComputeSection({
             </label>
           ))}
           {unavailableSelections.length > 0 && (
-            <div className="notice notice-error">
+            <div className="notice notice-error" role="alert">
               A previously selected GPU is unavailable. Choose the desired devices before saving.
               {selectedAvailableDeviceIds.length > 0 && (
                 <div>

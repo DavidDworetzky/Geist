@@ -109,6 +109,14 @@ class LocalAgent(BaseAgent):
         device_ids = tuple(getattr(self.runner, "effective_device_ids", ()))
         return backend, device_ids
 
+    def runtime_selection_detection_error(self) -> str | None:
+        """Return the discovery error attached to this exact runtime selection."""
+
+        if self.runner_type != "llama_server" or self.runner is None:
+            return None
+        error = getattr(self.runner, "selection_detection_error", None)
+        return error if isinstance(error, str) else None
+
     def _create_generation_config(
         self,
         max_tokens: int | None = None,

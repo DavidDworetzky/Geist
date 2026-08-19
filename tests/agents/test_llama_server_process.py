@@ -48,8 +48,10 @@ def _runtime_tree(tmp_path: Path) -> Path:
 
 
 class StaticDeviceService:
-    def __init__(self, *, device_count: int = 1):
+    def __init__(self, *, device_count: int = 1, error: str | None = None):
         self.refresh_requests = []
+        self.resolve_requests = []
+        self.error = error
         self.devices = tuple(
             LlamaDevice(
                 id=f"gpu-{index}",
@@ -73,9 +75,11 @@ class StaticDeviceService:
             recommended_backend="gpu" if self.devices else "cpu",
             recommended_device_ids=(self.devices[0].id,) if self.devices else (),
             reason="test inventory",
+            error=self.error,
         )
 
     def resolve_runtime_ids(self, device_ids):
+        self.resolve_requests.append(tuple(device_ids))
         by_id = {device.id: device.runtime_id for device in self.devices}
         missing = [device_id for device_id in device_ids if device_id not in by_id]
         if missing:
@@ -116,6 +120,7 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     def health_probe(base_url, api_key, process, timeout):
         probes.append((base_url, api_key, process, timeout))
 
+    device_service = StaticDeviceService()
     manager = LlamaServerManager(
         environment={
             "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
@@ -124,7 +129,7 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
         process_factory=process_factory,
         health_probe=health_probe,
         port_factory=lambda: 43123,
-        device_service=StaticDeviceService(),
+        device_service=device_service,
     )
 
     connection = manager.start(model, "test/model")
@@ -147,7 +152,39 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     else:
         assert options["start_new_session"] is True
     assert probes[0][0] == "http://127.0.0.1:43123"
+    assert device_service.refresh_requests == [False]
+    assert device_service.resolve_requests == []
     assert manager.public_status()["status"] == "ready"
+    manager.stop()
+
+
+@pytest.mark.parametrize(
+    ("discovery_error", "expected_detection_error"),
+    [("Vulkan loader unavailable", "Vulkan loader unavailable"), (None, None)],
+)
+def test_auto_cpu_carries_exact_inventory_error_provenance(
+    tmp_path: Path,
+    discovery_error: str | None,
+    expected_detection_error: str | None,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    device_service = StaticDeviceService(device_count=0, error=discovery_error)
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=lambda args, **_options: FakeProcess(args),
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=device_service,
+    )
+
+    connection = manager.start(model, "test/model")
+
+    assert connection.backend == "cpu"
+    assert connection.detection_error == expected_detection_error
+    assert device_service.refresh_requests == [False]
+    assert device_service.resolve_requests == []
     manager.stop()
 
 
@@ -229,12 +266,13 @@ def test_explicit_multiple_gpus_pass_exact_device_list(tmp_path):
         calls.append(process)
         return process
 
+    device_service = StaticDeviceService(device_count=2)
     manager = LlamaServerManager(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
         process_factory=process_factory,
         health_probe=lambda *_args: None,
         port_factory=lambda: 43123,
-        device_service=StaticDeviceService(device_count=2),
+        device_service=device_service,
     )
 
     connection = manager.start(
@@ -247,6 +285,7 @@ def test_explicit_multiple_gpus_pass_exact_device_list(tmp_path):
     assert connection.backend == "vulkan"
     assert connection.device_ids == ("gpu-0", "gpu-1")
     assert calls[0].args[calls[0].args.index("--device") + 1] == "Vulkan0,Vulkan1"
+    assert device_service.resolve_requests == [("gpu-0", "gpu-1")]
     manager.stop()
 
 
