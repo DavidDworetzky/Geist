@@ -687,6 +687,36 @@ class TestFactoryCreateFromConfig:
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
 
 
+class TestSettingsDrivenQwen3Creation:
+
+    @patch("app.services.user_settings_service.AgentFactory.create_agent")
+    @patch("app.services.user_settings_service.AgentFactoryConfig.from_user_settings")
+    @patch(
+        "app.services.user_settings_service.UserSettingsService."
+        "get_or_create_user_settings_by_id"
+    )
+    def test_local_settings_do_not_forward_online_backup_providers(
+        self, mock_get_settings, mock_from_settings, mock_create_agent
+    ):
+        from app.services.user_settings_service import UserSettingsService
+
+        factory_config = Mock(
+            agent_type="local",
+            model="Qwen/Qwen3-8B",
+            endpoint=None,
+            api_key=None,
+            runner_type=None,
+            device_config={},
+            generation_config={"max_tokens": 8},
+            backup_providers=[],
+        )
+        mock_from_settings.return_value = factory_config
+
+        UserSettingsService.create_agent_from_user_settings(1, Mock())
+
+        assert "backup_providers" not in mock_create_agent.call_args.kwargs
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

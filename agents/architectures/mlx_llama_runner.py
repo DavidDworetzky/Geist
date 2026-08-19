@@ -87,7 +87,17 @@ class MLXLlamaRunner(BaseRunner):
                 f"Unknown MLX implementation '{requested}'. Expected one of: {choices}."
             )
 
-        self.weights_dir = self._resolve_weights_dir(model_id, device_config)
+        try:
+            self.weights_dir = self._resolve_weights_dir(model_id, device_config)
+        except KeyError:
+            has_explicit_source = bool(
+                device_config.get("weights_dir")
+                or device_config.get("artifact_id")
+                or os.environ.get("LOCAL_WEIGHTS_DIR")
+            )
+            if self.implementation != "mlx_lm" or has_explicit_source:
+                raise
+            self.weights_dir = None
         if self.implementation == "manual":
             from agents.architectures.llama.llama_mlx import LlamaMLX
 
