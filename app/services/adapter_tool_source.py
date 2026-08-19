@@ -37,7 +37,7 @@ class AdapterToolSource:
         self._enabled_by_default = enabled_by_default
         self._timeout_seconds = timeout_seconds
 
-    def definitions(self) -> list[ToolDefinition]:
+    def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]:
         definitions: list[ToolDefinition] = []
         for adapter in self._adapters:
             try:

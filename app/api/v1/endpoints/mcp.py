@@ -4,12 +4,14 @@ API endpoints for configuring MCP (Model Context Protocol) servers.
 Configured servers are persisted per user; only servers explicitly marked
 enabled contribute tools to chat via the registry's MCP tool source.
 """
+
 import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agents.models.tool_calling import ToolContext
 from app.models.database.geist_user import get_default_user
 from app.models.database.mcp_server import (
     McpServerModel,
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+_REDACTED = "<redacted>"
 
 
 def get_current_user():
@@ -43,9 +46,7 @@ def _validate_transport_fields(transport: str, command: str | None, url: str | N
     if transport == "stdio":
         if not (command or "").strip():
             raise ValueError("stdio servers require a command")
-    elif transport == "http" and (
-        not url or not url.lower().startswith(("http://", "https://"))
-    ):
+    elif transport == "http" and (not url or not url.lower().startswith(("http://", "https://"))):
         raise ValueError("http servers require an http(s) URL")
 
 
@@ -110,7 +111,32 @@ class McpServerTestResponse(BaseModel):
 
 
 def _response(server: McpServerModel) -> McpServerResponse:
-    return McpServerResponse(**server.__dict__)
+    values = dict(server.__dict__)
+    values["env"] = {key: _REDACTED for key in server.env}
+    values["headers"] = {key: _REDACTED for key in server.headers}
+    return McpServerResponse(**values)
+
+
+def _owned_server_or_404(mcp_server_id: int, user_id: int) -> McpServerModel:
+    server = get_mcp_server(mcp_server_id)
+    if server is None or server.user_id != user_id:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    return server
+
+
+def _preserve_redacted_secrets(
+    updates: dict[str, Any],
+    existing: McpServerModel,
+) -> None:
+    for field in ("env", "headers"):
+        submitted = updates.get(field)
+        if not isinstance(submitted, dict):
+            continue
+        stored = getattr(existing, field)
+        updates[field] = {
+            key: stored.get(key, value) if value == _REDACTED else value
+            for key, value in submitted.items()
+        }
 
 
 def _invalidate(server_id: int | None = None) -> None:
@@ -149,19 +175,18 @@ async def create_server(request: McpServerCreate):
 
 @router.get("/servers/{mcp_server_id}", response_model=McpServerResponse)
 async def get_server(mcp_server_id: int):
-    server = get_mcp_server(mcp_server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    user = get_current_user()
+    server = _owned_server_or_404(mcp_server_id, user.user_id)
     return _response(server)
 
 
 @router.put("/servers/{mcp_server_id}", response_model=McpServerResponse)
 async def update_server(mcp_server_id: int, request: McpServerUpdate):
     try:
-        existing = get_mcp_server(mcp_server_id)
-        if not existing:
-            raise HTTPException(status_code=404, detail="MCP server not found")
+        user = get_current_user()
+        existing = _owned_server_or_404(mcp_server_id, user.user_id)
         updates = request.model_dump(exclude_unset=True)
+        _preserve_redacted_secrets(updates, existing)
 
         merged_transport = updates.get("transport", existing.transport)
         merged_command = updates.get("command", existing.command)
@@ -172,8 +197,10 @@ async def update_server(mcp_server_id: int, request: McpServerUpdate):
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         new_name = updates.get("name")
-        if new_name and new_name != existing.name and any(
-            server.name == new_name for server in list_mcp_servers(existing.user_id)
+        if (
+            new_name
+            and new_name != existing.name
+            and any(server.name == new_name for server in list_mcp_servers(existing.user_id))
         ):
             raise HTTPException(
                 status_code=409, detail=f"An MCP server named '{new_name}' already exists"
@@ -194,6 +221,8 @@ async def update_server(mcp_server_id: int, request: McpServerUpdate):
 @router.delete("/servers/{mcp_server_id}", status_code=204)
 async def delete_server(mcp_server_id: int):
     try:
+        user = get_current_user()
+        _owned_server_or_404(mcp_server_id, user.user_id)
         if not delete_mcp_server(mcp_server_id):
             raise HTTPException(status_code=404, detail="MCP server not found")
         _invalidate(mcp_server_id)
@@ -207,9 +236,8 @@ async def delete_server(mcp_server_id: int):
 @router.post("/servers/{mcp_server_id}/test", response_model=McpServerTestResponse)
 async def test_server(mcp_server_id: int):
     """Connect to the server and list its tools without enabling it."""
-    server = get_mcp_server(mcp_server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="MCP server not found")
+    user = get_current_user()
+    server = _owned_server_or_404(mcp_server_id, user.user_id)
     try:
         tools = get_mcp_manager().list_tools(config_from_model(server))
     except McpError as error:
@@ -233,9 +261,11 @@ async def test_server(mcp_server_id: int):
 async def list_mounted_tools():
     """List the MCP tools currently mounted into the chat tool registry."""
     try:
+        user = get_current_user()
+        context = ToolContext(user_id=user.user_id, chat_id=None, run_id="mcp-catalog")
         return [
             McpToolInfo(name=definition.name, description=definition.description)
-            for definition in get_mcp_tool_source().definitions()
+            for definition in get_mcp_tool_source().definitions(context)
         ]
     except Exception as e:
         logger.error(f"Error listing mounted MCP tools: {e}")

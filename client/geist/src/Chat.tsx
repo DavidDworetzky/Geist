@@ -10,7 +10,7 @@ import EnhancedChatInput from './Components/EnhancedChatInput';
 import ChatMemoryControls from './Components/ChatMemoryControls';
 import MemoryExplorer from './Components/MemoryExplorer';
 import StagePanelIcon from './Components/StagePanelIcon';
-import { ChatPair, ChatHistory, ChatTurnResult } from './chatTypes';
+import { ChatPair, ChatHistory, ChatTurnResult, ToolApprovalDecision } from './chatTypes';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 
 const PAGE_SIZE = 20;
@@ -576,6 +576,21 @@ const Chat = () => {
     ],
   );
 
+  const handleToolApproval = useCallback(async (
+    runId: string,
+    callId: string,
+    decision: ToolApprovalDecision,
+  ) => {
+    const response = await fetch(`/agent/runs/${runId}/tool_approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_id: callId, decision }),
+    });
+    if (!response.ok) {
+      throw new Error(`Tool approval failed (${response.status})`);
+    }
+  }, []);
+
   return (
     <div className={`ChatContainer chat-drawer-${chatDrawerState}${hasChatScrollbar ? ' chat-scrollbar-visible' : ''}`}>
       <section className="ChatContent">
@@ -585,6 +600,9 @@ const Chat = () => {
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
+                onToolApproval={(runId, callId, decision) => {
+                  void handleToolApproval(runId, callId, decision);
+                }}
               />
             </div>
           </div>

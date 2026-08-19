@@ -19,8 +19,14 @@ from agents.models.tool_calling import (
     ModelRequestConfig,
     ToolCall,
     ToolContext,
+    ToolResult,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.services.tool_approvals import (
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    ToolApprovalRegistry,
+    approval_registry,
+)
 from app.services.tool_registry import ToolRegistry
 
 
@@ -111,6 +117,8 @@ class ChatOrchestrator:
         max_tool_result_chars_total: int = 40_000,
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
+        approvals: ToolApprovalRegistry = approval_registry,
+        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     ) -> None:
         self.registry = registry
         self.run_controls = run_controls or RunControlRegistry()
@@ -122,6 +130,8 @@ class ChatOrchestrator:
         self.max_tool_result_chars_total = max_tool_result_chars_total
         self.history_loader = history_loader
         self.history_writer = history_writer
+        self.approvals = approvals
+        self.approval_timeout_seconds = approval_timeout_seconds
 
     @staticmethod
     def _entry_messages(entry: Any) -> list[ChatMessage]:
@@ -297,6 +307,7 @@ class ChatOrchestrator:
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,
+        interactive: bool = True,
     ) -> Iterator[ChatStreamEvent]:
         conversation = ConversationState(chat_id=chat_id, user_id=user_id)
         conversation.add_system_prompt(system_prompt)
@@ -306,6 +317,7 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
+        approved_call_ids: set[str] = set()
         context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
@@ -410,8 +422,7 @@ class ChatOrchestrator:
                     # has stopped making progress and each repeat burns tokens
                     # (and possibly side effects) for an identical answer.
                     signature = (
-                        f"{call.name}:"
-                        f"{json.dumps(call.arguments, sort_keys=True, default=str)}"
+                        f"{call.name}:" f"{json.dumps(call.arguments, sort_keys=True, default=str)}"
                     )
                     if signature == doom_signature:
                         doom_count += 1
@@ -424,7 +435,7 @@ class ChatOrchestrator:
                             f"{doom_count} times in a row with identical arguments"
                         )
 
-                    definition = self.registry.get(call.name)
+                    definition = self.registry.get(call.name, context)
                     requires_approval = bool(definition and definition.requires_approval)
                     proposed = self._tool_state(
                         call,
@@ -440,10 +451,52 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    if not requires_approval:
-                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                    if requires_approval:
+                        yield ChatStreamEvent(
+                            "tool_call",
+                            self._tool_state(
+                                call,
+                                "awaiting_approval",
+                                requires_approval=True,
+                            ),
+                        )
+                        if interactive:
+                            pending = self.approvals.request(run.run_id, call.id, call.name)
+                            decision = self.approvals.wait(
+                                pending,
+                                self.approval_timeout_seconds,
+                                cancellation,
+                            )
+                        else:
+                            decision = "deny"
 
-                    result = self.registry.execute(call, context)
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+
+                        if decision == "approve":
+                            approved_call_ids.add(call.id)
+                            context = ToolContext(
+                                user_id=user_id,
+                                chat_id=chat_id,
+                                run_id=run.run_id,
+                                approved_call_ids=frozenset(approved_call_ids),
+                            )
+                            yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                            result = self.registry.execute(call, context)
+                        else:
+                            result = ToolResult(
+                                call=call,
+                                status="failed",
+                                content=(
+                                    "BLOCKED: user approval was denied or timed out. "
+                                    "Do not retry this tool call without a new user request."
+                                ),
+                                error="approval_denied",
+                            )
+                    else:
+                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                        result = self.registry.execute(call, context)
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -528,6 +581,7 @@ class ChatOrchestrator:
                 {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
         finally:
+            self.approvals.cancel_run(run.run_id)
             self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:

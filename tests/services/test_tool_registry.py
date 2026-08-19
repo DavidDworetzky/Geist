@@ -232,7 +232,7 @@ class StaticSource:
         self._definitions = definitions
         self.fail = fail
 
-    def definitions(self):
+    def definitions(self, context=None):
         if self.fail:
             raise RuntimeError("source exploded")
         return list(self._definitions)

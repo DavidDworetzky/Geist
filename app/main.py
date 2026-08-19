@@ -35,7 +35,7 @@ from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
 from app.loopback_security import install_loopback_security
-from app.models.completion import CompleteTextParams, InitializeAgentParams
+from app.models.completion import CompleteTextParams, InitializeAgentParams, ToolApprovalParams
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
     get_all_chat_history,
@@ -55,6 +55,7 @@ from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.tool_approvals import approval_registry as tool_approval_registry
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -527,6 +528,19 @@ def create_app(
     def cancel_chat_run(run_id: str):
         return {"run_id": run_id, "cancelled": run_controls.cancel(run_id)}
 
+    @agent_router.post("/runs/{run_id}/tool_approval")
+    def resolve_tool_approval(run_id: str, params: ToolApprovalParams):
+        if not tool_approval_registry.resolve(run_id, params.call_id, params.decision):
+            raise HTTPException(
+                status_code=404,
+                detail="No pending approval for this run and call",
+            )
+        return {
+            "run_id": run_id,
+            "call_id": params.call_id,
+            "decision": params.decision,
+        }
+
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
         return get_chat_history(session_id)
@@ -567,7 +581,9 @@ def create_app(
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }
-                for tool in chat_orchestrator.registry.catalog()
+                for tool in chat_orchestrator.registry.catalog(
+                    ToolContext(user_id=user.user_id, chat_id=None, run_id="catalog")
+                )
             ]
         }
 

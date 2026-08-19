@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from app.models.database.database import (
 )
 from app.models.database.database_config import DatabaseConfig
 from app.models.database.geist_user import GeistUser
+from app.models.database.mcp_server import get_mcp_server
 from app.services.mcp_client import McpError
 
 
@@ -85,6 +87,44 @@ def test_mcp_server_crud_flow(mcp_client):
     assert deleted.status_code == 204
     assert mcp_client.get(f"/api/v1/mcp/servers/{server_id}").status_code == 404
     assert mcp_client.get("/api/v1/mcp/servers").json() == []
+
+
+def test_mcp_secrets_are_redacted_and_redacted_updates_preserve_values(mcp_client):
+    payload = _stdio_payload()
+    payload["env"] = {"ACCESS_TOKEN": "secret-token"}
+    created = mcp_client.post("/api/v1/mcp/servers", json=payload)
+    server_id = created.json()["mcp_server_id"]
+
+    assert created.json()["env"] == {"ACCESS_TOKEN": "<redacted>"}
+    listed = mcp_client.get("/api/v1/mcp/servers").json()[0]
+    assert listed["env"] == {"ACCESS_TOKEN": "<redacted>"}
+
+    updated = mcp_client.put(
+        f"/api/v1/mcp/servers/{server_id}",
+        json={"env": listed["env"], "timeout_seconds": 60},
+    )
+    assert updated.status_code == 200
+    assert get_mcp_server(server_id).env == {"ACCESS_TOKEN": "secret-token"}
+
+
+def test_mcp_server_routes_hide_other_users_servers(mcp_client, monkeypatch):
+    import app.api.v1.endpoints.mcp as mcp_endpoints
+
+    created = mcp_client.post("/api/v1/mcp/servers", json=_stdio_payload())
+    server_id = created.json()["mcp_server_id"]
+    monkeypatch.setattr(
+        mcp_endpoints,
+        "get_current_user",
+        lambda: SimpleNamespace(user_id=2),
+    )
+
+    assert mcp_client.get(f"/api/v1/mcp/servers/{server_id}").status_code == 404
+    assert (
+        mcp_client.put(f"/api/v1/mcp/servers/{server_id}", json={"enabled": True}).status_code
+        == 404
+    )
+    assert mcp_client.post(f"/api/v1/mcp/servers/{server_id}/test").status_code == 404
+    assert mcp_client.delete(f"/api/v1/mcp/servers/{server_id}").status_code == 404
 
 
 def test_stdio_server_requires_command(mcp_client):
