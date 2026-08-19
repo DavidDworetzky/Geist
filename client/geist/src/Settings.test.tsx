@@ -109,6 +109,11 @@ const renderBrandedSettings = () => render(
   </BrandingProvider>,
 );
 
+const waitForSettingsRefresh = async () => {
+  const controls = await screen.findByRole('group', { name: 'Settings controls' });
+  await waitFor(() => expect(controls).toHaveAttribute('aria-busy', 'false'));
+};
+
 describe('Settings page', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -267,7 +272,6 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
     });
-
     fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
 
     const page = container.querySelector('.settings-page-interactive');
@@ -337,6 +341,7 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
     });
+    await waitForSettingsRefresh();
 
     // go to Generation tab
     fireEvent.click(screen.getByText('Generation'));
@@ -393,6 +398,7 @@ describe('Settings page', () => {
 
     renderSettings();
     fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
 
     const computeBackend = await screen.findByLabelText('Compute Backend');
     expect(computeBackend).toHaveValue('automatic');
@@ -402,8 +408,12 @@ describe('Settings page', () => {
     const nvidia = screen.getByRole('checkbox', { name: /NVIDIA GeForce RTX 3080/i });
     const intel = screen.getByRole('checkbox', { name: /Intel\(R\) UHD Graphics/i });
     expect(nvidia).toBeChecked();
+    expect(nvidia).toBeDisabled();
+    expect(intel).not.toBeDisabled();
     expect(screen.getByText(/integrated.*not recommended/i)).toBeInTheDocument();
     fireEvent.click(intel);
+    expect(nvidia).not.toBeDisabled();
+    expect(intel).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => {
@@ -428,6 +438,7 @@ describe('Settings page', () => {
 
     renderSettings();
     fireEvent.click(await screen.findByRole('tab', { name: 'Generation' }));
+    await waitForSettingsRefresh();
     fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
       target: { value: '0.8' },
     });
@@ -439,7 +450,7 @@ describe('Settings page', () => {
     expect(global.fetch).not.toHaveBeenCalledWith('/api/v1/models/local/runtime/devices');
   });
 
-  it('refreshes a backend selection persisted after the provider first loaded', async () => {
+  it('keeps settings usable while refreshing a backend selection on mount', async () => {
     let settingsGets = 0;
     let resolveRefresh: ((response: any) => void) | null = null;
     const resolvedSettings = {
@@ -466,14 +477,46 @@ describe('Settings page', () => {
 
     renderSettings();
     await waitFor(() => expect(settingsGets).toBe(2));
-    expect(screen.getByText(/Loading settings/i)).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Models and Providers' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading settings/i)).not.toBeInTheDocument();
+    const modelsTab = screen.getByRole('tab', { name: 'Models and Providers' });
+    const generationTab = screen.getByRole('tab', { name: 'Generation' });
+    expect(modelsTab).not.toBeDisabled();
+    expect(generationTab).not.toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /keep editing.*Save and Reset.*refresh finishes/i,
+    );
+    expect(screen.getByRole('group', { name: 'Settings controls' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByLabelText('Default Agent Type')).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reset to Defaults' })).toBeDisabled();
+
+    fireEvent.click(generationTab);
+    const temperature = screen.getByRole('slider', { name: /Temperature/i });
+    expect(temperature).not.toBeDisabled();
+    fireEvent.change(temperature, { target: { value: '0.8' } });
+    expect(screen.getByText(/Unsaved Changes/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
 
     await act(async () => {
       resolveRefresh?.({ ok: true, json: async () => resolvedSettings });
     });
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Save Changes' })).not.toBeDisabled();
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Settings controls' })).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    expect(temperature).toHaveValue('0.8');
+    expect(screen.getByRole('button', { name: 'Reset to Defaults' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).not.toBeDisabled();
+
+    fireEvent.click(modelsTab);
     expect(await screen.findByLabelText('Compute Backend')).toHaveValue('gpu');
     expect(screen.queryByText(/pending|verified|verification/i)).not.toBeInTheDocument();
   });
@@ -490,6 +533,7 @@ describe('Settings page', () => {
     });
 
     fireEvent.click(screen.getByText('Generation'));
+    await waitForSettingsRefresh();
     const slider = screen.getByRole('slider', { name: /Temperature/i }) as HTMLInputElement;
     fireEvent.change(slider, { target: { value: '1.1' } });
     expect(screen.getByText(/Unsaved Changes/i)).toBeInTheDocument();
@@ -519,6 +563,7 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(screen.getByText(/Reset to Defaults/i)).toBeInTheDocument();
     });
+    await waitForSettingsRefresh();
 
     fireEvent.click(screen.getByText(/Reset to Defaults/i));
     await waitFor(() => {
@@ -571,6 +616,7 @@ describe('Settings page', () => {
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
+      await waitForSettingsRefresh();
 
       // Switch to online agent type first to see the provider dropdown
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
@@ -611,6 +657,7 @@ describe('Settings page', () => {
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
+      await waitForSettingsRefresh();
 
       // Switch to online agent type to see the model dropdown
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
@@ -652,6 +699,7 @@ describe('Settings page', () => {
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
       });
+      await waitForSettingsRefresh();
 
       // Switch to local agent type
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');

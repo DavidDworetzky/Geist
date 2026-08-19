@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.llama_server_process import LlamaServerConnection
 from agents.architectures.llama_server_runner import LlamaServerRunner
+from agents.local_agent import LocalAgent
 from agents.models.tool_calling import ChatMessage, ModelRequestConfig
 
 
@@ -29,7 +30,7 @@ class StreamResponse:
         return iter(self.lines)
 
 
-def _loaded_runner(tmp_path):
+def _loaded_runner(tmp_path, *, backend="cpu"):
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"GGUFtest")
     artifact = SimpleNamespace(id="artifact-id", model_id="test/model")
@@ -39,7 +40,7 @@ def _loaded_runner(tmp_path):
     server_manager.start.return_value = LlamaServerConnection(
         "http://127.0.0.1:43123",
         "private-key",
-        "cpu",
+        backend,
         "test/model",
         str(model_path),
     )
@@ -59,6 +60,19 @@ def test_load_resolves_managed_artifact_and_starts_private_server(tmp_path):
     model_manager.require_installed.assert_called_once_with("test/model")
     server_manager.start.assert_called_once()
     assert runner.headers["Authorization"] == "Bearer private-key"
+
+
+def test_explicit_server_does_not_report_a_managed_runtime_selection(tmp_path):
+    runner, _client, _model_manager, _server_manager = _loaded_runner(
+        tmp_path,
+        backend="explicit",
+    )
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "llama_server"
+    agent.runner = runner
+
+    assert runner.effective_backend is None
+    assert agent.runtime_selection() is None
 
 
 def test_complete_messages_adapts_openai_response(tmp_path):

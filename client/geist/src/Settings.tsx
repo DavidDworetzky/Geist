@@ -23,25 +23,47 @@ const agentTypeOptions = [
 const Settings: React.FC = () => {
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
   const [activeTab, setActiveTab] = useState<Tab>('general');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(() => new Set());
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const refreshedOnMount = useRef(false);
   const mounted = useRef(true);
   const [refreshingOnMount, setRefreshingOnMount] = useState(true);
+  const [mountRefreshSettled, setMountRefreshSettled] = useState(false);
+  const lastMergedSettings = useRef<any>(null);
+  const hasUnsavedChanges = dirtyKeys.size > 0;
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
-  } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings) && !refreshingOnMount);
+  } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings));
 
   useEffect(() => {
-    if (settings && !hasUnsavedChanges) {
-      setLocalSettings(settings);
+    if (!settings) return;
+    if (lastMergedSettings.current === settings) {
+      if (dirtyKeys.size === 0) {
+        setLocalSettings(settings);
+      }
+      return;
     }
-  }, [settings, hasUnsavedChanges]);
+    lastMergedSettings.current = settings;
+    setLocalSettings((current: any) => {
+      if (!current) return settings;
+      const merged = { ...current, ...settings };
+      dirtyKeys.forEach(key => {
+        merged[key] = current[key];
+      });
+      return merged;
+    });
+  }, [settings, dirtyKeys]);
+
+  useEffect(() => {
+    if (mountRefreshSettled) {
+      setRefreshingOnMount(false);
+    }
+  }, [mountRefreshSettled]);
 
   useEffect(() => {
     if (loading || refreshedOnMount.current) {
@@ -49,11 +71,13 @@ const Settings: React.FC = () => {
     }
     refreshedOnMount.current = true;
     if (!settings) {
-      setRefreshingOnMount(false);
+      setMountRefreshSettled(true);
       return;
     }
     void refetch().finally(() => {
-      if (mounted.current) setRefreshingOnMount(false);
+      if (mounted.current) {
+        setMountRefreshSettled(true);
+      }
     });
   }, [loading, refetch, settings]);
 
@@ -75,12 +99,16 @@ const Settings: React.FC = () => {
       ...prev,
       [key]: value
     }));
-    setHasUnsavedChanges(true);
+    setDirtyKeys(previous => {
+      const next = new Set(previous);
+      next.add(key);
+      return next;
+    });
     setSaveStatus('idle');
   };
 
   const handleSave = async () => {
-    if (!localSettings) return;
+    if (refreshingOnMount || !localSettings) return;
 
     try {
       setSaveStatus('saving');
@@ -108,7 +136,7 @@ const Settings: React.FC = () => {
       };
 
       await updateSettings(updates);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('success');
       setStatusMessage('Settings saved successfully.');
 
@@ -125,13 +153,14 @@ const Settings: React.FC = () => {
   const handleCancel = () => {
     if (settings) {
       setLocalSettings(settings);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('idle');
       setStatusMessage('');
     }
   };
 
   const handleReset = async () => {
+    if (refreshingOnMount) return;
     if (!window.confirm('Are you sure you want to reset all settings to their default values? This cannot be undone.')) {
       return;
     }
@@ -140,7 +169,7 @@ const Settings: React.FC = () => {
       setSaveStatus('saving');
       setStatusMessage('');
       await resetSettings();
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('success');
       setStatusMessage('Settings reset to defaults successfully.');
 
@@ -166,7 +195,7 @@ const Settings: React.FC = () => {
     { id: 'about' as Tab, label: 'About' }
   ];
 
-  if ((loading && !localSettings) || refreshingOnMount) {
+  if (loading && !localSettings) {
     return (
       <div className="settings-page page-surface page-surface-centered">
         <div className="empty-state">Loading settings...</div>
@@ -224,7 +253,17 @@ const Settings: React.FC = () => {
           ))}
         </div>
 
-        <div className="settings-tab-panel">
+        {refreshingOnMount && (
+          <p className="settings-description settings-refresh-status" role="status">
+            Refreshing settings… You can keep editing. Save and Reset will be available when refresh finishes.
+          </p>
+        )}
+
+        <fieldset
+          className="settings-tab-panel"
+          aria-busy={refreshingOnMount}
+          aria-label="Settings controls"
+        >
           {activeTab === 'general' && (
             <section className="settings-section">
               <header className="settings-section-header">
@@ -365,18 +404,18 @@ const Settings: React.FC = () => {
           )}
 
           {activeTab === 'about' && <AboutSection />}
-        </div>
+        </fieldset>
       </div>
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
-          <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
+          <button className="button button-danger" onClick={handleReset} disabled={refreshingOnMount || saveStatus === 'saving'}>
             Reset to Defaults
           </button>
           <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
             Cancel
           </button>
-          <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
+          <button className="button" onClick={handleSave} disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving'}>
             {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </footer>

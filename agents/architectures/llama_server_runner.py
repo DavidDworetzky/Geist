@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -47,7 +47,7 @@ class LlamaServerRunner(BaseRunner):
         self.client: httpx.Client | None = None
         self.base_url: str | None = None
         self.headers: dict[str, str] = {"Content-Type": "application/json"}
-        self.effective_backend: str | None = None
+        self.effective_backend: Literal["cpu", "gpu"] | None = None
         self.effective_device_ids: tuple[str, ...] = ()
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
@@ -73,7 +73,12 @@ class LlamaServerRunner(BaseRunner):
             self.client.close()
         self.model_id = artifact.model_id
         self.artifact_id = artifact.id
-        self.effective_backend = "gpu" if connection.backend == "vulkan" else "cpu"
+        if connection.backend == "vulkan":
+            self.effective_backend = "gpu"
+        elif connection.backend == "cpu":
+            self.effective_backend = "cpu"
+        else:
+            self.effective_backend = None
         self.effective_device_ids = connection.device_ids
         self.supports_native_tool_calling = bool(getattr(artifact, "supports_tool_calling", False))
         self.base_url = f"{connection.base_url}/v1"

@@ -23,7 +23,9 @@ def upgrade() -> None:
         "user_settings",
         sa.Column("llama_gpu_device_ids", sa.JSON(), nullable=True),
     )
-    op.execute("UPDATE user_settings SET llama_gpu_device_ids = '[]'")
+    op.execute(
+        "UPDATE user_settings SET llama_gpu_device_ids = '[]' WHERE llama_gpu_device_ids IS NULL"
+    )
 
 
 def downgrade() -> None:

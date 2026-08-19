@@ -49,6 +49,7 @@ def _runtime_tree(tmp_path: Path) -> Path:
 
 class StaticDeviceService:
     def __init__(self, *, device_count: int = 1):
+        self.refresh_requests = []
         self.devices = tuple(
             LlamaDevice(
                 id=f"gpu-{index}",
@@ -62,7 +63,8 @@ class StaticDeviceService:
             for index in range(device_count)
         )
 
-    def inventory(self):
+    def inventory(self, *, refresh=False):
+        self.refresh_requests.append(refresh)
         return LlamaDeviceInventory(
             available=True,
             managed_by_environment=False,
@@ -88,6 +90,16 @@ def test_platform_process_options_are_isolated() -> None:
 
     assert posix_options() == {"start_new_session": True}
     assert windows_options(WindowsSubprocess) == {"creationflags": 0x8000200}
+
+
+def test_device_inventory_forwards_refresh_to_service() -> None:
+    device_service = StaticDeviceService()
+    manager = LlamaServerManager(environment={}, device_service=device_service)
+
+    inventory = manager.device_inventory(refresh=True)
+
+    assert inventory["recommended_backend"] == "gpu"
+    assert device_service.refresh_requests == [True]
 
 
 def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):

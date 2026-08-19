@@ -80,7 +80,6 @@ export default function LlamaComputeSection({
     () => new Set(inventory?.devices?.map(device => device.id) ?? []),
     [inventory],
   );
-  const unavailableSelections = deviceIds.filter(deviceId => !availableDeviceIds.has(deviceId));
 
   if (loading) {
     return <p className="settings-description">Detecting llama.cpp compute devices…</p>;
@@ -102,6 +101,15 @@ export default function LlamaComputeSection({
   const selectedDeviceIds = backend === null
     ? inventory.recommended_device_ids
     : deviceIds;
+  const selectedAvailableDeviceIds = selectedDeviceIds.filter(
+    deviceId => availableDeviceIds.has(deviceId),
+  );
+  const unavailableSelections = selectedDeviceIds.filter(
+    deviceId => !availableDeviceIds.has(deviceId),
+  );
+  const onlySelectedDeviceId = selectedAvailableDeviceIds.length === 1
+    ? selectedAvailableDeviceIds[0]
+    : null;
   const selectBackend = (value: string) => {
     if (value === 'cpu') {
       onDeviceIdsChange([]);
@@ -110,24 +118,30 @@ export default function LlamaComputeSection({
     }
     if (value === 'gpu') {
       const validCurrent = deviceIds.filter(deviceId => availableDeviceIds.has(deviceId));
+      const validRecommended = inventory.recommended_device_ids.filter(
+        deviceId => availableDeviceIds.has(deviceId),
+      );
       const initial = validCurrent.length > 0
         ? validCurrent
-        : inventory.recommended_device_ids.length > 0
-          ? inventory.recommended_device_ids
+        : validRecommended.length > 0
+          ? validRecommended
           : devices.slice(0, 1).map(device => device.id);
       onDeviceIdsChange(initial);
       onBackendChange('gpu');
     }
   };
   const toggleDevice = (deviceId: string) => {
-    const currentAvailable = selectedDeviceIds.filter(value => availableDeviceIds.has(value));
-    const next = currentAvailable.includes(deviceId)
-      ? currentAvailable.filter(value => value !== deviceId)
-      : [...currentAvailable, deviceId];
+    const next = selectedAvailableDeviceIds.includes(deviceId)
+      ? selectedAvailableDeviceIds.filter(value => value !== deviceId)
+      : [...selectedAvailableDeviceIds, deviceId];
     if (next.length > 0) {
       onDeviceIdsChange(next);
       onBackendChange('gpu');
     }
+  };
+  const useAvailableDevices = () => {
+    onDeviceIdsChange(selectedAvailableDeviceIds);
+    onBackendChange('gpu');
   };
 
   return (
@@ -143,8 +157,11 @@ export default function LlamaComputeSection({
 
       {locked ? (
         <div className="notice">
-          Compute selection is managed by the environment
-          {inventory.forced_backend ? ` (${inventory.forced_backend.toUpperCase()})` : ''}.
+          <div>
+            Compute selection is managed by the environment
+            {inventory.forced_backend ? ` (${inventory.forced_backend.toUpperCase()})` : ''}.
+          </div>
+          <p className="settings-description">{inventory.reason}</p>
         </div>
       ) : (
         <div className="settings-field">
@@ -182,10 +199,14 @@ export default function LlamaComputeSection({
             Select one or more devices. llama.cpp splits model layers across multiple GPUs.
           </p>
           {devices.map(device => (
-            <label className="llama-device-option" key={device.id}>
+            <label
+              className={`llama-device-option${device.id === onlySelectedDeviceId ? ' llama-device-option-disabled' : ''}`}
+              key={device.id}
+            >
               <input
                 type="checkbox"
                 checked={selectedDeviceIds.includes(device.id)}
+                disabled={device.id === onlySelectedDeviceId}
                 onChange={() => toggleDevice(device.id)}
               />
               <span>
@@ -201,6 +222,17 @@ export default function LlamaComputeSection({
           {unavailableSelections.length > 0 && (
             <div className="notice notice-error">
               A previously selected GPU is unavailable. Choose the desired devices before saving.
+              {selectedAvailableDeviceIds.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    className="button button-secondary llama-device-normalize"
+                    onClick={useAvailableDevices}
+                  >
+                    Use available devices
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </fieldset>

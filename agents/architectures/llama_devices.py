@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import subprocess  # nosec B404 -- runs a fixed flag against a verified managed binary
@@ -14,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 
-DEVICE_LINE = re.compile(
-    r"^\s*(?P<runtime_id>Vulkan\d+):\s+(?P<name>.+?)"
-    r"(?:\s+\((?P<total>\d+)\s+MiB,\s+(?P<free>\d+)\s+MiB free\))?\s*$"
+DEVICE_LINE = re.compile(r"^\s*(?P<runtime_id>Vulkan\d+):\s+(?P<description>.+?)\s*$")
+DEVICE_MEMORY = re.compile(
+    r"\s*\((?P<total>\d+)\s+MiB,\s+(?P<free>\d+)\s+MiB free\)\s*",
+    re.IGNORECASE,
 )
 DEVICE_UUID = re.compile(
     r"\s*(?:[\[(]\s*)?(?:device[\s_-]*)?uuid\s*[:=]\s*"
@@ -34,7 +36,8 @@ BARE_DEVICE_PCI_ADDRESS = re.compile(
     r"\s*[\[(]\s*(?P<identity>(?:[0-9a-f]{4}:)?[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])" r"\s*[\])]",
     re.IGNORECASE,
 )
-DEFAULT_INVENTORY_CACHE_TTL_SECONDS = 5.0
+DEFAULT_INVENTORY_CACHE_TTL_SECONDS = 45.0
+DEFAULT_NEGATIVE_INVENTORY_CACHE_TTL_SECONDS = 3.0
 SOFTWARE_PATTERNS = (
     "llvmpipe",
     "lavapipe",
@@ -58,6 +61,9 @@ DISCRETE_PATTERNS = (
     re.compile(r"\bradeon\s+(?:rx|pro)\b", re.IGNORECASE),
     re.compile(r"\bintel(?:\(r\))?\s+arc\b", re.IGNORECASE),
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -164,7 +170,10 @@ def parse_device_inventory(output: str) -> tuple[LlamaDevice, ...]:
         match = DEVICE_LINE.match(line)
         if match is None:
             continue
-        name, stable_identity = _extract_stable_identity(match.group("name").strip())
+        description = match.group("description").strip()
+        memory_match = DEVICE_MEMORY.search(description)
+        description_without_memory = DEVICE_MEMORY.sub(" ", description)
+        name, stable_identity = _extract_stable_identity(description_without_memory)
         normalized_name = " ".join(name.casefold().split())
         parsed.append(
             _ParsedDevice(
@@ -172,8 +181,12 @@ def parse_device_inventory(output: str) -> tuple[LlamaDevice, ...]:
                 name=name,
                 normalized_name=normalized_name,
                 stable_identity=stable_identity,
-                total_memory_mib=(int(match.group("total")) if match.group("total") else None),
-                free_memory_mib=(int(match.group("free")) if match.group("free") else None),
+                total_memory_mib=(
+                    int(memory_match.group("total")) if memory_match is not None else None
+                ),
+                free_memory_mib=(
+                    int(memory_match.group("free")) if memory_match is not None else None
+                ),
             )
         )
 
@@ -267,12 +280,14 @@ class LlamaDeviceService:
         command_runner: CommandRunner = subprocess.run,
         timeout_seconds: float = 10.0,
         cache_ttl_seconds: float = DEFAULT_INVENTORY_CACHE_TTL_SECONDS,
+        negative_cache_ttl_seconds: float = DEFAULT_NEGATIVE_INVENTORY_CACHE_TTL_SECONDS,
         clock: Clock = time.monotonic,
     ) -> None:
         self.environment = environment if environment is not None else os.environ
         self.command_runner = command_runner
         self.timeout_seconds = timeout_seconds
         self.cache_ttl_seconds = max(0.0, cache_ttl_seconds)
+        self.negative_cache_ttl_seconds = max(0.0, negative_cache_ttl_seconds)
         self.clock = clock
         self._lock = threading.Lock()
         self._cached_inventory: LlamaDeviceInventory | None = None
@@ -288,12 +303,13 @@ class LlamaDeviceService:
                 return self._cached_inventory
 
             inventory = self._discover_inventory()
-            if inventory.error is None and inventory.devices:
-                self._cached_inventory = inventory
-                self._cached_inventory_expires_at = self.clock() + self.cache_ttl_seconds
-            else:
-                self._cached_inventory = None
-                self._cached_inventory_expires_at = 0.0
+            ttl_seconds = (
+                self.cache_ttl_seconds
+                if inventory.error is None and inventory.devices
+                else self.negative_cache_ttl_seconds
+            )
+            self._cached_inventory = inventory
+            self._cached_inventory_expires_at = self.clock() + ttl_seconds
             return inventory
 
     def _discover_inventory(self) -> LlamaDeviceInventory:
@@ -369,6 +385,7 @@ class LlamaDeviceService:
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
+            logger.warning("llama.cpp device discovery failed: %s", error)
             return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
@@ -379,6 +396,10 @@ class LlamaDeviceService:
 
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         if result.returncode != 0:
+            logger.warning(
+                "llama.cpp device discovery exited with code %s",
+                result.returncode,
+            )
             return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
@@ -390,13 +411,31 @@ class LlamaDeviceService:
         try:
             devices = parse_device_inventory(output)
         except AmbiguousLlamaDeviceError as error:
+            logger.warning("llama.cpp device discovery was ambiguous: %s", error)
+            if forced_backend == "gpu":
+                guidance = (
+                    "GEIST_LLAMA_ACCELERATION=vulkan is forcing Vulkan without per-device "
+                    "selection."
+                )
+                reason = "GPU discovery returned ambiguous device identities. " + guidance
+            else:
+                guidance = (
+                    "Set GEIST_LLAMA_ACCELERATION=vulkan to use Vulkan without per-device "
+                    "selection."
+                )
+                reason = (
+                    "GPU discovery returned ambiguous device identities, so CPU is recommended. "
+                    + guidance
+                )
             return _cpu_inventory(
                 available=True,
                 managed_by_environment=forced_backend is not None,
                 forced_backend=forced_backend,
-                reason="GPU discovery returned ambiguous device identities, so CPU is recommended.",
-                error=str(error),
+                reason=reason,
+                error=f"{error}. {guidance}",
             )
+        if not devices:
+            logger.warning("llama.cpp device discovery returned no parsed Vulkan devices")
         recommended = recommend_device(devices)
         if recommended is None:
             return _cpu_inventory(

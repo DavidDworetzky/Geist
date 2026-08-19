@@ -112,8 +112,8 @@ class LlamaServerManager:
                 self._state.detail = f"llama-server exited with code {self._process.returncode}"
             return self._state.public_dict()
 
-    def device_inventory(self) -> dict[str, Any]:
-        return self._device_service.inventory().public_dict()
+    def device_inventory(self, *, refresh: bool = False) -> dict[str, Any]:
+        return self._device_service.inventory(refresh=refresh).public_dict()
 
     def _selection_identity(
         self,

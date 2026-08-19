@@ -129,24 +129,24 @@ class UserSettingsService:
                 inventory = get_llama_device_service().inventory()
                 if inventory.managed_by_environment:
                     raise ValueError("llama.cpp compute selection is managed by the environment")
-
-            if next_backend == "gpu":
-                if not next_device_ids:
-                    raise ValueError("Select at least one llama.cpp GPU device")
-                if len(set(next_device_ids)) != len(next_device_ids):
-                    raise ValueError("llama.cpp GPU device selections must be unique")
-                if not inventory.available:
-                    raise ValueError("Managed llama.cpp GPU selection is unavailable")
-                available_ids = {device.id for device in inventory.devices}
-                missing_ids = [
-                    device_id for device_id in next_device_ids if device_id not in available_ids
-                ]
-                if missing_ids:
-                    raise ValueError(
-                        "Selected llama.cpp GPU devices are unavailable: " + ", ".join(missing_ids)
-                    )
-            elif next_backend == "cpu":
-                update_dict["llama_gpu_device_ids"] = []
+                if next_backend == "gpu":
+                    if not next_device_ids:
+                        raise ValueError("Select at least one llama.cpp GPU device")
+                    if len(set(next_device_ids)) != len(next_device_ids):
+                        raise ValueError("llama.cpp GPU device selections must be unique")
+                    if not inventory.available:
+                        raise ValueError("Managed llama.cpp GPU selection is unavailable")
+                    available_ids = {device.id for device in inventory.devices}
+                    missing_ids = [
+                        device_id for device_id in next_device_ids if device_id not in available_ids
+                    ]
+                    if missing_ids:
+                        raise ValueError(
+                            "Selected llama.cpp GPU devices are unavailable: "
+                            + ", ".join(missing_ids)
+                        )
+                elif next_backend == "cpu":
+                    update_dict["llama_gpu_device_ids"] = []
         if (
             "default_local_model" in update_dict
             and "default_local_artifact_id" not in update_dict

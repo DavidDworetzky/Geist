@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -48,6 +49,7 @@ def test_device_output_parses_stable_ids_memory_and_kinds() -> None:
     first_ids = {device.name: device.id for device in first}
     second_ids = {device.name: device.id for device in second}
     assert first_ids == second_ids
+    assert first[0].id == "gpu-37a868c553a4b745"
     assert first[0].runtime_id == "Vulkan0"
     assert second[1].runtime_id == "Vulkan1"
     assert first[0].free_memory_mib == 15407
@@ -87,6 +89,33 @@ def test_identical_devices_with_stable_identities_survive_reordering(
     assert first[0].id == reordered[1].id
     assert first[1].id == reordered[0].id
     assert first[0].runtime_id == reordered[0].runtime_id == "Vulkan0"
+
+
+@pytest.mark.parametrize(
+    "stable_identity",
+    [
+        "UUID=11111111-1111-1111-1111-111111111111",
+        "PCI=0000:01:00.0",
+    ],
+)
+def test_stable_identity_before_or_after_memory_preserves_memory(
+    stable_identity: str,
+) -> None:
+    before_memory = parse_device_inventory(
+        "Available devices:\n"
+        f"  Vulkan0: NVIDIA GeForce RTX 4090 [{stable_identity}] "
+        "(24564 MiB, 22000 MiB free)\n"
+    )[0]
+    after_memory = parse_device_inventory(
+        "Available devices:\n"
+        "  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free) "
+        f"[{stable_identity}]\n"
+    )[0]
+
+    assert before_memory.name == after_memory.name == "NVIDIA GeForce RTX 4090"
+    assert before_memory.id == after_memory.id
+    assert before_memory.total_memory_mib == after_memory.total_memory_mib == 24564
+    assert before_memory.free_memory_mib == after_memory.free_memory_mib == 22000
 
 
 def test_identical_devices_without_stable_identities_fail_safe_when_reordered() -> None:
@@ -130,7 +159,6 @@ def test_inventory_recommends_best_single_non_integrated_gpu(tmp_path: Path) -> 
             "GEIST_LOCAL_RUNNER": "llama_server",
         },
         command_runner=run,
-        cache_ttl_seconds=5.0,
         clock=lambda: now[0],
     )
     inventory = service.inventory()
@@ -142,11 +170,11 @@ def test_inventory_recommends_best_single_non_integrated_gpu(tmp_path: Path) -> 
     assert recommended.name == "NVIDIA GeForce RTX 3080 Laptop GPU"
     assert service.resolve_runtime_ids(inventory.recommended_device_ids) == ("Vulkan0",)
 
-    now[0] = 104.9
+    now[0] = 144.9
     assert service.inventory() is inventory
     assert len(calls) == 1
 
-    now[0] = 105.0
+    now[0] = 145.0
     assert service.inventory() is not inventory
     assert len(calls) == 2
 
@@ -154,8 +182,12 @@ def test_inventory_recommends_best_single_non_integrated_gpu(tmp_path: Path) -> 
     assert len(calls) == 3
 
 
-def test_failed_and_empty_probes_are_retried_instead_of_cached(tmp_path: Path) -> None:
+def test_failed_and_empty_probes_back_off_then_refresh_recovers(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runtime = _runtime_tree(tmp_path)
+    now = [100.0]
     responses = [
         subprocess.CompletedProcess([], 1, stdout="", stderr="driver unavailable"),
         subprocess.CompletedProcess([], 0, stdout="Available devices:\n", stderr=""),
@@ -170,17 +202,34 @@ def test_failed_and_empty_probes_are_retried_instead_of_cached(tmp_path: Path) -
     service = LlamaDeviceService(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
         command_runner=run,
+        clock=lambda: now[0],
     )
+    caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
 
-    assert service.inventory().error is not None
-    assert service.inventory().devices == ()
-    successful = service.inventory()
+    failed = service.inventory()
+    assert failed.error is not None
+    now[0] = 102.9
+    assert service.inventory() is failed
+    assert len(calls) == 1
+
+    now[0] = 103.0
+    empty = service.inventory()
+    assert empty.devices == ()
+    now[0] = 105.9
+    assert service.inventory() is empty
+    assert len(calls) == 2
+
+    successful = service.inventory(refresh=True)
     assert successful.devices
     assert service.inventory() is successful
     assert len(calls) == 3
+    assert "device discovery exited with code 1" in caplog.text
+    assert "returned no parsed Vulkan devices" in caplog.text
 
 
-def test_failed_forced_refresh_clears_the_previous_success(tmp_path: Path) -> None:
+def test_failed_forced_refresh_replaces_previous_success_until_next_refresh(
+    tmp_path: Path,
+) -> None:
     runtime = _runtime_tree(tmp_path)
     responses = [
         subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr=""),
@@ -194,8 +243,10 @@ def test_failed_forced_refresh_clears_the_previous_success(tmp_path: Path) -> No
     )
 
     assert service.inventory().devices
-    assert service.inventory(refresh=True).error is not None
-    assert service.inventory().devices
+    failed = service.inventory(refresh=True)
+    assert failed.error is not None
+    assert service.inventory() is failed
+    assert service.inventory(refresh=True).devices
     assert responses == []
 
 
@@ -242,7 +293,10 @@ def test_integrated_only_and_probe_failure_recommend_cpu(tmp_path: Path) -> None
     assert failed.error is not None
 
 
-def test_probe_timeout_recommends_cpu_and_uses_safe_process_options(tmp_path: Path) -> None:
+def test_probe_timeout_recommends_cpu_warns_and_uses_safe_process_options(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runtime = _runtime_tree(tmp_path)
     captured: dict[str, object] = {}
 
@@ -251,6 +305,7 @@ def test_probe_timeout_recommends_cpu_and_uses_safe_process_options(tmp_path: Pa
         captured.update(options)
         raise subprocess.TimeoutExpired(command, options["timeout"])
 
+    caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
     inventory = LlamaDeviceService(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
         command_runner=timeout,
@@ -262,6 +317,65 @@ def test_probe_timeout_recommends_cpu_and_uses_safe_process_options(tmp_path: Pa
     assert captured["command"][-1] == "--list-devices"
     assert captured["timeout"] == 0.25
     assert captured["shell"] is False
+    assert "device discovery failed" in caplog.text
+
+
+def test_probe_os_error_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    runtime = _runtime_tree(tmp_path)
+
+    def fail(*_args, **_kwargs):
+        raise OSError("Vulkan loader unavailable")
+
+    caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
+    inventory = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=fail,
+    ).inventory()
+
+    assert inventory.recommended_backend == "cpu"
+    assert "Vulkan loader unavailable" in inventory.error
+    assert "device discovery failed: Vulkan loader unavailable" in caplog.text
+
+
+def test_duplicate_production_devices_fail_safe_with_vulkan_escape_hatch(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    production_output = """ggml_vulkan: Found 2 Vulkan devices:
+Available devices:
+  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)
+  Vulkan1: NVIDIA GeForce RTX 4090 (24564 MiB, 21000 MiB free)
+"""
+    caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
+
+    inventory = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=production_output, stderr=""
+        ),
+    ).inventory()
+
+    assert inventory.recommended_backend == "cpu"
+    assert inventory.devices == ()
+    assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.reason
+    assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.error
+    assert "device discovery was ambiguous" in caplog.text
+
+    forced_inventory = LlamaDeviceService(
+        environment={
+            "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+            "GEIST_LLAMA_ACCELERATION": "vulkan",
+        },
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=production_output, stderr=""
+        ),
+    ).inventory()
+
+    assert forced_inventory.forced_backend == "gpu"
+    assert "GEIST_LLAMA_ACCELERATION=vulkan is forcing Vulkan" in forced_inventory.reason
+    assert "CPU is recommended" not in forced_inventory.reason
+    assert "GEIST_LLAMA_ACCELERATION=vulkan is forcing Vulkan" in forced_inventory.error
 
 
 def test_cpu_only_partial_runtime_remains_available(tmp_path: Path) -> None:

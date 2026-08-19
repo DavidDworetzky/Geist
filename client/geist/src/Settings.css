@@ -42,7 +42,15 @@
 }
 
 .settings-tab-panel {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
   min-height: 0;
+  padding: 0;
+}
+
+.settings-refresh-status {
+  margin-bottom: 10px;
 }
 
 .settings-page-interactive .settings-actions {
@@ -667,6 +675,14 @@
   gap: 0.75rem;
   margin-top: 0.65rem;
   padding: 0.8rem;
+}
+
+.llama-device-option-disabled {
+  cursor: not-allowed;
+}
+
+.llama-device-normalize {
+  margin-top: 0.75rem;
 }
 
 .llama-device-option span {

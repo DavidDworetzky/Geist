@@ -4,7 +4,7 @@ LocalAgent implementation for running local inference models.
 
 import logging
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 
 from agents.agent_context import AgentContext
 from agents.architectures import get_runner
@@ -96,7 +96,9 @@ class LocalAgent(BaseAgent):
         )
         model_load_status_registry.mark_ready(self.model_id)
 
-    def runtime_selection(self) -> tuple[str, tuple[str, ...]] | None:
+    def runtime_selection(
+        self,
+    ) -> tuple[Literal["cpu", "gpu"], tuple[str, ...]] | None:
         """Return the effective managed llama.cpp selection when applicable."""
 
         if self.runner_type != "llama_server" or self.runner is None:

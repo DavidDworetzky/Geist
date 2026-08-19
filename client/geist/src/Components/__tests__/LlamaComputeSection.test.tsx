@@ -70,13 +70,14 @@ describe('LlamaComputeSection', () => {
         devices: [],
         recommended_backend: 'cpu',
         recommended_device_ids: [],
-        reason: 'Managed by environment.',
+        reason: 'CUDA_VISIBLE_DEVICES restricts llama.cpp to the operator-selected GPU.',
         error: null,
       }),
     }));
 
     render(<LlamaComputeSection {...props} />);
     expect(await screen.findByText(/managed by the environment \(GPU\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/CUDA_VISIBLE_DEVICES restricts llama\.cpp/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('Compute Backend')).not.toBeInTheDocument();
   });
 
@@ -131,7 +132,9 @@ describe('LlamaComputeSection', () => {
     const select = await screen.findByLabelText('Compute Backend');
     expect(select).toHaveValue('automatic');
     expect(screen.getByRole('option', { name: 'Automatic (GPU recommended)' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Recommended GPU/i })).toBeChecked();
+    const recommendedGpu = screen.getByRole('checkbox', { name: /Recommended GPU/i });
+    expect(recommendedGpu).toBeChecked();
+    expect(recommendedGpu).toBeDisabled();
 
     fireEvent.change(select, { target: { value: 'gpu' } });
 
@@ -139,7 +142,40 @@ describe('LlamaComputeSection', () => {
     expect(props.onBackendChange).toHaveBeenCalledWith('gpu');
   });
 
-  it('warns when a saved GPU is no longer available', async () => {
+  it('falls back to an available GPU when the automatic recommendation is stale', async () => {
+    // @ts-ignore
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      json: async () => ({
+        available: true,
+        managed_by_environment: false,
+        forced_backend: null,
+        devices: [{
+          id: 'gpu-current',
+          name: 'Current GPU',
+          total_memory_mib: 8192,
+          free_memory_mib: 4096,
+          kind: 'discrete',
+          recommended: true,
+        }],
+        recommended_backend: 'gpu',
+        recommended_device_ids: ['gpu-missing'],
+        reason: 'Current GPU is recommended.',
+        error: null,
+      }),
+    }));
+
+    render(<LlamaComputeSection {...props} />);
+    expect(await screen.findByText(/previously selected GPU is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Automatic/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Current GPU/i })).not.toBeChecked();
+
+    fireEvent.change(screen.getByLabelText('Compute Backend'), { target: { value: 'gpu' } });
+    expect(props.onDeviceIdsChange).toHaveBeenCalledWith(['gpu-current']);
+    expect(props.onBackendChange).toHaveBeenCalledWith('gpu');
+  });
+
+  it('can normalize a mixed available and stale explicit selection', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({
       ok: true,
@@ -162,9 +198,19 @@ describe('LlamaComputeSection', () => {
       }),
     }));
 
-    render(<LlamaComputeSection {...props} backend="gpu" deviceIds={['gpu-missing']} />);
+    render(
+      <LlamaComputeSection
+        {...props}
+        backend="gpu"
+        deviceIds={['gpu-current', 'gpu-missing']}
+      />,
+    );
     expect(await screen.findByText(/previously selected GPU is unavailable/i)).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /Automatic/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Current GPU/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Current GPU/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use available devices' }));
+    expect(props.onDeviceIdsChange).toHaveBeenCalledWith(['gpu-current']);
+    expect(props.onBackendChange).toHaveBeenCalledWith('gpu');
   });
 });
