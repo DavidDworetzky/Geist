@@ -104,15 +104,13 @@ def list_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
         return [_to_model(server) for server in query.order_by(McpServer.mcp_server_id).all()]
 
 
-def list_enabled_mcp_servers() -> list[McpServerModel]:
-    """List every enabled MCP server (the set mounted into the tool registry)."""
+def list_enabled_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
+    """List enabled MCP servers, optionally scoped to one user."""
     with SessionLocal() as session:
-        servers = (
-            session.query(McpServer)
-            .filter_by(enabled=True)
-            .order_by(McpServer.mcp_server_id)
-            .all()
-        )
+        query = session.query(McpServer).filter_by(enabled=True)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        servers = query.order_by(McpServer.mcp_server_id).all()
         return [_to_model(server) for server in servers]
 
 

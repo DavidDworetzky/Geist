@@ -88,7 +88,7 @@ class ToolSource(Protocol):
 
     name: str
 
-    def definitions(self) -> list[ToolDefinition]: ...
+    def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]: ...
 
 
 _JSON_TYPE_CHECKS: dict[str, type | tuple[type, ...]] = {
@@ -123,7 +123,11 @@ def _schema_argument_errors(arguments: dict[str, Any], schema: dict[str, Any]) -
         expected = _JSON_TYPE_CHECKS.get(expected_type)
         if expected is None or value is None:
             continue
-        if isinstance(value, bool) and expected_type in ("integer", "number") or not isinstance(value, expected):
+        if (
+            isinstance(value, bool)
+            and expected_type in ("integer", "number")
+            or not isinstance(value, expected)
+        ):
             errors.append(f"Argument '{name}' must be of type {expected_type}")
     return errors
 
@@ -155,11 +159,11 @@ class ToolRegistry:
     def remove_source(self, name: str) -> None:
         self._sources = [source for source in self._sources if source.name != name]
 
-    def _source_definitions(self) -> dict[str, ToolDefinition]:
+    def _source_definitions(self, context: ToolContext | None = None) -> dict[str, ToolDefinition]:
         merged: dict[str, ToolDefinition] = {}
         for source in self._sources:
             try:
-                definitions = source.definitions()
+                definitions = source.definitions(context)
             except Exception:
                 logger.exception("Tool source %s failed; skipping its tools", source.name)
                 continue
@@ -174,23 +178,23 @@ class ToolRegistry:
                 merged[definition.name] = definition
         return merged
 
-    def get(self, name: str) -> ToolDefinition | None:
+    def get(self, name: str, context: ToolContext | None = None) -> ToolDefinition | None:
         definition = self._definitions.get(name)
         if definition is not None:
             return definition
         if not self._sources:
             return None
-        return self._source_definitions().get(name)
+        return self._source_definitions(context).get(name)
 
-    def catalog(self) -> list[ToolDefinition]:
-        return list(self._definitions.values()) + list(self._source_definitions().values())
+    def catalog(self, context: ToolContext | None = None) -> list[ToolDefinition]:
+        return list(self._definitions.values()) + list(self._source_definitions(context).values())
 
     def is_enabled(self, definition: ToolDefinition) -> bool:
         return definition.enabled_by_default or definition.name in self._explicitly_enabled
 
     def definitions_for_context(self, context: ToolContext) -> list[ToolDefinition]:
         definitions = []
-        for definition in self.catalog():
+        for definition in self.catalog(context):
             enabled = self.is_enabled(definition)
             available = definition.availability is None or definition.availability(context)
             if enabled and available:
@@ -198,7 +202,7 @@ class ToolRegistry:
         return definitions
 
     def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
-        definition = self.get(call.name)
+        definition = self.get(call.name, context)
         if definition is None:
             return ToolResult(
                 call=call,

@@ -70,7 +70,7 @@ def _approved_context(call: ToolCall) -> ToolContext:
 
 def test_definitions_namespace_and_schema_passthrough():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
 
     definitions = source.definitions()
     assert [definition.name for definition in definitions] == ["mcp.fake.echo"]
@@ -84,7 +84,7 @@ def test_definitions_namespace_and_schema_passthrough():
 
 def test_registry_executes_mcp_tool_through_source():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -104,7 +104,7 @@ def test_registry_executes_mcp_tool_through_source():
 
 def test_registry_rejects_missing_required_argument():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -118,7 +118,7 @@ def test_registry_rejects_missing_required_argument():
 
 def test_registry_rejects_wrong_argument_type():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -136,7 +136,10 @@ def test_failing_server_is_skipped():
     )
     source = McpToolSource(
         manager,
-        servers_loader=lambda: [_server_model(1, "bad"), _server_model(2, "good")],
+        servers_loader=lambda user_id=None: [
+            _server_model(1, "bad"),
+            _server_model(2, "good"),
+        ],
     )
 
     definitions = source.definitions()
@@ -146,8 +149,8 @@ def test_failing_server_is_skipped():
 def test_definitions_cached_until_invalidated():
     loads = []
 
-    def loader():
-        loads.append(1)
+    def loader(user_id=None):
+        loads.append(user_id)
         return [_server_model()]
 
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
@@ -160,6 +163,24 @@ def test_definitions_cached_until_invalidated():
     source.invalidate()
     source.definitions()
     assert len(loads) == 2
+
+
+def test_definitions_cache_and_loading_are_scoped_per_user():
+    loaded_user_ids = []
+
+    def loader(user_id=None):
+        loaded_user_ids.append(user_id)
+        return [_server_model(user_id or 0, f"user-{user_id}")]
+
+    manager = FakeManager(tools_by_server={"user-1": [ECHO_TOOL], "user-2": [ECHO_TOOL]})
+    source = McpToolSource(manager, servers_loader=loader, cache_ttl_seconds=3600)
+
+    user_1 = ToolContext(user_id=1, chat_id=None, run_id="one")
+    user_2 = ToolContext(user_id=2, chat_id=None, run_id="two")
+    assert source.definitions(user_1)[0].name == "mcp.user-1.echo"
+    assert source.definitions(user_2)[0].name == "mcp.user-2.echo"
+    source.definitions(user_1)
+    assert loaded_user_ids == [1, 2]
 
 
 def test_config_from_model_maps_fields():

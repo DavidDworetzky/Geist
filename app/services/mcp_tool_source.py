@@ -46,29 +46,29 @@ class McpToolSource:
     def __init__(
         self,
         manager: McpClientManager,
-        servers_loader: Callable[[], list[McpServerModel]] = list_enabled_mcp_servers,
+        servers_loader: Callable[[int | None], list[McpServerModel]] = list_enabled_mcp_servers,
         cache_ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
     ):
         self._manager = manager
         self._servers_loader = servers_loader
         self._cache_ttl_seconds = cache_ttl_seconds
         self._lock = threading.Lock()
-        self._cached: list[ToolDefinition] | None = None
-        self._cache_expires_at = 0.0
+        self._cached: dict[int | None, tuple[list[ToolDefinition], float]] = {}
 
     def invalidate(self) -> None:
         with self._lock:
-            self._cached = None
-            self._cache_expires_at = 0.0
+            self._cached.clear()
 
-    def definitions(self) -> list[ToolDefinition]:
+    def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]:
+        user_id = context.user_id if context is not None else None
         with self._lock:
-            if self._cached is not None and time.monotonic() < self._cache_expires_at:
-                return list(self._cached)
+            cached = self._cached.get(user_id)
+            if cached is not None and time.monotonic() < cached[1]:
+                return list(cached[0])
 
         definitions: list[ToolDefinition] = []
         try:
-            servers = self._servers_loader()
+            servers = self._servers_loader(user_id)
         except Exception:
             logger.exception("Could not load MCP server configurations")
             servers = []
@@ -85,8 +85,10 @@ class McpToolSource:
                     definitions.append(definition)
 
         with self._lock:
-            self._cached = list(definitions)
-            self._cache_expires_at = time.monotonic() + self._cache_ttl_seconds
+            self._cached[user_id] = (
+                list(definitions),
+                time.monotonic() + self._cache_ttl_seconds,
+            )
         return definitions
 
     def _definition(self, config: McpServerConfig, tool: dict) -> ToolDefinition | None:
