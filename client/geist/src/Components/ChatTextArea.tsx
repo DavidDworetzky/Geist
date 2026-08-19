@@ -96,31 +96,34 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 )}
 
                 {needsApproval && (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button
-                      className="button button-small"
-                      type="button"
-                      disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
-                      onClick={() => element.run_id && props.onToolApproval?.(
-                        element.run_id,
-                        toolCall.id,
-                        'approve',
-                      )}
-                    >
-                      Approve once
-                    </button>
-                    <button
-                      className="button button-small"
-                      type="button"
-                      disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
-                      onClick={() => element.run_id && props.onToolApproval?.(
-                        element.run_id,
-                        toolCall.id,
-                        'deny',
-                      )}
-                    >
-                      Deny
-                    </button>
+                  <div style={{ marginTop: 8 }}>
+                    <div className="input-help">Approval required</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
+                        onClick={() => element.run_id && props.onToolApproval?.(
+                          element.run_id,
+                          toolCall.id,
+                          'approve',
+                        )}
+                      >
+                        Approve once
+                      </button>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
+                        onClick={() => element.run_id && props.onToolApproval?.(
+                          element.run_id,
+                          toolCall.id,
+                          'deny',
+                        )}
+                      >
+                        Deny
+                      </button>
+                    </div>
                   </div>
                 )}
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}
