@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   waitForElementToBeRemoved,
 } from '@testing-library/react';
 import LlamaComputeSection from '../LlamaComputeSection';
@@ -319,7 +320,9 @@ describe('LlamaComputeSection', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       /choose at least one available GPU device/i,
     );
-    expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+    });
     const integratedGpu = screen.getByRole('checkbox', { name: /Integrated GPU/i });
     const softwareGpu = screen.getByRole('checkbox', { name: /Software Vulkan Device/i });
     const nonRecommendedDiscrete = screen.getByRole('checkbox', {
@@ -337,7 +340,9 @@ describe('LlamaComputeSection', () => {
     rerender(
       <LlamaComputeSection {...props} backend="gpu" deviceIds={['gpu-integrated']} />,
     );
-    expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+    });
   });
 
   it('maps legacy IDs to one canonical checked device and normalizes on interaction', async () => {
@@ -375,7 +380,9 @@ describe('LlamaComputeSection', () => {
     expect(stableGpu).toBeChecked();
     expect(stableGpu).toBeDisabled();
     expect(screen.queryByText(/previously selected GPU is unavailable/i)).not.toBeInTheDocument();
-    expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+    });
 
     rerender(
       <LlamaComputeSection
@@ -389,7 +396,9 @@ describe('LlamaComputeSection', () => {
       'role',
       'alert',
     );
-    expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false, true);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Use available devices' }));
     expect(props.onDeviceIdsChange).toHaveBeenLastCalledWith(['gpu-stable']);
     expect(props.onBackendChange).toHaveBeenLastCalledWith('gpu');
