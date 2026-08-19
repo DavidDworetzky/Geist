@@ -21,7 +21,7 @@ import os
 import subprocess
 import threading
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -53,6 +53,10 @@ class McpServerConfig:
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0
+    connector_kind: str = "custom"
+    trusted: bool = False
+    recipient_allowlist: tuple[str, ...] = ()
+    max_writes_per_hour: int = 20
 
     @property
     def fingerprint(self) -> str:
@@ -398,6 +402,8 @@ class McpClientManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._connections: dict[int, McpConnection] = {}
+        self._idempotency_lock = threading.Lock()
+        self._idempotency_results: OrderedDict[str, str] = OrderedDict()
 
     def _connection(self, config: McpServerConfig) -> McpConnection:
         with self._lock:
@@ -436,12 +442,24 @@ class McpClientManager:
         *,
         idempotency_key: str | None = None,
     ) -> str:
+        if idempotency_key:
+            with self._idempotency_lock:
+                cached = self._idempotency_results.get(idempotency_key)
+                if cached is not None:
+                    self._idempotency_results.move_to_end(idempotency_key)
+                    return cached
         try:
-            return self._connection(config).call_tool(
+            content = self._connection(config).call_tool(
                 name,
                 arguments,
                 idempotency_key=idempotency_key,
             )
+            if idempotency_key:
+                with self._idempotency_lock:
+                    self._idempotency_results[idempotency_key] = content
+                    while len(self._idempotency_results) > 1000:
+                        self._idempotency_results.popitem(last=False)
+            return content
         except McpError:
             self.invalidate(config.server_id)
             raise
@@ -459,5 +477,7 @@ class McpClientManager:
         with self._lock:
             connections = list(self._connections.values())
             self._connections.clear()
+        with self._idempotency_lock:
+            self._idempotency_results.clear()
         for connection in connections:
             connection.close()

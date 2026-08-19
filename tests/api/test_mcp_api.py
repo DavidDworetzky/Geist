@@ -149,8 +149,40 @@ def test_email_connector_starts_disabled_untrusted_and_security_gated(mcp_client
         f"/api/v1/mcp/servers/{body['mcp_server_id']}",
         json={"enabled": True},
     )
-    assert enabled.status_code == 409
-    assert "security inspection" in enabled.json()["detail"]
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+
+    disabled_policy = mcp_client.put(
+        "/api/v1/security/policy",
+        json={"enabled": False},
+    )
+    assert disabled_policy.status_code == 200
+    assert disabled_policy.json()["enabled"] is False
+    assert mcp_client.get("/api/v1/mcp/tools").json() == []
+
+
+def test_security_policy_defaults_to_fail_closed_inspection(mcp_client):
+    response = mcp_client.get("/api/v1/security/policy")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is True
+    assert body["inspect_tool_metadata"] is True
+    assert body["inspect_outbound_arguments"] is True
+    assert body["inspect_inbound_results"] is True
+    assert body["deterministic_scanner"] is True
+    assert body["model_mode"] == "mirror"
+
+
+def test_blocked_original_can_only_be_revealed_through_security_endpoint(mcp_client):
+    from app.services.mcp_security import blocked_originals
+
+    blocked_id = blocked_originals.put(1, "original untrusted email")
+
+    response = mcp_client.get(f"/api/v1/security/blocked/{blocked_id}")
+    assert response.status_code == 200
+    assert response.json()["content"] == "original untrusted email"
+    assert mcp_client.get("/api/v1/security/blocked/blocked_missing").status_code == 404
 
 
 def test_mcp_server_routes_hide_other_users_servers(mcp_client, monkeypatch):

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents.models.tool_calling import ToolContext
 from app.models.database.geist_user import get_default_user
+from app.models.database.mcp_security_policy import get_or_create_mcp_security_policy
 from app.models.database.mcp_server import (
     McpServerModel,
     create_mcp_server,
@@ -182,8 +183,12 @@ class EmailConnectorCreate(McpServerCreate):
     connector_kind: EmailConnectorKind
 
 
-def _validate_email_policy(values: dict[str, Any]) -> None:
-    if values.get("connector_kind") != "custom" and values.get("enabled"):
+def _validate_email_policy(values: dict[str, Any], user_id: int) -> None:
+    if (
+        values.get("connector_kind") != "custom"
+        and values.get("enabled")
+        and not get_or_create_mcp_security_policy(user_id).enabled
+    ):
         raise HTTPException(
             status_code=409,
             detail="Email connectors cannot be enabled until MCP security inspection is configured",
@@ -244,7 +249,7 @@ async def create_server(request: McpServerCreate):
                 status_code=409, detail=f"An MCP server named '{request.name}' already exists"
             )
         values = request.model_dump()
-        _validate_email_policy(values)
+        _validate_email_policy(values, user.user_id)
         values["security_required"] = request.connector_kind != "custom"
         server = create_mcp_server(user.user_id, values)
         _invalidate()
@@ -274,7 +279,8 @@ async def update_server(mcp_server_id: int, request: McpServerUpdate):
             {
                 "connector_kind": existing.connector_kind,
                 "enabled": updates.get("enabled", existing.enabled),
-            }
+            },
+            user.user_id,
         )
 
         merged_transport = updates.get("transport", existing.transport)

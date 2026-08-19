@@ -5,6 +5,7 @@ import AgentConfigSection from './Components/AgentConfigSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import McpServersSection from './Components/McpServersSection';
+import SecuritySettingsSection from './Components/SecuritySettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import AboutSection from './Components/AboutSection';
@@ -14,7 +15,7 @@ import {
   useHostDevelopmentEnabled,
 } from './plugins/runtime';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'mcp' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'mcp' | 'security' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -133,6 +134,7 @@ const Settings: React.FC = () => {
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
     { id: 'mcp' as Tab, label: 'MCP Servers' },
+    { id: 'security' as Tab, label: 'Security' },
     { id: 'ui' as Tab, label: 'Appearance' },
     ...(hostDevelopmentEnabled
       ? [{ id: 'developer' as Tab, label: 'Developer' }]
@@ -268,6 +270,8 @@ const Settings: React.FC = () => {
           )}
 
           {activeTab === 'mcp' && <McpServersSection />}
+
+          {activeTab === 'security' && <SecuritySettingsSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection

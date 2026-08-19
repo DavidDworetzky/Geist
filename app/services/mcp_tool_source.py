@@ -38,6 +38,10 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
         url=server.url,
         headers=dict(server.headers or {}),
         timeout_seconds=server.timeout_seconds,
+        connector_kind=server.connector_kind,
+        trusted=server.trusted,
+        recipient_allowlist=tuple(server.recipient_allowlist or []),
+        max_writes_per_hour=server.max_writes_per_hour,
     )
 
 
@@ -156,6 +160,13 @@ class McpToolSource:
             requires_approval=True,
             timeout_seconds=config.timeout_seconds + 5.0,
             source_adapter=f"mcp:{config.name}",
+            # Email remains untrusted even after an operator promotes its
+            # server. Trust promotion only affects non-email MCP servers.
+            untrusted_external=(not config.trusted or config.connector_kind != "custom"),
+            always_untrusted_content=config.connector_kind != "custom",
+            security_source_id=config.server_id,
+            recipient_allowlist=config.recipient_allowlist,
+            max_writes_per_hour=config.max_writes_per_hour,
         )
 
 

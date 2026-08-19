@@ -206,6 +206,14 @@ const McpServersSection: React.FC = () => {
     }
   };
 
+  const handleToggleTrusted = async (server: McpServer, trusted: boolean) => {
+    try {
+      await updateServer(server.mcp_server_id, { trusted });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to update server trust');
+    }
+  };
+
   const handleTest = async (server: McpServer) => {
     try {
       setTestingId(server.mcp_server_id);
@@ -314,6 +322,14 @@ const McpServersSection: React.FC = () => {
                   description={server.security_required
                     ? 'Email connectors require the Security stack before they can expose tools.'
                     : 'Only enabled servers expose tools to chat.'}
+                />
+                <SettingsToggle
+                  label="Trusted server"
+                  checked={Boolean(server.trusted)}
+                  onChange={(checked) => void handleToggleTrusted(server, checked)}
+                  description={server.connector_kind !== 'custom'
+                    ? 'Operator promotion does not make email content trusted; email boundaries remain inspected.'
+                    : 'Promoting this server bypasses MCP inspection. New servers are untrusted by default.'}
                 />
                 {testResult && (
                   <div

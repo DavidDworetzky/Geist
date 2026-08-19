@@ -1,3 +1,4 @@
+import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,9 @@ from agents.models.tool_calling import (
     ToolDefinition,
     ToolExecutionOutput,
 )
+from app.models.database.mcp_security_policy import McpSecurityPolicyModel
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.mcp_security import McpSecurityInspector, SecurityAuditLog
 from app.services.tool_registry import ToolRegistry
 
 
@@ -39,6 +42,37 @@ class ScriptedBackend:
         if turn.text:
             yield ModelEvent.text_delta(turn.text)
         yield ModelEvent.turn_complete(turn)
+
+
+def _enabled_security_policy(user_id: int) -> McpSecurityPolicyModel:
+    now = datetime.datetime(2026, 8, 19)
+    return McpSecurityPolicyModel(
+        mcp_security_policy_id=1,
+        user_id=user_id,
+        enabled=True,
+        inspect_tool_metadata=True,
+        inspect_outbound_arguments=True,
+        inspect_inbound_results=True,
+        deterministic_scanner=True,
+        model_mode="mirror",
+        create_date=now,
+        update_date=now,
+    )
+
+
+def _allow_verdict(safe_result: str | None = None) -> ModelTurn:
+    import json
+
+    return ModelTurn(
+        text=json.dumps(
+            {
+                "verdict": "allow",
+                "reason": "clean",
+                "categories": [],
+                "safe_text": safe_result,
+            }
+        )
+    )
 
 
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///tmp/secret", "not-a-url"])
@@ -119,6 +153,72 @@ def test_tool_result_reenters_model_context_and_turn_persists_once():
     assert completion.chat_id == 42
     assert completion.tool_calls[0].id == "call_1"
     assert completion.message == ["I found 2023-tax-return.pdf."]
+
+
+def test_untrusted_tool_is_inspected_at_all_three_boundaries(tmp_path):
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="mcp.mail.read_message",
+            description="Read one email",
+            arguments_schema={
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+            handler=lambda context, arguments: ToolExecutionOutput(
+                content='<p>Hello</p><img src="https://tracker">'
+            ),
+            untrusted_external=True,
+            always_untrusted_content=True,
+            source_adapter="mcp:mail",
+        )
+    )
+    backend = ScriptedBackend(
+        [
+            _allow_verdict(),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="mail_1", name="mcp.mail.read_message", arguments={"id": "1"})
+                ]
+            ),
+            _allow_verdict(),
+            _allow_verdict(),
+            ModelTurn(text="The message says hello."),
+        ]
+    )
+    inspector = McpSecurityInspector(audit_log=SecurityAuditLog(tmp_path / "security-audit.log"))
+    orchestrator = ChatOrchestrator(
+        registry,
+        security=inspector,
+        security_policy_loader=_enabled_security_policy,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Read message one",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    assert backend.requests[0]["tools"] == []
+    assert backend.requests[1]["tools"] == ["mcp.mail.read_message"]
+    assert backend.requests[-1]["messages"][-1]["content"] == "Hello"
+    assert [event.payload.status for event in events if event.event == "tool_call"] == [
+        "proposed",
+        "running",
+        "succeeded",
+    ]
+    audit_surfaces = [
+        __import__("json").loads(line)["surface"]
+        for line in (tmp_path / "security-audit.log").read_text().splitlines()
+    ]
+    assert audit_surfaces == ["tool_metadata", "outbound_arguments", "inbound_result"]
 
 
 def test_artifact_bytes_are_live_but_not_persisted_inline():
@@ -455,9 +555,7 @@ def test_doom_loop_interrupts_repeated_identical_tool_calls():
 
     def repeated_turn(call_id):
         return ModelTurn(
-            tool_calls=[
-                ToolCall(id=call_id, name="documents.search", arguments={"query": "loop"})
-            ],
+            tool_calls=[ToolCall(id=call_id, name="documents.search", arguments={"query": "loop"})],
             finish_reason="tool_calls",
         )
 
@@ -510,9 +608,7 @@ def test_doom_loop_not_triggered_by_varied_arguments():
 
     def turn(call_id, query):
         return ModelTurn(
-            tool_calls=[
-                ToolCall(id=call_id, name="documents.search", arguments={"query": query})
-            ],
+            tool_calls=[ToolCall(id=call_id, name="documents.search", arguments={"query": query})],
             finish_reason="tool_calls",
         )
 
