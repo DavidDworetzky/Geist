@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agents.architectures.llama_devices import (
+    DISCOVERY_IN_PROGRESS_ERROR,
     LlamaDeviceService,
     classify_device,
     llama_compute_managed_by_environment,
@@ -150,6 +151,7 @@ def test_unique_legacy_name_id_resolves_after_stable_identity_appears(
     inventory = service.inventory()
 
     assert inventory.devices[0].id != legacy.id
+    assert inventory.resolve_device_ids((legacy.id,)) == (inventory.devices[0].id,)
     assert service.resolve_runtime_ids((legacy.id,), inventory=inventory) == ("Vulkan7",)
     with pytest.raises(ValueError, match="resolve to unique devices"):
         service.resolve_runtime_ids(
@@ -311,9 +313,13 @@ def test_inventory_recommends_best_single_non_integrated_gpu(tmp_path: Path) -> 
     assert len(calls) == 1
 
     now[0] = 145.0
-    assert service.inventory() is not inventory
+    refreshed = service.inventory()
+    assert refreshed is not inventory
     assert len(calls) == 2
 
+    assert service.inventory(refresh=True) is refreshed
+    assert len(calls) == 2
+    now[0] = 147.0
     service.inventory(refresh=True)
     assert len(calls) == 3
 
@@ -345,6 +351,7 @@ def test_failed_probe_backs_off_and_successful_empty_probe_uses_positive_ttl(
     failed = service.inventory()
     assert failed.error is not None
     assert failed.cache_policy == "negative"
+    assert failed.selection_detection_error == failed.error
     now[0] = 102.9
     assert service.inventory() is failed
     assert len(calls) == 1
@@ -385,7 +392,7 @@ def test_environment_management_predicate(
     assert llama_compute_managed_by_environment(environment) is expected
 
 
-def test_forced_refresh_bypasses_ordinary_cache_then_obeys_minimum_interval(
+def test_forced_refresh_obeys_minimum_interval_after_every_probe(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
@@ -402,14 +409,19 @@ def test_forced_refresh_bypasses_ordinary_cache_then_obeys_minimum_interval(
         clock=lambda: now[0],
     )
 
-    assert service.inventory().devices
+    ordinary = service.inventory()
+    assert ordinary.devices
+    assert service.inventory(refresh=True) is ordinary
+    now[0] = 101.999
+    assert service.inventory(refresh=True) is ordinary
+    now[0] = 102.0
     failed = service.inventory(refresh=True)
     assert failed.error is not None
     assert service.inventory() is failed
     assert service.inventory(refresh=True) is failed
-    now[0] = 101.999
+    now[0] = 103.999
     assert service.inventory(refresh=True) is failed
-    now[0] = 102.0
+    now[0] = 104.0
     assert service.inventory(refresh=True).devices
     assert responses == []
 
@@ -422,6 +434,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     refresh_probe_entered = threading.Event()
     release_refresh_probe = threading.Event()
     second_refresh_started = threading.Event()
+    second_refresh_returned = threading.Event()
     calls = []
 
     def run(*_args, **_kwargs):
@@ -429,6 +442,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
         if len(calls) == 2:
             refresh_probe_entered.set()
             assert release_refresh_probe.wait(timeout=2)
+            now[0] = 110.0
         return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
 
     service = LlamaDeviceService(
@@ -437,35 +451,95 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
         clock=lambda: now[0],
     )
     ordinary = service.inventory()
-    results = []
+    now[0] = 102.0
+    first_results = []
+    second_results = []
 
-    first = threading.Thread(target=lambda: results.append(service.inventory(refresh=True)))
+    first = threading.Thread(target=lambda: first_results.append(service.inventory(refresh=True)))
 
     def second_refresh() -> None:
         second_refresh_started.set()
-        results.append(service.inventory(refresh=True))
+        second_results.append(service.inventory(refresh=True))
+        second_refresh_returned.set()
 
     second = threading.Thread(target=second_refresh)
     first.start()
     assert refresh_probe_entered.wait(timeout=2)
     second.start()
     assert second_refresh_started.wait(timeout=2)
+    returned_before_release = second_refresh_returned.wait(timeout=1)
     release_refresh_probe.set()
     first.join(timeout=2)
     second.join(timeout=2)
 
     assert not first.is_alive()
     assert not second.is_alive()
+    assert returned_before_release is True
     assert len(calls) == 2
-    assert len(results) == 2
-    assert all(result is results[0] for result in results)
-    assert results[0] is not ordinary
-    assert service.inventory(refresh=True) is results[0]
+    assert second_results == [ordinary]
+    assert len(first_results) == 1
+    refreshed = first_results[0]
+    assert refreshed is not ordinary
+    assert service.inventory(refresh=True) is refreshed
     assert len(calls) == 2
 
-    now[0] = 102.0
-    assert service.inventory(refresh=True) is not results[0]
+    now[0] = 112.0
+    assert service.inventory(refresh=True) is not refreshed
     assert len(calls) == 3
+
+
+def test_concurrent_cold_caller_returns_transient_result_without_waiting(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    probe_entered = threading.Event()
+    release_probe = threading.Event()
+    second_returned = threading.Event()
+    calls = []
+
+    def run(*_args, **_kwargs):
+        calls.append(True)
+        probe_entered.set()
+        assert release_probe.wait(timeout=3)
+        return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
+
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=run,
+    )
+    discovered = []
+    transient = []
+    first = threading.Thread(target=lambda: discovered.append(service.inventory()))
+
+    def second_inventory() -> None:
+        transient.append(service.inventory())
+        second_returned.set()
+
+    second = threading.Thread(target=second_inventory)
+    first.start()
+    assert probe_entered.wait(timeout=2)
+    second.start()
+    returned_before_release = second_returned.wait(timeout=1)
+    release_probe.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert returned_before_release is True
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(calls) == 1
+    assert len(transient) == 1
+    in_progress = transient[0]
+    assert in_progress.recommended_backend == "cpu"
+    assert in_progress.error == DISCOVERY_IN_PROGRESS_ERROR
+    assert in_progress.selection_detection_error == DISCOVERY_IN_PROGRESS_ERROR
+    assert in_progress.discovery_in_progress is True
+    assert in_progress.public_dict()["discovery_in_progress"] is True
+    assert len(discovered) == 1
+    assert discovered[0].recommended_backend == "gpu"
+    assert discovered[0].discovery_in_progress is False
+    assert service.inventory() is discovered[0]
+    assert service.inventory() is not in_progress
 
 
 @pytest.mark.parametrize("runner", ["transformers", "mlx_llama"])
@@ -509,6 +583,7 @@ def test_integrated_only_and_probe_failure_recommend_cpu(tmp_path: Path) -> None
     assert integrated.devices[0].kind == "integrated"
     assert failed.recommended_backend == "cpu"
     assert failed.error is not None
+    assert failed.selection_detection_error == failed.error
 
 
 def test_probe_timeout_recommends_cpu_warns_and_uses_safe_process_options(
@@ -532,6 +607,7 @@ def test_probe_timeout_recommends_cpu_warns_and_uses_safe_process_options(
 
     assert inventory.recommended_backend == "cpu"
     assert inventory.error is not None
+    assert inventory.selection_detection_error == inventory.error
     assert captured["command"][-1] == "--list-devices"
     assert captured["timeout"] == 0.25
     assert captured["shell"] is False
@@ -552,6 +628,7 @@ def test_probe_os_error_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) 
 
     assert inventory.recommended_backend == "cpu"
     assert "Vulkan loader unavailable" in inventory.error
+    assert inventory.selection_detection_error == inventory.error
     assert "device discovery failed: Vulkan loader unavailable" in caplog.text
 
 
@@ -585,6 +662,7 @@ Available devices:
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.reason
     assert "GEIST_LLAMA_ACCELERATION=vulkan" in inventory.error
     assert inventory.cache_policy == "positive"
+    assert inventory.selection_detection_error == inventory.error
     assert "device discovery was ambiguous" in caplog.text
     now[0] = 102.9
     assert service.inventory() is inventory
@@ -631,7 +709,10 @@ def test_cpu_only_partial_runtime_remains_available(tmp_path: Path) -> None:
     assert inventory.recommended_backend == "cpu"
     assert inventory.error == "The Vulkan llama-server executable is unavailable"
     assert inventory.cache_policy == "positive"
+    assert inventory.selection_detection_error is None
     assert "cache_policy" not in inventory.public_dict()
+    assert "selection_detection_error" not in inventory.public_dict()
+    assert inventory.public_dict()["discovery_in_progress"] is False
     now[0] = 103.0
     assert service.inventory() is inventory
     now[0] = 145.0

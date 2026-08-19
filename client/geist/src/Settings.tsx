@@ -63,9 +63,11 @@ const Settings: React.FC = () => {
       ? pendingLlamaComputeValidity.valid
       : undefined
   );
-  const llamaComputeValid = pendingCurrentLlamaComputeValidity
-    ?? cachedLlamaComputeValidity
+  const llamaComputeValid = cachedLlamaComputeValidity
+    ?? pendingCurrentLlamaComputeValidity
     ?? fallbackLlamaComputeValidity(localSettings);
+  const llamaComputeSectionMounted = activeTab === 'models'
+    && localSettings?.default_agent_type === 'local';
   const handleLlamaComputeValidityChange = useCallback((valid: boolean, settled: boolean) => {
     if (!settled) {
       setPendingLlamaComputeValidity({ signature: llamaComputeSignature, valid });
@@ -143,10 +145,10 @@ const Settings: React.FC = () => {
   }, [activeTab, hostDevelopmentEnabled]);
 
   useEffect(() => {
-    if (activeTab !== 'models' || localSettings?.default_agent_type !== 'local') {
+    if (!llamaComputeSectionMounted) {
       setPendingLlamaComputeValidity(current => (current === null ? current : null));
     }
-  }, [activeTab, localSettings?.default_agent_type]);
+  }, [llamaComputeSectionMounted]);
 
   const updateLocalSetting = (key: string, value: any) => {
     setLocalSettings((prev: any) => ({
@@ -177,10 +179,12 @@ const Settings: React.FC = () => {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
         default_local_artifact_id: localSettings.default_local_artifact_id,
-        ...(localSettings.llama_backend === null ? {} : {
-          llama_backend: localSettings.llama_backend,
-          llama_gpu_device_ids: localSettings.llama_gpu_device_ids,
-        }),
+        ...(dirtyKeys.has('llama_backend')
+          ? { llama_backend: localSettings.llama_backend }
+          : {}),
+        ...(dirtyKeys.has('llama_gpu_device_ids')
+          ? { llama_gpu_device_ids: localSettings.llama_gpu_device_ids }
+          : {}),
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
@@ -471,7 +475,7 @@ const Settings: React.FC = () => {
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
-          {!llamaComputeValid && activeTab !== 'models' && (
+          {!llamaComputeValid && !llamaComputeSectionMounted && (
             <span
               id={SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
               className="settings-description settings-action-validation"
@@ -491,7 +495,7 @@ const Settings: React.FC = () => {
             onClick={handleSave}
             disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || !llamaComputeValid}
             aria-describedby={!llamaComputeValid
-              ? (activeTab === 'models'
+              ? (llamaComputeSectionMounted
                 ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID
                 : SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID)
               : undefined}

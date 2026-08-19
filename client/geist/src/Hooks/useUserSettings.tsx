@@ -69,6 +69,21 @@ export interface UseUserSettingsReturn {
 
 const UserSettingsContext = createContext<UseUserSettingsReturn | null>(null);
 
+const responseErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Some upstream failures do not return JSON; preserve the HTTP fallback.
+  }
+  return fallback;
+};
+
 const useUserSettingsState = (): UseUserSettingsReturn => {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -114,7 +129,10 @@ const useUserSettingsState = (): UseUserSettingsReturn => {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to update settings: ${response.statusText}`);
+        throw new Error(await responseErrorMessage(
+          response,
+          `Failed to update settings: ${response.statusText}`,
+        ));
       }
 
       const data = await response.json();

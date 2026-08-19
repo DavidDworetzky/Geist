@@ -187,6 +187,7 @@ class LlamaServerManager:
                         root / "vulkan" / filename,
                         inventory.resolve_runtime_ids(recommended_ids),
                         recommended_ids,
+                        detection_error=inventory.selection_detection_error,
                     ),
                     LlamaServerCandidate("cpu", root / "cpu" / filename),
                 ]
@@ -195,7 +196,7 @@ class LlamaServerManager:
                     LlamaServerCandidate(
                         "cpu",
                         root / "cpu" / filename,
-                        detection_error=inventory.error,
+                        detection_error=inventory.selection_detection_error,
                     )
                 ]
 

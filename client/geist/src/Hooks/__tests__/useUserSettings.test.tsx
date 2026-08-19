@@ -120,6 +120,31 @@ describe('useUserSettings', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('surfaces FastAPI detail from an update error', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    const detail = 'Select at least one llama.cpp GPU device';
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => mockSettings });
+    const { result } = renderHook(() => useUserSettings(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      statusText: 'Unprocessable Entity',
+      json: async () => ({ detail }),
+    });
+
+    await act(async () => {
+      await expect(result.current.updateSettings({
+        llama_backend: 'gpu',
+        llama_gpu_device_ids: [],
+      })).rejects.toThrow(detail);
+    });
+
+    expect(result.current.error).toBe(detail);
+    consoleErrorSpy.mockRestore();
+  });
+
   it('resets settings (POST success)', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => mockSettings });
     const { result } = renderHook(() => useUserSettings(), { wrapper });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { StrictMode } from 'react';
 import {
   act,
   fireEvent,
@@ -18,9 +18,43 @@ const props = {
   onValidityChange: jest.fn(),
 };
 
+const discoveredGpuInventory = {
+  available: true,
+  managed_by_environment: false,
+  forced_backend: null,
+  devices: [{
+    id: 'gpu-detected',
+    compatibility_ids: [],
+    name: 'Detected GPU',
+    total_memory_mib: 8192,
+    free_memory_mib: 6144,
+    kind: 'discrete',
+    recommended: true,
+  }],
+  recommended_backend: 'gpu',
+  recommended_device_ids: ['gpu-detected'],
+  reason: 'Detected GPU is recommended.',
+  error: null,
+  discovery_in_progress: false,
+};
+
+const discoveryInProgressInventory = {
+  ...discoveredGpuInventory,
+  devices: [],
+  recommended_backend: 'cpu',
+  recommended_device_ids: [],
+  reason: 'GPU discovery is already in progress, so CPU is temporarily recommended.',
+  error: 'llama.cpp device discovery is already in progress',
+  discovery_in_progress: true,
+};
+
 describe('LlamaComputeSection', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('hides compute settings when the platform has no managed llama.cpp runtime', async () => {
@@ -228,6 +262,130 @@ describe('LlamaComputeSection', () => {
       });
       await refreshResponse;
     });
+  });
+
+  it('recovers from a StrictMode cold-probe race without settling the transient result', async () => {
+    let requestCount = 0;
+    const fetchMock = jest.fn((_url: string, options?: RequestInit) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Promise((_resolve, reject) => {
+          const signal = options?.signal as AbortSignal;
+          const rejectAsAborted = () => {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (signal.aborted) {
+            rejectAsAborted();
+          } else {
+            signal.addEventListener('abort', rejectAsAborted, { once: true });
+          }
+        });
+      }
+      const inventory = requestCount === 2
+        ? discoveryInProgressInventory
+        : discoveredGpuInventory;
+      return Promise.resolve({
+        ok: true,
+        statusText: 'OK',
+        json: async () => inventory,
+      });
+    });
+    // @ts-ignore
+    global.fetch = fetchMock;
+
+    render(
+      <StrictMode>
+        <LlamaComputeSection
+          {...props}
+          backend="gpu"
+          deviceIds={['gpu-detected']}
+        />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole('checkbox', { name: /Detected GPU/i })).toBeChecked();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/models/local/runtime/devices',
+      expect.objectContaining({ signal: expect.any(Object) }),
+    );
+    expect(props.onValidityChange).not.toHaveBeenCalledWith(false, true);
+    await waitFor(() => {
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(true, true);
+    });
+    expect(screen.queryByText(/device discovery is already in progress/i))
+      .not.toBeInTheDocument();
+  });
+
+  it('stops retrying a persistent discovery marker and keeps it unsettled', async () => {
+    jest.useFakeTimers();
+    const retryStartedAt = Date.now();
+    const fetchMock = jest.fn((_url: string, _options?: RequestInit) => Promise.resolve({
+      ok: true,
+      statusText: 'OK',
+      json: async () => discoveryInProgressInventory,
+    }));
+    // @ts-ignore
+    global.fetch = fetchMock;
+
+    render(
+      <LlamaComputeSection
+        {...props}
+        backend="gpu"
+        deviceIds={['gpu-detected']}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    for (let retry = 0; retry < 6; retry += 1) {
+      await act(async () => {
+        jest.runOnlyPendingTimers();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(Date.now() - retryStartedAt).toBeGreaterThan(10000);
+    expect(screen.getByText(/device discovery is already in progress/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh devices' })).toBeEnabled();
+    expect(props.onValidityChange).not.toHaveBeenCalledWith(false, true);
+  });
+
+  it('cancels a pending discovery-marker retry when unmounted', async () => {
+    jest.useFakeTimers();
+    const fetchMock = jest.fn((_url: string, _options?: RequestInit) => Promise.resolve({
+      ok: true,
+      statusText: 'OK',
+      json: async () => discoveryInProgressInventory,
+    }));
+    // @ts-ignore
+    global.fetch = fetchMock;
+
+    const { unmount } = render(<LlamaComputeSection {...props} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const requestOptions = fetchMock.mock.calls[0][1] as RequestInit;
+    const signal = requestOptions.signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('uses an unknown-kind GPU recommendation for an explicit GPU choice', async () => {

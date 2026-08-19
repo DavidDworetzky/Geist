@@ -100,15 +100,16 @@ class UserSettingsService:
         current_local_model = canonicalize_local_model_id(current_settings.default_local_model)
 
         compute_keys = {"llama_backend", "llama_gpu_device_ids"}
+        compute_supplied = any(key in update_dict for key in compute_keys)
         compute_changed = any(
             key in update_dict and update_dict[key] != getattr(current_settings, key)
             for key in compute_keys
         )
-        if compute_changed:
-            next_backend = update_dict.get("llama_backend", current_settings.llama_backend)
-            next_device_ids = update_dict.get(
-                "llama_gpu_device_ids", current_settings.llama_gpu_device_ids
-            )
+        next_backend = update_dict.get("llama_backend", current_settings.llama_backend)
+        next_device_ids = update_dict.get(
+            "llama_gpu_device_ids", current_settings.llama_gpu_device_ids
+        )
+        if compute_changed or (compute_supplied and next_backend == "gpu"):
             if (
                 next_backend is None
                 and current_settings.llama_backend is not None
@@ -139,7 +140,8 @@ class UserSettingsService:
                     # Validate against the exact snapshot used for the rest of this
                     # update. Its resolver also accepts unambiguous compatibility
                     # IDs from settings written before stable hardware IDs existed.
-                    inventory.resolve_runtime_ids(next_device_ids)
+                    canonical_device_ids = inventory.resolve_device_ids(next_device_ids)
+                    update_dict["llama_gpu_device_ids"] = list(canonical_device_ids)
                 elif next_backend == "cpu":
                     update_dict["llama_gpu_device_ids"] = []
         if (

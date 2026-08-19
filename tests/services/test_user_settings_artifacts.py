@@ -163,9 +163,9 @@ def test_explicit_gpu_selection_requires_current_inventory_devices():
     service.inventory.assert_called_once_with()
 
 
-def test_explicit_gpu_selection_accepts_and_preserves_unique_legacy_device_id():
+def test_explicit_gpu_selection_canonicalizes_unique_legacy_device_id():
     current = _settings(llama_backend="cpu")
-    updated = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-legacy"])
+    updated = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-stable"])
     inventory = _inventory(_device("gpu-stable", "Vulkan0", compatibility_ids=("gpu-legacy",)))
     service = MagicMock()
     service.inventory.return_value = inventory
@@ -188,12 +188,43 @@ def test_explicit_gpu_selection_accepts_and_preserves_unique_legacy_device_id():
         )
 
     assert result is not None
-    assert result.llama_gpu_device_ids == ["gpu-legacy"]
-    # Runtime IDs are process-specific. Preserve the accepted public legacy ID
-    # in settings instead of replacing it with the resolver's runtime ID.
-    assert update.call_args.args[1]["llama_gpu_device_ids"] == ["gpu-legacy"]
+    assert result.llama_gpu_device_ids == ["gpu-stable"]
+    # Runtime IDs are process-specific. Store the current stable public ID,
+    # never the accepted compatibility alias or Vulkan runtime identifier.
+    assert update.call_args.args[1]["llama_gpu_device_ids"] == ["gpu-stable"]
+    assert inventory.resolve_device_ids(["gpu-legacy"]) == ("gpu-stable",)
     assert inventory.resolve_runtime_ids(["gpu-legacy"]) == ("Vulkan0",)
     service.inventory.assert_called_once_with()
+
+
+def test_resaving_unchanged_legacy_selection_migrates_to_canonical_id():
+    current = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-legacy"])
+    updated = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-stable"])
+    inventory = _inventory(_device("gpu-stable", "Vulkan0", compatibility_ids=("gpu-legacy",)))
+    service = MagicMock()
+    service.inventory.return_value = inventory
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch(
+            "app.services.user_settings_service.update_user_settings",
+            return_value=updated,
+        ) as update,
+        patch(
+            "agents.architectures.llama_devices.get_llama_device_service",
+            return_value=service,
+        ),
+    ):
+        result = UserSettingsService.update_user_settings_by_id(
+            1,
+            UserSettingsUpdate(
+                llama_backend="gpu",
+                llama_gpu_device_ids=["gpu-legacy"],
+            ),
+        )
+
+    assert result is not None
+    assert result.llama_gpu_device_ids == ["gpu-stable"]
+    assert update.call_args.args[1]["llama_gpu_device_ids"] == ["gpu-stable"]
 
 
 def test_explicit_gpu_selection_rejects_alias_and_canonical_id_for_same_device():
@@ -215,6 +246,34 @@ def test_explicit_gpu_selection_rejects_alias_and_canonical_id_for_same_device()
             UserSettingsUpdate(
                 llama_backend="gpu",
                 llama_gpu_device_ids=["gpu-legacy", "gpu-stable"],
+            ),
+        )
+
+    update.assert_not_called()
+
+
+def test_explicit_gpu_selection_rejects_distinct_ids_for_same_runtime_device():
+    current = _settings(llama_backend="cpu")
+    inventory = _inventory(
+        _device("gpu-stable-a", "Vulkan0"),
+        _device("gpu-stable-b", "Vulkan0"),
+    )
+    service = MagicMock()
+    service.inventory.return_value = inventory
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch("app.services.user_settings_service.update_user_settings") as update,
+        patch(
+            "agents.architectures.llama_devices.get_llama_device_service",
+            return_value=service,
+        ),
+        pytest.raises(ValueError, match="resolve to unique devices"),
+    ):
+        UserSettingsService.update_user_settings_by_id(
+            1,
+            UserSettingsUpdate(
+                llama_backend="gpu",
+                llama_gpu_device_ids=["gpu-stable-a", "gpu-stable-b"],
             ),
         )
 

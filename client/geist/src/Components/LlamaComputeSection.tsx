@@ -21,6 +21,7 @@ interface LlamaDeviceInventory {
   recommended_device_ids: string[];
   reason: string;
   error: string | null;
+  discovery_in_progress?: boolean;
 }
 
 interface LlamaComputeSectionProps {
@@ -32,6 +33,27 @@ interface LlamaComputeSectionProps {
 }
 
 export const LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'llama-compute-selection-validation';
+
+const DISCOVERY_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 4000] as const;
+
+function waitForDiscoveryRetry(delayMs: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve(true);
+    }, delayMs);
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      resolve(false);
+    };
+    signal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
 
 function memoryLabel(device: LlamaDevice): string {
   if (device.free_memory_mib !== null) {
@@ -71,14 +93,38 @@ export default function LlamaComputeSection({
       const url = refresh
         ? '/api/v1/models/local/runtime/devices?refresh=true'
         : '/api/v1/models/local/runtime/devices';
-      const response = await fetch(url, { signal: controller.signal });
-      if (controller.signal.aborted) {
+      const fetchInventory = async (requestUrl: string): Promise<LlamaDeviceInventory | null> => {
+        const response = await fetch(requestUrl, { signal: controller.signal });
+        if (controller.signal.aborted) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(`Device inventory failed: ${response.statusText}`);
+        }
+        return response.json();
+      };
+      let payload = await fetchInventory(url);
+      if (payload === null) {
         return;
       }
-      if (!response.ok) {
-        throw new Error(`Device inventory failed: ${response.statusText}`);
+      for (const delayMs of DISCOVERY_RETRY_DELAYS_MS) {
+        if (!payload.discovery_in_progress) {
+          break;
+        }
+        if (
+          !await waitForDiscoveryRetry(delayMs, controller.signal)
+          || controller.signal.aborted
+        ) {
+          return;
+        }
+        payload = await fetchInventory('/api/v1/models/local/runtime/devices');
+        if (payload === null) {
+          return;
+        }
       }
-      const payload = await response.json();
+      if (payload.discovery_in_progress) {
+        throw new Error(payload.error || 'llama.cpp device discovery is still in progress');
+      }
       if (mounted.current && !controller.signal.aborted) {
         setInventory(payload);
       }

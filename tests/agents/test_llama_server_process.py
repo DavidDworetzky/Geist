@@ -82,6 +82,7 @@ class StaticDeviceService:
             recommended_device_ids=(self.devices[0].id,) if self.devices else (),
             reason="test inventory",
             error=self.error,
+            selection_detection_error=self.error,
         )
 
     def resolve_runtime_ids(self, device_ids):
@@ -229,6 +230,42 @@ def test_auto_falls_back_to_cpu_when_vulkan_fails_health(tmp_path):
     assert calls[0].terminated is True
     executable = "llama-server.exe" if os.name == "nt" else "llama-server"
     assert calls[1].args[0] == str(runtime / "cpu" / executable)
+    manager.stop()
+
+
+def test_auto_cpu_missing_vulkan_diagnostic_is_not_selection_pending(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    (runtime / "vulkan" / llama_server_filename()).unlink()
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    device_service = LlamaDeviceService(environment=environment)
+    inventory = device_service.inventory()
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=device_service,
+    )
+
+    connection = manager.start(model, "test/model")
+
+    assert inventory.error == "The Vulkan llama-server executable is unavailable"
+    assert inventory.selection_detection_error is None
+    assert connection.backend == "cpu"
+    assert connection.selection_backend == "auto"
+    assert connection.detection_error is None
+    assert len(calls) == 1
     manager.stop()
 
 

@@ -381,6 +381,36 @@ describe('Settings page', () => {
     });
   });
 
+  it('shows the FastAPI detail when a settings update is rejected', async () => {
+    const detail = 'The selected llama.cpp GPU is no longer available';
+    // @ts-ignore
+    global.fetch = jest.fn((url: string, options?: RequestInit) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (options?.method === 'PUT') {
+        return Promise.resolve({
+          ok: false,
+          statusText: 'Unprocessable Entity',
+          json: async () => ({ detail }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Generation' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to update settings: Unprocessable Entity/i))
+      .not.toBeInTheDocument();
+  });
+
   it('selects GPU explicitly from automatic and saves one or more devices', async () => {
     let savedUpdates: any = null;
     // @ts-ignore
@@ -540,6 +570,46 @@ describe('Settings page', () => {
     );
   });
 
+  it('describes invalid compute state when Models is showing the online agent', async () => {
+    const invalidPersistedSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: [],
+    };
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
+      }
+      return Promise.resolve({ ok: true, json: async () => invalidPersistedSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    expect(await screen.findByText(
+      /choose at least one available GPU device before saving/i,
+    )).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    fireEvent.change(screen.getByLabelText('Default Agent Type'), {
+      target: { value: 'online' },
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+
+    expect(await screen.findByLabelText('Online Provider')).toBeInTheDocument();
+    const validation = screen.getByRole('alert');
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(validation).toHaveTextContent(/resolve the GPU device selection before saving/i);
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute('aria-describedby', validation.id);
+    expect(document.getElementById(save.getAttribute('aria-describedby') ?? ''))
+      .toBe(validation);
+  });
+
   it('restores cached valid compute state when cancelling an invalid GPU edit off-tab', async () => {
     const manualDeviceInventory = {
       ...mockDeviceInventory,
@@ -635,7 +705,80 @@ describe('Settings page', () => {
     });
   });
 
-  it('preserves unresolved compute detection when saving without opening Models', async () => {
+  it('keeps settled validity during a same-selection remount until discovery settles', async () => {
+    const persistedGpuSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: ['gpu-nvidia'],
+    };
+    const inventoryWithoutSelectedGpu = {
+      ...mockDeviceInventory,
+      devices: [mockDeviceInventory.devices[1]],
+      recommended_backend: 'cpu',
+      recommended_device_ids: [],
+      reason: 'The previously selected GPU is no longer available.',
+    };
+    let inventoryCalls = 0;
+    let resolveRemountInventory: ((response: any) => void) | null = null;
+    const remountInventoryResponse = new Promise((resolve) => {
+      resolveRemountInventory = resolve;
+    });
+    // @ts-ignore
+    global.fetch = jest.fn((url: string) => {
+      if (url === '/api/v1/models/') {
+        return Promise.resolve({ ok: true, json: async () => mockModelsResponse });
+      }
+      if (url === '/api/v1/models/local/runtime/devices') {
+        inventoryCalls += 1;
+        if (inventoryCalls === 1) {
+          return Promise.resolve({ ok: true, json: async () => mockDeviceInventory });
+        }
+        return remountInventoryResponse;
+      }
+      return Promise.resolve({ ok: true, json: async () => persistedGpuSettings });
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Models and Providers' }));
+    await waitForSettingsRefresh();
+    expect(await screen.findByRole('checkbox', {
+      name: /NVIDIA GeForce RTX 3080/i,
+    })).toBeChecked();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Generation' }));
+    fireEvent.change(screen.getByRole('slider', { name: /Temperature/i }), {
+      target: { value: '0.8' },
+    });
+    const save = screen.getByRole('button', { name: 'Save Changes' });
+    expect(save).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+    expect(await screen.findByText(/Detecting llama\.cpp compute devices/i)).toBeInTheDocument();
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-describedby');
+
+    await act(async () => {
+      resolveRemountInventory?.({
+        ok: true,
+        json: async () => inventoryWithoutSelectedGpu,
+      });
+      await remountInventoryResponse;
+    });
+
+    const validation = await screen.findByText(
+      /^Resolve the GPU device selection before saving\.$/i,
+    );
+    expect(validation).toHaveTextContent(/resolve the GPU device selection before saving/i);
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute('aria-describedby', validation.id);
+  });
+
+  it('omits stale persisted compute settings from an unrelated save', async () => {
+    const stalePersistedSettings = {
+      ...baseSettings,
+      llama_backend: 'gpu' as const,
+      llama_gpu_device_ids: ['gpu-from-an-older-runtime'],
+    };
     let savedUpdates: any = null;
     // @ts-ignore
     global.fetch = jest.fn((url: string, options?: any) => {
@@ -644,9 +787,12 @@ describe('Settings page', () => {
       }
       if (options?.method === 'PUT') {
         savedUpdates = JSON.parse(options.body);
-        return Promise.resolve({ ok: true, json: async () => ({ ...baseSettings, ...savedUpdates }) });
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...stalePersistedSettings, ...savedUpdates }),
+        });
       }
-      return Promise.resolve({ ok: true, json: async () => baseSettings });
+      return Promise.resolve({ ok: true, json: async () => stalePersistedSettings });
     });
 
     renderSettings();
@@ -660,7 +806,9 @@ describe('Settings page', () => {
     await waitFor(() => expect(savedUpdates).not.toBeNull());
     expect(savedUpdates).not.toHaveProperty('llama_backend');
     expect(savedUpdates).not.toHaveProperty('llama_gpu_device_ids');
-    expect(global.fetch).not.toHaveBeenCalledWith('/api/v1/models/local/runtime/devices');
+    expect((global.fetch as jest.Mock).mock.calls.map(([url]) => url)).not.toContain(
+      '/api/v1/models/local/runtime/devices',
+    );
   });
 
   it('keeps settings usable while refreshing a backend selection on mount', async () => {

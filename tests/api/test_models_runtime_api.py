@@ -12,7 +12,7 @@ def test_runtime_devices_refresh_query_reprobes_inventory(monkeypatch) -> None:
     class FakeManager:
         def device_inventory(self, *, refresh: bool = False):
             refresh_requests.append(refresh)
-            return {"refresh": refresh}
+            return {"refresh": refresh, "discovery_in_progress": True}
 
     monkeypatch.setattr(models, "get_llama_server_manager", lambda: FakeManager())
     app = FastAPI()
@@ -22,5 +22,5 @@ def test_runtime_devices_refresh_query_reprobes_inventory(monkeypatch) -> None:
         response = client.get("/local/runtime/devices?refresh=true")
 
     assert response.status_code == 200
-    assert response.json() == {"refresh": True}
+    assert response.json() == {"refresh": True, "discovery_in_progress": True}
     assert refresh_requests == [True]
