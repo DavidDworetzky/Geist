@@ -49,6 +49,7 @@ class McpServerConfig:
     command: str | None = None
     args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
+    working_directory: str | None = None
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0
@@ -61,6 +62,7 @@ class McpServerConfig:
                 "command": self.command,
                 "args": list(self.args),
                 "env": self.env,
+                "working_directory": self.working_directory,
                 "url": self.url,
                 "headers": self.headers,
             },
@@ -81,6 +83,7 @@ class _StdioTransport:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env={**os.environ, **config.env},
+                cwd=config.working_directory,
                 text=True,
                 bufsize=1,
             )
@@ -151,9 +154,7 @@ class _StdioTransport:
                 stdin.write(payload + "\n")
                 stdin.flush()
             except (BrokenPipeError, OSError) as error:
-                raise McpError(
-                    f"MCP server pipe closed: {self._stderr_summary()}"
-                ) from error
+                raise McpError(f"MCP server pipe closed: {self._stderr_summary()}") from error
 
     def _stderr_summary(self) -> str:
         return " | ".join(self._stderr_tail) or "no stderr output"
@@ -356,10 +357,19 @@ class McpConnection:
                 break
         return tools
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+    ) -> str:
+        params: dict[str, Any] = {"name": name, "arguments": arguments}
+        if idempotency_key:
+            params["_meta"] = {"geist/idempotencyKey": idempotency_key}
         result = self._transport.request(
             "tools/call",
-            {"name": name, "arguments": arguments},
+            params,
             timeout=self.config.timeout_seconds,
         )
         result = result or {}
@@ -418,9 +428,20 @@ class McpClientManager:
             self.invalidate(config.server_id)
             raise McpError(f"MCP server '{config.name}' failed: {error}") from error
 
-    def call_tool(self, config: McpServerConfig, name: str, arguments: dict[str, Any]) -> str:
+    def call_tool(
+        self,
+        config: McpServerConfig,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+    ) -> str:
         try:
-            return self._connection(config).call_tool(name, arguments)
+            return self._connection(config).call_tool(
+                name,
+                arguments,
+                idempotency_key=idempotency_key,
+            )
         except McpError:
             self.invalidate(config.server_id)
             raise

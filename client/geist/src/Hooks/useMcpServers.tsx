@@ -8,8 +8,15 @@ export interface McpServer {
   command: string | null;
   args: string[];
   env: Record<string, string>;
+  working_directory: string | null;
   url: string | null;
   headers: Record<string, string>;
+  connector_kind: ConnectorKind;
+  account_label: string | null;
+  trusted: boolean;
+  security_required: boolean;
+  recipient_allowlist: string[];
+  max_writes_per_hour: number;
   enabled: boolean;
   timeout_seconds: number;
   create_date: string;
@@ -22,10 +29,27 @@ export interface McpServerInput {
   command?: string | null;
   args?: string[];
   env?: Record<string, string>;
+  working_directory?: string | null;
   url?: string | null;
   headers?: Record<string, string>;
+  connector_kind?: ConnectorKind;
+  account_label?: string | null;
+  trusted?: boolean;
+  recipient_allowlist?: string[];
+  max_writes_per_hour?: number;
   enabled?: boolean;
   timeout_seconds?: number;
+}
+
+export type EmailConnectorKind = 'gmail' | 'google_workspace' | 'outlook' | 'proton';
+export type ConnectorKind = 'custom' | EmailConnectorKind;
+
+export interface EmailConnectorProfile {
+  kind: EmailConnectorKind;
+  label: string;
+  account_scope: string;
+  authentication: string;
+  requirements: string[];
 }
 
 export interface McpToolInfo {
@@ -55,10 +79,12 @@ const parseError = async (response: Response): Promise<string> => {
 
 export interface UseMcpServersReturn {
   servers: McpServer[];
+  connectorProfiles: EmailConnectorProfile[];
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
   createServer: (input: McpServerInput) => Promise<McpServer>;
+  createEmailConnector: (input: McpServerInput) => Promise<McpServer>;
   updateServer: (id: number, updates: Partial<McpServerInput>) => Promise<McpServer>;
   deleteServer: (id: number) => Promise<void>;
   testServer: (id: number) => Promise<McpTestResult>;
@@ -66,6 +92,7 @@ export interface UseMcpServersReturn {
 
 export const useMcpServers = (): UseMcpServersReturn => {
   const [servers, setServers] = useState<McpServer[]>([]);
+  const [connectorProfiles, setConnectorProfiles] = useState<EmailConnectorProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,11 +100,24 @@ export const useMcpServers = (): UseMcpServersReturn => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`${BASE_URL}/servers`);
-      if (!response.ok) {
-        throw new Error(await parseError(response));
+      const [serversResponse, profilesResponse] = await Promise.all([
+        fetch(`${BASE_URL}/servers`),
+        fetch(`${BASE_URL}/email-connectors/profiles`),
+      ]);
+      if (!serversResponse.ok) {
+        throw new Error(await parseError(serversResponse));
       }
-      setServers(await response.json());
+      if (!profilesResponse.ok) {
+        throw new Error(await parseError(profilesResponse));
+      }
+      setServers(await serversResponse.json());
+      const profiles = await profilesResponse.json();
+      const profileKinds = new Set(['gmail', 'google_workspace', 'outlook', 'proton']);
+      setConnectorProfiles(
+        Array.isArray(profiles)
+          ? profiles.filter((profile) => profileKinds.has(profile?.kind))
+          : []
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load MCP servers');
     } finally {
@@ -92,6 +132,23 @@ export const useMcpServers = (): UseMcpServersReturn => {
   const createServer = useCallback(
     async (input: McpServerInput): Promise<McpServer> => {
       const response = await fetch(`${BASE_URL}/servers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response));
+      }
+      const created = await response.json();
+      await refetch();
+      return created;
+    },
+    [refetch]
+  );
+
+  const createEmailConnector = useCallback(
+    async (input: McpServerInput): Promise<McpServer> => {
+      const response = await fetch(`${BASE_URL}/email-connectors`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -142,5 +199,16 @@ export const useMcpServers = (): UseMcpServersReturn => {
     return response.json();
   }, []);
 
-  return { servers, loading, error, refetch, createServer, updateServer, deleteServer, testServer };
+  return {
+    servers,
+    connectorProfiles,
+    loading,
+    error,
+    refetch,
+    createServer,
+    createEmailConnector,
+    updateServer,
+    deleteServer,
+    testServer,
+  };
 };
