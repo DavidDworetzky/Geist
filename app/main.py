@@ -510,7 +510,7 @@ def run_routine(routine) -> None:
             routine.routine_id,
         )
         return
-    user_id = int(get_default_user().user_id)
+    user_id = int(routine.user_id)
     params = CompleteTextParams(
         prompt=routine.prompt, max_tokens=1024, enable_tools=True
     )

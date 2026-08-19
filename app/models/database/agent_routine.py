@@ -139,13 +139,35 @@ def get_due_routines(now: datetime.datetime | None = None) -> list[AgentRoutineM
         return [_to_model(routine) for routine in routines]
 
 
-def mark_routine_run(routine_id: int, now: datetime.datetime | None = None) -> None:
-    """Record a completed run and schedule the next one."""
+def claim_routine_run(
+    routine: AgentRoutineModel,
+    now: datetime.datetime | None = None,
+) -> bool:
+    """Atomically claim one due occurrence and schedule its next run.
+
+    The due timestamp and interval are part of the compare-and-swap so another
+    scheduler process, or a concurrent user edit, wins cleanly instead of
+    launching a duplicate or stale occurrence.
+    """
+    if routine.next_run_at is None:
+        return False
     now = now or datetime.datetime.utcnow()
     with SessionLocal() as session:
-        routine = session.query(AgentRoutine).filter_by(routine_id=routine_id).first()
-        if not routine:
-            return
-        routine.last_run_at = now
-        routine.next_run_at = now + datetime.timedelta(minutes=routine.interval_minutes)
+        claimed = (
+            session.query(AgentRoutine)
+            .filter(AgentRoutine.routine_id == routine.routine_id)
+            .filter(AgentRoutine.enabled.is_(True))
+            .filter(AgentRoutine.next_run_at == routine.next_run_at)
+            .filter(AgentRoutine.next_run_at <= now)
+            .filter(AgentRoutine.interval_minutes == routine.interval_minutes)
+            .update(
+                {
+                    AgentRoutine.last_run_at: now,
+                    AgentRoutine.next_run_at: now
+                    + datetime.timedelta(minutes=routine.interval_minutes),
+                },
+                synchronize_session=False,
+            )
+        )
         session.commit()
+        return claimed == 1

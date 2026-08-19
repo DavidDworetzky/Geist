@@ -20,8 +20,8 @@ from collections.abc import Callable
 
 from app.models.database.agent_routine import (
     AgentRoutineModel,
+    claim_routine_run,
     get_due_routines,
-    mark_routine_run,
 )
 
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_POLL_INTERVAL_SECONDS = 60.0
 
 RoutineRunner = Callable[[AgentRoutineModel], None]
+RoutineClaimer = Callable[[AgentRoutineModel], bool]
 
 
 class RoutineScheduler:
@@ -39,14 +40,14 @@ class RoutineScheduler:
         *,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         due_loader: Callable[[], list[AgentRoutineModel]] | None = None,
-        run_marker: Callable[[int], None] | None = None,
+        routine_claimer: RoutineClaimer | None = None,
     ):
         self.runner = runner
         self.poll_interval_seconds = poll_interval_seconds
         self.due_loader = due_loader or (
             lambda: get_due_routines(datetime.datetime.utcnow())
         )
-        self.run_marker = run_marker or mark_routine_run
+        self.routine_claimer = routine_claimer or claim_routine_run
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -68,10 +69,16 @@ class RoutineScheduler:
             if self._stop_event.is_set():
                 break
             try:
-                self.run_marker(routine.routine_id)
+                claimed = self.routine_claimer(routine)
             except Exception:
                 logger.exception(
-                    "Could not mark routine %s as run; skipping this cycle",
+                    "Could not claim routine %s; skipping this cycle",
+                    routine.routine_id,
+                )
+                continue
+            if not claimed:
+                logger.info(
+                    "Routine %s was already claimed or changed; skipping",
                     routine.routine_id,
                 )
                 continue
