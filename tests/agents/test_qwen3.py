@@ -21,10 +21,19 @@ Covers:
 import importlib
 import json
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
+
+def expected_local_runner() -> str:
+    if sys.platform in {"win32", "linux"}:
+        return "llama_server"
+    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        return "mlx_llama"
+    return "transformers"
 
 
 _MLX_SUBMODULES = ("mlx", "mlx.core", "mlx.core.random", "mlx.nn", "mlx.utils")
@@ -534,8 +543,15 @@ class TestQwen3RunnerRegistry:
 
 class TestFactoryGenericAutoDetection:
 
+    def test_transformers_recognizes_qwen3_config(self):
+        from transformers import AutoConfig
+
+        config = AutoConfig.for_model("qwen3")
+
+        assert config.model_type == "qwen3"
+
     def test_infer_runner_type_qwen_models(self):
-        expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+        expected = expected_local_runner()
         assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == expected
         assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == expected
         assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == expected
@@ -553,7 +569,7 @@ class TestFactoryGenericAutoDetection:
             AgentFactory._infer_runner_type("Qwen/Qwen2.5-72B-Instruct")
 
     def test_infer_runner_type_case_insensitive(self):
-        expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+        expected = expected_local_runner()
         assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == expected
         assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == expected
 
@@ -571,7 +587,7 @@ class TestFactoryGenericAutoDetection:
 
             MockLocalAgent.assert_called_once()
             _, kwargs = MockLocalAgent.call_args
-            expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+            expected = expected_local_runner()
             assert kwargs["runner_type"] == expected
             assert kwargs["model_id"] == "Qwen/Qwen3-8B"
 
@@ -666,7 +682,7 @@ class TestFactoryCreateFromConfig:
             AgentFactory.create_from_config(config, context)
 
             _, kwargs = MockLocalAgent.call_args
-            expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+            expected = expected_local_runner()
             assert kwargs["runner_type"] == expected
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
 

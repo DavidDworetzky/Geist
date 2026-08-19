@@ -1,6 +1,7 @@
 """Tests for generic model/provider catalog and runner routing."""
 import asyncio
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,14 @@ from agents.model_catalog import (
     get_provider_endpoint,
     infer_model_spec,
 )
+
+
+def expected_local_runner() -> str:
+    if sys.platform in {"win32", "linux"}:
+        return "llama_server"
+    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        return "mlx_llama"
+    return "transformers"
 
 
 def test_platform_default_preserves_apple_silicon_mlx_and_uses_gguf_on_windows():
@@ -35,6 +44,14 @@ def test_catalog_covers_requested_families():
         "llama", "qwen", "mistral", "phi", "smollm", "gemma",
         "granite", "olmo", "glm", "gpt-oss", "kimi", "deepseek",
     }.issubset(families)
+
+
+def test_qwen3_8b_declares_runtime_compatibility():
+    spec = get_model_spec("Qwen/Qwen3-8B")
+
+    assert spec.local is True
+    assert spec.backend == "transformers"
+    assert spec.min_transformers_version == "4.51.0"
 
 
 def test_family_inference_supports_future_finetunes():
@@ -121,8 +138,7 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     "openai/gpt-oss-20b",
 ])
 def test_standard_local_models_use_generic_runner(model_id):
-    expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
-    assert AgentFactory._infer_runner_type(model_id) == expected
+    assert AgentFactory._infer_runner_type(model_id) == expected_local_runner()
 
 
 def test_unknown_huggingface_model_uses_generic_runner():

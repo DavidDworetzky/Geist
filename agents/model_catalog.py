@@ -118,7 +118,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec(
         "Qwen/Qwen3-8B", "Qwen 3 8B (Local)", "qwen",
         context_window=32768, max_output_tokens=8192, supports_function_calling=True,
-        supports_reasoning=True, parameter_count="8B",
+        supports_reasoning=True, min_transformers_version="4.51.0", parameter_count="8B",
         performance_note="Use 4-bit weights and non-thinking mode for lower local latency.",
     ),
     ModelSpec(
