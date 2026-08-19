@@ -126,7 +126,7 @@ class TestPluginMcpMounting:
                     }
                 ]
 
-            def call_tool(self, config, name, arguments):
+            def call_tool(self, config, name, arguments, **_kwargs):
                 return f"{name}:{arguments['text']}"
 
         source = McpToolSource(
@@ -139,13 +139,19 @@ class TestPluginMcpMounting:
         definitions = {definition.name for definition in tool_registry.catalog()}
         assert "mcp.demo-plugin.srv.echo" in definitions
 
+        call = ToolCall(
+            id="call-3",
+            name="mcp.demo-plugin.srv.echo",
+            arguments={"text": "hello"},
+        )
         result = tool_registry.execute(
-            ToolCall(
-                id="call-3",
-                name="mcp.demo-plugin.srv.echo",
-                arguments={"text": "hello"},
+            call,
+            ToolContext(
+                user_id=1,
+                chat_id=None,
+                run_id="run-test",
+                approved_call_ids=frozenset({call.id}),
             ),
-            _context(),
         )
         assert result.succeeded
         assert result.content == "echo:hello"

@@ -9,9 +9,14 @@ delete routes.
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.security.operator import (
+    OperatorCapability,
+    OperatorPrincipal,
+    require_operator_capability,
+)
 from app.services.plugin_context import get_plugin_mcp_source
 from app.services.plugin_loader import enabled_plugin_names, get_plugin_registry
 
@@ -19,6 +24,7 @@ from app.services.plugin_loader import enabled_plugin_names, get_plugin_registry
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+_require_tools_operator = require_operator_capability(OperatorCapability.TOOLS_MANAGE)
 
 
 class PluginSkillResponse(BaseModel):
@@ -88,12 +94,16 @@ def _plugin_list() -> PluginListResponse:
 
 @router.get("", response_model=PluginListResponse)
 @router.get("/", response_model=PluginListResponse, include_in_schema=False)
-def list_plugins() -> PluginListResponse:
+def list_plugins(
+    _operator: OperatorPrincipal = Depends(_require_tools_operator),
+) -> PluginListResponse:
     return _plugin_list()
 
 
 @router.post("/refresh", response_model=PluginListResponse)
-def refresh_plugins() -> PluginListResponse:
+def refresh_plugins(
+    _operator: OperatorPrincipal = Depends(_require_tools_operator),
+) -> PluginListResponse:
     """Re-scan the plugin directory and invalidate cached MCP discovery."""
     get_plugin_registry().refresh()
     source = get_plugin_mcp_source()

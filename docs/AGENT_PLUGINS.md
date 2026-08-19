@@ -30,7 +30,9 @@ plugins/
 ```
 
 `GET /api/v1/plugins` lists what was discovered; `POST /api/v1/plugins/refresh`
-re-scans the directory without a restart.
+re-scans the directory without a restart. Both routes require the operator
+principal's `tools.manage` capability; in a Pitchblend-managed process that
+means the wrapper-injected `GeistOperator` credential.
 
 ## Manifest
 
@@ -68,3 +70,7 @@ plugin's servers by naming the plugin in `GEIST_ENABLED_PLUGINS`
 (comma-separated), mirroring `GEIST_ENABLED_CHAT_TOOLS`. Skill bodies and MCP
 tool descriptions/results are third-party content: treat them as untrusted
 input, not instructions to the operator.
+
+Discovery rejects plugin-root and skill-file symlink escapes, bounds manifests,
+skill files, descriptions, skills, and MCP server counts, and applies the same
+argument/environment/header limits used by operator-configured MCP servers.

@@ -150,6 +150,26 @@ class TestLoadPlugin:
         plugin = load_plugin(plugin_root)
         assert plugin.skills == ()
 
+    def test_skill_symlink_escaping_plugin_root_is_rejected(self, tmp_path):
+        plugin_root = _write_plugin(tmp_path)
+        outside = tmp_path / "outside.md"
+        outside.write_text("---\ndescription: Escaped\n---\nBody", encoding="utf-8")
+        skill_dir = plugin_root / "skills" / "escaped"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").symlink_to(outside)
+
+        plugin = load_plugin(plugin_root)
+
+        assert plugin.skills == ()
+
+    def test_oversized_skill_file_is_rejected(self, tmp_path):
+        plugin_root = _write_plugin(tmp_path)
+        skill_dir = plugin_root / "skills" / "large"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("x" * (1024 * 1024 + 1), encoding="utf-8")
+
+        assert load_plugin(plugin_root).skills == ()
+
 
 class TestMcpDiscovery:
     def test_parses_dot_mcp_json_with_wrapper(self, tmp_path):
@@ -225,6 +245,56 @@ class TestMcpDiscovery:
         plugin = load_plugin(plugin_root)
         assert plugin.mcp_servers == ()
 
+    def test_http_server_with_non_object_headers_is_skipped(self, tmp_path):
+        plugin_root = _write_plugin(
+            tmp_path,
+            manifest_extra={
+                "mcpServers": {"bad": {"url": "https://example.com/mcp", "headers": []}}
+            },
+        )
+
+        plugin = load_plugin(plugin_root)
+
+        assert plugin.mcp_servers == ()
+
+    def test_stdio_server_with_invalid_args_or_env_is_skipped(self, tmp_path):
+        plugin_root = _write_plugin(
+            tmp_path,
+            manifest_extra={
+                "mcpServers": {
+                    "bad-args": {"command": "server", "args": "--unsafe"},
+                    "bad-env": {"command": "server", "env": ["TOKEN=value"]},
+                }
+            },
+        )
+
+        plugin = load_plugin(plugin_root)
+
+        assert plugin.mcp_servers == ()
+
+    def test_http_header_injection_is_rejected(self, tmp_path):
+        plugin_root = _write_plugin(
+            tmp_path,
+            manifest_extra={
+                "mcpServers": {
+                    "bad": {
+                        "url": "https://example.com/mcp",
+                        "headers": {"Authorization": "ok\r\nX-Injected: yes"},
+                    }
+                }
+            },
+        )
+
+        assert load_plugin(plugin_root).mcp_servers == ()
+
+    def test_stdio_environment_requires_string_values(self, tmp_path):
+        plugin_root = _write_plugin(
+            tmp_path,
+            manifest_extra={"mcpServers": {"bad": {"command": "server", "env": {"X": 1}}}},
+        )
+
+        assert load_plugin(plugin_root).mcp_servers == ()
+
 
 class TestPluginRegistry:
     def test_discovers_multiple_plugins_and_skips_invalid(self, tmp_path):
@@ -237,6 +307,16 @@ class TestPluginRegistry:
 
     def test_missing_plugin_dir_is_empty(self, tmp_path):
         assert discover_plugins(tmp_path / "missing") == []
+
+    def test_symlinked_plugin_root_is_skipped(self, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _write_plugin(outside, "linked")
+        plugin_dir = tmp_path / "plugins"
+        plugin_dir.mkdir()
+        (plugin_dir / "linked").symlink_to(outside / "linked", target_is_directory=True)
+
+        assert discover_plugins(plugin_dir) == []
 
     def test_registry_find_skill(self, tmp_path):
         _write_skill(_write_plugin(tmp_path, "alpha"))
