@@ -57,6 +57,8 @@ class ModelSpec:
     parameter_count: str | None = None
     activated_parameters: str | None = None
     optional_dependencies: tuple[str, ...] = ()
+    unsupported_parameters: tuple[str, ...] = ()
+    mandatory_reasoning_effort: str | None = None
     local: bool = True
     performance_note: str | None = None
 
@@ -73,6 +75,9 @@ PROVIDERS: dict[str, ProviderSpec] = {
     ),
     "deepseek": ProviderSpec(
         "deepseek", "DeepSeek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"
+    ),
+    "openrouter": ProviderSpec(
+        "openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"
     ),
     "self-hosted": ProviderSpec(
         "self-hosted",
@@ -179,6 +184,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "deepseek-distill", context_window=131072, max_output_tokens=32768,
         supports_reasoning=True, parameter_count="7B",
         performance_note="Uses the underlying Qwen architecture and generic runner.",
+    ),
+    ModelSpec(
+        "x-ai/grok-4.6", "Grok 4.6", "grok", provider="openrouter",
+        backend="openai_compatible", context_window=500000,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="high", local=False,
+        performance_note=(
+            "Hosted through OpenRouter; mandatory reasoning defaults to high. "
+            "Enable OpenRouter ZDR routing before sending confidential workloads."
+        ),
     ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(

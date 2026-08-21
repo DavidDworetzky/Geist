@@ -59,6 +59,28 @@ def test_heavyweight_models_are_server_backed():
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
 
 
+def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
+    grok = get_model_spec("x-ai/grok-4.6")
+
+    assert grok.provider == "openrouter"
+    assert grok.backend == "openai_compatible"
+    assert grok.local is False
+    assert grok.context_window == 500000
+    assert grok.max_output_tokens is None
+    assert grok.parameter_count is None
+    assert grok.supports_vision is True
+    assert grok.supports_function_calling is True
+    assert grok.supports_reasoning is True
+    assert grok.supports_streaming is True
+    assert grok.mandatory_reasoning_effort == "high"
+    assert grok.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize("model_id", [
     "Qwen/Qwen2.5-3B-Instruct",
     "Qwen/Qwen3-4B",
@@ -162,6 +184,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "openai/gpt-oss-120b",
     "zai-org/GLM-5.2",
     "deepseek-ai/DeepSeek-R1",
+    "x-ai/grok-4.6",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -181,6 +204,13 @@ def test_hosted_glm_infers_zai_endpoint():
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model="glm-4.7-flash")
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
+
+
+def test_openrouter_model_infers_openrouter_endpoint():
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model="x-ai/grok-4.6")
+    assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
 
 
 def test_self_hosted_model_requires_endpoint_or_environment():
@@ -292,9 +322,12 @@ def test_model_routes_serialize_string_backed_providers():
     provider_ids = asyncio.run(get_providers())
     assert "self-hosted" in provider_ids
     assert "moonshot" in provider_ids
+    assert "openrouter" in provider_ids
 
     response = asyncio.run(get_available_models())
     assert "self-hosted" in response.providers
+    assert "openrouter" in response.providers
+    assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "openai/gpt-oss-120b"
         for model in response.providers["self-hosted"]

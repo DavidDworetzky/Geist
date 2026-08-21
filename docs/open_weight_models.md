@@ -10,7 +10,8 @@ catalog lives in `agents/model_catalog.py`.
 Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
-8x7B, and gpt-oss 120B are intentionally server-backed.
+8x7B, gpt-oss 120B, and OpenRouter's Grok 4.6 route are intentionally
+server-backed.
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
 
@@ -30,6 +31,19 @@ provider. An explicit local `runner_type` override opts capable machines back
 into in-process loading.
 Catalog providers use string IDs, so adding one does not require extending the
 legacy `OnlineModelProviders` enum or changing the model API routes.
+
+## OpenRouter-hosted Grok 4.6
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`x-ai/grok-4.6`. The model uses OpenRouter's OpenAI-compatible chat endpoint,
+retains native function calling, and cannot fall through to a local runner.
+Grok 4.6 always reasons; Geist sends its documented default `high` effort and
+omits unsupported frequency penalty, presence penalty, and stop parameters.
+
+OpenRouter does not retain prompt or response content unless logging is
+explicitly enabled, but downstream provider policy still applies. Enable
+OpenRouter's Zero Data Retention routing for confidential workloads so the
+request can use only eligible provider endpoints.
 
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and
