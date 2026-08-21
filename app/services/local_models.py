@@ -98,6 +98,25 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
             "README.md",
         ),
     ),
+    LocalModelArtifact(
+        id="qwen3.8-27b-4bit-mlx",
+        model_id="Qwen/Qwen3.8-27B",
+        display_name="Qwen 3.8 27B 4-bit (MLX)",
+        format="snapshot",
+        backend="mlx_llama",
+        repo_id="mlx-community/Qwen3.8-27B-4bit",
+        revision="3e6447f082e89cc7f0bc6e5441afd38dfce760ff",
+        filename="snapshot",
+        size_bytes=16_074_530_674,
+        quantization="4-bit",
+        license="Apache-2.0",
+        supports_tool_calling=True,
+        allow_patterns=(
+            "*.json",
+            "*.jinja",
+            "*.safetensors",
+        ),
+    ),
 )
 
 
@@ -895,6 +914,7 @@ class LocalModelManager:
 
         class SnapshotProgress(tqdm):
             def __init__(self, *args, **kwargs):
+                kwargs.pop("name", None)
                 kwargs.setdefault("disable", True)
                 super().__init__(*args, **kwargs)
                 progress(int(self.n), int(self.total) if self.total is not None else None)

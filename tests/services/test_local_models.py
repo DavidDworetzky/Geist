@@ -57,6 +57,20 @@ def _mlx_artifact(**overrides) -> LocalModelArtifact:
     return LocalModelArtifact(**values)
 
 
+def test_qwen3_8_uses_pinned_mlx_snapshot():
+    artifact = next(
+        item for item in CURATED_LOCAL_ARTIFACTS if item.model_id == "Qwen/Qwen3.8-27B"
+    )
+
+    assert artifact.id == "qwen3.8-27b-4bit-mlx"
+    assert artifact.repo_id == "mlx-community/Qwen3.8-27B-4bit"
+    assert artifact.revision == "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
+    assert artifact.backend == "mlx_llama"
+    assert artifact.quantization == "4-bit"
+    assert local_artifact_supported(artifact, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
+
+
 @pytest.fixture
 def managers():
     active = []
@@ -429,7 +443,7 @@ def test_snapshot_downloader_pins_revision_and_reports_file_progress(
     def snapshot_download(**kwargs):
         captured.update(kwargs)
         progress_type = kwargs["tqdm_class"]
-        progress = progress_type(total=2)
+        progress = progress_type(total=2, name="huggingface_hub.snapshot_download")
         progress.update()
         progress.update()
 

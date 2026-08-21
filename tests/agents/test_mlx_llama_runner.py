@@ -56,7 +56,8 @@ def test_mlx_lm_can_be_selected_by_environment(monkeypatch):
     )
 
 
-def test_mlx_lm_falls_back_to_huggingface_without_managed_artifact(monkeypatch):
+def test_qwen3_8_defaults_to_mlx_lm_with_managed_weights(monkeypatch):
+    monkeypatch.delenv("GEIST_MLX_IMPLEMENTATION", raising=False)
     monkeypatch.delenv("LOCAL_WEIGHTS_DIR", raising=False)
     backend_class = MagicMock(return_value=MagicMock())
     module_name = "agents.architectures.llama.mlx_lm_backend"
@@ -67,16 +68,17 @@ def test_mlx_lm_falls_back_to_huggingface_without_managed_artifact(monkeypatch):
         patch.object(
             MLXLlamaRunner,
             "_resolve_weights_dir",
-            side_effect=KeyError("No managed artifact"),
+            return_value="/models/qwen3.8",
         ),
     ):
         runner = MLXLlamaRunner()
-        runner.load("Qwen/Qwen3-8B", {"implementation": "mlx_lm"})
+        runner.load("Qwen/Qwen3.8-27B")
 
+    assert runner.implementation == "mlx_lm"
     backend_class.assert_called_once_with(
         max_new_tokens=16,
-        model_id="Qwen/Qwen3-8B",
-        weights_dir=None,
+        model_id="Qwen/Qwen3.8-27B",
+        weights_dir="/models/qwen3.8",
     )
 
 
@@ -212,6 +214,6 @@ def test_mlx_lm_uses_a_thread_local_generation_stream():
             ),
         ),
     ):
-        MLXLMBackend(max_new_tokens=8, model_id="Qwen/Qwen3-8B")
+        MLXLMBackend(max_new_tokens=8, model_id="Qwen/Qwen3.8-27B")
 
     assert generation_module.generation_stream is thread_local_stream

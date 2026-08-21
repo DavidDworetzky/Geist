@@ -18,7 +18,8 @@ Trace the model through these existing surfaces:
 - `agents/architectures/` for the compatible runner and its default weight path.
 - `app/main.py` and `app/models/user_settings.py` for settings-driven local-agent construction.
 - `app/api/v1/endpoints/models.py` and `client/geist/src/Hooks/useAvailableModels.tsx` for backend discovery and the frontend fallback catalog.
-- `scripts/download_models.py` and `scripts/copy_weights.py` for explicit weight placement.
+- `app/services/local_models.py` for curated immutable artifacts.
+- `scripts/download_models.py` and `scripts/copy_weights.py` for legacy explicit weight placement.
 
 Inspect the live diff first and preserve unrelated worktree changes, especially when any of these files are already modified.
 
@@ -47,13 +48,15 @@ Keep one source of truth for runner inference. Ensure settings-derived and appli
 
 ## 4. Align Weight Placement
 
+Prefer a curated `LocalModelArtifact` when the runnable weights come from a separate quantized Hugging Face repository. Pin its immutable revision, runtime backend, size, quantization, license, and minimal allow-patterns. Keep the catalog model ID as the official upstream identity and the artifact `repo_id` as the concrete runnable weights.
+
 Match explicit downloads or copies to the runner's lookup convention. The Hugging Face download path derives:
 
 ```text
 app/model_weights/<hugging-face-id-with-slashes-replaced-by-underscores>
 ```
 
-For example, `Qwen/Qwen3-8B` maps to `app/model_weights/Qwen_Qwen3-8B`.
+For example, `Qwen/Qwen3.8-27B` maps to `app/model_weights/Qwen_Qwen3.8-27B` on the legacy downloader path, while a curated MLX quantization is stored in the managed model directory.
 
 Prefer loading from an existing local pretrained directory when present. Allow the runner's established Hugging Face fallback when local files are absent. Never download multi-gigabyte weights merely to validate catalog or routing changes unless the user explicitly requests a live inference run.
 

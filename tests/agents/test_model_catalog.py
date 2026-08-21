@@ -46,12 +46,15 @@ def test_catalog_covers_requested_families():
     }.issubset(families)
 
 
-def test_qwen3_8b_declares_runtime_compatibility():
-    spec = get_model_spec("Qwen/Qwen3-8B")
+def test_qwen3_8_27b_declares_runtime_compatibility():
+    spec = get_model_spec("Qwen/Qwen3.8-27B")
 
     assert spec.local is True
-    assert spec.backend == "transformers"
-    assert spec.min_transformers_version == "4.51.0"
+    assert spec.backend == "mlx_llama"
+    assert spec.context_window == 262144
+    assert spec.parameter_count == "27B"
+    assert spec.min_transformers_version == "5.8.0"
+    assert spec.supports_vision is False
 
 
 def test_family_inference_supports_future_finetunes():
@@ -128,6 +131,7 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
 @pytest.mark.parametrize("model_id", [
     "Qwen/Qwen2.5-3B-Instruct",
     "Qwen/Qwen3-4B",
+    "Qwen/Qwen3.8-27B",
     "mistralai/Mistral-7B-Instruct-v0.3",
     "microsoft/Phi-4-mini-instruct",
     "HuggingFaceTB/SmolLM3-3B",

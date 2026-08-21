@@ -543,15 +543,21 @@ class TestQwen3RunnerRegistry:
 
 class TestFactoryGenericAutoDetection:
 
-    def test_transformers_recognizes_qwen3_config(self):
+    @pytest.mark.skipif(
+        sys.platform != "darwin"
+        or platform.machine().lower() not in {"arm64", "aarch64"},
+        reason="Qwen3.8 MLX dependencies are Apple Silicon-only",
+    )
+    def test_transformers_recognizes_qwen3_5_config(self):
         from transformers import AutoConfig
 
-        config = AutoConfig.for_model("qwen3")
+        config = AutoConfig.for_model("qwen3_5")
 
-        assert config.model_type == "qwen3"
+        assert config.model_type == "qwen3_5"
 
     def test_infer_runner_type_qwen_models(self):
         expected = expected_local_runner()
+        assert AgentFactory._infer_runner_type("Qwen/Qwen3.8-27B") == expected
         assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == expected
         assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == expected
         assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == expected
@@ -587,7 +593,7 @@ class TestFactoryGenericAutoDetection:
 
             MockLocalAgent.assert_called_once()
             _, kwargs = MockLocalAgent.call_args
-            expected = expected_local_runner()
+            expected = os.environ.get("GEIST_LOCAL_RUNNER") or expected_local_runner()
             assert kwargs["runner_type"] == expected
             assert kwargs["model_id"] == "Qwen/Qwen3-8B"
 
@@ -682,7 +688,7 @@ class TestFactoryCreateFromConfig:
             AgentFactory.create_from_config(config, context)
 
             _, kwargs = MockLocalAgent.call_args
-            expected = expected_local_runner()
+            expected = os.environ.get("GEIST_LOCAL_RUNNER") or expected_local_runner()
             assert kwargs["runner_type"] == expected
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
 
@@ -702,7 +708,7 @@ class TestSettingsDrivenQwen3Creation:
 
         factory_config = Mock(
             agent_type="local",
-            model="Qwen/Qwen3-8B",
+            model="Qwen/Qwen3.8-27B",
             endpoint=None,
             api_key=None,
             runner_type=None,
