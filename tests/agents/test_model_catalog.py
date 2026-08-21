@@ -63,6 +63,16 @@ def test_heavyweight_models_are_server_backed():
     assert qwen_max.local is False
     assert get_provider_endpoint(qwen_max.provider) == "https://openrouter.ai/api/v1"
 
+    ox_alpha = get_model_spec("stealth/ox-alpha")
+    assert ox_alpha.backend == "openai_compatible"
+    assert ox_alpha.local is False
+    assert ox_alpha.context_window == 1048576
+    assert ox_alpha.max_output_tokens == 131072
+    assert ox_alpha.supports_vision is True
+    assert ox_alpha.supports_function_calling is True
+    assert ox_alpha.supports_reasoning is True
+    assert get_provider_endpoint(ox_alpha.provider) == "https://openrouter.ai/api/v1"
+
 
 def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
     from agents.architectures.registry import get_all_models, provider_from_string
@@ -181,6 +191,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "deepseek-ai/DeepSeek-R1",
     "qwen/qwen3.8-max",
     "qwen3.8-max",
+    "stealth/ox-alpha",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -202,8 +213,10 @@ def test_hosted_glm_infers_zai_endpoint():
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
 
 
-@pytest.mark.parametrize("model_id", ["qwen/qwen3.8-max", "qwen3.8-max"])
-def test_qwen_max_infers_openrouter_endpoint(model_id):
+@pytest.mark.parametrize(
+    "model_id", ["qwen/qwen3.8-max", "qwen3.8-max", "stealth/ox-alpha"]
+)
+def test_openrouter_model_infers_openrouter_endpoint(model_id):
     context = MagicMock()
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model=model_id)

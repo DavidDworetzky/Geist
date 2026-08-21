@@ -259,6 +259,16 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted-only flagship MoE; OpenRouter proxies Alibaba's endpoint until open weights ship.",
     ),
     ModelSpec(
+        "stealth/ox-alpha", "Ox Alpha (Preview)", "stealth", provider="openrouter",
+        backend="openai_compatible", context_window=1048576, max_output_tokens=131072,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, local=False,
+        performance_note=(
+            "Anonymous OpenRouter preview with mandatory reasoning; pricing and "
+            "availability may change."
+        ),
+    ),
+    ModelSpec(
         "deepseek-reasoner", "DeepSeek R1", "deepseek", provider="deepseek",
         backend="openai_compatible", context_window=131072, max_output_tokens=32768,
         supports_function_calling=True, supports_reasoning=True, supports_streaming=True,
