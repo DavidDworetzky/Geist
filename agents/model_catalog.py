@@ -74,6 +74,9 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "deepseek": ProviderSpec(
         "deepseek", "DeepSeek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"
     ),
+    "openrouter": ProviderSpec(
+        "openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"
+    ),
     "self-hosted": ProviderSpec(
         "self-hosted",
         "Self-hosted OpenAI-compatible",
@@ -248,6 +251,24 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "qwen/qwen3.8-max", "Qwen 3.8 Max", "qwen", provider="openrouter",
+        backend="openai_compatible", context_window=1000000, max_output_tokens=131072,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True, parameter_count="2.4T",
+        activated_parameters="95B", local=False,
+        performance_note="Hosted-only flagship MoE; OpenRouter proxies Alibaba's endpoint until open weights ship.",
+    ),
+    ModelSpec(
+        "stealth/ox-alpha", "Ox Alpha (Preview)", "stealth", provider="openrouter",
+        backend="openai_compatible", context_window=1048576, max_output_tokens=131072,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, local=False,
+        performance_note=(
+            "Anonymous OpenRouter preview with mandatory reasoning; pricing and "
+            "availability may change."
+        ),
+    ),
+    ModelSpec(
         "deepseek-reasoner", "DeepSeek R1", "deepseek", provider="deepseek",
         backend="openai_compatible", context_window=131072, max_output_tokens=32768,
         supports_function_calling=True, supports_reasoning=True, supports_streaming=True,
@@ -275,6 +296,8 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
     # Map heavyweight Hugging Face repository IDs to their server-backed
     # catalog entries so they can never fall through to an accidental local
     # trillion-parameter load.
+    if "qwen3.8-max" in value:
+        return get_model_spec("qwen/qwen3.8-max")
     if "moonshotai/kimi-k2" in value:
         return get_model_spec("kimi-k2.5")
     if "zai-org/glm-5" in value:

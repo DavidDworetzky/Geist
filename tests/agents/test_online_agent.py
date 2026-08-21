@@ -225,6 +225,21 @@ class TestOnlineAgentInitialization:
             assert agent.model == "grok-2"
             assert agent.api_key == "test-grok-key"
 
+    def test_openrouter_initialization(self):
+        """Test OpenRouter key discovery and native tool support."""
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="stealth/ox-alpha",
+            )
+
+            assert agent.api_key == "test-openrouter-key"
+            assert agent.headers["Authorization"] == "Bearer test-openrouter-key"
+            assert agent.supports_native_tool_calling is True
+
     def test_explicit_api_key(self):
         """Test initialization with explicitly provided API key."""
         context = create_mock_agent_context()
