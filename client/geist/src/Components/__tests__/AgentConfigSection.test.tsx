@@ -255,6 +255,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
     });
 
+    it('shows Muse Spark Contributor from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'meta/muse-spark-1.2-contributor',
+              name: 'Muse Spark 1.2 Contributor',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: null,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'muse',
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-spark-1.2-contributor"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+    });
+
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 

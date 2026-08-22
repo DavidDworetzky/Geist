@@ -73,6 +73,24 @@ def test_heavyweight_models_are_server_backed():
     assert ox_alpha.supports_reasoning is True
     assert get_provider_endpoint(ox_alpha.provider) == "https://openrouter.ai/api/v1"
 
+    muse = get_model_spec("meta/muse-spark-1.2-contributor")
+    assert muse.backend == "openai_compatible"
+    assert muse.provider == "openrouter"
+    assert muse.local is False
+    assert muse.context_window == 1048576
+    assert muse.max_output_tokens is None
+    assert muse.parameter_count is None
+    assert muse.supports_vision is True
+    assert muse.supports_function_calling is True
+    assert muse.supports_reasoning is True
+    assert muse.supports_streaming is True
+    assert muse.mandatory_reasoning_effort == "medium"
+    assert muse.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+
 
 def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
     from agents.architectures.registry import get_all_models, provider_from_string
@@ -215,6 +233,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "qwen/qwen3.8-max",
     "qwen3.8-max",
     "stealth/ox-alpha",
+    "meta/muse-spark-1.2-contributor",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -238,7 +257,13 @@ def test_hosted_glm_infers_zai_endpoint():
 
 @pytest.mark.parametrize(
     "model_id",
-    ["x-ai/grok-4.6", "qwen/qwen3.8-max", "qwen3.8-max", "stealth/ox-alpha"],
+    [
+        "x-ai/grok-4.6",
+        "qwen/qwen3.8-max",
+        "qwen3.8-max",
+        "stealth/ox-alpha",
+        "meta/muse-spark-1.2-contributor",
+    ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
     context = MagicMock()
@@ -362,6 +387,10 @@ def test_model_routes_serialize_string_backed_providers():
     assert "self-hosted" in response.providers
     assert "openrouter" in response.providers
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "meta/muse-spark-1.2-contributor"
+        for model in response.providers["openrouter"]
+    )
     assert any(
         model.id == "openai/gpt-oss-120b"
         for model in response.providers["self-hosted"]

@@ -283,6 +283,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "meta/muse-spark-1.2-contributor", "Muse Spark 1.2 Contributor", "muse",
+        provider="openrouter", backend="openai_compatible", context_window=1048576,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="medium", local=False,
+        performance_note=(
+            "Low-cost Meta contributor tier with mandatory reasoning. Meta retains "
+            "requests for 30 days; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "deepseek-reasoner", "DeepSeek R1", "deepseek", provider="deepseek",
         backend="openai_compatible", context_window=131072, max_output_tokens=32768,
         supports_function_calling=True, supports_reasoning=True, supports_streaming=True,
