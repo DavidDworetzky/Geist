@@ -112,6 +112,8 @@ def _build_provider_kwargs(
 @router.get("/models")
 async def list_voice_models():
     """Return supported voice/TTS providers and model options for frontend selection."""
+    from app.services.tts import get_supported_tts_providers
+
     return {
         "default_provider": "sesame",
         "providers": get_supported_tts_providers(),
