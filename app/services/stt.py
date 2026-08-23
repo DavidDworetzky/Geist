@@ -9,6 +9,7 @@ and reaches model loaders), and a string-keyed factory.
 import logging
 from typing import Any, Protocol
 
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FASTER_WHISPER_MODEL = "large-v3-turbo"
