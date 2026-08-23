@@ -324,7 +324,7 @@ describe('Settings page', () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
-    render(<Settings />);
+    renderSettings();
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Models and Providers' })).toBeInTheDocument();
