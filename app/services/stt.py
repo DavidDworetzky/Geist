@@ -9,16 +9,10 @@ and reaches model loaders), and a string-keyed factory.
 import logging
 from typing import Any, Protocol
 
-from adapters.faster_whisper_adapter import (
-    DEFAULT_FASTER_WHISPER_MODEL,
-    FasterWhisperAdapter,
-)
-from adapters.mms_adapter import MMSAdapter
-from adapters.parakeet_adapter import DEFAULT_PARAKEET_MODEL, ParakeetAdapter
-from adapters.whisper_adapter import WhisperAdapter
-
-
 logger = logging.getLogger(__name__)
+
+DEFAULT_FASTER_WHISPER_MODEL = "large-v3-turbo"
+DEFAULT_PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 
 
 class STTAdapter(Protocol):
@@ -159,15 +153,23 @@ def create_stt_adapter(provider_type: str = "mms", **kwargs) -> STTAdapter:
     provider = provider_type.lower().replace("-", "_")
 
     if provider == "mms":
+        from adapters.mms_adapter import MMSAdapter
+
         return MMSAdapter()
     if provider == "whisper":
+        from adapters.whisper_adapter import WhisperAdapter
+
         return WhisperAdapter(api_key=kwargs.get("whisper_api_key"))
     if provider == "faster_whisper":
+        from adapters.faster_whisper_adapter import FasterWhisperAdapter
+
         model = _validate_stt_model(
             "faster_whisper", kwargs.get("stt_model") or DEFAULT_FASTER_WHISPER_MODEL
         )
         return FasterWhisperAdapter(model=model, device=kwargs.get("stt_device"))
     if provider == "parakeet":
+        from adapters.parakeet_adapter import ParakeetAdapter
+
         model = _validate_stt_model(
             "parakeet", kwargs.get("stt_model") or DEFAULT_PARAKEET_MODEL
         )
