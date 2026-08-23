@@ -1,0 +1,4 @@
+interface:
+  display_name: "Geist QA Engineer"
+  short_description: "Diff-driven local QA with video evidence"
+  default_prompt: "Use $qa-engineer to test the current clean Geist PR and publish a QA verdict with video evidence."

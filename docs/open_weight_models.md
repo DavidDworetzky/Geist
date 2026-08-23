@@ -14,6 +14,9 @@ Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
 server-backed.
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
+The anonymous Ox Alpha preview is also server-backed because it is available
+only through OpenRouter as `stealth/ox-alpha`; the catalog does not guess its
+undisclosed model family or parameter count.
 
 ## Adding a model or provider
 
