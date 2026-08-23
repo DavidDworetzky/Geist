@@ -1,7 +1,7 @@
 """add provider credential table
 
 Revision ID: a7c9e1f3b5d8
-Revises: e4b7a9c2d1f0
+Revises: f5c8a1d3e7b9
 Create Date: 2026-07-23
 """
 from collections.abc import Sequence
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'a7c9e1f3b5d8'
-down_revision: str | None = 'e4b7a9c2d1f0'
+down_revision: str | None = 'f5c8a1d3e7b9'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
