@@ -56,6 +56,32 @@ def test_mlx_lm_can_be_selected_by_environment(monkeypatch):
     )
 
 
+def test_qwen3_8_defaults_to_mlx_lm_with_managed_weights(monkeypatch):
+    monkeypatch.delenv("GEIST_MLX_IMPLEMENTATION", raising=False)
+    monkeypatch.delenv("LOCAL_WEIGHTS_DIR", raising=False)
+    backend_class = MagicMock(return_value=MagicMock())
+    module_name = "agents.architectures.llama.mlx_lm_backend"
+    fake_module = _backend_module(module_name, "MLXLMBackend", backend_class)
+
+    with (
+        patch.dict(sys.modules, {module_name: fake_module}),
+        patch.object(
+            MLXLlamaRunner,
+            "_resolve_weights_dir",
+            return_value="/models/qwen3.8",
+        ),
+    ):
+        runner = MLXLlamaRunner()
+        runner.load("Qwen/Qwen3.8-27B")
+
+    assert runner.implementation == "mlx_lm"
+    backend_class.assert_called_once_with(
+        max_new_tokens=16,
+        model_id="Qwen/Qwen3.8-27B",
+        weights_dir="/models/qwen3.8",
+    )
+
+
 def test_device_config_overrides_environment(monkeypatch):
     monkeypatch.setenv("GEIST_MLX_IMPLEMENTATION", "mlx_lm")
     backend_class = MagicMock(return_value=MagicMock())
@@ -153,6 +179,7 @@ def test_structured_messages_reach_mlx_backend_unchanged():
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.tokenizer = MagicMock()
+    backend.model_id = "Qwen/Qwen3.8-27B"
     messages = [
         {"role": "system", "content": "Be concise."},
         {"role": "user", "content": "Remember cobalt."},
@@ -168,4 +195,27 @@ def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
         messages,
         tokenize=False,
         add_generation_prompt=True,
+        enable_thinking=False,
     )
+
+
+def test_mlx_lm_uses_a_thread_local_generation_stream():
+    mlx_core = MagicMock()
+    generation_module = MagicMock()
+    thread_local_stream = MagicMock()
+    mlx_lm_module = ModuleType("mlx_lm")
+    mlx_lm_module.load = MagicMock(return_value=(MagicMock(), MagicMock()))
+    mlx_core.new_thread_local_stream.return_value = thread_local_stream
+
+    with (
+        patch.dict(sys.modules, {"mlx_lm": mlx_lm_module}),
+        patch(
+            "agents.architectures.llama.mlx_lm_backend.importlib.import_module",
+            side_effect=lambda name: (
+                mlx_core if name == "mlx.core" else generation_module
+            ),
+        ),
+    ):
+        MLXLMBackend(max_new_tokens=8, model_id="Qwen/Qwen3.8-27B")
+
+    assert generation_module.generation_stream is thread_local_stream

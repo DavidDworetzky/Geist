@@ -9,6 +9,8 @@ from .base_runner import BaseRunner, GenerationConfig
 
 logger = logging.getLogger(__name__)
 
+MLX_LM_DEFAULT_MODELS = frozenset({"qwen/qwen3.8-27b"})
+
 
 class _MLXBackend(Protocol):
     """Shared runtime contract implemented by both MLX backends."""
@@ -74,9 +76,12 @@ class MLXLlamaRunner(BaseRunner):
         """Load the selected implementation and propagate the requested model path."""
         device_config = device_config or {}
         self.model_id = model_id
+        default_implementation = (
+            "mlx_lm" if model_id.casefold() in MLX_LM_DEFAULT_MODELS else "manual"
+        )
         requested = device_config.get(
             "implementation",
-            os.environ.get("GEIST_MLX_IMPLEMENTATION", "manual"),
+            os.environ.get("GEIST_MLX_IMPLEMENTATION", default_implementation),
         )
         if not isinstance(requested, str):
             raise TypeError("MLX implementation must be a string")

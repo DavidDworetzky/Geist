@@ -109,19 +109,31 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec(
         "Qwen/Qwen3-4B", "Qwen 3 4B (Local)", "qwen",
         context_window=32768, max_output_tokens=8192, supports_function_calling=True,
-        supports_reasoning=True, recommended=True, parameter_count="4B",
+        supports_reasoning=True, recommended=True,
+        min_transformers_version="4.51.0", parameter_count="4B",
         performance_note="Use non-thinking mode for lower latency when reasoning is unnecessary.",
     ),
     ModelSpec(
         "Qwen/Qwen3-8B", "Qwen 3 8B (Local)", "qwen",
         context_window=32768, max_output_tokens=8192, supports_function_calling=True,
-        supports_reasoning=True, parameter_count="8B",
+        supports_reasoning=True, min_transformers_version="4.51.0", parameter_count="8B",
         performance_note="Use 4-bit weights and non-thinking mode for lower local latency.",
+    ),
+    ModelSpec(
+        "Qwen/Qwen3.8-27B", "Qwen 3.8 27B (Local, MLX 4-bit)", "qwen",
+        backend="mlx_llama", context_window=262144, max_output_tokens=8192,
+        supports_function_calling=True, supports_reasoning=True,
+        min_transformers_version="5.8.0", parameter_count="27B",
+        performance_note=(
+            "Text-only local inference on Apple Silicon using the curated "
+            "mlx-community/Qwen3.8-27B-4bit snapshot."
+        ),
     ),
     ModelSpec(
         "Qwen/Qwen3-1.7B", "Qwen 3 1.7B (Local)", "qwen",
         context_window=32768, max_output_tokens=8192, supports_reasoning=True,
-        parameter_count="1.7B", performance_note="Small laptop-friendly reference model.",
+        min_transformers_version="4.51.0", parameter_count="1.7B",
+        performance_note="Small laptop-friendly reference model.",
     ),
     ModelSpec(
         "mistralai/Mistral-7B-Instruct-v0.3", "Mistral 7B Instruct v0.3 (Local)",

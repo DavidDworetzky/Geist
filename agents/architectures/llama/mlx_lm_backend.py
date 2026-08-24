@@ -1,9 +1,16 @@
 """Adapter from Geist's completion contract to the optional mlx-lm runtime."""
 
+import importlib
 import time
 from collections.abc import Iterator
 
 from agents.models.llama_completion import strings_to_message_dict
+
+
+def _configure_thread_local_generation_stream() -> None:
+    mx = importlib.import_module("mlx.core")
+    generate_module = importlib.import_module("mlx_lm.generate")
+    generate_module.generation_stream = mx.new_thread_local_stream(mx.default_device())
 
 
 class MLXLMBackend:
@@ -24,6 +31,7 @@ class MLXLMBackend:
                 "The mlx_lm implementation requires the pinned mlx-lm dependency."
             ) from exc
 
+        _configure_thread_local_generation_stream()
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -44,10 +52,15 @@ class MLXLMBackend:
             {"role": message["role"], "content": message.get("content") or ""}
             for message in messages
         ]
+        template_options = {
+            "tokenize": False,
+            "add_generation_prompt": True,
+        }
+        if "qwen3" in self.model_id.casefold():
+            template_options["enable_thinking"] = False
         return self.tokenizer.apply_chat_template(
             normalized,
-            tokenize=False,
-            add_generation_prompt=True,
+            **template_options,
         )
 
     def stream_text(self, system_prompt: str, user_prompt: str) -> Iterator[str]:

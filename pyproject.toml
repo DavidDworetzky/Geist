@@ -27,7 +27,8 @@ dependencies = [
     "openpyxl==3.1.5",
     "chardet==5.2.0",
     # Managed local-model downloads and the private llama-server lifecycle.
-    "huggingface-hub==0.36.0",
+    "huggingface-hub==1.5.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "huggingface-hub==0.36.0; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "psutil==6.1.1",
 ]
 
@@ -52,14 +53,14 @@ postgres = [
 ]
 local-mlx = [
     "numpy==2.2.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "transformers==4.57.6; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers==5.15.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tokenizers==0.22.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "safetensors==0.5.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sentencepiece==0.2.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "einops==0.8.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tiktoken==0.9.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx==0.31.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "mlx-lm==0.29.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx-lm==0.31.3; platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 local-transformers = [
     # Torch's CPU compiler imports setuptools at runtime.
@@ -67,9 +68,11 @@ local-transformers = [
     "numpy==2.2.3",
     "torch==2.6.0",
     "accelerate==1.14.0",
-    "transformers==4.57.6",
+    "transformers==5.15.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers==4.57.6; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "tokenizers==0.22.1",
-    "safetensors==0.5.2",
+    "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "sentencepiece==0.2.0",
     "einops==0.8.1",
     "tiktoken==0.9.0",
@@ -83,9 +86,11 @@ voice = [
     "torchtune==0.6.0",
     # torchtune imports torchao at runtime but does not declare it.
     "torchao==0.10.0",
-    "transformers==4.57.6",
+    "transformers==5.15.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers==4.57.6; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "tokenizers==0.22.1",
-    "safetensors==0.5.2",
+    "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "sentencepiece==0.2.0",
     "einops==0.8.1",
     "tiktoken==0.9.0",

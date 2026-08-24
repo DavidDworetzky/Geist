@@ -2,6 +2,7 @@
 Service layer for user settings management.
 """
 import logging
+from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
@@ -224,19 +225,23 @@ class UserSettingsService:
 
         logger.info(f"Creating agent with config: {factory_config}")
 
-        # Create agent using factory
-        agent = AgentFactory.create_agent(
-            agent_type=factory_config.agent_type,
-            agent_context=agent_context,
-            model=factory_config.model,
-            endpoint=factory_config.endpoint,
-            api_key=factory_config.api_key,
-            runner_type=factory_config.runner_type,
-            device_config=factory_config.device_config,
-            backup_providers=[
+        factory_kwargs: dict[str, Any] = {
+            "agent_type": factory_config.agent_type,
+            "agent_context": agent_context,
+            "model": factory_config.model,
+            "endpoint": factory_config.endpoint,
+            "api_key": factory_config.api_key,
+            "runner_type": factory_config.runner_type,
+            "device_config": factory_config.device_config,
+            "generation_config": factory_config.generation_config,
+        }
+        if factory_config.agent_type == "online":
+            factory_kwargs["backup_providers"] = [
                 provider.model_dump() for provider in factory_config.backup_providers
-            ],
-            generation_config=factory_config.generation_config,
+            ]
+
+        agent = AgentFactory.create_agent(
+            **factory_kwargs,
         )
 
         return agent
