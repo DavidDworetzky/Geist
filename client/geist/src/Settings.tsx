@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
+import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
@@ -20,25 +21,138 @@ const agentTypeOptions = [
   { value: 'online', label: 'Online Model' }
 ];
 
+const SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'settings-llama-compute-validation';
+
+const llamaComputeSelectionSignature = (value: any): string => JSON.stringify([
+  value?.llama_backend ?? null,
+  [...(value?.llama_gpu_device_ids ?? [])].sort(),
+]);
+
+const fallbackLlamaComputeValidity = (value: any): boolean => {
+  const deviceIds = value?.llama_gpu_device_ids ?? [];
+  return value?.llama_backend !== 'gpu'
+    || (deviceIds.length > 0 && new Set(deviceIds).size === deviceIds.length);
+};
+
 const Settings: React.FC = () => {
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
   const [activeTab, setActiveTab] = useState<Tab>('general');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(() => new Set());
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [llamaComputeValidityBySignature, setLlamaComputeValidityBySignature] = useState(
+    () => new Map<string, boolean>(),
+  );
+  const [pendingLlamaComputeValidity, setPendingLlamaComputeValidity] = useState<{
+    signature: string;
+    valid: boolean;
+    validationError: string | null;
+  } | null>(null);
+  const refreshedOnMount = useRef(false);
+  const mounted = useRef(true);
+  const [refreshingOnMount, setRefreshingOnMount] = useState(true);
+  const [mountRefreshSettled, setMountRefreshSettled] = useState(false);
+  const lastMergedSettings = useRef<any>(null);
+  const hasUnsavedChanges = dirtyKeys.size > 0;
+  const llamaComputeDirty = dirtyKeys.has('llama_backend')
+    || dirtyKeys.has('llama_gpu_device_ids');
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
+  const llamaComputeSignature = llamaComputeSelectionSignature(localSettings);
+  const cachedLlamaComputeValidity = llamaComputeValidityBySignature.get(llamaComputeSignature);
+  const pendingCurrentLlamaComputeValidity = (
+    pendingLlamaComputeValidity?.signature === llamaComputeSignature
+      ? pendingLlamaComputeValidity
+      : undefined
+  );
+  const llamaComputeValidationError = pendingCurrentLlamaComputeValidity?.validationError
+    ?? null;
+  const llamaComputeValid = llamaComputeValidationError
+    ? false
+    : cachedLlamaComputeValidity
+      ?? pendingCurrentLlamaComputeValidity?.valid
+      ?? fallbackLlamaComputeValidity(localSettings);
+  const llamaComputeSaveBlocked = llamaComputeDirty && !llamaComputeValid;
+  const llamaComputeSectionMounted = activeTab === 'models'
+    && localSettings?.default_agent_type === 'local';
+  const handleLlamaComputeValidityChange = useCallback((
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => {
+    if (!settled) {
+      setPendingLlamaComputeValidity({
+        signature: llamaComputeSignature,
+        valid,
+        validationError,
+      });
+      return;
+    }
+    setLlamaComputeValidityBySignature(current => {
+      if (current.get(llamaComputeSignature) === valid) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(llamaComputeSignature, valid);
+      return next;
+    });
+    setPendingLlamaComputeValidity(current => (
+      current?.signature === llamaComputeSignature ? null : current
+    ));
+  }, [llamaComputeSignature]);
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
   } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings));
 
   useEffect(() => {
-    if (settings) {
-      setLocalSettings(settings);
+    if (!settings) return;
+    if (lastMergedSettings.current === settings) {
+      if (dirtyKeys.size === 0) {
+        setLocalSettings(settings);
+      }
+      return;
     }
-  }, [settings]);
+    lastMergedSettings.current = settings;
+    setLocalSettings((current: any) => {
+      if (!current) return settings;
+      const merged = { ...current, ...settings };
+      dirtyKeys.forEach(key => {
+        merged[key] = current[key];
+      });
+      return merged;
+    });
+  }, [settings, dirtyKeys]);
+
+  useEffect(() => {
+    if (mountRefreshSettled) {
+      setRefreshingOnMount(false);
+    }
+  }, [mountRefreshSettled]);
+
+  useEffect(() => {
+    if (loading || refreshedOnMount.current) {
+      return;
+    }
+    refreshedOnMount.current = true;
+    if (!settings) {
+      setMountRefreshSettled(true);
+      return;
+    }
+    void refetch().finally(() => {
+      if (mounted.current) {
+        setMountRefreshSettled(true);
+      }
+    });
+  }, [loading, refetch, settings]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hostDevelopmentEnabled && activeTab === 'developer') {
@@ -46,17 +160,37 @@ const Settings: React.FC = () => {
     }
   }, [activeTab, hostDevelopmentEnabled]);
 
+  useEffect(() => {
+    if (!llamaComputeSectionMounted) {
+      setPendingLlamaComputeValidity(current => (
+        current?.validationError ? current : null
+      ));
+    }
+  }, [llamaComputeSectionMounted]);
+
   const updateLocalSetting = (key: string, value: any) => {
     setLocalSettings((prev: any) => ({
       ...prev,
       [key]: value
     }));
-    setHasUnsavedChanges(true);
+    setDirtyKeys(previous => {
+      const next = new Set(previous);
+      next.add(key);
+      return next;
+    });
     setSaveStatus('idle');
   };
 
   const handleSave = async () => {
-    if (!localSettings) return;
+    if (refreshingOnMount || !localSettings) return;
+    if (llamaComputeSaveBlocked) {
+      setSaveStatus('error');
+      setStatusMessage(
+        llamaComputeValidationError
+        || 'Resolve the GPU device selection before saving.',
+      );
+      return;
+    }
 
     try {
       setSaveStatus('saving');
@@ -66,6 +200,12 @@ const Settings: React.FC = () => {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
         default_local_artifact_id: localSettings.default_local_artifact_id,
+        ...(dirtyKeys.has('llama_backend')
+          ? { llama_backend: localSettings.llama_backend }
+          : {}),
+        ...(dirtyKeys.has('llama_gpu_device_ids')
+          ? { llama_gpu_device_ids: localSettings.llama_gpu_device_ids }
+          : {}),
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
@@ -80,7 +220,7 @@ const Settings: React.FC = () => {
       };
 
       await updateSettings(updates);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('success');
       setStatusMessage('Settings saved successfully.');
 
@@ -97,13 +237,14 @@ const Settings: React.FC = () => {
   const handleCancel = () => {
     if (settings) {
       setLocalSettings(settings);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('idle');
       setStatusMessage('');
     }
   };
 
   const handleReset = async () => {
+    if (refreshingOnMount) return;
     if (!window.confirm('Are you sure you want to reset all settings to their default values? This cannot be undone.')) {
       return;
     }
@@ -112,7 +253,9 @@ const Settings: React.FC = () => {
       setSaveStatus('saving');
       setStatusMessage('');
       await resetSettings();
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
+      setLlamaComputeValidityBySignature(new Map());
+      setPendingLlamaComputeValidity(null);
       setSaveStatus('success');
       setStatusMessage('Settings reset to defaults successfully.');
 
@@ -196,7 +339,17 @@ const Settings: React.FC = () => {
           ))}
         </div>
 
-        <div className="settings-tab-panel">
+        {refreshingOnMount && (
+          <p className="settings-description settings-refresh-status" role="status">
+            Refreshing settings… You can keep editing. Save and Reset will be available when refresh finishes.
+          </p>
+        )}
+
+        <fieldset
+          className="settings-tab-panel"
+          aria-busy={refreshingOnMount}
+          aria-label="Settings controls"
+        >
           {activeTab === 'general' && (
             <section className="settings-section">
               <header className="settings-section-header">
@@ -219,6 +372,8 @@ const Settings: React.FC = () => {
               localModel={localSettings.default_local_model}
               onlineProvider={localSettings.default_online_provider}
               onlineModel={localSettings.default_online_model}
+              llamaBackend={localSettings.llama_backend}
+              llamaGpuDeviceIds={localSettings.llama_gpu_device_ids}
               onLocalModelChange={(value) => {
                 updateLocalSetting('default_local_model', value);
                 updateLocalSetting('default_local_artifact_id', null);
@@ -238,6 +393,9 @@ const Settings: React.FC = () => {
                   updateLocalSetting('default_agent_type', 'online');
                 }
               }}
+              onLlamaBackendChange={(value) => updateLocalSetting('llama_backend', value)}
+              onLlamaGpuDeviceIdsChange={(value) => updateLocalSetting('llama_gpu_device_ids', value)}
+              onLlamaComputeValidityChange={handleLlamaComputeValidityChange}
             />
           )}
 
@@ -333,18 +491,37 @@ const Settings: React.FC = () => {
           )}
 
           {activeTab === 'about' && <AboutSection />}
-        </div>
+        </fieldset>
       </div>
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
-          <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
+          {llamaComputeSaveBlocked && !llamaComputeSectionMounted && (
+            <span
+              id={SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
+              className="settings-description settings-action-validation"
+              role="alert"
+            >
+              {llamaComputeValidationError
+                || 'Resolve the GPU device selection before saving.'}
+            </span>
+          )}
+          <button className="button button-danger" onClick={handleReset} disabled={refreshingOnMount || saveStatus === 'saving'}>
             Reset to Defaults
           </button>
           <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
             Cancel
           </button>
-          <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
+          <button
+            className="button"
+            onClick={handleSave}
+            disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || llamaComputeSaveBlocked}
+            aria-describedby={llamaComputeSaveBlocked
+              ? (llamaComputeSectionMounted
+                ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID
+                : SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID)
+              : undefined}
+          >
             {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </footer>

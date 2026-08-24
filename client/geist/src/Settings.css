@@ -42,7 +42,21 @@
 }
 
 .settings-tab-panel {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
   min-height: 0;
+  padding: 0;
+}
+
+.settings-refresh-status {
+  margin-bottom: 10px;
+}
+
+.settings-action-validation {
+  max-width: 34rem;
+  margin-right: auto;
+  color: var(--geist-color-danger);
 }
 
 .settings-page-interactive .settings-actions {
@@ -645,4 +659,43 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+.llama-compute-section {
+  border-top: 1px solid var(--geist-color-border);
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+}
+
+.llama-device-picker {
+  border: 0;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.llama-device-option {
+  align-items: center;
+  border: 1px solid var(--geist-color-border);
+  border-radius: 0.65rem;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+  padding: 0.8rem;
+}
+
+.llama-device-option-disabled {
+  cursor: not-allowed;
+}
+
+.llama-device-normalize {
+  margin-top: 0.75rem;
+}
+
+.llama-device-option span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.llama-device-option small {
+  color: var(--geist-color-text-muted);
 }

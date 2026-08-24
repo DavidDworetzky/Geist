@@ -1,15 +1,25 @@
 import React, { useMemo } from 'react';
 import SettingsSelect from './SettingsSelect';
 import { useAvailableModels } from '../Hooks/useAvailableModels';
+import LlamaComputeSection from './LlamaComputeSection';
 
 interface AgentConfigSectionProps {
   agentType: string;
   localModel: string;
   onlineProvider: string;
   onlineModel: string;
+  llamaBackend: 'cpu' | 'gpu' | null;
+  llamaGpuDeviceIds: string[];
   onLocalModelChange: (value: string) => void;
   onOnlineProviderChange: (value: string) => void;
   onOnlineModelChange: (value: string) => void;
+  onLlamaBackendChange: (value: 'cpu' | 'gpu' | null) => void;
+  onLlamaGpuDeviceIdsChange: (value: string[]) => void;
+  onLlamaComputeValidityChange: (
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => void;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -32,9 +42,14 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   localModel,
   onlineProvider,
   onlineModel,
+  llamaBackend,
+  llamaGpuDeviceIds,
   onLocalModelChange,
   onOnlineProviderChange,
-  onOnlineModelChange
+  onOnlineModelChange,
+  onLlamaBackendChange,
+  onLlamaGpuDeviceIdsChange,
+  onLlamaComputeValidityChange,
 }) => {
   const {
     getModelById,
@@ -94,16 +109,25 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
       </header>
 
       {agentType === 'local' ? (
-        <SettingsSelect
-          label="Local Model"
-          value={localModel}
-          options={localModelOptions}
-          onChange={onLocalModelChange}
-          description={
-            getModelById(localModel)?.performance_note ||
-            'Select which local model to use for generation'
-          }
-        />
+        <>
+          <SettingsSelect
+            label="Local Model"
+            value={localModel}
+            options={localModelOptions}
+            onChange={onLocalModelChange}
+            description={
+              getModelById(localModel)?.performance_note ||
+              'Select which local model to use for generation'
+            }
+          />
+          <LlamaComputeSection
+            backend={llamaBackend}
+            deviceIds={llamaGpuDeviceIds}
+            onBackendChange={onLlamaBackendChange}
+            onDeviceIdsChange={onLlamaGpuDeviceIdsChange}
+            onValidityChange={onLlamaComputeValidityChange}
+          />
+        </>
       ) : (
         <>
           <SettingsSelect

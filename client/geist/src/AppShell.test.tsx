@@ -14,6 +14,8 @@ const baseSettings = {
   default_agent_type: 'local',
   default_local_model: 'Qwen/Qwen3-4B',
   default_local_artifact_id: 'qwen3-4b-q4-k-m',
+  llama_backend: 'cpu' as const,
+  llama_gpu_device_ids: [],
   default_online_model: 'gpt-4o',
   default_online_provider: 'openai',
   default_file_archives: [],

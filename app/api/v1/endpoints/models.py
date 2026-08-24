@@ -255,6 +255,13 @@ def get_local_runtime_status():
     return get_llama_server_manager().public_status()
 
 
+@router.get("/local/runtime/devices")
+def get_local_runtime_devices(refresh: bool = False):
+    """List managed llama.cpp devices and the automatic recommendation."""
+
+    return get_llama_server_manager().device_inventory(refresh=refresh)
+
+
 @router.post("/local/runtime/stop")
 def stop_local_runtime():
     manager = get_llama_server_manager()

@@ -18,6 +18,7 @@ from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
+from agents.architectures.llama_devices import llama_compute_managed_by_environment
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
@@ -156,6 +157,11 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 entry_agent is cached_agent and entry_signature == signature
                 for entry_agent, entry_signature in local_entries
             ):
+                signature = _persist_first_use_llama_backend(
+                    cached_agent,
+                    factory_config,
+                    signature,
+                )
                 _set_local_agent_cache(cached_agent, signature)
                 return cached_agent
 
@@ -164,6 +170,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
+        signature = _persist_first_use_llama_backend(new_agent, factory_config, signature)
         _set_local_agent_cache(new_agent, signature)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
@@ -180,6 +187,51 @@ def _get_local_agent_factory_config() -> AgentFactoryConfig:
         settings,
         AgentConfigRequest(agent_type="local"),
     )
+
+
+def _persist_first_use_llama_backend(
+    agent,
+    factory_config: AgentFactoryConfig,
+    signature: str,
+) -> str:
+    if (
+        factory_config.device_config.get("llama_backend") != "auto"
+        or _llama_selection_managed_by_environment()
+    ):
+        return signature
+
+    runtime_selection = getattr(agent, "runtime_selection", None)
+    selection = runtime_selection() if callable(runtime_selection) else None
+    if selection is None:
+        return signature
+
+    backend, device_ids = selection
+    detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
+    detection_error = detection_error_reader() if callable(detection_error_reader) else None
+    if backend == "cpu" and detection_error is not None:
+        logger.warning(
+            "Keeping llama.cpp compute selection automatic after device discovery failed: %s",
+            detection_error,
+        )
+        return signature
+
+    try:
+        default_user = get_default_user()
+        persisted = UserSettingsService.persist_detected_llama_backend(
+            default_user.user_id,
+            backend,
+            device_ids,
+        )
+        if persisted is not None and persisted.llama_backend is not None:
+            # A user can save a manual choice while automatic startup is in
+            # flight. Cache this agent under what it actually loaded; a
+            # different persisted choice will force a restart on the next use.
+            factory_config.device_config["llama_backend"] = backend
+            factory_config.device_config["llama_gpu_device_ids"] = list(device_ids)
+            return _local_agent_configuration_signature(factory_config)
+    except Exception:
+        logger.exception("Unable to persist detected llama.cpp compute backend")
+    return signature
 
 
 def _local_agent_configuration_signature(factory_config: AgentFactoryConfig) -> str:
@@ -659,7 +711,9 @@ def _configured_inference_info() -> dict[str, str | None]:
     except Exception as error:
         logger.warning("Unable to read configured inference settings: %s", error)
         fallback_runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
+        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(
+            DEFAULT_LOCAL_MODEL
+        )
         return {
             "mode": "local",
             "engine": fallback_runner_type,
@@ -693,14 +747,26 @@ def _configured_inference_info() -> dict[str, str | None]:
         "engine": runner_type,
         "model": factory_config.model,
         "provider": None,
-        "acceleration": _llama_acceleration(runner_type),
+        "acceleration": _llama_acceleration(runner_type, settings.llama_backend),
     }
 
 
-def _llama_acceleration(runner_type: str) -> str | None:
+def _llama_acceleration(
+    runner_type: str,
+    selected_backend: str | None = None,
+) -> str | None:
     if runner_type != "llama_server":
         return None
-    return (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    acceleration = (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    if acceleration != "auto":
+        return acceleration
+    if selected_backend == "gpu":
+        return "vulkan"
+    return selected_backend or "auto"
+
+
+def _llama_selection_managed_by_environment() -> bool:
+    return llama_compute_managed_by_environment(os.environ)
 
 
 def _parse_agent_type(agent_type: str) -> AgentType:

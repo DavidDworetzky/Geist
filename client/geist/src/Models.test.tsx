@@ -23,6 +23,8 @@ jest.mock('./Hooks/useUserSettings', () => ({
       default_agent_type: 'local',
       default_local_model: 'legacy-model',
       default_local_artifact_id: null,
+      llama_backend: null,
+      llama_gpu_device_ids: [],
       default_online_model: 'gpt-4',
       default_online_provider: 'openai',
     },

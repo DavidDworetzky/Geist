@@ -60,7 +60,7 @@ async def get_user_settings_by_id(user_id: int):
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.put("/", response_model=UserSettingsResponse)
-async def update_user_settings(
+def update_user_settings(
     updates: UserSettingsUpdate,
     current_user = Depends(get_current_user)
 ):
@@ -94,7 +94,7 @@ async def update_user_settings(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.put("/{user_id}", response_model=UserSettingsResponse)
-async def update_user_settings_by_id(
+def update_user_settings_by_id(
     user_id: int,
     updates: UserSettingsUpdate
 ):
@@ -135,6 +135,8 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_agent_type="local",
             default_local_model=default_local_model_id(),
             default_local_artifact_id=None,
+            llama_backend=None,
+            llama_gpu_device_ids=[],
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
@@ -148,7 +150,11 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             ui_preferences={}
         )
 
-        settings = UserSettingsService.update_user_settings_by_id(current_user.user_id, default_updates)
+        settings = UserSettingsService.update_user_settings_by_id(
+            current_user.user_id,
+            default_updates,
+            allow_llama_redetection=True,
+        )
         if not settings:
             # Create default settings if user doesn't exist
             settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)

@@ -11,12 +11,17 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from agents.architectures.llama_devices import (
+    LlamaDeviceService,
+    get_llama_device_service,
+    llama_server_filename,
+)
 from agents.architectures.llama_server_process_platform import (
     attach_process_lifetime,
     close_process_lifetime,
@@ -35,6 +40,10 @@ class LlamaServerConnection:
     backend: str
     model_id: str
     model_path: str
+    device_ids: tuple[str, ...] = ()
+    selection_backend: str = "auto"
+    selection_device_ids: tuple[str, ...] = ()
+    detection_error: str | None = None
 
 
 @dataclass
@@ -42,6 +51,7 @@ class LlamaServerState:
     status: str = "stopped"
     backend: str | None = None
     model_id: str | None = None
+    device_ids: list[str] = field(default_factory=list)
     detail: str | None = None
 
     def public_dict(self) -> dict[str, Any]:
@@ -52,8 +62,13 @@ ProcessFactory = Callable[..., subprocess.Popen[str]]
 HealthProbe = Callable[[str, str, subprocess.Popen[str], float], None]
 
 
-def _server_filename() -> str:
-    return "llama-server.exe" if os.name == "nt" else "llama-server"
+@dataclass(frozen=True)
+class LlamaServerCandidate:
+    backend: str
+    executable: Path
+    runtime_device_ids: tuple[str, ...] = ()
+    public_device_ids: tuple[str, ...] = ()
+    detection_error: str | None = None
 
 
 def _free_loopback_port() -> int:
@@ -72,11 +87,18 @@ class LlamaServerManager:
         process_factory: ProcessFactory = subprocess.Popen,
         health_probe: HealthProbe | None = None,
         port_factory: Callable[[], int] = _free_loopback_port,
+        device_service: LlamaDeviceService | None = None,
     ) -> None:
+        uses_process_environment = environment is None
         self.environment = environment if environment is not None else os.environ
         self._process_factory = process_factory
         self._health_probe = health_probe or self._default_health_probe
         self._port_factory = port_factory
+        self._device_service = device_service or (
+            get_llama_device_service()
+            if uses_process_environment
+            else LlamaDeviceService(environment=self.environment)
+        )
         self._lock = threading.RLock()
         self._start_lock = threading.Lock()
         self._stop_epoch = 0
@@ -92,10 +114,38 @@ class LlamaServerManager:
                 self._state.detail = f"llama-server exited with code {self._process.returncode}"
             return self._state.public_dict()
 
-    def _candidate_executables(self) -> list[tuple[str, Path]]:
+    def device_inventory(self, *, refresh: bool = False) -> dict[str, Any]:
+        return self._device_service.inventory(
+            refresh=refresh,
+            allow_in_progress=True,
+        ).public_dict()
+
+    def _selection_identity(
+        self,
+        backend: str,
+        device_ids: tuple[str, ...],
+    ) -> tuple[str, tuple[str, ...]]:
+        """Remove user choices that cannot affect an operator-managed runtime."""
+
+        if self.environment.get("GEIST_LLAMA_SERVER_PATH"):
+            return "environment", ()
+        acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
+        if acceleration == "cpu":
+            return "cpu", ()
+        if acceleration == "vulkan":
+            return "gpu", ()
+        if backend == "cpu":
+            return "cpu", ()
+        return backend, device_ids
+
+    def _candidate_executables(
+        self,
+        backend: str,
+        device_ids: tuple[str, ...],
+    ) -> list[LlamaServerCandidate]:
         explicit = self.environment.get("GEIST_LLAMA_SERVER_PATH")
         if explicit:
-            return [("explicit", Path(explicit).expanduser().resolve())]
+            return [LlamaServerCandidate("explicit", Path(explicit).expanduser().resolve())]
 
         root_value = self.environment.get("GEIST_LLAMA_RUNTIME_ROOT")
         if not root_value:
@@ -107,16 +157,82 @@ class LlamaServerManager:
         acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
         if acceleration not in {"auto", "cpu", "vulkan"}:
             raise ValueError("GEIST_LLAMA_ACCELERATION must be auto, cpu, or vulkan")
-        order = ["vulkan", "cpu"] if acceleration == "auto" else [acceleration]
-        candidates = [(backend, root / backend / _server_filename()) for backend in order]
-        existing = [(backend, path) for backend, path in candidates if path.is_file()]
+
+        requested_backend = backend.strip().lower()
+        if requested_backend not in {"auto", "cpu", "gpu"}:
+            raise ValueError("llama.cpp backend must be auto, cpu, or gpu")
+        forced_backend = {"cpu": "cpu", "vulkan": "gpu"}.get(acceleration)
+        effective_backend = forced_backend or requested_backend
+        filename = llama_server_filename()
+
+        candidates: list[LlamaServerCandidate]
+        if effective_backend == "cpu":
+            candidates = [LlamaServerCandidate("cpu", root / "cpu" / filename)]
+        elif effective_backend == "gpu":
+            if not device_ids and forced_backend is None:
+                raise ValueError("Select at least one llama.cpp GPU device")
+            runtime_ids = self._device_service.resolve_runtime_ids(device_ids) if device_ids else ()
+            candidates = [
+                LlamaServerCandidate(
+                    "vulkan",
+                    root / "vulkan" / filename,
+                    runtime_ids,
+                    device_ids,
+                )
+            ]
+        else:
+            inventory = self._device_service.inventory()
+            if inventory.recommended_backend == "gpu" and inventory.recommended_device_ids:
+                recommended_ids = inventory.recommended_device_ids
+                candidates = [
+                    LlamaServerCandidate(
+                        "vulkan",
+                        root / "vulkan" / filename,
+                        inventory.resolve_runtime_ids(recommended_ids),
+                        recommended_ids,
+                    ),
+                    LlamaServerCandidate("cpu", root / "cpu" / filename),
+                ]
+            else:
+                candidates = [
+                    LlamaServerCandidate(
+                        "cpu",
+                        root / "cpu" / filename,
+                        detection_error=inventory.selection_detection_error,
+                    )
+                ]
+
+        if (
+            effective_backend == "auto"
+            and len(candidates) > 1
+            and candidates[-1].executable.is_file()
+        ):
+            # Let the startup loop observe a preferred runtime that vanished
+            # after discovery so its exact error is attached to the available
+            # fallback. Otherwise retain the fail-closed executable filtering.
+            return candidates
+
+        existing = [candidate for candidate in candidates if candidate.executable.is_file()]
         if not existing:
-            expected = ", ".join(str(path) for _backend, path in candidates)
+            expected = ", ".join(str(candidate.executable) for candidate in candidates)
             raise FileNotFoundError(f"No llama-server executable found; checked {expected}")
         return existing
 
-    def start(self, model_path: str | Path, model_id: str) -> LlamaServerConnection:
+    def start(
+        self,
+        model_path: str | Path,
+        model_id: str,
+        *,
+        backend: str = "auto",
+        device_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> LlamaServerConnection:
         resolved_model = Path(model_path).expanduser().resolve(strict=True)
+        requested_backend = backend.strip().lower()
+        requested_device_ids = tuple(device_ids or ())
+        selection_backend, selection_device_ids = self._selection_identity(
+            requested_backend,
+            requested_device_ids,
+        )
         with self._lock:
             requested_epoch = self._stop_epoch
 
@@ -132,45 +248,72 @@ class LlamaServerManager:
                     and self._connection is not None
                     and self._connection.model_id == model_id
                     and self._connection.model_path == str(resolved_model)
+                    and self._connection.selection_backend == selection_backend
+                    and self._connection.selection_device_ids == selection_device_ids
                 ):
                     return self._connection
 
                 self._stop_locked()
                 self._state = LlamaServerState(status="starting", model_id=model_id)
 
+            try:
+                candidates = self._candidate_executables(
+                    selection_backend,
+                    selection_device_ids,
+                )
+            except Exception as error:
+                with self._lock:
+                    if requested_epoch != self._stop_epoch:
+                        raise RuntimeError("llama-server startup was cancelled") from error
+                    self._state = LlamaServerState(
+                        status="error",
+                        model_id=model_id,
+                        detail=str(error),
+                    )
+                raise
+
             errors: list[str] = []
-            for backend, executable in self._candidate_executables():
+            prior_startup_error: str | None = None
+            for candidate in candidates:
+                startup_candidate = (
+                    replace(candidate, detection_error=prior_startup_error)
+                    if prior_startup_error is not None and candidate.detection_error is None
+                    else candidate
+                )
                 try:
                     return self._start_candidate(
-                        executable,
-                        backend,
+                        startup_candidate,
                         resolved_model,
                         model_id,
                         requested_epoch,
+                        selection_backend,
+                        selection_device_ids,
                     )
                 except Exception as error:
                     with self._lock:
                         if requested_epoch != self._stop_epoch:
                             raise RuntimeError("llama-server startup was cancelled") from error
                         self._stop_locked()
-                    errors.append(f"{backend}: {error}")
-                    logger.warning("llama-server %s startup failed: %s", backend, error)
+                    prior_startup_error = str(error)
+                    errors.append(f"{candidate.backend}: {error}")
+                    logger.warning("llama-server %s startup failed: %s", candidate.backend, error)
 
             detail = "; ".join(errors) or "No llama-server runtime candidate was available"
             with self._lock:
-                self._state = LlamaServerState(
-                    status="error", model_id=model_id, detail=detail
-                )
+                self._state = LlamaServerState(status="error", model_id=model_id, detail=detail)
             raise RuntimeError(f"Unable to start llama-server ({detail})")
 
     def _start_candidate(
         self,
-        executable: Path,
-        backend: str,
+        candidate: LlamaServerCandidate,
         model_path: Path,
         model_id: str,
         start_epoch: int,
+        selection_backend: str,
+        selection_device_ids: tuple[str, ...],
     ) -> LlamaServerConnection:
+        executable = candidate.executable
+        backend = candidate.backend
         if not executable.is_file():
             raise FileNotFoundError(f"llama-server executable does not exist: {executable}")
         port = self._port_factory()
@@ -197,6 +340,8 @@ class LlamaServerManager:
             if not gpu_layers.isdigit():
                 raise ValueError("GEIST_LLAMA_GPU_LAYERS must be a non-negative integer")
             args.extend(["--n-gpu-layers", gpu_layers])
+            if candidate.runtime_device_ids:
+                args.extend(["--device", ",".join(candidate.runtime_device_ids)])
         popen_options: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.PIPE,
@@ -220,6 +365,7 @@ class LlamaServerManager:
             self._process = process
             self._process_lifetime_handle = process_lifetime_handle
             self._state.backend = backend
+            self._state.device_ids = list(candidate.public_device_ids)
         self._drain_output(process, api_key)
         timeout = float(self.environment.get("GEIST_LLAMA_STARTUP_TIMEOUT_SECONDS", "180"))
         base_url = f"http://127.0.0.1:{port}"
@@ -237,10 +383,18 @@ class LlamaServerManager:
                 backend,
                 model_id,
                 str(model_path),
+                candidate.public_device_ids,
+                selection_backend,
+                selection_device_ids,
+                candidate.detection_error,
             )
             self._connection = connection
             self._state = LlamaServerState(
-                status="ready", backend=backend, model_id=model_id, detail=None
+                status="ready",
+                backend=backend,
+                model_id=model_id,
+                device_ids=list(candidate.public_device_ids),
+                detail=None,
             )
             return connection
 

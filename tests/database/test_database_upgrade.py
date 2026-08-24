@@ -63,6 +63,8 @@ def test_unversioned_pre_artifact_schema_is_adopted_at_previous_revision():
         expected_metadata,
         Column("user_settings_id", Integer, primary_key=True),
         Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
     )
     engine = create_engine("sqlite:///:memory:")
     with engine.begin() as connection:
@@ -80,6 +82,8 @@ def test_unversioned_schema_with_any_additional_gap_is_rejected():
         expected_metadata,
         Column("user_settings_id", Integer, primary_key=True),
         Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
         Column("another_required_column", String),
     )
     engine = create_engine("sqlite:///:memory:")
@@ -90,3 +94,26 @@ def test_unversioned_schema_with_any_additional_gap_is_rejected():
 
     with pytest.raises(RuntimeError, match="another_required_column"):
         _classify_legacy_schema(expected_metadata, engine)
+
+
+def test_unversioned_pre_compute_schema_is_adopted_at_previous_head():
+    expected_metadata = MetaData()
+    Table(
+        "user_settings",
+        expected_metadata,
+        Column("user_settings_id", Integer, primary_key=True),
+        Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE user_settings ("
+                "user_settings_id INTEGER PRIMARY KEY, "
+                "default_local_artifact_id TEXT)"
+            )
+        )
+
+    assert _classify_legacy_schema(expected_metadata, engine) == "pre_llama_compute"

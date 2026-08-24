@@ -16,6 +16,11 @@ PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]
 MIGRATIONS_PATH = PROJECT_ROOT / "migrations"
 PRE_LOCAL_ARTIFACT_REVISION = "c3a1f5e7d9b2"
 PRE_LOCAL_ARTIFACT_GAP = ("user_settings", "default_local_artifact_id")
+PRE_LLAMA_COMPUTE_REVISION = "f5c8a1d3e7b9"
+LLAMA_COMPUTE_GAPS = {
+    ("user_settings", "llama_backend"),
+    ("user_settings", "llama_gpu_device_ids"),
+}
 
 
 def upgrade_database() -> None:
@@ -59,6 +64,13 @@ def upgrade_database() -> None:
             )
             command.stamp(alembic_config, PRE_LOCAL_ARTIFACT_REVISION)
             command.upgrade(alembic_config, "head")
+        elif schema_kind == "pre_llama_compute":
+            logger.info(
+                "Adopting an unversioned legacy Geist database at %s before upgrading",
+                PRE_LLAMA_COMPUTE_REVISION,
+            )
+            command.stamp(alembic_config, PRE_LLAMA_COMPUTE_REVISION)
+            command.upgrade(alembic_config, "head")
         else:
             logger.info("Adopting an unversioned legacy Geist database at Alembic head")
             command.stamp(alembic_config, "head")
@@ -92,7 +104,7 @@ def _classify_legacy_schema(metadata, engine) -> str:
     """Recognize current metadata or the one safe pre-artifact legacy shape."""
 
     schema_kind, problems = _inspect_legacy_schema(metadata, engine)
-    if schema_kind in {"current", "pre_local_artifact"}:
+    if schema_kind in {"current", "pre_local_artifact", "pre_llama_compute"}:
         return schema_kind
     _raise_legacy_schema_error(problems)
     raise AssertionError("unreachable")
@@ -119,7 +131,9 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
 
     if not problems:
         return "current", problems
-    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP} and len(problems) == 1:
+    if missing_column_gaps == LLAMA_COMPUTE_GAPS and len(problems) == 1:
+        return "pre_llama_compute", problems
+    if missing_column_gaps == LLAMA_COMPUTE_GAPS | {PRE_LOCAL_ARTIFACT_GAP} and len(problems) == 1:
         return "pre_local_artifact", problems
     return "unknown", problems
 

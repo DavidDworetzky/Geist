@@ -2,8 +2,9 @@
 DTO models for user settings API.
 """
 
+import sys
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,13 @@ class UserSettingsBase(BaseModel):
     default_local_artifact_id: str | None = Field(
         default=None,
         description="Concrete managed artifact selected for the default local model",
+    )
+    llama_backend: Literal["cpu", "gpu"] | None = Field(
+        default=None,
+        description="Managed llama.cpp compute backend; null triggers first-use detection",
+    )
+    llama_gpu_device_ids: list[str] = Field(
+        default=[], description="Selected managed llama.cpp GPU device IDs"
     )
     default_online_model: str = Field(default="gpt-4", description="Default online model")
     default_online_provider: str = Field(default="openai", description="Default online provider")
@@ -53,6 +61,8 @@ class UserSettingsUpdate(BaseModel):
     default_agent_type: str | None = None
     default_local_model: str | None = None
     default_local_artifact_id: str | None = None
+    llama_backend: Literal["cpu", "gpu"] | None = None
+    llama_gpu_device_ids: list[str] | None = None
     default_online_model: str | None = None
     default_online_provider: str | None = None
     default_file_archives: list[int] | None = None
@@ -136,7 +146,10 @@ class AgentFactoryConfig(BaseModel):
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type
             artifact_id = overrides.artifact_id or settings.default_local_artifact_id
-            device_config = {"artifact_id": artifact_id} if artifact_id else {}
+            device_config: dict[str, Any] = {"artifact_id": artifact_id} if artifact_id else {}
+            if sys.platform in {"win32", "linux"}:
+                device_config["llama_backend"] = settings.llama_backend or "auto"
+                device_config["llama_gpu_device_ids"] = settings.llama_gpu_device_ids
             endpoint = None
             api_key = None
         else:  # online
@@ -149,7 +162,12 @@ class AgentFactoryConfig(BaseModel):
                 endpoint = overrides.endpoint or "https://api.anthropic.com/v1/messages"
             else:
                 from agents.model_catalog import get_provider_endpoint
-                provider = "xai" if settings.default_online_provider == "grok" else settings.default_online_provider
+
+                provider = (
+                    "xai"
+                    if settings.default_online_provider == "grok"
+                    else settings.default_online_provider
+                )
                 endpoint = overrides.endpoint or get_provider_endpoint(provider)
             api_key = None  # Will be retrieved from environment
 
@@ -160,8 +178,12 @@ class AgentFactoryConfig(BaseModel):
 
         # Generation config
         generation_config = {
-            "max_tokens": overrides.max_tokens if overrides.max_tokens is not None else settings.default_max_tokens,
-            "temperature": overrides.temperature if overrides.temperature is not None else settings.default_temperature,
+            "max_tokens": overrides.max_tokens
+            if overrides.max_tokens is not None
+            else settings.default_max_tokens,
+            "temperature": overrides.temperature
+            if overrides.temperature is not None
+            else settings.default_temperature,
             "top_p": overrides.top_p if overrides.top_p is not None else settings.default_top_p,
             "frequency_penalty": (
                 overrides.frequency_penalty

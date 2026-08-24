@@ -1,9 +1,10 @@
 """
 UserSettings database model for storing user preferences and default agent configurations.
 """
+
 import datetime
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
@@ -16,17 +17,22 @@ class UserSettings(Base):
     """
     Database model for user settings and agent preferences.
     """
-    __tablename__ = 'user_settings'
+
+    __tablename__ = "user_settings"
 
     user_settings_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
+    user_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=False)
 
     # Default agent preferences
-    default_agent_type = Column(String, default='local')  # 'local' or 'online'
+    default_agent_type = Column(String, default="local")  # 'local' or 'online'
     default_local_model = Column(String, default=default_local_model_id)
     default_local_artifact_id = Column(String, nullable=True)
-    default_online_model = Column(String, default='gpt-4')
-    default_online_provider = Column(String, default='openai')  # 'openai', 'anthropic', 'groq', 'grok'
+    llama_backend = Column(String, nullable=True)
+    llama_gpu_device_ids = Column(JSON, default=list)
+    default_online_model = Column(String, default="gpt-4")
+    default_online_provider = Column(
+        String, default="openai"
+    )  # 'openai', 'anthropic', 'groq', 'grok'
 
     # RAG and file settings
     default_file_archives = Column(JSON, default=list)  # List of file IDs to search by default
@@ -47,21 +53,27 @@ class UserSettings(Base):
 
     # Timestamps
     create_date = Column(DateTime, default=datetime.datetime.utcnow)
-    update_date = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    update_date = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
 
     # Relationships
     user = relationship("GeistUser", backref="settings")
+
 
 @dataclass
 class UserSettingsModel:
     """
     Data model for user settings.
     """
+
     user_settings_id: int
     user_id: int
     default_agent_type: str
     default_local_model: str
     default_local_artifact_id: str | None
+    llama_backend: Literal["cpu", "gpu"] | None
+    llama_gpu_device_ids: list[str]
     default_online_model: str
     default_online_provider: str
     default_file_archives: list[int]
@@ -75,6 +87,7 @@ class UserSettingsModel:
     ui_preferences: dict[str, Any]
     create_date: datetime.datetime
     update_date: datetime.datetime
+
 
 def get_user_settings(user_id: int) -> UserSettingsModel | None:
     """
@@ -95,6 +108,8 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 default_agent_type=settings.default_agent_type,
                 default_local_model=settings.default_local_model,
                 default_local_artifact_id=settings.default_local_artifact_id,
+                llama_backend=settings.llama_backend,
+                llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
                 default_online_model=settings.default_online_model,
                 default_online_provider=settings.default_online_provider,
                 default_file_archives=settings.default_file_archives or [],
@@ -107,9 +122,10 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 backup_providers=settings.backup_providers or [],
                 ui_preferences=settings.ui_preferences or {},
                 create_date=settings.create_date,
-                update_date=settings.update_date
+                update_date=settings.update_date,
             )
         return None
+
 
 def create_default_user_settings(user_id: int) -> UserSettingsModel:
     """
@@ -124,11 +140,13 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
     with SessionLocal() as session:
         settings = UserSettings(
             user_id=user_id,
-            default_agent_type='local',
+            default_agent_type="local",
             default_local_model=default_local_model_id(),
             default_local_artifact_id=None,
-            default_online_model='gpt-4',
-            default_online_provider='openai',
+            llama_backend=None,
+            llama_gpu_device_ids=[],
+            default_online_model="gpt-4",
+            default_online_provider="openai",
             default_file_archives=[],
             enable_rag_by_default=True,
             default_max_tokens=4096,
@@ -137,7 +155,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_frequency_penalty=0.0,
             default_presence_penalty=0.0,
             backup_providers=[],
-            ui_preferences={}
+            ui_preferences={},
         )
         session.add(settings)
         session.commit()
@@ -149,6 +167,8 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_agent_type=settings.default_agent_type,
             default_local_model=settings.default_local_model,
             default_local_artifact_id=settings.default_local_artifact_id,
+            llama_backend=settings.llama_backend,
+            llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
@@ -161,8 +181,9 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             backup_providers=settings.backup_providers or [],
             ui_preferences=settings.ui_preferences or {},
             create_date=settings.create_date,
-            update_date=settings.update_date
+            update_date=settings.update_date,
         )
+
 
 def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsModel | None:
     """
@@ -195,6 +216,8 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             default_agent_type=settings.default_agent_type,
             default_local_model=settings.default_local_model,
             default_local_artifact_id=settings.default_local_artifact_id,
+            llama_backend=settings.llama_backend,
+            llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
@@ -207,8 +230,36 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             backup_providers=settings.backup_providers or [],
             ui_preferences=settings.ui_preferences or {},
             create_date=settings.create_date,
-            update_date=settings.update_date
+            update_date=settings.update_date,
         )
+
+
+def update_detected_llama_backend_if_unset(
+    user_id: int,
+    backend: Literal["cpu", "gpu"],
+    device_ids: list[str],
+) -> bool:
+    """Atomically persist first-use detection without replacing a user choice."""
+
+    with SessionLocal() as session:
+        updated = (
+            session.query(UserSettings)
+            .filter(
+                UserSettings.user_id == user_id,
+                UserSettings.llama_backend.is_(None),
+            )
+            .update(
+                {
+                    UserSettings.llama_backend: backend,
+                    UserSettings.llama_gpu_device_ids: device_ids,
+                    UserSettings.update_date: datetime.datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        session.commit()
+        return updated == 1
+
 
 def get_or_create_user_settings(user_id: int) -> UserSettingsModel:
     """

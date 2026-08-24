@@ -1,6 +1,7 @@
 """
 Agent factory for instantiating LocalAgent and OnlineAgent instances.
 """
+
 import logging
 import os
 import platform
@@ -14,6 +15,7 @@ from agents.model_ids import canonicalize_local_model_id
 
 logger = logging.getLogger(__name__)
 
+
 class AgentFactory:
     """Factory class for creating agent instances."""
 
@@ -26,7 +28,7 @@ class AgentFactory:
         api_key: str | None = None,
         runner_type: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """
         Create an agent instance based on the specified type and configuration.
@@ -52,7 +54,7 @@ class AgentFactory:
                 model=model,
                 runner_type=runner_type,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         elif agent_type == "online":
             return AgentFactory._create_online_agent(
@@ -61,10 +63,11 @@ class AgentFactory:
                 endpoint=endpoint,
                 api_key=api_key,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}. Must be 'local' or 'online'")
+
     @staticmethod
     def _infer_runner_type(model: str) -> str:
         """Infer a backend from catalog capabilities, not provider branding."""
@@ -101,7 +104,7 @@ class AgentFactory:
         model: str | None = None,
         runner_type: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """
         Create a LocalAgent instance.
@@ -125,6 +128,15 @@ class AgentFactory:
             # Auto-detect runner type from model ID when not explicitly set
             if not runner_type:
                 runner_type = configured_runner or AgentFactory._infer_runner_type(model)
+
+            if runner_type != "llama_server":
+                device_config = kwargs.pop("device_config", None) or {}
+                # app/main.py inspects this caller-owned mapping after creation
+                # to recognize non-llama runners and skip llama persistence.
+                device_config.pop("llama_backend", None)
+                device_config.pop("llama_gpu_device_ids", None)
+                if device_config:
+                    kwargs["device_config"] = device_config
 
             if not runner_was_explicit and runner_type == "mlx_llama":
                 from agents.model_catalog import infer_model_spec
@@ -160,7 +172,7 @@ class AgentFactory:
                 model_id=model,
                 runner_type=runner_type,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         except ImportError as e:
             logger.error(f"Failed to import LocalAgent: {e}")
@@ -173,7 +185,7 @@ class AgentFactory:
         endpoint: str | None = None,
         api_key: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """Create an OnlineAgent instance."""
         try:
@@ -202,7 +214,7 @@ class AgentFactory:
                 model=model,
                 api_key=api_key,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         except ImportError as e:
             logger.error(f"Failed to import OnlineAgent: {e}")
@@ -233,7 +245,17 @@ class AgentFactory:
             api_key=config.get("api_key"),
             runner_type=config.get("runner_type"),
             as_subprocess=config.get("as_subprocess", False),
-            **{k: v for k, v in config.items() if k not in [
-                "agent_type", "model", "endpoint", "api_key", "runner_type", "as_subprocess"
-            ]}
+            **{
+                k: v
+                for k, v in config.items()
+                if k
+                not in [
+                    "agent_type",
+                    "model",
+                    "endpoint",
+                    "api_key",
+                    "runner_type",
+                    "as_subprocess",
+                ]
+            },
         )

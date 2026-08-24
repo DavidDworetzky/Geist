@@ -1,7 +1,9 @@
 """
 Service layer for user settings management.
 """
+
 import logging
+from typing import Literal
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
@@ -9,8 +11,10 @@ from agents.factory import AgentFactory
 from agents.model_ids import canonicalize_local_model_id
 from app.models.database.geist_user import get_default_user
 from app.models.database.user_settings import (
+    UserSettingsModel,
     get_or_create_user_settings,
     get_user_settings,
+    update_detected_llama_backend_if_unset,
     update_user_settings,
 )
 from app.models.user_settings import (
@@ -22,6 +26,14 @@ from app.models.user_settings import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSettingsResponse:
+    response = UserSettingsResponse.model_validate(settings_model)
+    return response.model_copy(
+        update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
+    )
+
 
 class UserSettingsService:
     """Service for managing user settings and agent configuration."""
@@ -39,26 +51,7 @@ class UserSettingsService:
         """
         settings_model = get_user_settings(user_id)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date
-            )
+            return _to_user_settings_response(settings_model)
         return None
 
     @staticmethod
@@ -73,29 +66,15 @@ class UserSettingsService:
             UserSettingsResponse
         """
         settings_model = get_or_create_user_settings(user_id)
-        return UserSettingsResponse(
-            user_settings_id=settings_model.user_settings_id,
-            user_id=settings_model.user_id,
-            default_agent_type=settings_model.default_agent_type,
-            default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-            default_local_artifact_id=settings_model.default_local_artifact_id,
-            default_online_model=settings_model.default_online_model,
-            default_online_provider=settings_model.default_online_provider,
-            default_file_archives=settings_model.default_file_archives,
-            enable_rag_by_default=settings_model.enable_rag_by_default,
-            default_max_tokens=settings_model.default_max_tokens,
-            default_temperature=settings_model.default_temperature,
-            default_top_p=settings_model.default_top_p,
-            default_frequency_penalty=settings_model.default_frequency_penalty,
-            default_presence_penalty=settings_model.default_presence_penalty,
-            backup_providers=settings_model.backup_providers,
-            ui_preferences=settings_model.ui_preferences,
-            create_date=settings_model.create_date,
-            update_date=settings_model.update_date
-        )
+        return _to_user_settings_response(settings_model)
 
     @staticmethod
-    def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> UserSettingsResponse | None:
+    def update_user_settings_by_id(
+        user_id: int,
+        updates: UserSettingsUpdate,
+        *,
+        allow_llama_redetection: bool = False,
+    ) -> UserSettingsResponse | None:
         """
         Update user settings.
 
@@ -119,6 +98,52 @@ class UserSettingsService:
             )
 
         current_local_model = canonicalize_local_model_id(current_settings.default_local_model)
+
+        compute_keys = {"llama_backend", "llama_gpu_device_ids"}
+        compute_supplied = any(key in update_dict for key in compute_keys)
+        compute_changed = any(
+            key in update_dict and update_dict[key] != getattr(current_settings, key)
+            for key in compute_keys
+        )
+        next_backend = update_dict.get("llama_backend", current_settings.llama_backend)
+        next_device_ids = update_dict.get(
+            "llama_gpu_device_ids", current_settings.llama_gpu_device_ids
+        )
+        if compute_changed or (compute_supplied and next_backend == "gpu"):
+            if (
+                next_backend is None
+                and current_settings.llama_backend is not None
+                and not allow_llama_redetection
+            ):
+                raise ValueError(
+                    "llama.cpp backend detection can only be reset with Reset to Defaults"
+                )
+            if next_backend is None:
+                if next_device_ids and not allow_llama_redetection:
+                    raise ValueError("Pending llama.cpp detection cannot select GPU devices")
+                update_dict["llama_gpu_device_ids"] = []
+
+            resetting_detection = allow_llama_redetection and next_backend is None
+            if not resetting_detection:
+                from agents.architectures.llama_devices import get_llama_device_service
+
+                inventory = get_llama_device_service().inventory()
+                if inventory.managed_by_environment:
+                    raise ValueError("llama.cpp compute selection is managed by the environment")
+                if next_backend == "gpu":
+                    if not next_device_ids:
+                        raise ValueError("Select at least one llama.cpp GPU device")
+                    if len(set(next_device_ids)) != len(next_device_ids):
+                        raise ValueError("llama.cpp GPU device selections must be unique")
+                    if not inventory.available:
+                        raise ValueError("Managed llama.cpp GPU selection is unavailable")
+                    # Validate against the exact snapshot used for the rest of this
+                    # update. Its resolver also accepts unambiguous compatibility
+                    # IDs from settings written before stable hardware IDs existed.
+                    canonical_device_ids = inventory.resolve_device_ids(next_device_ids)
+                    update_dict["llama_gpu_device_ids"] = list(canonical_device_ids)
+                elif next_backend == "cpu":
+                    update_dict["llama_gpu_device_ids"] = []
         if (
             "default_local_model" in update_dict
             and "default_local_artifact_id" not in update_dict
@@ -130,10 +155,7 @@ class UserSettingsService:
         if selected_artifact_id:
             from app.services.local_models import get_local_model_manager
 
-            selected_model = (
-                update_dict.get("default_local_model")
-                or current_local_model
-            )
+            selected_model = update_dict.get("default_local_model") or current_local_model
             manager = get_local_model_manager()
             try:
                 artifact = manager.get_artifact(str(selected_artifact_id))
@@ -151,42 +173,45 @@ class UserSettingsService:
 
         # Backend validation: auto-infer agent_type based on model/provider changes
         # This acts as a safety net if the frontend doesn't set agent_type correctly
-        if 'default_agent_type' not in update_dict or update_dict.get('default_agent_type') is None:
+        if "default_agent_type" not in update_dict or update_dict.get("default_agent_type") is None:
             # If online model or online provider is being set, infer agent_type as 'online'
-            if 'default_online_model' in update_dict or 'default_online_provider' in update_dict:
-                provider = update_dict.get('default_online_provider', '')
+            if "default_online_model" in update_dict or "default_online_provider" in update_dict:
+                provider = update_dict.get("default_online_provider", "")
                 # Only set to online if provider is not 'offline'
-                if provider != 'offline':
-                    update_dict['default_agent_type'] = 'online'
-                    logger.info("Auto-inferred agent_type='online' based on online model/provider update")
+                if provider != "offline":
+                    update_dict["default_agent_type"] = "online"
+                    logger.info(
+                        "Auto-inferred agent_type='online' based on online model/provider update"
+                    )
             # If local model is being set, infer agent_type as 'local'
-            elif 'default_local_model' in update_dict or selected_artifact_id:
-                update_dict['default_agent_type'] = 'local'
+            elif "default_local_model" in update_dict or selected_artifact_id:
+                update_dict["default_agent_type"] = "local"
                 logger.info("Auto-inferred agent_type='local' based on local model update")
 
         settings_model = update_user_settings(user_id, update_dict)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=canonicalize_local_model_id(settings_model.default_local_model),
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date
-            )
+            return _to_user_settings_response(settings_model)
         return None
+
+    @staticmethod
+    def persist_detected_llama_backend(
+        user_id: int,
+        backend: Literal["cpu", "gpu"],
+        device_ids: tuple[str, ...],
+    ) -> UserSettingsResponse | None:
+        """Persist a first-use result without overwriting a concurrent user choice."""
+
+        current_settings = get_user_settings(user_id)
+        if current_settings is None or current_settings.llama_backend is not None:
+            return UserSettingsService.get_user_settings_by_id(user_id)
+        if backend not in {"cpu", "gpu"}:
+            raise ValueError("Detected llama.cpp backend must be cpu or gpu")
+        update_detected_llama_backend_if_unset(
+            user_id,
+            backend,
+            list(device_ids) if backend == "gpu" else [],
+        )
+        return UserSettingsService.get_user_settings_by_id(user_id)
 
     @staticmethod
     def get_default_user_settings() -> UserSettingsResponse:
@@ -201,9 +226,7 @@ class UserSettingsService:
 
     @staticmethod
     def create_agent_from_user_settings(
-        user_id: int,
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+        user_id: int, agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
         Create an agent instance based on user settings and optional overrides.
@@ -243,8 +266,7 @@ class UserSettingsService:
 
     @staticmethod
     def create_agent_from_default_user(
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+        agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
         Create an agent instance for the default user.
@@ -258,7 +280,5 @@ class UserSettingsService:
         """
         default_user = get_default_user()
         return UserSettingsService.create_agent_from_user_settings(
-            default_user.user_id,
-            agent_context,
-            overrides
+            default_user.user_id, agent_context, overrides
         )
