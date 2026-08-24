@@ -1,6 +1,7 @@
 """Tests for generic model/provider catalog and runner routing."""
 import asyncio
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -139,7 +140,12 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     "openai/gpt-oss-20b",
 ])
 def test_standard_local_models_use_generic_runner(model_id):
-    expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+    if sys.platform in {"win32", "linux"}:
+        expected = "llama_server"
+    elif sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        expected = "mlx_llama"
+    else:
+        expected = "transformers"
     assert AgentFactory._infer_runner_type(model_id) == expected
 
 
