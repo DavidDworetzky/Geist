@@ -95,6 +95,12 @@ prefer minimal inline implementations over extra dependency imports. Core librar
 
 #SDLC
 
-## first, create a plan for your feature in /plans
-## next, implement the plan, adding the backend data models, middle data models, service layer, routes, backend tests,
-## finally, test the solution by running `docker compose up -d`, then verifying no error logs in the docker container, then doing a curl command to localhost:3000
+## feature work
+Before implementing a new feature or substantial architectural capability, create a plan in `/plans`.
+
+## bug fixes
+Do not create new Markdown plan or specification files for bug fixes. Record the diagnosis, scope, and verification in the pull request description instead.
+
+## implementation and validation
+Implement feature plans with the required backend data models, middle data models, service layer, routes, and backend tests.
+Finally, test the solution by running `docker compose up -d`, verifying there are no error logs in the Docker containers, and running a curl command against `localhost:3000`.
