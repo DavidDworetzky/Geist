@@ -221,6 +221,40 @@ describe('AgentConfigSection', () => {
       expect(optionLabels).toContain('Groq');
     });
 
+    it('uses the OpenRouter display name from live catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'x-ai/grok-4.6',
+              name: 'Grok 4.6',
+              provider: 'openrouter',
+              context_window: 500000,
+              max_output_tokens: null,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'grok',
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="x-ai/grok-4.6"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
+    });
+
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 

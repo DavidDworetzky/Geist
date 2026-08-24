@@ -17,7 +17,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
-from agents.model_catalog import PROVIDERS
+from agents.model_catalog import PROVIDERS, get_model_spec
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -141,6 +141,20 @@ class OnlineAgent(BaseAgent):
             return os.getenv("GROK_API_KEY")
         return None
 
+    @staticmethod
+    def _apply_model_request_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply cataloged request constraints before provider dispatch."""
+        spec = get_model_spec(str(payload.get("model") or ""))
+        if spec is None:
+            return payload
+
+        constrained = payload.copy()
+        for parameter in spec.unsupported_parameters:
+            constrained.pop(parameter, None)
+        if spec.mandatory_reasoning_effort and "reasoning" not in constrained:
+            constrained["reasoning"] = {"effort": spec.mandatory_reasoning_effort}
+        return constrained
+
     def _make_request(
         self, payload: dict[str, Any], use_backup: bool = False, backup_index: int = 0
     ) -> dict[str, Any]:
@@ -171,6 +185,8 @@ class OnlineAgent(BaseAgent):
             payload = payload.copy()
             payload["model"] = current_model
 
+        request_payload = self._apply_model_request_requirements(payload)
+
         # Ensure endpoint includes chat/completions
         if not current_url.endswith("/chat/completions"):
             current_url = f"{current_url}/chat/completions"
@@ -179,7 +195,9 @@ class OnlineAgent(BaseAgent):
             try:
                 self.logger.debug(f"Making request to {current_url} (attempt {attempt + 1})")
 
-                response = self.client.post(current_url, json=payload, headers=current_headers)
+                response = self.client.post(
+                    current_url, json=request_payload, headers=current_headers
+                )
 
                 if response.status_code == 200:
                     return cast(dict[str, Any], response.json())
@@ -325,6 +343,7 @@ class OnlineAgent(BaseAgent):
             chat_id,
         )
         payload["stream"] = True
+        payload = self._apply_model_request_requirements(payload)
         # Ensure endpoint includes chat/completions
         current_url = self.base_url
         if not current_url.endswith("/chat/completions"):
@@ -610,6 +629,7 @@ class OnlineAgent(BaseAgent):
         if tools:
             payload["tools"] = [tool.to_openai(internal_to_provider[tool.name]) for tool in tools]
             payload["tool_choice"] = "auto"
+        payload = self._apply_model_request_requirements(payload)
 
         text_parts: list[str] = []
         call_parts: dict[int, dict[str, str]] = {}
