@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import useUserSettings from './Hooks/useUserSettings';
 import { useBranding } from './branding';
@@ -12,6 +12,14 @@ interface NavItem {
   path: string;
   description: string;
   icon: JSX.Element;
+}
+
+interface InstalledLocalArtifact {
+  id: string;
+  model_id: string;
+  display_name: string;
+  status: string;
+  supported?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -82,18 +90,91 @@ function pageTitle(pathname: string): string {
 }
 
 function RuntimeSummary(): JSX.Element {
-  const { settings, loading, error } = useUserSettings();
+  const { settings, loading, error, updateSettings } = useUserSettings();
+  const [installedArtifacts, setInstalledArtifacts] = useState<InstalledLocalArtifact[]>([]);
+  const [artifactsLoading, setArtifactsLoading] = useState(true);
+  const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+  const runtimeMode = settings?.default_agent_type;
+
+  useEffect(() => {
+    if (!runtimeMode || runtimeMode === 'online') {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const fetchInstalledArtifacts = async () => {
+      try {
+        const response = await fetch('/api/v1/models/local/artifacts');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch installed models: ${response.statusText}`);
+        }
+        const payload = await response.json();
+        if (!cancelled) {
+          setInstalledArtifacts(
+            (payload.artifacts ?? []).filter(
+              (artifact: InstalledLocalArtifact) =>
+                artifact.status === 'installed' && artifact.supported !== false,
+            ),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setModelSaveError('Installed models unavailable');
+        }
+      } finally {
+        if (!cancelled) {
+          setArtifactsLoading(false);
+        }
+      }
+    };
+
+    void fetchInstalledArtifacts();
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeMode]);
 
   if (loading) {
     return <span className="runtime-chip">Runtime loading</span>;
   }
 
-  if (error || !settings) {
+  if (!settings) {
     return <span className="runtime-chip runtime-chip-warning">Settings unavailable</span>;
   }
 
-  const mode = settings.default_agent_type || 'local';
+  const mode = runtimeMode || 'local';
   const model = mode === 'online' ? settings.default_online_model : settings.default_local_model;
+  const activeArtifact = installedArtifacts.find(
+    artifact => artifact.id === settings.default_local_artifact_id,
+  ) ?? installedArtifacts.find(
+    artifact => artifact.model_id === settings.default_local_model,
+  );
+  const selectedArtifactId = pendingArtifactId ?? activeArtifact?.id ?? '';
+
+  const handleLocalModelChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextArtifact = installedArtifacts.find(artifact => artifact.id === event.target.value);
+    if (!nextArtifact) return;
+
+    setPendingArtifactId(nextArtifact.id);
+    setSavingModel(true);
+    setModelSaveError(null);
+
+    try {
+      await updateSettings({
+        default_agent_type: 'local',
+        default_local_model: nextArtifact.model_id,
+        default_local_artifact_id: nextArtifact.id,
+      });
+    } catch {
+      setModelSaveError('Model switch failed');
+    } finally {
+      setPendingArtifactId(null);
+      setSavingModel(false);
+    }
+  };
 
   return (
     <div className="runtime-summary" aria-label="Current runtime">
@@ -101,7 +182,35 @@ function RuntimeSummary(): JSX.Element {
       {mode === 'online' && (
         <span className="runtime-chip">{settings.default_online_provider}</span>
       )}
-      <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
+      {mode === 'local' ? (
+        <select
+          aria-label="Local model"
+          aria-invalid={modelSaveError ? 'true' : undefined}
+          className="runtime-model runtime-model-select"
+          disabled={artifactsLoading || savingModel || installedArtifacts.length === 0}
+          onChange={handleLocalModelChange}
+          title={activeArtifact?.display_name ?? model ?? 'No model selected'}
+          value={selectedArtifactId}
+        >
+          {!activeArtifact && (
+            <option value="">
+              {artifactsLoading ? 'Loading installed models…' : model || 'No model selected'}
+            </option>
+          )}
+          {installedArtifacts.map((artifact) => (
+            <option key={artifact.id} value={artifact.id}>
+              {artifact.display_name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
+      )}
+      {mode === 'local' && modelSaveError && (
+        <span className="runtime-model-error" role="alert" title={error ?? modelSaveError}>
+          {modelSaveError}
+        </span>
+      )}
     </div>
   );
 }
