@@ -729,6 +729,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             supports_function_calling=False,
             recommended=False,
             family="qwen3",
+            min_transformers_version="4.51.0",
         ),
     ],
 }

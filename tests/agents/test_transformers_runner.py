@@ -242,6 +242,22 @@ def test_minimum_transformers_version_fails_early(_version):
         runner.load("allenai/Olmo-3-7B-Instruct", {"device": "cpu"})
 
 
+@pytest.mark.parametrize(
+    "model_id",
+    ["Qwen/Qwen3-4B", "Qwen/Qwen3-8B", "Qwen/Qwen3-1.7B"],
+)
+def test_installed_transformers_satisfies_qwen3_minimum(model_id):
+    from importlib import metadata
+
+    from agents.architectures.transformers_runner import _version_tuple
+    from agents.model_catalog import get_model_spec
+
+    required = get_model_spec(model_id).min_transformers_version
+
+    assert required is not None
+    assert _version_tuple(metadata.version("transformers")) >= _version_tuple(required)
+
+
 def test_server_backed_model_fails_before_loading():
     runner = TransformersRunner()
     with pytest.raises(ValueError, match="server-backed"):

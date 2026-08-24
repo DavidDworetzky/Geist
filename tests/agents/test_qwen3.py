@@ -28,14 +28,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 
-def expected_local_runner() -> str:
-    if sys.platform in {"win32", "linux"}:
-        return "llama_server"
-    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
-        return "mlx_llama"
-    return "transformers"
-
-
 _MLX_SUBMODULES = ("mlx", "mlx.core", "mlx.core.random", "mlx.nn", "mlx.utils")
 for _mod_name in _MLX_SUBMODULES:
     if _mod_name not in sys.modules:
@@ -541,27 +533,36 @@ class TestQwen3RunnerRegistry:
 # Factory: auto-detection and weights_dir
 # ---------------------------------------------------------------------------
 
+
+@pytest.mark.skipif(
+    sys.platform != "darwin"
+    or platform.machine().lower() not in {"arm64", "aarch64"},
+    reason="Qwen3.8 MLX dependencies are Apple Silicon-only",
+)
+def test_qwen3_8_declared_minimum_matches_installed_transformers():
+    from importlib import metadata
+
+    from packaging.version import Version
+    from transformers import AutoConfig
+
+    from agents.model_catalog import get_model_spec
+
+    required = get_model_spec("Qwen/Qwen3.8-27B").min_transformers_version
+
+    assert required is not None
+    assert Version(metadata.version("transformers")) >= Version(required)
+    assert AutoConfig.for_model("qwen3_5").model_type == "qwen3_5"
+
+
 class TestFactoryGenericAutoDetection:
 
-    @pytest.mark.skipif(
-        sys.platform != "darwin"
-        or platform.machine().lower() not in {"arm64", "aarch64"},
-        reason="Qwen3.8 MLX dependencies are Apple Silicon-only",
-    )
-    def test_transformers_recognizes_qwen3_5_config(self):
-        from transformers import AutoConfig
-
-        config = AutoConfig.for_model("qwen3_5")
-
-        assert config.model_type == "qwen3_5"
-
     def test_infer_runner_type_qwen_models(self):
-        expected = expected_local_runner()
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3.8-27B") == expected
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == expected
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == expected
-        assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == expected
-        assert AgentFactory._infer_runner_type("qwen3-custom") == expected
+        with patch("agents.factory.sys.platform", "linux"):
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3.8-27B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == "llama_server"
+            assert AgentFactory._infer_runner_type("qwen3-custom") == "llama_server"
 
     def test_infer_runner_type_non_qwen(self):
         native = sys.platform in {"win32", "linux"}
@@ -575,16 +576,20 @@ class TestFactoryGenericAutoDetection:
             AgentFactory._infer_runner_type("Qwen/Qwen2.5-72B-Instruct")
 
     def test_infer_runner_type_case_insensitive(self):
-        expected = expected_local_runner()
-        assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == expected
-        assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == expected
+        with patch("agents.factory.sys.platform", "linux"):
+            assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == "llama_server"
+            assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == "llama_server"
 
     def test_factory_auto_detects_qwen3(self):
         """Qwen uses the same generic runner as other standard causal LMs."""
         context = Mock()
         context.settings = Mock()
 
-        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
+        with (
+            patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": ""}),
+            patch("agents.factory.sys.platform", "linux"),
+            patch("agents.local_agent.LocalAgent") as MockLocalAgent,
+        ):
             AgentFactory.create_agent(
                 agent_type="local",
                 agent_context=context,
@@ -593,8 +598,7 @@ class TestFactoryGenericAutoDetection:
 
             MockLocalAgent.assert_called_once()
             _, kwargs = MockLocalAgent.call_args
-            expected = os.environ.get("GEIST_LOCAL_RUNNER") or expected_local_runner()
-            assert kwargs["runner_type"] == expected
+            assert kwargs["runner_type"] == "llama_server"
             assert kwargs["model_id"] == "Qwen/Qwen3-8B"
 
     def test_factory_explicit_runner_overrides_auto(self):
@@ -684,12 +688,15 @@ class TestFactoryCreateFromConfig:
             "weights_dir": "/data/qwen3",
         }
 
-        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
+        with (
+            patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": ""}),
+            patch("agents.factory.sys.platform", "linux"),
+            patch("agents.local_agent.LocalAgent") as MockLocalAgent,
+        ):
             AgentFactory.create_from_config(config, context)
 
             _, kwargs = MockLocalAgent.call_args
-            expected = os.environ.get("GEIST_LOCAL_RUNNER") or expected_local_runner()
-            assert kwargs["runner_type"] == expected
+            assert kwargs["runner_type"] == "llama_server"
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
 
 

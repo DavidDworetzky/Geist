@@ -1,7 +1,6 @@
 """Tests for generic model/provider catalog and runner routing."""
 import asyncio
 import os
-import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -17,14 +16,6 @@ from agents.model_catalog import (
     get_provider_endpoint,
     infer_model_spec,
 )
-
-
-def expected_local_runner() -> str:
-    if sys.platform in {"win32", "linux"}:
-        return "llama_server"
-    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
-        return "mlx_llama"
-    return "transformers"
 
 
 def test_platform_default_preserves_apple_silicon_mlx_and_uses_gguf_on_windows():
@@ -55,6 +46,23 @@ def test_qwen3_8_27b_declares_runtime_compatibility():
     assert spec.parameter_count == "27B"
     assert spec.min_transformers_version == "5.8.0"
     assert spec.supports_vision is False
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["Qwen/Qwen3-4B", "Qwen/Qwen3-8B", "Qwen/Qwen3-1.7B"],
+)
+def test_qwen3_models_declare_architecture_runtime_compatibility(model_id):
+    assert get_model_spec(model_id).min_transformers_version == "4.51.0"
+
+
+def test_registry_only_qwen3_model_declares_runtime_compatibility():
+    from agents.architectures.registry import OnlineModelProviders, get_models_for_provider
+
+    offline_models = get_models_for_provider(OnlineModelProviders.OFFLINE)
+    qwen3_06b = next(model for model in offline_models if model.id == "Qwen/Qwen3-0.6B")
+
+    assert qwen3_06b.min_transformers_version == "4.51.0"
 
 
 def test_family_inference_supports_future_finetunes():
@@ -141,8 +149,27 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     "zai-org/glm-4-9b-chat-hf",
     "openai/gpt-oss-20b",
 ])
-def test_standard_local_models_use_generic_runner(model_id):
-    assert AgentFactory._infer_runner_type(model_id) == expected_local_runner()
+def test_local_catalog_models_use_managed_runner_on_linux(model_id):
+    with patch("agents.factory.sys.platform", "linux"):
+        assert AgentFactory._infer_runner_type(model_id) == "llama_server"
+
+
+@pytest.mark.parametrize(
+    "host_platform, machine, model_id, expected_runner",
+    [
+        ("linux", "x86_64", "Qwen/Qwen3-4B", "llama_server"),
+        ("win32", "AMD64", "Qwen/Qwen3-4B", "llama_server"),
+        ("darwin", "arm64", "Qwen/Qwen3-4B", "mlx_llama"),
+        ("darwin", "x86_64", "Qwen/Qwen3-4B", "transformers"),
+        ("darwin", "x86_64", "Qwen/Qwen3.8-27B", "mlx_llama"),
+    ],
+)
+def test_platform_runner_selection(host_platform, machine, model_id, expected_runner):
+    with (
+        patch("agents.factory.sys.platform", host_platform),
+        patch("agents.factory.platform.machine", return_value=machine),
+    ):
+        assert AgentFactory._infer_runner_type(model_id) == expected_runner
 
 
 def test_unknown_huggingface_model_uses_generic_runner():
