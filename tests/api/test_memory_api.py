@@ -32,10 +32,9 @@ def memory_client(tmp_path, monkeypatch):
         session.add(
             GeistUser(
                 user_id=1,
-                username="ddworetzky",
-                name="David Dworetzky",
-                email="david@phantasmal.ai",
-                password="",
+                workspace_key="default",
+                username="local",
+                name="Local User",
             )
         )
         session.commit()
