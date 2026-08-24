@@ -52,10 +52,15 @@ class MLXLMBackend:
             {"role": message["role"], "content": message.get("content") or ""}
             for message in messages
         ]
+        template_options = {
+            "tokenize": False,
+            "add_generation_prompt": True,
+        }
+        if "qwen3" in self.model_id.casefold():
+            template_options["enable_thinking"] = False
         return self.tokenizer.apply_chat_template(
             normalized,
-            tokenize=False,
-            add_generation_prompt=True,
+            **template_options,
         )
 
     def stream_text(self, system_prompt: str, user_prompt: str) -> Iterator[str]:

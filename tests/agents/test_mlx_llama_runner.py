@@ -179,6 +179,7 @@ def test_structured_messages_reach_mlx_backend_unchanged():
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.tokenizer = MagicMock()
+    backend.model_id = "Qwen/Qwen3.8-27B"
     messages = [
         {"role": "system", "content": "Be concise."},
         {"role": "user", "content": "Remember cobalt."},
@@ -194,6 +195,7 @@ def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
         messages,
         tokenize=False,
         add_generation_prompt=True,
+        enable_thinking=False,
     )
 
 
