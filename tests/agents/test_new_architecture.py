@@ -197,6 +197,11 @@ class TestUserSettingsIntegration:
         assert config.runner_type is None
         assert config.endpoint is None
 
+        settings.default_local_model = "Qwen/Qwen3-4B"
+        config = AgentFactoryConfig.from_user_settings(settings)
+        assert config.model == "Qwen/Qwen3-4B"
+        assert config.runner_type is None
+
         # Test online agent config
         settings.default_agent_type = "online"
         config = AgentFactoryConfig.from_user_settings(settings)

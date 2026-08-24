@@ -14,7 +14,7 @@ const baseSettings = {
   user_settings_id: 1,
   user_id: 1,
   default_agent_type: 'local',
-  default_local_model: 'Meta-Llama-3.1-8B-Instruct',
+  default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   default_online_model: 'gpt-4',
   default_online_provider: 'openai',
   default_file_archives: [],
@@ -40,7 +40,8 @@ const mockModelsResponse = {
       { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', recommended: true },
     ],
     offline: [
-      { id: 'Meta-Llama-3.1-8B-Instruct', name: 'Meta Llama 3.1 8B Instruct', provider: 'offline', recommended: true },
+      { id: 'meta-llama/Meta-Llama-3.1-8B-Instruct', name: 'Meta Llama 3.1 8B Instruct', provider: 'offline', recommended: true },
+      { id: 'Qwen/Qwen3-4B', name: 'Qwen 3 4B', provider: 'offline', recommended: true },
     ],
   },
   last_updated: '2025-01-01T00:00:00Z',
@@ -319,6 +320,25 @@ describe('Settings page', () => {
     });
   });
 
+  it('selects the stored canonical local model', async () => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Models and Providers' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Local Model')).toHaveValue(
+        'meta-llama/Meta-Llama-3.1-8B-Instruct'
+      );
+    });
+  });
+
   it('cancel reverts local changes', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
@@ -494,7 +514,10 @@ describe('Settings page', () => {
 
       // Change the local model
       const modelSelect = screen.getByLabelText('Local Model');
-      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B-Instruct' } });
+      await waitFor(() => {
+        expect(screen.getByRole('option', { name: 'Qwen 3 4B' })).toBeInTheDocument();
+      });
+      fireEvent.change(modelSelect, { target: { value: 'Qwen/Qwen3-4B' } });
 
       // Save and verify agent_type is 'local'
       fireEvent.click(screen.getByText(/Save Changes/i));
@@ -502,7 +525,7 @@ describe('Settings page', () => {
       await waitFor(() => {
         expect(savedUpdates).not.toBeNull();
         expect(savedUpdates.default_agent_type).toBe('local');
-        expect(savedUpdates.default_local_model).toBe('Meta-Llama-3.1-8B-Instruct');
+        expect(savedUpdates.default_local_model).toBe('Qwen/Qwen3-4B');
       });
     });
   });

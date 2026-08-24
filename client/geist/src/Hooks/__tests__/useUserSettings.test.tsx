@@ -18,7 +18,7 @@ const mockSettings: UserSettings = {
   user_settings_id: 1,
   user_id: 1,
   default_agent_type: 'local',
-  default_local_model: 'Meta-Llama-3.1-8B-Instruct',
+  default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   default_local_artifact_id: 'meta-llama-3.1-8b-instruct',
   default_online_model: 'gpt-4',
   default_online_provider: 'openai',
