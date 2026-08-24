@@ -70,13 +70,35 @@ def _resolve_next(approvals, decision):
         while time.monotonic() < deadline:
             pending = approvals.pending()
             if pending:
-                approvals.resolve(pending[0].run_id, pending[0].call_id, decision)
+                approvals.resolve(
+                    pending[0].run_id,
+                    pending[0].call_id,
+                    decision,
+                    user_id=pending[0].user_id,
+                )
                 return
             time.sleep(0.01)
 
     thread = threading.Thread(target=resolve, daemon=True)
     thread.start()
     return thread
+
+
+def test_approval_resolution_is_scoped_to_the_owning_user():
+    approvals = ToolApprovalRegistry()
+    pending = approvals.request(
+        "run-1",
+        "call-1",
+        "external.write",
+        user_id=7,
+        arguments_fingerprint="arguments",
+        definition_fingerprint="definition",
+    )
+
+    assert not approvals.resolve("run-1", "call-1", "approve", user_id=8)
+    assert approvals.pending() == [pending]
+    assert approvals.resolve("run-1", "call-1", "approve", user_id=7)
+    assert pending.event.is_set()
 
 
 def test_approved_call_resumes_and_executes_once():
@@ -152,3 +174,24 @@ def test_unattended_call_denies_without_waiting():
     assert any(
         event.event == "tool_call" and event.payload.error == "approval_denied" for event in events
     )
+
+
+def test_nonstream_completion_never_waits_for_interactive_approval():
+    approvals = ToolApprovalRegistry()
+    calls = []
+    backend = Backend()
+    started_at = time.monotonic()
+
+    completion = _orchestrator(approvals, calls).complete(
+        backend=backend,
+        prompt="write",
+        user_id=1,
+        chat_id=None,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+
+    assert time.monotonic() - started_at < 0.5
+    assert calls == []
+    assert completion.message == ["done"]
+    assert approvals.pending() == []

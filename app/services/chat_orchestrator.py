@@ -26,6 +26,7 @@ from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     ToolApprovalRegistry,
     approval_registry,
+    tool_arguments_fingerprint,
 )
 from app.services.tool_registry import ToolRegistry
 
@@ -41,6 +42,7 @@ class ChatStreamEvent:
 
 @dataclass
 class _RunControl:
+    user_id: int
     cancellation: threading.Event
     on_cancel: Callable[[], bool] | None = None
     cancel_callback_claimed: bool = False
@@ -57,22 +59,25 @@ class RunControlRegistry:
         self,
         run_id: str,
         *,
+        user_id: int,
+        cancellation: threading.Event | None = None,
         on_cancel: Callable[[], bool] | None = None,
     ) -> threading.Event:
-        cancellation = threading.Event()
+        cancellation = cancellation or threading.Event()
         with self._lock:
             self._runs[run_id] = _RunControl(
+                user_id=user_id,
                 cancellation=cancellation,
                 on_cancel=on_cancel,
             )
         return cancellation
 
-    def cancel(self, run_id: str) -> bool:
+    def cancel(self, run_id: str, *, user_id: int) -> bool:
         callback: Callable[[], bool] | None = None
         control: _RunControl | None = None
         with self._lock:
             control = self._runs.get(run_id)
-            if control is None:
+            if control is None or control.user_id != user_id:
                 return False
             control.cancellation.set()
             if control.on_cancel is not None and not control.cancel_callback_claimed:
@@ -318,7 +323,13 @@ class ChatOrchestrator:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
         approved_call_ids: set[str] = set()
-        context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
+        cancellation = threading.Event()
+        context = ToolContext(
+            user_id=user_id,
+            chat_id=chat_id,
+            run_id=run.run_id,
+            cancellation=cancellation,
+        )
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
             self.registry.definitions_for_context(context) if enable_tools and native_tools else []
@@ -368,8 +379,10 @@ class ChatOrchestrator:
         # Register durable cancellation before exposing the run ID. The cancel
         # endpoint therefore cannot acknowledge a run and then lose its terminal
         # record merely because the browser closes the SSE response.
-        cancellation = self.run_controls.start(
+        self.run_controls.start(
             run.run_id,
+            user_id=user_id,
+            cancellation=cancellation,
             on_cancel=persist_cancelled_state,
         )
 
@@ -452,6 +465,7 @@ class ChatOrchestrator:
                         return
 
                     if requires_approval:
+                        assert definition is not None
                         yield ChatStreamEvent(
                             "tool_call",
                             self._tool_state(
@@ -461,7 +475,17 @@ class ChatOrchestrator:
                             ),
                         )
                         if interactive:
-                            pending = self.approvals.request(run.run_id, call.id, call.name)
+                            pending = self.approvals.request(
+                                run.run_id,
+                                call.id,
+                                call.name,
+                                user_id=user_id,
+                                arguments_fingerprint=tool_arguments_fingerprint(
+                                    call.name,
+                                    call.arguments,
+                                ),
+                                definition_fingerprint=definition.approval_fingerprint(),
+                            )
                             decision = self.approvals.wait(
                                 pending,
                                 self.approval_timeout_seconds,
@@ -481,9 +505,19 @@ class ChatOrchestrator:
                                 chat_id=chat_id,
                                 run_id=run.run_id,
                                 approved_call_ids=frozenset(approved_call_ids),
+                                cancellation=cancellation,
                             )
                             yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
-                            result = self.registry.execute(call, context)
+                            result = self.registry.execute(
+                                call,
+                                context,
+                                expected_approval_fingerprint=(
+                                    pending.definition_fingerprint
+                                    if pending.arguments_fingerprint
+                                    == tool_arguments_fingerprint(call.name, call.arguments)
+                                    else "invalidated"
+                                ),
+                            )
                         else:
                             result = ToolResult(
                                 call=call,
@@ -585,6 +619,7 @@ class ChatOrchestrator:
             self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:
+        kwargs.setdefault("interactive", False)
         completion: AgentCompletion | None = None
         error: str | None = None
         for event in self.stream(**kwargs):

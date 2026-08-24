@@ -1,6 +1,7 @@
 """Tests for mounting MCP server tools into the unified ToolRegistry."""
 
 import datetime
+import threading
 
 from agents.models.tool_calling import ToolCall, ToolContext
 from app.models.database.mcp_server import McpServerModel
@@ -50,7 +51,7 @@ class FakeManager:
             raise McpError(self.errors_by_server[config.name])
         return self.tools_by_server.get(config.name, [])
 
-    def call_tool(self, config, name, arguments):
+    def call_tool(self, config, name, arguments, **kwargs):
         self.calls.append((config.name, name, arguments))
         return f"{name} says: {arguments.get('text', '')}"
 
@@ -129,6 +130,29 @@ def test_registry_rejects_wrong_argument_type():
     assert result.error == "invalid_arguments"
 
 
+def test_registry_rejects_approval_after_mcp_configuration_changes():
+    server = _server_model()
+    manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [server])
+    registry = ToolRegistry()
+    registry.add_source(source)
+    call = ToolCall.create("mcp.fake.echo", {"text": "hello"})
+    approved_definition = registry.get(call.name, _context())
+    assert approved_definition is not None
+
+    server.env["CHANGED"] = "after-approval"
+    source.invalidate()
+    result = registry.execute(
+        call,
+        _approved_context(call),
+        expected_approval_fingerprint=approved_definition.approval_fingerprint(),
+    )
+
+    assert result.status == "failed"
+    assert result.error == "approval_stale"
+    assert manager.calls == []
+
+
 def test_failing_server_is_skipped():
     manager = FakeManager(
         tools_by_server={"good": [ECHO_TOOL]},
@@ -181,6 +205,75 @@ def test_definitions_cache_and_loading_are_scoped_per_user():
     assert source.definitions(user_2)[0].name == "mcp.user-2.echo"
     source.definitions(user_1)
     assert loaded_user_ids == [1, 2]
+
+
+def test_invalidation_prevents_stale_discovery_from_repopulating_cache():
+    first_started = threading.Event()
+    release_first = threading.Event()
+
+    class RacingManager(FakeManager):
+        def __init__(self):
+            super().__init__()
+            self.discovery_count = 0
+
+        def list_tools(self, config):
+            self.discovery_count += 1
+            if self.discovery_count == 1:
+                first_started.set()
+                assert release_first.wait(2)
+                return [{**ECHO_TOOL, "name": "stale"}]
+            return [{**ECHO_TOOL, "name": "fresh"}]
+
+    manager = RacingManager()
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    stale_result = []
+    stale_thread = threading.Thread(
+        target=lambda: stale_result.extend(source.definitions()),
+        daemon=True,
+    )
+    stale_thread.start()
+    assert first_started.wait(1)
+
+    source.invalidate()
+    fresh = source.definitions()
+    release_first.set()
+    stale_thread.join(timeout=2)
+
+    assert [definition.name for definition in fresh] == ["mcp.fake.fresh"]
+    assert [definition.name for definition in source.definitions()] == ["mcp.fake.fresh"]
+
+
+def test_discovery_is_single_flight_per_user_and_generation():
+    first_started = threading.Event()
+    release = threading.Event()
+
+    class BlockingManager(FakeManager):
+        def __init__(self):
+            super().__init__()
+            self.discovery_count = 0
+
+        def list_tools(self, config):
+            self.discovery_count += 1
+            first_started.set()
+            assert release.wait(2)
+            return [ECHO_TOOL]
+
+    manager = BlockingManager()
+    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    results: list[list] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(source.definitions()), daemon=True)
+        for _ in range(3)
+    ]
+    for thread in threads:
+        thread.start()
+    assert first_started.wait(1)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert manager.discovery_count == 1
+    assert len(results) == 3
 
 
 def test_config_from_model_maps_fields():

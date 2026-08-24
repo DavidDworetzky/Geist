@@ -1,6 +1,7 @@
 """Tests for the minimal synchronous MCP client (stdio transport + parsing)."""
 
 import sys
+import threading
 
 import pytest
 
@@ -9,6 +10,7 @@ from app.services.mcp_client import (
     McpConnection,
     McpError,
     McpServerConfig,
+    _filtered_child_environment,
     _HttpTransport,
     _unwrap_response,
 )
@@ -127,6 +129,28 @@ def test_stdio_request_timeout():
         connection.close()
 
 
+def test_stdio_request_honors_cancellation():
+    connection = McpConnection(_stdio_config(timeout_seconds=5.0))
+    cancellation = threading.Event()
+    cancellation.set()
+    try:
+        with pytest.raises(McpError, match="cancelled"):
+            connection.call_tool("slow", {}, cancellation=cancellation)
+    finally:
+        connection.close()
+
+
+def test_stdio_child_environment_does_not_inherit_application_secrets(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
+    monkeypatch.setenv("PATH", "/safe/bin")
+
+    environment = _filtered_child_environment({"EXPLICIT_TOKEN": "configured"})
+
+    assert environment["PATH"] == "/safe/bin"
+    assert environment["EXPLICIT_TOKEN"] == "configured"
+    assert "OPENAI_API_KEY" not in environment
+
+
 def test_missing_command_fails_fast():
     config = McpServerConfig(server_id=2, name="broken", transport="stdio", command=None)
     with pytest.raises(McpError, match="no command"):
@@ -174,6 +198,45 @@ def test_manager_reconnects_when_fingerprint_changes():
         manager.shutdown()
 
 
+def test_manager_invalidation_discards_connection_created_by_stale_flight(monkeypatch):
+    import app.services.mcp_client as mcp_client
+
+    first_started = threading.Event()
+    release_first = threading.Event()
+    created = []
+
+    class FakeConnection:
+        def __init__(self, config, *, deadline=None):
+            self.config = config
+            self.closed = False
+            created.append(self)
+            if len(created) == 1:
+                first_started.set()
+                assert release_first.wait(2)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(mcp_client, "McpConnection", FakeConnection)
+    manager = McpClientManager()
+    result = []
+    worker = threading.Thread(
+        target=lambda: result.append(manager._connection(_stdio_config())),
+        daemon=True,
+    )
+    worker.start()
+    assert first_started.wait(1)
+
+    manager.invalidate(1)
+    release_first.set()
+    worker.join(timeout=2)
+
+    assert len(created) == 2
+    assert created[0].closed is True
+    assert result == [created[1]]
+    manager.shutdown()
+
+
 def test_unwrap_response_surfaces_server_errors():
     with pytest.raises(McpError, match="boom .code -32000."):
         _unwrap_response(
@@ -212,3 +275,23 @@ def test_sse_response_without_answer_raises():
     lines = ['data: {"jsonrpc": "2.0", "method": "noise"}', ""]
     with pytest.raises(McpError, match="ended without a response"):
         _HttpTransport._read_sse_response(_FakeSseResponse(lines), "req-1", "tools/list")
+
+
+def test_http_transport_rejects_redirects():
+    class RedirectResponse:
+        status_code = 302
+
+        def close(self):
+            pass
+
+    class RedirectSession:
+        def post(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return RedirectResponse()
+
+    transport = object.__new__(_HttpTransport)
+    transport._url = "https://example.test/mcp"
+    transport._session = RedirectSession()
+
+    with pytest.raises(McpError, match="redirects are not allowed"):
+        transport._post({"jsonrpc": "2.0"}, timeout=1, stream=True)

@@ -232,7 +232,8 @@ def test_run_can_be_cancelled_after_run_started():
     )
 
     started = next(stream)
-    assert controls.cancel(started.payload["run_id"])
+    assert not controls.cancel(started.payload["run_id"], user_id=2)
+    assert controls.cancel(started.payload["run_id"], user_id=1)
     cancelled = next(stream)
     assert cancelled.event == "cancelled"
     assert cancelled.payload["chat_id"] == 9
@@ -261,7 +262,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
 
     started = next(stream)
     run_id = started.payload["run_id"]
-    assert controls.cancel(run_id)
+    assert controls.cancel(run_id, user_id=1)
     assert len(writes) == 1
     assert writes[0]["status"] == "cancelled"
     assert writes[0]["run_id"] == run_id
@@ -271,7 +272,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     stream.close()
 
     assert len(writes) == 1
-    assert not controls.cancel(run_id)
+    assert not controls.cancel(run_id, user_id=1)
 
 
 def test_backend_without_native_tools_receives_empty_registry():

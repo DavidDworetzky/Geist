@@ -6,7 +6,17 @@ import datetime
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.models.database.database import Base, SessionLocal
@@ -16,6 +26,9 @@ class McpServer(Base):
     """Connection settings for one MCP server (stdio or streamable HTTP)."""
 
     __tablename__ = 'mcp_server'
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_mcp_server_user_name"),
+    )
 
     mcp_server_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
@@ -132,9 +145,17 @@ def create_mcp_server(user_id: int, values: dict[str, Any]) -> McpServerModel:
         return _to_model(server)
 
 
-def update_mcp_server(mcp_server_id: int, updates: dict[str, Any]) -> McpServerModel | None:
+def update_mcp_server(
+    mcp_server_id: int,
+    updates: dict[str, Any],
+    *,
+    user_id: int | None = None,
+) -> McpServerModel | None:
     with SessionLocal() as session:
-        server = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id).first()
+        query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        server = query.first()
         if not server:
             return None
         for key in _MUTABLE_FIELDS:
@@ -146,9 +167,12 @@ def update_mcp_server(mcp_server_id: int, updates: dict[str, Any]) -> McpServerM
         return _to_model(server)
 
 
-def delete_mcp_server(mcp_server_id: int) -> bool:
+def delete_mcp_server(mcp_server_id: int, *, user_id: int | None = None) -> bool:
     with SessionLocal() as session:
-        server = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id).first()
+        query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        server = query.first()
         if not server:
             return False
         session.delete(server)

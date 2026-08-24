@@ -12,6 +12,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
@@ -49,6 +50,11 @@ from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
 from app.security.middleware import OperatorAuthenticationMiddleware
+from app.security.operator import (
+    OperatorCapability,
+    OperatorPrincipal,
+    require_operator_capability,
+)
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.mcp_tool_source import get_mcp_tool_source
@@ -113,6 +119,7 @@ if enhanced_logging:
     )
     logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
+_require_tool_operator = require_operator_capability(OperatorCapability.TOOLS_EXECUTE)
 
 
 def get_envs() -> dict[str, str]:
@@ -525,12 +532,27 @@ def create_app(
         return run_chat_completion(params, chat_id=session_id)
 
     @agent_router.post("/runs/{run_id}/cancel")
-    def cancel_chat_run(run_id: str):
-        return {"run_id": run_id, "cancelled": run_controls.cancel(run_id)}
+    def cancel_chat_run(
+        run_id: str,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        return {
+            "run_id": run_id,
+            "cancelled": run_controls.cancel(run_id, user_id=operator.user_id),
+        }
 
     @agent_router.post("/runs/{run_id}/tool_approval")
-    def resolve_tool_approval(run_id: str, params: ToolApprovalParams):
-        if not tool_approval_registry.resolve(run_id, params.call_id, params.decision):
+    def resolve_tool_approval(
+        run_id: str,
+        params: ToolApprovalParams,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        if not tool_approval_registry.resolve(
+            run_id,
+            params.call_id,
+            params.decision,
+            user_id=operator.user_id,
+        ):
             raise HTTPException(
                 status_code=404,
                 detail="No pending approval for this run and call",
@@ -561,29 +583,29 @@ def create_app(
         return chat_sessions
 
     @agent_router.get("/tools")
-    async def get_chat_tool_catalog():
-        workspace = get_default_workspace()
-        enabled_names = {
-            tool.name
-            for tool in chat_orchestrator.registry.definitions_for_context(
-                ToolContext(user_id=workspace.workspace_id, chat_id=None, run_id="catalog")
-            )
-        }
+    async def get_chat_tool_catalog(
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        context = ToolContext(
+            user_id=operator.workspace_id,
+            chat_id=None,
+            run_id="catalog",
+        )
+        catalog = await run_in_threadpool(chat_orchestrator.registry.catalog, context)
         return {
             "tools": [
                 {
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.parameters_schema(),
-                    "enabled": tool.name in enabled_names,
+                    "enabled": chat_orchestrator.registry.is_enabled(tool)
+                    and (tool.availability is None or tool.availability(context)),
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }
-                for tool in chat_orchestrator.registry.catalog(
-                    ToolContext(user_id=user.user_id, chat_id=None, run_id="catalog")
-                )
+                for tool in catalog
             ]
         }
 

@@ -72,13 +72,64 @@ run output associated with the chat in which the run started.
 Every terminal run is persisted with `completed`, `failed`, or `cancelled`
 status so completed tool activity is auditable even if a later model request
 fails. Recent-history and aggregate tool-result budgets bound provider context.
-Tool execution uses a bounded worker pool; Python cannot forcibly stop a handler
-already running after a timeout, which is another reason side-effect mappings
-remain unavailable.
+Tool execution uses a bounded worker pool. Cancellation is cooperative: MCP
+stdio requests observe the run cancellation event, while HTTP operations are
+bounded by the same end-to-end server deadline and have their connection closed
+when invalidated. Side-effect mappings additionally require an interactive,
+call-specific approval before dispatch.
 
-A future authenticated approve/reject-and-resume endpoint plus durable
-idempotency is required before filesystem writes, email, or SMS can become
-operational chat tools.
+## Security and identity model
+
+Geist deliberately separates three identities that older code conflated:
+
+- The **workspace identity** is the durable local owner of chats, memories,
+  files, settings, workflows, jobs, and MCP configuration. It is the neutral
+  `geist_user` row with `workspace_key="default"`; its numeric `user_id` is
+  preserved when older databases are migrated. Display name and email are
+  profile metadata, not credentials, and the legacy password column is not an
+  authentication mechanism.
+- The **operator principal** is the process or person authorized to control the
+  local workspace. It is immutable and request-scoped, carries the workspace
+  `user_id`, an authentication method, loopback status, and explicit
+  capabilities. There is no built-in admin user account and no email-based
+  login.
+- **Pitchblend Cloud identity** remains Pitchblend's OIDC login for account,
+  licensing, and sync. Its access and refresh tokens are not accepted by Geist
+  and never become local tool credentials.
+
+An unwrapped standalone Geist process accepts an operator only from a loopback
+client. The supported Docker Compose and native `make run` flows generate a
+local operator-token file. The backend and server-side development proxy read
+that file, and the proxy attaches the `GeistOperator` scheme without exposing
+the credential to the browser bundle. Compose publishes its UI, API, and debug
+ports on loopback only. A token-file principal is therefore local even when the
+development proxy reaches the backend over a private container address.
+
+A Pitchblend-managed launch instead generates a high-entropy secret for that
+process, passes it to the Geist child as `GEIST_OPERATOR_TOKEN`, and attaches
+the same authorization scheme inside a dedicated Electron webview session.
+The secret is not exposed to page JavaScript. When either supported credential
+source is configured, missing, duplicate, malformed, and incorrect credentials
+fail closed; conflicting environment and file credentials also fail closed.
+Pitchblend login and logout do not rotate workspace ownership or require a
+second Geist login.
+
+MCP configuration, connection tests, tool catalog inspection, approval, and
+run cancellation require operator capabilities. Stdio server configuration is
+accepted only from a local operator: a direct loopback request or the generated
+local token-file principal. A future remote wrapper-token deployment remains
+unable to configure process-spawning transports. A remote deployment must
+provide its own strong operator credential and transport boundary; it must not
+treat a Host or Origin header as authentication.
+
+Approval is authorization for one exact operation, not a reusable boolean.
+The pending record binds the operator's `user_id`, run ID, call ID, tool name,
+canonical argument hash, and tool-definition fingerprint. The definition
+fingerprint includes the MCP configuration revision. If arguments or server
+configuration change between review and dispatch, execution fails with a stale
+approval and the operator must review again. Non-streaming callers are always
+unattended and deny approval-requiring tools immediately instead of waiting for
+the interactive timeout.
 
 ## MCP servers
 
@@ -98,6 +149,20 @@ implementation (initialize, paginated `tools/list`, `tools/call`); server
 initiated requests such as sampling are declined. Tool descriptions and
 results from MCP servers are untrusted third-party content — enable only
 servers you trust, since their tool output re-enters the model context.
+
+The transport boundary also:
+
+- inherits only a small process-launch environment allowlist; secrets are
+  passed to stdio servers only when explicitly configured for that server;
+- rejects HTTP redirects and credential-bearing URLs so an MCP endpoint cannot
+  redirect an authorized request into a different SSRF target;
+- applies one deadline across initialization and paginated discovery rather
+  than resetting the timeout on each page;
+- caps response bytes, SSE events, stdio line length, page count, discovered
+  tool count, and returned tool-result text;
+- performs server discovery off the FastAPI event loop, in bounded parallel
+  workers, with generation-aware single-flight caches so invalidation cannot
+  publish a stale tool definition or connection.
 
 ## Bridged adapter actions
 

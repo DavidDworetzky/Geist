@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from dataclasses import dataclass, field
 from typing import Literal
@@ -16,6 +18,9 @@ class PendingToolApproval:
     run_id: str
     call_id: str
     tool_name: str
+    user_id: int
+    arguments_fingerprint: str
+    definition_fingerprint: str
     event: threading.Event = field(default_factory=threading.Event)
     decision: ToolApprovalDecision | None = None
 
@@ -27,9 +32,27 @@ class ToolApprovalRegistry:
         self._lock = threading.Lock()
         self._pending: dict[tuple[str, str], PendingToolApproval] = {}
 
-    def request(self, run_id: str, call_id: str, tool_name: str) -> PendingToolApproval:
-        pending = PendingToolApproval(run_id=run_id, call_id=call_id, tool_name=tool_name)
+    def request(
+        self,
+        run_id: str,
+        call_id: str,
+        tool_name: str,
+        *,
+        user_id: int,
+        arguments_fingerprint: str,
+        definition_fingerprint: str,
+    ) -> PendingToolApproval:
+        pending = PendingToolApproval(
+            run_id=run_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            user_id=user_id,
+            arguments_fingerprint=arguments_fingerprint,
+            definition_fingerprint=definition_fingerprint,
+        )
         with self._lock:
+            if (run_id, call_id) in self._pending:
+                raise ValueError("A pending approval already exists for this tool call")
             self._pending[(run_id, call_id)] = pending
         return pending
 
@@ -38,11 +61,16 @@ class ToolApprovalRegistry:
         run_id: str,
         call_id: str,
         decision: ToolApprovalDecision,
+        *,
+        user_id: int,
     ) -> bool:
         if decision not in {"approve", "deny"}:
             raise ValueError("decision must be 'approve' or 'deny'")
         with self._lock:
-            pending = self._pending.pop((run_id, call_id), None)
+            pending = self._pending.get((run_id, call_id))
+            if pending is None or pending.user_id != user_id:
+                return False
+            self._pending.pop((run_id, call_id), None)
         if pending is None:
             return False
         pending.decision = decision
@@ -80,3 +108,14 @@ class ToolApprovalRegistry:
 
 
 approval_registry = ToolApprovalRegistry()
+
+
+def tool_arguments_fingerprint(tool_name: str, arguments: dict) -> str:
+    payload = json.dumps(
+        {"tool_name": tool_name, "arguments": arguments},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

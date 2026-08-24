@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import McpServersSection from '../McpServersSection';
 
 const stdioServer = {
@@ -68,13 +68,20 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Add MCP Server'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'my-server' } });
     fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'npx' } });
-    fireEvent.click(screen.getByText('Add Server'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Add Server'));
+    });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/mcp/servers',
         expect.objectContaining({ method: 'POST' })
       );
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: 'Add MCP Server' })
+      ).not.toBeInTheDocument();
     });
     const [, options] = fetchMock.mock.calls.find(
       ([url, opts]: [string, RequestInit?]) => opts?.method === 'POST'

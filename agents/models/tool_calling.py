@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -116,6 +118,7 @@ class ToolContext:
     chat_id: int | None
     run_id: str
     approved_call_ids: frozenset[str] = frozenset()
+    cancellation: threading.Event | None = None
 
 
 @dataclass
@@ -144,6 +147,7 @@ class ToolDefinition:
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
     source_adapter: str | None = None
+    source_revision: str | None = None
     availability: ToolAvailability | None = None
     # Raw JSON-schema alternative to arguments_model for tools whose schemas
     # arrive at runtime (MCP servers, reflected adapters). Exactly one of the
@@ -167,6 +171,21 @@ class ToolDefinition:
         schema.setdefault("type", "object")
         schema.setdefault("properties", {})
         return schema
+
+    def approval_fingerprint(self) -> str:
+        payload = json.dumps(
+            {
+                "name": self.name,
+                "parameters": self.parameters_schema(),
+                "side_effect": self.side_effect,
+                "source_adapter": self.source_adapter,
+                "source_revision": self.source_revision,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def to_openai(self, provider_name: str | None = None) -> dict[str, Any]:
         return {

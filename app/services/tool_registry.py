@@ -201,7 +201,13 @@ class ToolRegistry:
                 definitions.append(definition)
         return definitions
 
-    def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
+    def execute(
+        self,
+        call: ToolCall,
+        context: ToolContext,
+        *,
+        expected_approval_fingerprint: str | None = None,
+    ) -> ToolResult:
         definition = self.get(call.name, context)
         if definition is None:
             return ToolResult(
@@ -209,6 +215,19 @@ class ToolRegistry:
                 status="failed",
                 content=f"Unknown tool: {call.name}",
                 error="unknown_tool",
+            )
+        if (
+            expected_approval_fingerprint is not None
+            and definition.approval_fingerprint() != expected_approval_fingerprint
+        ):
+            return ToolResult(
+                call=call,
+                status="failed",
+                content=(
+                    "BLOCKED: the tool definition changed after approval. "
+                    "Review the updated tool before trying again."
+                ),
+                error="approval_stale",
             )
         if not self.is_enabled(definition):
             return ToolResult(

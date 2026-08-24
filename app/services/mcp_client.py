@@ -15,15 +15,18 @@ well-behaved servers degrade gracefully. Like the provider clients in
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import subprocess
 import threading
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 import requests
 
@@ -33,10 +36,45 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "geist", "version": "0.1.0"}
 _MAX_TOOL_LIST_PAGES = 25
+_MAX_DISCOVERED_TOOLS = 500
+_MAX_STDIO_LINE_CHARS = 1_000_000
+_MAX_HTTP_RESPONSE_BYTES = 2_000_000
+_MAX_SSE_EVENTS = 1_000
+_MAX_TOOL_RESULT_CHARS = 100_000
+_INHERITED_STDIO_ENVIRONMENT_KEYS = frozenset(
+    {
+        "COMSPEC",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "WINDIR",
+    }
+)
 
 
 class McpError(RuntimeError):
     """A transport, protocol, or server-reported MCP failure."""
+
+
+def _remaining_seconds(deadline: float, operation: str) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise McpError(f"MCP operation '{operation}' exceeded its end-to-end deadline")
+    return remaining
+
+
+def _filtered_child_environment(configured: dict[str, str]) -> dict[str, str]:
+    inherited = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in _INHERITED_STDIO_ENVIRONMENT_KEYS
+    }
+    return {**inherited, **configured}
 
 
 @dataclass(frozen=True)
@@ -55,7 +93,7 @@ class McpServerConfig:
 
     @property
     def fingerprint(self) -> str:
-        return json.dumps(
+        payload = json.dumps(
             {
                 "transport": self.transport,
                 "command": self.command,
@@ -64,8 +102,11 @@ class McpServerConfig:
                 "url": self.url,
                 "headers": self.headers,
             },
+            ensure_ascii=False,
             sort_keys=True,
+            separators=(",", ":"),
         )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class _StdioTransport:
@@ -80,7 +121,7 @@ class _StdioTransport:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env={**os.environ, **config.env},
+                env=_filtered_child_environment(config.env),
                 text=True,
                 bufsize=1,
             )
@@ -98,7 +139,14 @@ class _StdioTransport:
         stdout = self._process.stdout
         if stdout is None:
             return
-        for line in stdout:
+        while True:
+            line = stdout.readline(_MAX_STDIO_LINE_CHARS + 1)
+            if not line:
+                break
+            if len(line) > _MAX_STDIO_LINE_CHARS:
+                logger.warning("Closing MCP stdio server after oversized response line")
+                self.close()
+                break
             line = line.strip()
             if not line:
                 continue
@@ -118,7 +166,7 @@ class _StdioTransport:
         if stderr is None:
             return
         for line in stderr:
-            self._stderr_tail.append(line.rstrip())
+            self._stderr_tail.append(line[:2000].rstrip())
 
     def _handle_message(self, message: dict[str, Any]) -> None:
         message_id = message.get("id")
@@ -158,7 +206,13 @@ class _StdioTransport:
     def _stderr_summary(self) -> str:
         return " | ".join(self._stderr_tail) or "no stderr output"
 
-    def request(self, method: str, params: dict[str, Any] | None, timeout: float) -> Any:
+    def request(
+        self,
+        method: str,
+        params: dict[str, Any] | None,
+        timeout: float,
+        cancellation: threading.Event | None = None,
+    ) -> Any:
         request_id = uuid.uuid4().hex
         event = threading.Event()
         with self._pending_lock:
@@ -168,8 +222,12 @@ class _StdioTransport:
             if params is not None:
                 message["params"] = params
             self._write(message)
-            if not event.wait(timeout):
-                raise McpError(f"MCP request '{method}' timed out after {timeout:g}s")
+            deadline = time.monotonic() + timeout
+            while not event.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+                if cancellation is not None and cancellation.is_set():
+                    raise McpError(f"MCP request '{method}' was cancelled")
+                if time.monotonic() >= deadline:
+                    raise McpError(f"MCP request '{method}' timed out after {timeout:g}s")
             with self._pending_lock:
                 response = self._pending.pop(request_id, None)
             if response is None:
@@ -183,7 +241,12 @@ class _StdioTransport:
                 self._pending_events.pop(request_id, None)
                 self._pending.pop(request_id, None)
 
-    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+    def notify(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = 10.0,
+    ) -> None:
         message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             message["params"] = params
@@ -207,6 +270,15 @@ class _HttpTransport:
     def __init__(self, config: McpServerConfig):
         if not config.url:
             raise McpError(f"MCP server '{config.name}' has no URL configured")
+        parsed_url = urlsplit(config.url)
+        if (
+            parsed_url.scheme not in {"http", "https"}
+            or not parsed_url.hostname
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.fragment
+        ):
+            raise McpError(f"MCP server '{config.name}' has an invalid HTTP URL")
         self._url = config.url
         self._session = requests.Session()
         self._session.headers.update(
@@ -218,7 +290,15 @@ class _HttpTransport:
         )
         self._mcp_session_id: str | None = None
 
-    def request(self, method: str, params: dict[str, Any] | None, timeout: float) -> Any:
+    def request(
+        self,
+        method: str,
+        params: dict[str, Any] | None,
+        timeout: float,
+        cancellation: threading.Event | None = None,
+    ) -> Any:
+        if cancellation is not None and cancellation.is_set():
+            raise McpError(f"MCP request '{method}' was cancelled")
         request_id = uuid.uuid4().hex
         message: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
         if params is not None:
@@ -231,21 +311,31 @@ class _HttpTransport:
                 self._session.headers["Mcp-Session-Id"] = session_id
             content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip()
             if content_type == "text/event-stream":
-                payload = self._read_sse_response(response, request_id, method)
+                payload = self._read_sse_response(
+                    response,
+                    request_id,
+                    method,
+                    cancellation=cancellation,
+                )
             else:
                 try:
-                    payload = response.json()
-                except ValueError as error:
+                    payload = json.loads(self._read_bounded_body(response))
+                except (UnicodeDecodeError, ValueError) as error:
                     raise McpError(
                         f"MCP server returned a non-JSON response to '{method}'"
                     ) from error
         return _unwrap_response(payload, method)
 
-    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+    def notify(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = 10.0,
+    ) -> None:
         message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             message["params"] = params
-        response = self._post(message, timeout=10, stream=False)
+        response = self._post(message, timeout=timeout, stream=False)
         response.close()
 
     def _post(self, message: dict[str, Any], timeout: float, stream: bool) -> requests.Response:
@@ -255,24 +345,38 @@ class _HttpTransport:
                 data=json.dumps(message, ensure_ascii=False).encode("utf-8"),
                 timeout=timeout,
                 stream=stream,
+                allow_redirects=False,
             )
         except requests.RequestException as error:
             raise McpError(f"MCP server request failed: {error}") from error
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise McpError("MCP server redirects are not allowed")
         if response.status_code >= 400:
-            body = response.text[:500]
+            body = self._read_bounded_body(response)[:500]
             response.close()
             raise McpError(f"MCP server returned HTTP {response.status_code}: {body}")
         return response
 
     @staticmethod
     def _read_sse_response(
-        response: requests.Response, request_id: str, method: str
+        response: requests.Response,
+        request_id: str,
+        method: str,
+        cancellation: threading.Event | None = None,
     ) -> dict[str, Any]:
         data_lines: list[str] = []
+        total_bytes = 0
+        event_count = 0
         for raw_line in response.iter_lines(decode_unicode=True):
+            if cancellation is not None and cancellation.is_set():
+                raise McpError(f"MCP request '{method}' was cancelled")
             if raw_line is None:
                 continue
             line = raw_line.rstrip("\r") if isinstance(raw_line, str) else ""
+            total_bytes += len(line.encode("utf-8")) + 1
+            if total_bytes > _MAX_HTTP_RESPONSE_BYTES:
+                raise McpError("MCP event stream exceeded the response size limit")
             if line.startswith("data:"):
                 data_lines.append(line[5:].lstrip())
                 continue
@@ -282,6 +386,9 @@ class _HttpTransport:
                 continue
             data = "\n".join(data_lines)
             data_lines = []
+            event_count += 1
+            if event_count > _MAX_SSE_EVENTS:
+                raise McpError("MCP event stream exceeded the event limit")
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
@@ -293,6 +400,19 @@ class _HttpTransport:
             ):
                 return cast(dict[str, Any], message)
         raise McpError(f"MCP event stream ended without a response to '{method}'")
+
+    @staticmethod
+    def _read_bounded_body(response: requests.Response) -> str:
+        chunks: list[bytes] = []
+        total_bytes = 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total_bytes += len(chunk)
+            if total_bytes > _MAX_HTTP_RESPONSE_BYTES:
+                raise McpError("MCP response exceeded the response size limit")
+            chunks.append(chunk)
+        return b"".join(chunks).decode(response.encoding or "utf-8")
 
     def close(self) -> None:
         self._session.close()
@@ -313,8 +433,10 @@ def _unwrap_response(message: Any, method: str) -> Any:
 class McpConnection:
     """One initialized MCP session over either transport."""
 
-    def __init__(self, config: McpServerConfig):
+    def __init__(self, config: McpServerConfig, *, deadline: float | None = None):
         self.config = config
+        self._operation_lock = threading.Lock()
+        deadline = deadline or (time.monotonic() + config.timeout_seconds)
         if config.transport == "stdio":
             self._transport: _StdioTransport | _HttpTransport = _StdioTransport(config)
         elif config.transport == "http":
@@ -329,39 +451,58 @@ class McpConnection:
                     "capabilities": {},
                     "clientInfo": CLIENT_INFO,
                 },
-                timeout=config.timeout_seconds,
+                timeout=_remaining_seconds(deadline, "initialize"),
             )
             self.server_info = (result or {}).get("serverInfo", {})
             self.instructions = (result or {}).get("instructions")
             negotiated = (result or {}).get("protocolVersion") or PROTOCOL_VERSION
             if isinstance(self._transport, _HttpTransport):
                 self._transport._session.headers["MCP-Protocol-Version"] = str(negotiated)
-            self._transport.notify("notifications/initialized")
+            self._transport.notify(
+                "notifications/initialized",
+                timeout=_remaining_seconds(deadline, "notifications/initialized"),
+            )
         except Exception:
             self._transport.close()
             raise
 
-    def list_tools(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = []
-        cursor: str | None = None
-        for _ in range(_MAX_TOOL_LIST_PAGES):
-            params: dict[str, Any] = {"cursor": cursor} if cursor else {}
-            result = self._transport.request(
-                "tools/list", params, timeout=self.config.timeout_seconds
-            )
-            page = (result or {}).get("tools") or []
-            tools.extend(tool for tool in page if isinstance(tool, dict))
-            cursor = (result or {}).get("nextCursor")
-            if not cursor:
-                break
-        return tools
+    def list_tools(self, *, deadline: float | None = None) -> list[dict[str, Any]]:
+        deadline = deadline or (time.monotonic() + self.config.timeout_seconds)
+        with self._operation_lock:
+            tools: list[dict[str, Any]] = []
+            cursor: str | None = None
+            for _ in range(_MAX_TOOL_LIST_PAGES):
+                params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+                result = self._transport.request(
+                    "tools/list",
+                    params,
+                    timeout=_remaining_seconds(deadline, "tools/list"),
+                )
+                page = (result or {}).get("tools") or []
+                tools.extend(tool for tool in page if isinstance(tool, dict))
+                if len(tools) > _MAX_DISCOVERED_TOOLS:
+                    raise McpError("MCP server exceeded the discovered tool limit")
+                cursor = (result or {}).get("nextCursor")
+                if not cursor:
+                    return tools
+            raise McpError("MCP server exceeded the tool pagination limit")
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        result = self._transport.request(
-            "tools/call",
-            {"name": name, "arguments": arguments},
-            timeout=self.config.timeout_seconds,
-        )
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        deadline: float | None = None,
+        cancellation: threading.Event | None = None,
+    ) -> str:
+        deadline = deadline or (time.monotonic() + self.config.timeout_seconds)
+        with self._operation_lock:
+            result = self._transport.request(
+                "tools/call",
+                {"name": name, "arguments": arguments},
+                timeout=_remaining_seconds(deadline, "tools/call"),
+                cancellation=cancellation,
+            )
         result = result or {}
         parts: list[str] = []
         for item in result.get("content") or []:
@@ -374,6 +515,8 @@ class McpConnection:
         if not parts and result.get("structuredContent") is not None:
             parts.append(json.dumps(result["structuredContent"], ensure_ascii=False))
         content = "\n".join(part for part in parts if part)
+        if len(content) > _MAX_TOOL_RESULT_CHARS:
+            raise McpError("MCP tool result exceeded the content size limit")
         if result.get("isError"):
             raise McpError(content or f"MCP tool '{name}' reported an error")
         return content
@@ -388,29 +531,80 @@ class McpClientManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._connections: dict[int, McpConnection] = {}
+        self._generations: dict[int, int] = {}
+        self._connecting: dict[tuple[int, int, str], threading.Event] = {}
+        self._closed = False
 
-    def _connection(self, config: McpServerConfig) -> McpConnection:
-        with self._lock:
-            existing = self._connections.get(config.server_id)
-            if existing is not None and existing.config.fingerprint == config.fingerprint:
-                return existing
-            if existing is not None:
-                existing.close()
-                del self._connections[config.server_id]
-        connection = McpConnection(config)
-        with self._lock:
-            current = self._connections.get(config.server_id)
-            if current is not None and current.config.fingerprint == config.fingerprint:
+    def _connection(
+        self,
+        config: McpServerConfig,
+        *,
+        deadline: float | None = None,
+    ) -> McpConnection:
+        deadline = deadline or (time.monotonic() + config.timeout_seconds)
+        while True:
+            stale_connection: McpConnection | None = None
+            with self._lock:
+                if self._closed:
+                    raise McpError("MCP client manager is shut down")
+                generation = self._generations.get(config.server_id, 0)
+                existing = self._connections.get(config.server_id)
+                if existing is not None and existing.config.fingerprint == config.fingerprint:
+                    return existing
+                if existing is not None:
+                    stale_connection = self._connections.pop(config.server_id)
+                flight_key = (config.server_id, generation, config.fingerprint)
+                flight = self._connecting.get(flight_key)
+                leader = flight is None
+                if leader:
+                    flight = threading.Event()
+                    self._connecting[flight_key] = flight
+
+            if stale_connection is not None:
+                stale_connection.close()
+            assert flight is not None
+            if not leader:
+                if not flight.wait(_remaining_seconds(deadline, "connect")):
+                    raise McpError("MCP connection setup timed out")
+                continue
+
+            try:
+                connection = McpConnection(config, deadline=deadline)
+            except Exception:
+                with self._lock:
+                    self._connecting.pop(flight_key, None)
+                    flight.set()
+                raise
+
+            replaced: McpConnection | None = None
+            retry = False
+            with self._lock:
+                self._connecting.pop(flight_key, None)
+                if self._closed or self._generations.get(config.server_id, 0) != generation:
+                    retry = not self._closed
+                else:
+                    current = self._connections.get(config.server_id)
+                    if current is not None and current.config.fingerprint == config.fingerprint:
+                        replaced = connection
+                        connection = current
+                    else:
+                        replaced = current
+                        self._connections[config.server_id] = connection
+                flight.set()
+            if replaced is not None:
+                replaced.close()
+            if self._closed:
                 connection.close()
-                return current
-            if current is not None:
-                current.close()
-            self._connections[config.server_id] = connection
-        return connection
+                raise McpError("MCP client manager is shut down")
+            if retry:
+                connection.close()
+                continue
+            return connection
 
     def list_tools(self, config: McpServerConfig) -> list[dict[str, Any]]:
+        deadline = time.monotonic() + config.timeout_seconds
         try:
-            return self._connection(config).list_tools()
+            return self._connection(config, deadline=deadline).list_tools(deadline=deadline)
         except McpError:
             self.invalidate(config.server_id)
             raise
@@ -418,9 +612,22 @@ class McpClientManager:
             self.invalidate(config.server_id)
             raise McpError(f"MCP server '{config.name}' failed: {error}") from error
 
-    def call_tool(self, config: McpServerConfig, name: str, arguments: dict[str, Any]) -> str:
+    def call_tool(
+        self,
+        config: McpServerConfig,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        cancellation: threading.Event | None = None,
+    ) -> str:
+        deadline = time.monotonic() + config.timeout_seconds
         try:
-            return self._connection(config).call_tool(name, arguments)
+            return self._connection(config, deadline=deadline).call_tool(
+                name,
+                arguments,
+                deadline=deadline,
+                cancellation=cancellation,
+            )
         except McpError:
             self.invalidate(config.server_id)
             raise
@@ -430,13 +637,19 @@ class McpClientManager:
 
     def invalidate(self, server_id: int) -> None:
         with self._lock:
+            self._generations[server_id] = self._generations.get(server_id, 0) + 1
             connection = self._connections.pop(server_id, None)
         if connection is not None:
             connection.close()
 
     def shutdown(self) -> None:
         with self._lock:
+            self._closed = True
             connections = list(self._connections.values())
             self._connections.clear()
+            server_ids = set(self._generations)
+            server_ids.update(key[0] for key in self._connecting)
+            for server_id in server_ids:
+                self._generations[server_id] = self._generations.get(server_id, 0) + 1
         for connection in connections:
             connection.close()

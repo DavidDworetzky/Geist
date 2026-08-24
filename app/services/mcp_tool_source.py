@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from agents.models.tool_calling import ToolContext, ToolDefinition, ToolExecutionOutput
 from app.models.database.mcp_server import McpServerModel, list_enabled_mcp_servers
@@ -53,42 +54,83 @@ class McpToolSource:
         self._servers_loader = servers_loader
         self._cache_ttl_seconds = cache_ttl_seconds
         self._lock = threading.Lock()
-        self._cached: dict[int | None, tuple[list[ToolDefinition], float]] = {}
+        self._generation = 0
+        self._cached: dict[int | None, tuple[list[ToolDefinition], float, int]] = {}
+        self._inflight: dict[tuple[int | None, int], threading.Event] = {}
 
     def invalidate(self) -> None:
         with self._lock:
+            self._generation += 1
             self._cached.clear()
 
     def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]:
         user_id = context.user_id if context is not None else None
-        with self._lock:
-            cached = self._cached.get(user_id)
-            if cached is not None and time.monotonic() < cached[1]:
-                return list(cached[0])
+        while True:
+            with self._lock:
+                generation = self._generation
+                cached = self._cached.get(user_id)
+                if (
+                    cached is not None
+                    and cached[2] == generation
+                    and time.monotonic() < cached[1]
+                ):
+                    return list(cached[0])
+                flight_key = (user_id, generation)
+                flight = self._inflight.get(flight_key)
+                leader = flight is None
+                if leader:
+                    flight = threading.Event()
+                    self._inflight[flight_key] = flight
+            assert flight is not None
+            if leader:
+                break
+            flight.wait()
 
-        definitions: list[ToolDefinition] = []
+        try:
+            definitions = self._discover_definitions(user_id)
+        except Exception:
+            logger.exception("Could not discover MCP tool definitions")
+            definitions = []
+        with self._lock:
+            self._inflight.pop(flight_key, None)
+            if generation == self._generation:
+                self._cached[user_id] = (
+                    list(definitions),
+                    time.monotonic() + self._cache_ttl_seconds,
+                    generation,
+                )
+            flight.set()
+        return definitions
+
+    def _discover_definitions(self, user_id: int | None) -> list[ToolDefinition]:
         try:
             servers = self._servers_loader(user_id)
         except Exception:
             logger.exception("Could not load MCP server configurations")
-            servers = []
-        for server in servers:
+            return []
+
+        def discover(server: McpServerModel) -> list[ToolDefinition]:
             config = config_from_model(server)
             try:
                 tools = self._manager.list_tools(config)
             except McpError as error:
                 logger.warning("Skipping MCP server '%s': %s", server.name, error)
-                continue
+                return []
+            server_definitions: list[ToolDefinition] = []
             for tool in tools:
                 definition = self._definition(config, tool)
                 if definition is not None:
-                    definitions.append(definition)
+                    server_definitions.append(definition)
+            return server_definitions
 
-        with self._lock:
-            self._cached[user_id] = (
-                list(definitions),
-                time.monotonic() + self._cache_ttl_seconds,
-            )
+        if not servers:
+            return []
+        with ThreadPoolExecutor(
+            max_workers=min(4, len(servers)),
+            thread_name_prefix="geist-mcp-discovery",
+        ) as executor:
+            discovered = executor.map(discover, servers)
+            definitions = [definition for group in discovered for definition in group]
         return definitions
 
     def _definition(self, config: McpServerConfig, tool: dict) -> ToolDefinition | None:
@@ -109,7 +151,12 @@ class McpToolSource:
             _config: McpServerConfig = config,
             _tool: str = tool_name,
         ) -> ToolExecutionOutput:
-            content = self._manager.call_tool(_config, _tool, arguments)
+            content = self._manager.call_tool(
+                _config,
+                _tool,
+                arguments,
+                cancellation=context.cancellation,
+            )
             return ToolExecutionOutput(
                 content=content or "(empty tool result)",
                 summary=f"Called {_tool} on MCP server {_config.name}",
@@ -127,6 +174,7 @@ class McpToolSource:
             requires_approval=True,
             timeout_seconds=config.timeout_seconds + 5.0,
             source_adapter=f"mcp:{config.name}",
+            source_revision=config.fingerprint,
         )
 
 

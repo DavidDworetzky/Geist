@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'b3e5d7f9a1c3'
-down_revision = 'f5c8a1d3e7b9'
+down_revision = 'c6d9e2f4a7b1'
 branch_labels = None
 depends_on = None
 
@@ -34,6 +34,7 @@ def upgrade():
         sa.Column('update_date', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['geist_user.user_id'], ),
         sa.PrimaryKeyConstraint('mcp_server_id'),
+        sa.UniqueConstraint('user_id', 'name', name='uq_mcp_server_user_name'),
     )
 
 

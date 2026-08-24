@@ -1,5 +1,4 @@
 import importlib
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +13,11 @@ from app.models.database.database import (
 from app.models.database.database_config import DatabaseConfig
 from app.models.database.geist_user import GeistUser
 from app.models.database.mcp_server import get_mcp_server
+from app.security.operator import (
+    ALL_OPERATOR_CAPABILITIES,
+    OperatorPrincipal,
+    get_operator_principal,
+)
 from app.services.mcp_client import McpError
 
 
@@ -33,17 +37,25 @@ def mcp_client(tmp_path, monkeypatch):
         session.add(
             GeistUser(
                 user_id=1,
-                username="ddworetzky",
-                name="David Dworetzky",
-                email="david@phantasmal.ai",
-                password="",
+                workspace_key="default",
+                username="local",
+                name="Local User",
             )
         )
         session.commit()
     from app.main import create_app
 
-    with TestClient(create_app()) as client:
+    app = create_app()
+    app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
+        subject="test-operator",
+        authentication_method="test",
+        user_id=1,
+        is_loopback=True,
+        capabilities=ALL_OPERATOR_CAPABILITIES,
+    )
+    with TestClient(app) as client:
         yield client
+    app.dependency_overrides.clear()
     Session.remove()
     Base.metadata.drop_all(bind=engine)
     configure_database(original_config)
@@ -57,6 +69,18 @@ def _stdio_payload(name: str = "filesystem") -> dict:
         "args": ["-y", "@modelcontextprotocol/server-filesystem"],
         "env": {"HOME": "/tmp"},
     }
+
+
+def test_mcp_routes_require_operator_authentication(monkeypatch):
+    monkeypatch.setenv("GEIST_OPERATOR_TOKEN", "a" * 43)
+    monkeypatch.setenv("GEIST_JOB_WORKER_ENABLED", "false")
+    from app.main import create_app
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/mcp/servers")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "GeistOperator"
 
 
 def test_mcp_server_crud_flow(mcp_client):
@@ -106,16 +130,22 @@ def test_mcp_secrets_are_redacted_and_redacted_updates_preserve_values(mcp_clien
     assert updated.status_code == 200
     assert get_mcp_server(server_id).env == {"ACCESS_TOKEN": "secret-token"}
 
+    unknown_placeholder = mcp_client.put(
+        f"/api/v1/mcp/servers/{server_id}",
+        json={"env": {"NEW_TOKEN": "<redacted>"}},
+    )
+    assert unknown_placeholder.status_code == 422
 
-def test_mcp_server_routes_hide_other_users_servers(mcp_client, monkeypatch):
-    import app.api.v1.endpoints.mcp as mcp_endpoints
 
+def test_mcp_server_routes_hide_other_users_servers(mcp_client):
     created = mcp_client.post("/api/v1/mcp/servers", json=_stdio_payload())
     server_id = created.json()["mcp_server_id"]
-    monkeypatch.setattr(
-        mcp_endpoints,
-        "get_current_user",
-        lambda: SimpleNamespace(user_id=2),
+    mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
+        subject="other-test-operator",
+        authentication_method="test",
+        user_id=2,
+        is_loopback=True,
+        capabilities=ALL_OPERATOR_CAPABILITIES,
     )
 
     assert mcp_client.get(f"/api/v1/mcp/servers/{server_id}").status_code == 404
@@ -133,6 +163,35 @@ def test_stdio_server_requires_command(mcp_client):
         json={"name": "broken", "transport": "stdio"},
     )
     assert response.status_code == 422
+
+
+def test_remote_operator_cannot_configure_stdio_server(mcp_client):
+    mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
+        subject="remote-test-operator",
+        authentication_method="test",
+        user_id=1,
+        is_loopback=False,
+        capabilities=ALL_OPERATOR_CAPABILITIES,
+    )
+
+    response = mcp_client.post("/api/v1/mcp/servers", json=_stdio_payload())
+
+    assert response.status_code == 422
+    assert "local operator" in response.json()["detail"]
+
+
+def test_local_token_file_operator_can_configure_stdio_server_through_proxy(mcp_client):
+    mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
+        subject="local-managed",
+        authentication_method="local-token-file",
+        user_id=1,
+        is_loopback=False,
+        capabilities=ALL_OPERATOR_CAPABILITIES,
+    )
+
+    response = mcp_client.post("/api/v1/mcp/servers", json=_stdio_payload("proxied"))
+
+    assert response.status_code == 201
 
 
 def test_http_server_requires_http_url(mcp_client):
