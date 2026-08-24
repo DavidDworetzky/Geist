@@ -46,6 +46,8 @@ infer the default workspace from a person's email on a new Geist revision.
 - Add an immutable request-scoped `OperatorPrincipal` with subject,
   authentication method, local user ID, and explicit capabilities.
 - Treat loopback-only standalone Geist as a trusted local operator.
+- Give Docker/native development proxies a generated local operator token;
+  keep it in a private file consumed only by the backend and server-side proxy.
 - Accept a per-launch wrapper credential for Pitchblend-managed Geist and map
   it to the neutral default workspace without using Pitchblend OIDC tokens.
 - Require authenticated operator capabilities on MCP CRUD/test routes.

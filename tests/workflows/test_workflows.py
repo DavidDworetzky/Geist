@@ -10,7 +10,7 @@ from app.models.database.workflow import Workflow, WorkflowStep
 
 
 @pytest.fixture
-def client():
+def client(test_workspace):
     """Test client fixture."""
     return TestClient(app, base_url="http://127.0.0.1")
 
@@ -44,9 +44,9 @@ def test_workspace(db_session):
 
 
 @pytest.fixture
-def auth_headers(test_workspace):
-    """Authentication headers fixture."""
-    return {"Authorization": f"Bearer test_token_{test_workspace.workspace_id}"}
+def auth_headers():
+    """Loopback requests authenticate without a configured operator token."""
+    return {}
 
 
 def test_create_workflow(client, auth_headers):
