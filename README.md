@@ -111,6 +111,9 @@ Tests and alternate application entry points can inject `DatabaseConfig(provider
     - Downloads are resumable, cancellable, verified before inference, and
       stored beneath the user-writable `GEIST_MODEL_HOME`/data directory.
       `LOCAL_WEIGHTS_DIR` remains available for legacy MLX installations.
+    - Voice (STT/TTS) models can be pre-fetched into the Hugging Face cache with
+      `python scripts/download_models.py --voice_model <name|all>`; list the
+      available names with `--list_voice_models`.
 
 
 client/geist/.env settings:

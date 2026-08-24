@@ -1,6 +1,7 @@
 import React, { useState, useRef, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
+import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
 import useVoiceChat from '../Hooks/useVoiceChat';
 
 interface EnhancedChatInputProps {
@@ -36,6 +37,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+
   const {
     isRecording,
     isProcessing,
@@ -43,6 +46,11 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     toggleRecording
   } = useVoiceChat({
     sessionId,
+    sttProvider: voiceSelection.sttProvider,
+    ttsProvider: voiceSelection.ttsProvider,
+    ttsModel: voiceSelection.ttsModel,
+    ttsVoice: voiceSelection.ttsVoice,
+    ttsLanguage: voiceSelection.ttsLanguage,
     onTranscriptFinal: (text) => {
       onChange(text);
     },
@@ -185,12 +193,19 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
         <div className="input-actions">
           {enableVoice && (
-            <VoiceButton
-              isRecording={isRecording}
-              isProcessing={isProcessing}
-              onClick={toggleRecording}
-              disabled={disabled}
-            />
+            <>
+              <VoiceSettings
+                selection={voiceSelection}
+                onChange={setVoiceSelection}
+                disabled={disabled || isRecording}
+              />
+              <VoiceButton
+                isRecording={isRecording}
+                isProcessing={isProcessing}
+                onClick={toggleRecording}
+                disabled={disabled}
+              />
+            </>
           )}
 
           <button
