@@ -17,6 +17,9 @@ when their mixture-of-experts active-parameter count is much smaller.
 The anonymous Ox Alpha preview is also server-backed because it is available
 only through OpenRouter as `stealth/ox-alpha`; the catalog does not guess its
 undisclosed model family or parameter count.
+Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
+its parameter count or a fixed maximum output limit, so the catalog leaves
+both fields unset.
 
 ## Adding a model or provider
 
@@ -47,6 +50,20 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
+
+## OpenRouter-hosted Muse Spark 1.2 Contributor
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-spark-1.2-contributor`. The stable OpenRouter route supports a
+1,048,576-token context, multimodal input, streaming, structured output, and
+native function calling. Muse Spark always reasons; Geist supplies its
+documented default `medium` effort and omits unsupported frequency penalty,
+presence penalty, and stop parameters.
+
+OpenRouter does not retain prompt or response content unless logging is
+explicitly enabled. The sole upstream Meta endpoint, however, has a documented
+30-day retention policy and is not on OpenRouter's ZDR endpoint list. Do not
+send confidential workloads to this model.
 
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and

@@ -280,14 +280,21 @@ class TestOnlineAgentInitialization:
 class TestOnlineAgentAPIRequests:
     """Test API request handling for different providers."""
 
-    def test_grok_46_applies_openrouter_request_constraints(self):
+    @pytest.mark.parametrize(
+        ("model_id", "reasoning_effort"),
+        [
+            ("x-ai/grok-4.6", "high"),
+            ("meta/muse-spark-1.2-contributor", "medium"),
+        ],
+    )
+    def test_openrouter_models_apply_request_constraints(self, model_id, reasoning_effort):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="x-ai/grok-4.6",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -298,7 +305,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "x-ai/grok-4.6",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "frequency_penalty": 0.5,
                         "presence_penalty": 0.5,
@@ -312,7 +319,7 @@ class TestOnlineAgentAPIRequests:
                 assert "presence_penalty" not in payload
                 assert "stop" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
-                assert payload["reasoning"] == {"effort": "high"}
+                assert payload["reasoning"] == {"effort": reasoning_effort}
 
     def test_openai_complete_text(self):
         """Test complete_text with OpenAI API."""
@@ -605,7 +612,16 @@ class TestOnlineAgentRetryLogic:
                 second_call_args = mock_post.call_args_list[1]
                 assert "groq.com" in second_call_args[0][0]
 
-    def test_grok_46_constraints_do_not_leak_to_backup_provider(self):
+    @pytest.mark.parametrize(
+        ("model_id", "reasoning_effort"),
+        [
+            ("x-ai/grok-4.6", "high"),
+            ("meta/muse-spark-1.2-contributor", "medium"),
+        ],
+    )
+    def test_openrouter_constraints_do_not_leak_to_backup_provider(
+        self, model_id, reasoning_effort
+    ):
         """Apply model-specific constraints independently for backup models."""
         context = create_mock_agent_context()
         backup_providers = [
@@ -620,34 +636,38 @@ class TestOnlineAgentRetryLogic:
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="x-ai/grok-4.6",
+                model=model_id,
                 backup_providers=backup_providers,
                 max_retries=1,
             )
 
             with patch.object(agent.client, "post") as mock_post:
-                mock_response_fail = Mock()
-                mock_response_fail.status_code = 500
-                mock_response_fail.text = "Internal Server Error"
-                mock_response_success = Mock()
-                mock_response_success.status_code = 200
-                mock_response_success.json.return_value = GROQ_RESPONSE
-                mock_post.side_effect = [mock_response_fail, mock_response_success]
+                primary_failure = Mock(status_code=500, text="Internal Server Error")
+                backup_success = Mock(status_code=200)
+                backup_success.json.return_value = GROQ_RESPONSE
+                mock_post.side_effect = [primary_failure, backup_success]
 
                 agent._make_request(
                     {
-                        "model": "x-ai/grok-4.6",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
                     }
                 )
 
                 primary_payload = mock_post.call_args_list[0].kwargs["json"]
                 backup_payload = mock_post.call_args_list[1].kwargs["json"]
-                assert primary_payload["reasoning"] == {"effort": "high"}
+                assert primary_payload["reasoning"] == {"effort": reasoning_effort}
                 assert "frequency_penalty" not in primary_payload
-                assert "reasoning" not in backup_payload
+                assert "presence_penalty" not in primary_payload
+                assert "stop" not in primary_payload
+                assert backup_payload["model"] == "llama-3.1-70b-versatile"
                 assert backup_payload["frequency_penalty"] == 0.5
+                assert backup_payload["presence_penalty"] == 0.5
+                assert backup_payload["stop"] == "END"
+                assert "reasoning" not in backup_payload
 
     def test_request_error_with_backup(self):
         """Test backup provider is used on request errors."""
