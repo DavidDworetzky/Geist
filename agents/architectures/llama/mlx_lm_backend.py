@@ -3,8 +3,40 @@
 import importlib
 import time
 from collections.abc import Iterator
+from typing import Any
 
 from agents.models.llama_completion import strings_to_message_dict
+
+
+QWEN3_TOP_K = 20
+
+
+def _is_qwen3_model(model_id: str) -> bool:
+    normalized = model_id.lower().replace("_", "").replace("-", "")
+    return "qwen3" in normalized
+
+
+def _normalize_stops(stop: str | list[str] | None) -> tuple[str, ...]:
+    if isinstance(stop, str):
+        stop = [stop]
+    return tuple(dict.fromkeys(value for value in stop or [] if value))
+
+
+def _first_stop_index(text: str, stops: tuple[str, ...]) -> int | None:
+    positions = (text.find(stop) for stop in stops)
+    return min((position for position in positions if position >= 0), default=None)
+
+
+def _stop_prefix_length(text: str, stops: tuple[str, ...]) -> int:
+    """Retain a suffix that may become a stop sequence in the next text chunk."""
+    retained = 0
+    for stop in stops:
+        maximum = min(len(text), len(stop) - 1)
+        for length in range(maximum, 0, -1):
+            if text.endswith(stop[:length]):
+                retained = max(retained, length)
+                break
+    return retained
 
 
 def _configure_thread_local_generation_stream() -> None:
@@ -23,6 +55,7 @@ class MLXLMBackend:
         top_p: float = 1.0,
         model_id: str = "meta-llama/Meta-Llama-3.1-8B-Instruct",
         weights_dir: str | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ):
         try:
             from mlx_lm import load
@@ -35,8 +68,12 @@ class MLXLMBackend:
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
+        self.frequency_penalty = 0.0
+        self.presence_penalty = 0.0
+        self.stop: str | list[str] | None = None
         self.model_id = model_id
         self.weights_dir = weights_dir
+        self.chat_template_kwargs = dict(chat_template_kwargs or {})
         self.model, self.tokenizer = load(weights_dir or model_id)
         self.last_stats: dict[str, float] = {}
 
@@ -56,8 +93,9 @@ class MLXLMBackend:
             "tokenize": False,
             "add_generation_prompt": True,
         }
-        if "qwen3" in self.model_id.casefold():
+        if _is_qwen3_model(self.model_id):
             template_options["enable_thinking"] = False
+        template_options.update(self.chat_template_kwargs)
         return self.tokenizer.apply_chat_template(
             normalized,
             **template_options,
@@ -77,22 +115,48 @@ class MLXLMBackend:
     ) -> Iterator[str]:
         """Yield decoded text for a structured conversation."""
         from mlx_lm import stream_generate
-        from mlx_lm.sample_utils import make_sampler
+        from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
         prompt = self._build_messages_prompt(messages)
-        sampler = make_sampler(temp=self.temperature, top_p=self.top_p)
+        sampler = make_sampler(
+            temp=self.temperature,
+            top_p=self.top_p,
+            top_k=QWEN3_TOP_K if _is_qwen3_model(self.model_id) else 0,
+        )
+        logits_processors = make_logits_processors(
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+        )
+        stops = _normalize_stops(self.stop)
         started = time.perf_counter()
         final_response = None
+        pending_text = ""
+        stopped = False
         for response in stream_generate(
             self.model,
             self.tokenizer,
             prompt,
             max_tokens=self.max_new_tokens,
             sampler=sampler,
+            logits_processors=logits_processors or None,
         ):
             final_response = response
-            if response.text:
-                yield response.text
+            pending_text += response.text
+            stop_index = _first_stop_index(pending_text, stops)
+            if stop_index is not None:
+                if stop_index:
+                    yield pending_text[:stop_index]
+                stopped = True
+                break
+
+            retained = _stop_prefix_length(pending_text, stops)
+            emit_length = len(pending_text) - retained
+            if emit_length:
+                yield pending_text[:emit_length]
+                pending_text = pending_text[emit_length:]
+
+        if pending_text and not stopped:
+            yield pending_text
 
         elapsed = time.perf_counter() - started
         if final_response is not None:

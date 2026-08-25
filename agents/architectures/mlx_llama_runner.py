@@ -9,8 +9,6 @@ from .base_runner import BaseRunner, GenerationConfig
 
 logger = logging.getLogger(__name__)
 
-MLX_LM_DEFAULT_MODELS = frozenset({"qwen/qwen3.8-27b"})
-
 
 class _MLXBackend(Protocol):
     """Shared runtime contract implemented by both MLX backends."""
@@ -18,6 +16,9 @@ class _MLXBackend(Protocol):
     max_new_tokens: int
     temperature: float
     top_p: float
+    frequency_penalty: float
+    presence_penalty: float
+    stop: str | list[str] | None
 
     def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]: ...
 
@@ -37,6 +38,14 @@ class MLXLlamaRunner(BaseRunner):
         self.model_id: str | None = None
         self.weights_dir: str | None = None
         self.implementation: str | None = None
+
+    @staticmethod
+    def _manual_implementation_supports(model_id: str) -> bool:
+        """The hand-written kernel only implements the Llama architecture."""
+        from agents.model_catalog import infer_model_spec
+
+        spec = infer_model_spec(model_id)
+        return spec is None or spec.family == "llama"
 
     @staticmethod
     def _resolve_weights_dir(model_id: str, device_config: dict[str, Any]) -> str:
@@ -76,13 +85,11 @@ class MLXLlamaRunner(BaseRunner):
         """Load the selected implementation and propagate the requested model path."""
         device_config = device_config or {}
         self.model_id = model_id
-        default_implementation = (
-            "mlx_lm" if model_id.casefold() in MLX_LM_DEFAULT_MODELS else "manual"
-        )
-        requested = device_config.get(
-            "implementation",
-            os.environ.get("GEIST_MLX_IMPLEMENTATION", default_implementation),
-        )
+        requested = device_config.get("implementation")
+        if requested is None:
+            requested = os.environ.get("GEIST_MLX_IMPLEMENTATION")
+        if requested is None:
+            requested = "manual" if self._manual_implementation_supports(model_id) else "mlx_lm"
         if not isinstance(requested, str):
             raise TypeError("MLX implementation must be a string")
         self.implementation = requested.strip().lower().replace("-", "_")
@@ -90,6 +97,11 @@ class MLXLlamaRunner(BaseRunner):
             choices = ", ".join(sorted(self.IMPLEMENTATIONS))
             raise ValueError(
                 f"Unknown MLX implementation '{requested}'. Expected one of: {choices}."
+            )
+        if self.implementation == "manual" and not self._manual_implementation_supports(model_id):
+            raise ValueError(
+                "The manual MLX implementation only supports Llama models; "
+                f"use implementation='mlx_lm' for {model_id}."
             )
 
         self.weights_dir = self._resolve_weights_dir(model_id, device_config)
@@ -104,10 +116,18 @@ class MLXLlamaRunner(BaseRunner):
         else:
             from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
 
+            backend_kwargs: dict[str, Any] = {
+                "max_new_tokens": 16,
+                "model_id": model_id,
+                "weights_dir": self.weights_dir,
+            }
+            chat_template_kwargs = device_config.get("chat_template_kwargs")
+            if chat_template_kwargs is not None:
+                if not isinstance(chat_template_kwargs, dict):
+                    raise TypeError("chat_template_kwargs must be a dictionary")
+                backend_kwargs["chat_template_kwargs"] = chat_template_kwargs
             self.llama = MLXLMBackend(
-                max_new_tokens=16,
-                model_id=model_id,
-                weights_dir=self.weights_dir,
+                **backend_kwargs,
             )
 
         logger.info(
@@ -124,6 +144,9 @@ class MLXLlamaRunner(BaseRunner):
         backend.max_new_tokens = generation_config.max_tokens
         backend.temperature = generation_config.temperature
         backend.top_p = generation_config.top_p
+        backend.frequency_penalty = generation_config.frequency_penalty
+        backend.presence_penalty = generation_config.presence_penalty
+        backend.stop = generation_config.stop
         return backend
 
     def generate(
