@@ -47,6 +47,7 @@ from app.models.database.geist_user import get_default_workspace
 from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
+from app.security.middleware import OperatorAuthenticationMiddleware
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.memory_context import build_memory_context
@@ -454,6 +455,7 @@ def create_app(
             _stop_runtime_services()
 
     app = FastAPI(lifespan=lifespan)
+    app.add_middleware(OperatorAuthenticationMiddleware)
     if loopback_only:
         install_loopback_security(app)
     app.state.ready = False

@@ -9,8 +9,11 @@ from app.security import operator
 from app.security.operator import (
     ALL_OPERATOR_CAPABILITIES,
     OPERATOR_AUTHENTICATION_SCHEME,
+    OperatorAuthentication,
+    OperatorAuthenticator,
     OperatorCapability,
     OperatorPrincipal,
+    authenticate_operator,
     get_operator_principal,
     require_operator_capability,
 )
@@ -183,3 +186,30 @@ def test_workspace_dependency_uses_principal_workspace(monkeypatch):
     )
 
     assert api_utils.get_current_workspace(principal) is workspace
+
+
+def test_custom_authenticator_can_supply_node_scoped_principal():
+    class NodeAuthenticator(OperatorAuthenticator):
+        def authenticate(self, connection, *, is_loopback):
+            del connection, is_loopback
+            return OperatorAuthentication(
+                subject="pitchblend-controller",
+                authentication_method="tailscale-assertion",
+                capabilities=frozenset({OperatorCapability.WORKSPACE_READ}),
+                controller_node_id="controller-1",
+                target_node_id="workstation-7",
+                audience="geist://workstation-7",
+                credential_id="credential-9",
+            )
+
+    principal = authenticate_operator(
+        request(client_host="100.64.0.7"),
+        authenticators=(NodeAuthenticator(),),
+    )
+
+    assert principal.workspace_id == 41
+    assert principal.controller_node_id == "controller-1"
+    assert principal.target_node_id == "workstation-7"
+    assert principal.audience == "geist://workstation-7"
+    assert principal.credential_id == "credential-9"
+    assert principal.capabilities == frozenset({OperatorCapability.WORKSPACE_READ})

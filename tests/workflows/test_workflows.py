@@ -12,7 +12,11 @@ from app.models.database.workflow import Workflow, WorkflowStep
 @pytest.fixture
 def client(test_workspace):
     """Test client fixture."""
-    return TestClient(app, base_url="http://127.0.0.1")
+    return TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
 
 
 @pytest.fixture

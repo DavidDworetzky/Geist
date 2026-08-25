@@ -4,13 +4,14 @@ import ipaddress
 import os
 import secrets
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
+from starlette.requests import HTTPConnection
 
 from app.models.database.geist_user import get_default_workspace
 
@@ -52,12 +53,40 @@ class OperatorPrincipal:
         return self.is_loopback or self.authentication_method == "local-token-file"
 
 
-def get_operator_principal(request: Request) -> OperatorPrincipal:
-    """Authenticate the process operating this local Geist workspace."""
-    client_host = request.client.host if request.client else None
-    is_loopback = bool(client_host and _is_loopback_address(client_host))
-    configured_token, token_source = _configured_operator_token()
-    if configured_token:
+@dataclass(frozen=True)
+class OperatorAuthentication:
+    """Authenticator output before it is bound to the local workspace."""
+
+    subject: str
+    authentication_method: str
+    capabilities: frozenset[OperatorCapability]
+    controller_node_id: str | None = None
+    target_node_id: str | None = None
+    audience: str | None = None
+    expires_at: datetime | None = None
+    credential_id: str | None = None
+
+
+class OperatorAuthenticator(ABC):
+    """Pluggable request authentication boundary for local and remote clients."""
+
+    @abstractmethod
+    def authenticate(
+        self, connection: HTTPConnection, *, is_loopback: bool
+    ) -> OperatorAuthentication | None:
+        """Return an authentication result or None when this method is not configured."""
+
+
+class ConfiguredTokenAuthenticator(OperatorAuthenticator):
+    """Authenticate wrapper launch tokens and server-only local token files."""
+
+    def authenticate(
+        self, connection: HTTPConnection, *, is_loopback: bool
+    ) -> OperatorAuthentication | None:
+        del is_loopback
+        configured_token, token_source = _configured_operator_token()
+        if configured_token is None:
+            return None
         if (
             len(configured_token) < MINIMUM_OPERATOR_TOKEN_LENGTH
             or configured_token.strip() != configured_token
@@ -67,29 +96,81 @@ def get_operator_principal(request: Request) -> OperatorPrincipal:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Geist operator authentication is misconfigured",
             )
-        supplied_token = _operator_token_from_request(request)
-        if supplied_token is None or not secrets.compare_digest(
-            supplied_token, configured_token
-        ):
+        supplied_token = _operator_token_from_request(connection)
+        if supplied_token is None or not secrets.compare_digest(supplied_token, configured_token):
             raise _not_authenticated()
-        authentication_method = token_source
-        subject = (
-            "pitchblend-managed" if token_source == "wrapper-token" else "local-managed"
+        return OperatorAuthentication(
+            subject=("pitchblend-managed" if token_source == "wrapper-token" else "local-managed"),
+            authentication_method=token_source,
+            capabilities=ALL_OPERATOR_CAPABILITIES,
         )
-    else:
+
+
+class LoopbackAuthenticator(OperatorAuthenticator):
+    """Authorize standalone requests only when the peer is loopback."""
+
+    def authenticate(
+        self, connection: HTTPConnection, *, is_loopback: bool
+    ) -> OperatorAuthentication | None:
+        del connection
         if not is_loopback:
-            raise _not_authenticated()
-        authentication_method = "loopback"
-        subject = "local-standalone"
+            return None
+        return OperatorAuthentication(
+            subject="local-standalone",
+            authentication_method="loopback",
+            capabilities=ALL_OPERATOR_CAPABILITIES,
+        )
+
+
+DEFAULT_OPERATOR_AUTHENTICATORS: tuple[OperatorAuthenticator, ...] = (
+    ConfiguredTokenAuthenticator(),
+    LoopbackAuthenticator(),
+)
+
+
+def authenticate_operator(
+    connection: HTTPConnection,
+    authenticators: Sequence[OperatorAuthenticator] = DEFAULT_OPERATOR_AUTHENTICATORS,
+) -> OperatorPrincipal:
+    """Authenticate a connection and bind it to this node's singleton workspace."""
+    cached_principal = getattr(connection.state, "operator_principal", None)
+    if isinstance(cached_principal, OperatorPrincipal):
+        return cached_principal
+
+    client_host = connection.client.host if connection.client else None
+    is_loopback = bool(client_host and _is_loopback_address(client_host))
+    authentication = next(
+        (
+            result
+            for authenticator in authenticators
+            if (result := authenticator.authenticate(connection, is_loopback=is_loopback))
+            is not None
+        ),
+        None,
+    )
+    if authentication is None:
+        raise _not_authenticated()
 
     workspace = get_default_workspace()
-    return OperatorPrincipal(
-        subject=subject,
-        authentication_method=authentication_method,
+    principal = OperatorPrincipal(
+        subject=authentication.subject,
+        authentication_method=authentication.authentication_method,
         workspace_id=workspace.workspace_id,
         is_loopback=is_loopback,
-        capabilities=ALL_OPERATOR_CAPABILITIES,
+        capabilities=authentication.capabilities,
+        controller_node_id=authentication.controller_node_id,
+        target_node_id=authentication.target_node_id,
+        audience=authentication.audience,
+        expires_at=authentication.expires_at,
+        credential_id=authentication.credential_id,
     )
+    connection.state.operator_principal = principal
+    return principal
+
+
+def get_operator_principal(connection: HTTPConnection) -> OperatorPrincipal:
+    """FastAPI dependency for the authenticated local-server request principal."""
+    return authenticate_operator(connection)
 
 
 def require_operator_capability(
@@ -108,10 +189,10 @@ def require_operator_capability(
     return dependency
 
 
-def _operator_token_from_request(request: Request) -> str | None:
+def _operator_token_from_request(connection: HTTPConnection) -> str | None:
     authorization_headers: list[str] = [
         value.decode("latin-1").strip()
-        for name, value in request.scope.get("headers", [])
+        for name, value in connection.scope.get("headers", [])
         if name.lower() == b"authorization"
     ]
     if len(authorization_headers) != 1:
@@ -160,9 +241,13 @@ def _configured_operator_token() -> tuple[str | None, str]:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Geist operator authentication is misconfigured",
             )
-    if environment_token and file_token and not secrets.compare_digest(
-        environment_token,
-        file_token,
+    if (
+        environment_token
+        and file_token
+        and not secrets.compare_digest(
+            environment_token,
+            file_token,
+        )
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

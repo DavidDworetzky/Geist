@@ -24,17 +24,21 @@ module.exports = function(app) {
 
   console.log(`Proxying API requests to: ${target}`);
 
+  const injectOperatorAuthorization = (proxyRequest) => {
+    if (authorization) {
+      proxyRequest.setHeader('Authorization', authorization);
+    }
+  };
   const proxyConfig = {
     target: target,
     changeOrigin: true,
-    onProxyReq: (proxyRequest) => {
-      if (authorization) {
-        proxyRequest.setHeader('Authorization', authorization);
-      }
-    },
+    ws: true,
+    onProxyReq: injectOperatorAuthorization,
+    onProxyReqWs: injectOperatorAuthorization,
   };
 
-  // Proxy both /api and /agent paths
+  // Proxy every backend namespace through the server-side credential boundary.
   app.use('/api', createProxyMiddleware(proxyConfig));
   app.use('/agent', createProxyMiddleware(proxyConfig));
+  app.use('/adapter', createProxyMiddleware(proxyConfig));
 };

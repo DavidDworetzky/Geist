@@ -27,7 +27,11 @@ def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
     )
     app = main.create_app()
 
-    with TestClient(app, base_url="http://127.0.0.1") as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    ) as client:
         assert events == ["start"]
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/health/live").json()["status"] == "live"
@@ -51,6 +55,29 @@ def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
         assert client.get("/").json() == {"Version": "1.0"}
 
     assert events == ["start", "stop", "models", "llama"]
+
+
+def test_operator_authentication_wraps_the_application_surface(monkeypatch):
+    token = "g" * 43
+    monkeypatch.setenv("GEIST_OPERATOR_TOKEN", token)
+    monkeypatch.delenv("GEIST_OPERATOR_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("GEIST_JOB_WORKER_ENABLED", "false")
+    app = main.create_app()
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/api/v1/system").status_code == 401
+        authorized = client.get(
+            "/api/v1/system",
+            headers={"Authorization": f"GeistOperator {token}"},
+        )
+
+    assert authorized.status_code == 200
+    assert authorized.json()["apiVersion"] == str(main.api_version)
 
 
 def test_core_app_import_does_not_load_optional_inference_or_voice_stacks():

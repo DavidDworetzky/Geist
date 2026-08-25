@@ -33,12 +33,19 @@ describe('development API proxy operator authentication', () => {
     const proxyConfig = createProxyMiddleware.mock.calls[0][0];
     const proxyRequest = { setHeader: jest.fn() };
     proxyConfig.onProxyReq(proxyRequest);
+    const websocketRequest = { setHeader: jest.fn() };
+    proxyConfig.onProxyReqWs(websocketRequest);
 
     expect(proxyRequest.setHeader).toHaveBeenCalledWith(
       'Authorization',
       `GeistOperator ${'t'.repeat(32)}`,
     );
-    expect(app.use).toHaveBeenCalledTimes(2);
+    expect(websocketRequest.setHeader).toHaveBeenCalledWith(
+      'Authorization',
+      `GeistOperator ${'t'.repeat(32)}`,
+    );
+    expect(proxyConfig.ws).toBe(true);
+    expect(app.use).toHaveBeenCalledTimes(3);
   });
 
   test('leaves authorization untouched when standalone proxy auth is not configured', () => {
