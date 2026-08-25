@@ -408,6 +408,7 @@ def test_native_tool_capability_is_known_provider_or_explicit_override():
 class LocalRunner:
     def __init__(self):
         self.messages = None
+        self.generation_config = None
 
     def complete(self, system_prompt, user_prompt, generation_config):
         return [
@@ -417,6 +418,7 @@ class LocalRunner:
 
     def complete_messages(self, messages, generation_config):
         self.messages = messages
+        self.generation_config = generation_config
         return [
             {"role": "user", "content": messages[-1]["content"]},
             {"role": "assistant", "content": "local answer"},
@@ -499,3 +501,17 @@ def test_local_runner_preserves_structured_conversation_roles():
         {"role": "assistant", "content": "I will remember cobalt."},
         {"role": "user", "content": "What should you remember?"},
     ]
+
+
+def test_local_runner_forwards_all_stop_sequences():
+    agent = local_agent_without_loading_model()
+
+    list(
+        agent.stream_model_turn(
+            [ChatMessage(role="user", content="hello")],
+            [],
+            ModelRequestConfig(stop=["STOP", "END"]),
+        )
+    )
+
+    assert agent.runner.generation_config.stop == ["STOP", "END"]

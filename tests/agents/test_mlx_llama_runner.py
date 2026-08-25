@@ -44,6 +44,51 @@ def test_manual_is_default_and_receives_requested_path(monkeypatch):
     )
 
 
+def test_large_llama_defaults_to_manual_implementation(monkeypatch):
+    monkeypatch.delenv("GEIST_MLX_IMPLEMENTATION", raising=False)
+    backend = MagicMock()
+    backend_class = MagicMock(return_value=backend)
+    module_name = "agents.architectures.llama.llama_mlx"
+    fake_module = _backend_module(module_name, "LlamaMLX", backend_class)
+
+    with patch.dict(sys.modules, {module_name: fake_module}):
+        runner = MLXLlamaRunner()
+        runner.load(
+            "mlx-community/Llama-3.1-70B-Instruct-4bit",
+            {"weights_dir": "/models/llama-70b"},
+        )
+
+    assert runner.implementation == "manual"
+    backend_class.assert_called_once_with(
+        max_new_tokens=16,
+        model_id="mlx-community/Llama-3.1-70B-Instruct-4bit",
+        weights_dir="/models/llama-70b",
+    )
+
+
+@pytest.mark.parametrize(
+    ("model_type", "expected"),
+    [
+        ("llama", True),
+        ("qwen3_5", False),
+        ("mllama", False),
+    ],
+)
+def test_manual_support_uses_installed_model_architecture(tmp_path, model_type, expected):
+    (tmp_path / "config.json").write_text(
+        f'{{"model_type": "{model_type}"}}',
+        encoding="utf-8",
+    )
+
+    assert (
+        MLXLlamaRunner._manual_implementation_supports(
+            "custom/Llama-named-checkpoint",
+            str(tmp_path),
+        )
+        is expected
+    )
+
+
 def test_mlx_lm_can_be_selected_by_environment(monkeypatch):
     monkeypatch.setenv("GEIST_MLX_IMPLEMENTATION", "mlx-lm")
     backend = MagicMock()
@@ -97,6 +142,10 @@ def test_qwen_rejects_explicit_manual_implementation():
             {"implementation": "manual", "weights_dir": "/models/qwen3.8"},
         )
 
+    assert runner.model_id is None
+    assert runner.implementation is None
+    assert runner.weights_dir is None
+
 
 def test_mlx_lm_forwards_qwen_chat_template_controls(monkeypatch):
     monkeypatch.delenv("GEIST_MLX_IMPLEMENTATION", raising=False)
@@ -136,7 +185,7 @@ def test_device_config_overrides_environment(monkeypatch):
     with patch.dict(sys.modules, {module_name: fake_module}):
         runner = MLXLlamaRunner()
         runner.load(
-            "model-id",
+            "mlx-community/Llama-3.1-8B-Instruct-4bit",
             {"implementation": "manual", "weights_dir": "/models/llama"},
         )
     assert runner.implementation == "manual"
@@ -184,6 +233,7 @@ def test_mlx_runner_rejects_managed_gguf_artifact():
 def test_generation_config_and_response_contract():
     runner = MLXLlamaRunner()
     runner.llama = MagicMock()
+    runner.implementation = "mlx_lm"
     runner.llama.complete.return_value = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
@@ -210,6 +260,25 @@ def test_generation_config_and_response_contract():
         system_prompt="system",
         user_prompt="hello",
     )
+
+
+def test_manual_backend_warns_once_for_unsupported_generation_controls(caplog):
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    runner.implementation = "manual"
+    config = GenerationConfig(
+        frequency_penalty=0.3,
+        presence_penalty=0.5,
+        stop=["STOP", "END"],
+    )
+
+    runner._apply_generation_config(config)
+    runner._apply_generation_config(config)
+
+    warnings = [
+        record for record in caplog.records if "manual MLX implementation ignores" in record.message
+    ]
+    assert len(warnings) == 1
 
 
 def test_structured_messages_reach_mlx_backend_unchanged():
@@ -278,13 +347,36 @@ def test_mlx_lm_prompt_allows_qwen_thinking_override():
     )
 
 
+def test_mlx_lm_prompt_keeps_structural_template_options():
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.tokenizer = MagicMock()
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.chat_template_kwargs = {
+        "tokenize": True,
+        "add_generation_prompt": False,
+    }
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    messages = [{"role": "user", "content": "hello"}]
+
+    backend._build_messages_prompt(messages)
+
+    backend.tokenizer.apply_chat_template.assert_called_once_with(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [
         ("Qwen/Qwen3-8B", True),
         ("Qwen/Qwen3.8-27B", True),
         ("mlx-community/Qwen3.8-27B-4bit", True),
+        ("Qwen/Qwen3-32B", True),
         ("Qwen/Qwen2.5-7B-Instruct", False),
+        ("deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", False),
         ("meta-llama/Llama-3.1-8B-Instruct", False),
     ],
 )
@@ -334,7 +426,12 @@ def test_qwen3_stream_applies_sampler_penalties_and_cross_chunk_stop():
             peak_memory=1.0,
         ),
     ]
-    stream_generate = MagicMock(return_value=iter(responses))
+
+    def response_stream():
+        yield from responses
+
+    stream = response_stream()
+    stream_generate = MagicMock(return_value=stream)
     make_sampler = MagicMock(return_value="sampler")
     logits_processors = [object(), object()]
     make_logits_processors = MagicMock(return_value=logits_processors)
@@ -371,6 +468,49 @@ def test_qwen3_stream_applies_sampler_penalties_and_cross_chunk_stop():
         sampler="sampler",
         logits_processors=logits_processors,
     )
+    assert stream.gi_frame is None
+
+
+def test_non_qwen_stream_omits_top_k_and_empty_logits_processors():
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model = object()
+    backend.tokenizer = MagicMock()
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.chat_template_kwargs = {}
+    backend.model_id = "meta-llama/Llama-3.1-8B-Instruct"
+    backend.max_new_tokens = 8
+    backend.temperature = 0.7
+    backend.top_p = 0.9
+    backend.frequency_penalty = 0.0
+    backend.presence_penalty = 0.0
+    backend.stop = None
+
+    stream_generate = MagicMock(return_value=iter(()))
+    make_sampler = MagicMock(return_value="sampler")
+    make_logits_processors = MagicMock(return_value=[])
+    mlx_lm_module = _backend_module("mlx_lm", "stream_generate", stream_generate)
+    sample_utils_module = _backend_module(
+        "mlx_lm.sample_utils",
+        "make_sampler",
+        make_sampler,
+    )
+    sample_utils_module.make_logits_processors = make_logits_processors
+
+    with patch.dict(
+        sys.modules,
+        {
+            "mlx_lm": mlx_lm_module,
+            "mlx_lm.sample_utils": sample_utils_module,
+        },
+    ):
+        assert list(backend.stream_messages([{"role": "user", "content": "hello"}])) == []
+
+    make_sampler.assert_called_once_with(temp=0.7, top_p=0.9)
+    make_logits_processors.assert_called_once_with(
+        presence_penalty=0.0,
+        frequency_penalty=0.0,
+    )
+    assert stream_generate.call_args.kwargs["logits_processors"] is None
 
 
 def test_mlx_lm_uses_a_thread_local_generation_stream():

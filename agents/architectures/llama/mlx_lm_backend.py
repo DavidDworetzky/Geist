@@ -1,6 +1,7 @@
 """Adapter from Geist's completion contract to the optional mlx-lm runtime."""
 
 import importlib
+import re
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -12,8 +13,7 @@ QWEN3_TOP_K = 20
 
 
 def _is_qwen3_model(model_id: str) -> bool:
-    normalized = model_id.lower().replace("_", "").replace("-", "")
-    return "qwen3" in normalized
+    return re.search(r"(?<![a-z0-9])qwen[-_ ]?3(?:[._]\d+)?(?!\d)", model_id, re.I) is not None
 
 
 def _normalize_stops(stop: str | list[str] | None) -> tuple[str, ...]:
@@ -89,13 +89,15 @@ class MLXLMBackend:
             {"role": message["role"], "content": message.get("content") or ""}
             for message in messages
         ]
-        template_options = {
-            "tokenize": False,
-            "add_generation_prompt": True,
-        }
+        template_options = dict(self.chat_template_kwargs)
         if _is_qwen3_model(self.model_id):
-            template_options["enable_thinking"] = False
-        template_options.update(self.chat_template_kwargs)
+            template_options.setdefault("enable_thinking", False)
+        template_options.update(
+            {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+        )
         return self.tokenizer.apply_chat_template(
             normalized,
             **template_options,
@@ -118,11 +120,13 @@ class MLXLMBackend:
         from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
         prompt = self._build_messages_prompt(messages)
-        sampler = make_sampler(
-            temp=self.temperature,
-            top_p=self.top_p,
-            top_k=QWEN3_TOP_K if _is_qwen3_model(self.model_id) else 0,
-        )
+        sampler_options: dict[str, float | int] = {
+            "temp": self.temperature,
+            "top_p": self.top_p,
+        }
+        if _is_qwen3_model(self.model_id):
+            sampler_options["top_k"] = QWEN3_TOP_K
+        sampler = make_sampler(**sampler_options)
         logits_processors = make_logits_processors(
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
@@ -132,28 +136,34 @@ class MLXLMBackend:
         final_response = None
         pending_text = ""
         stopped = False
-        for response in stream_generate(
+        response_stream = stream_generate(
             self.model,
             self.tokenizer,
             prompt,
             max_tokens=self.max_new_tokens,
             sampler=sampler,
             logits_processors=logits_processors or None,
-        ):
-            final_response = response
-            pending_text += response.text
-            stop_index = _first_stop_index(pending_text, stops)
-            if stop_index is not None:
-                if stop_index:
-                    yield pending_text[:stop_index]
-                stopped = True
-                break
+        )
+        try:
+            for response in response_stream:
+                final_response = response
+                pending_text += response.text
+                stop_index = _first_stop_index(pending_text, stops)
+                if stop_index is not None:
+                    if stop_index:
+                        yield pending_text[:stop_index]
+                    stopped = True
+                    break
 
-            retained = _stop_prefix_length(pending_text, stops)
-            emit_length = len(pending_text) - retained
-            if emit_length:
-                yield pending_text[:emit_length]
-                pending_text = pending_text[emit_length:]
+                retained = _stop_prefix_length(pending_text, stops)
+                emit_length = len(pending_text) - retained
+                if emit_length:
+                    yield pending_text[:emit_length]
+                    pending_text = pending_text[emit_length:]
+        finally:
+            close = getattr(response_stream, "close", None)
+            if callable(close):
+                close()
 
         if pending_text and not stopped:
             yield pending_text

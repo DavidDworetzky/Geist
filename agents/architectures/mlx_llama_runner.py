@@ -1,7 +1,9 @@
 """Switchable MLX Llama runner."""
 
+import json
 import logging
 import os
+import re
 from typing import Any, Protocol
 
 from .base_runner import BaseRunner, GenerationConfig
@@ -38,14 +40,33 @@ class MLXLlamaRunner(BaseRunner):
         self.model_id: str | None = None
         self.weights_dir: str | None = None
         self.implementation: str | None = None
+        self._unsupported_generation_controls_warned = False
 
     @staticmethod
-    def _manual_implementation_supports(model_id: str) -> bool:
+    def _manual_implementation_supports(model_id: str, weights_dir: str) -> bool:
         """The hand-written kernel only implements the Llama architecture."""
         from agents.model_catalog import infer_model_spec
 
+        config_path = os.path.join(weights_dir, "config.json")
+        try:
+            with open(config_path, encoding="utf-8") as config_file:
+                model_type = json.load(config_file).get("model_type")
+        except (AttributeError, json.JSONDecodeError, OSError):
+            model_type = None
+        if isinstance(model_type, str):
+            return model_type.casefold() == "llama"
+
         spec = infer_model_spec(model_id)
-        return spec is None or spec.family == "llama"
+        if spec is not None and spec.family == "llama":
+            return True
+        return (
+            re.search(
+                r"(?:^|[/_-])[a-z]*llama(?:[-_./]|$)",
+                model_id,
+                re.IGNORECASE,
+            )
+            is not None
+        )
 
     @staticmethod
     def _resolve_weights_dir(model_id: str, device_config: dict[str, Any]) -> str:
@@ -84,34 +105,37 @@ class MLXLlamaRunner(BaseRunner):
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """Load the selected implementation and propagate the requested model path."""
         device_config = device_config or {}
-        self.model_id = model_id
         requested = device_config.get("implementation")
         if requested is None:
             requested = os.environ.get("GEIST_MLX_IMPLEMENTATION")
-        if requested is None:
-            requested = "manual" if self._manual_implementation_supports(model_id) else "mlx_lm"
-        if not isinstance(requested, str):
+        if requested is not None and not isinstance(requested, str):
             raise TypeError("MLX implementation must be a string")
-        self.implementation = requested.strip().lower().replace("-", "_")
-        if self.implementation not in self.IMPLEMENTATIONS:
+        implementation = (
+            requested.strip().lower().replace("-", "_") if requested is not None else None
+        )
+        if implementation is not None and implementation not in self.IMPLEMENTATIONS:
             choices = ", ".join(sorted(self.IMPLEMENTATIONS))
             raise ValueError(
                 f"Unknown MLX implementation '{requested}'. Expected one of: {choices}."
             )
-        if self.implementation == "manual" and not self._manual_implementation_supports(model_id):
+
+        weights_dir = self._resolve_weights_dir(model_id, device_config)
+        manual_supported = self._manual_implementation_supports(model_id, weights_dir)
+        if implementation is None:
+            implementation = "manual" if manual_supported else "mlx_lm"
+        if implementation == "manual" and not manual_supported:
             raise ValueError(
                 "The manual MLX implementation only supports Llama models; "
                 f"use implementation='mlx_lm' for {model_id}."
             )
 
-        self.weights_dir = self._resolve_weights_dir(model_id, device_config)
-        if self.implementation == "manual":
+        if implementation == "manual":
             from agents.architectures.llama.llama_mlx import LlamaMLX
 
-            self.llama = LlamaMLX(
+            backend: _MLXBackend = LlamaMLX(
                 max_new_tokens=16,
                 model_id=model_id,
-                weights_dir=self.weights_dir,
+                weights_dir=weights_dir,
             )
         else:
             from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
@@ -119,16 +143,22 @@ class MLXLlamaRunner(BaseRunner):
             backend_kwargs: dict[str, Any] = {
                 "max_new_tokens": 16,
                 "model_id": model_id,
-                "weights_dir": self.weights_dir,
+                "weights_dir": weights_dir,
             }
             chat_template_kwargs = device_config.get("chat_template_kwargs")
             if chat_template_kwargs is not None:
                 if not isinstance(chat_template_kwargs, dict):
                     raise TypeError("chat_template_kwargs must be a dictionary")
                 backend_kwargs["chat_template_kwargs"] = chat_template_kwargs
-            self.llama = MLXLMBackend(
+            backend = MLXLMBackend(
                 **backend_kwargs,
             )
+
+        self.llama = backend
+        self.model_id = model_id
+        self.weights_dir = weights_dir
+        self.implementation = implementation
+        self._unsupported_generation_controls_warned = False
 
         logger.info(
             "MLX Llama runner loaded implementation=%s model=%s weights=%s",
@@ -144,9 +174,21 @@ class MLXLlamaRunner(BaseRunner):
         backend.max_new_tokens = generation_config.max_tokens
         backend.temperature = generation_config.temperature
         backend.top_p = generation_config.top_p
-        backend.frequency_penalty = generation_config.frequency_penalty
-        backend.presence_penalty = generation_config.presence_penalty
-        backend.stop = generation_config.stop
+        if self.implementation == "mlx_lm":
+            backend.frequency_penalty = generation_config.frequency_penalty
+            backend.presence_penalty = generation_config.presence_penalty
+            backend.stop = generation_config.stop
+        elif (
+            generation_config.frequency_penalty
+            or generation_config.presence_penalty
+            or generation_config.stop
+        ) and not self._unsupported_generation_controls_warned:
+            logger.warning(
+                "The manual MLX implementation ignores frequency_penalty, "
+                "presence_penalty, and stop; select implementation='mlx_lm' "
+                "to use those controls."
+            )
+            self._unsupported_generation_controls_warned = True
         return backend
 
     def generate(
