@@ -27,6 +27,7 @@ def make_settings_model(local_model: str) -> UserSettingsModel:
         default_presence_penalty=0.0,
         backup_providers=[],
         ui_preferences={},
+        agent_permissions={},
         create_date=now,
         update_date=now,
     )
