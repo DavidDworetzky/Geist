@@ -4,9 +4,10 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
 from typing import Any, Protocol
 
-from .base_runner import BaseRunner, GenerationConfig
+from .base_runner import BaseRunner, GenerationConfig, stream_text_until_stop
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,11 @@ class _MLXBackend(Protocol):
         self,
         messages: list[dict[str, str | None]],
     ) -> list[dict[str, str]]: ...
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> Iterator[str]: ...
 
 
 class MLXLlamaRunner(BaseRunner):
@@ -217,6 +223,17 @@ class MLXLlamaRunner(BaseRunner):
     ) -> list[dict[str, str]]:
         backend = self._apply_generation_config(generation_config)
         return backend.complete_messages(messages)
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> Iterator[str]:
+        backend = self._apply_generation_config(generation_config)
+        yield from stream_text_until_stop(
+            backend.stream_messages(messages),
+            generation_config.stop,
+        )
 
     def cleanup(self) -> None:
         self.llama = None

@@ -2,6 +2,7 @@
 
 import os
 from collections import UserDict
+from queue import Queue
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,6 +35,26 @@ def _model():
     model.hf_device_map = None
     model.generate.return_value = torch.tensor([[1, 2, 3, 8, 9]])
     return model
+
+
+class FakeTextIteratorStreamer:
+    def __init__(self, *_args, **_kwargs):
+        self.chunks = Queue()
+
+    def on_finalized_text(self, text, stream_end=False):
+        if text:
+            self.chunks.put(text)
+        if stream_end:
+            self.chunks.put(None)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        chunk = self.chunks.get(timeout=1)
+        if chunk is None:
+            raise StopIteration
+        return chunk
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
@@ -178,6 +199,56 @@ def test_multiple_stop_sequences_use_the_earliest_match():
     )
 
     assert result[1]["content"] == "first"
+
+
+@patch(
+    "agents.architectures.transformers_runner.TextIteratorStreamer",
+    FakeTextIteratorStreamer,
+)
+def test_stream_messages_forwards_multiple_chunks_and_hides_split_stop_sequence():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    def generate(**kwargs):
+        streamer = kwargs["streamer"]
+        streamer.on_finalized_text("fast EN")
+        streamer.on_finalized_text("D ignored", stream_end=True)
+
+    runner.model.generate.side_effect = generate
+
+    chunks = list(
+        runner.stream_messages(
+            [{"role": "user", "content": "hello"}],
+            GenerationConfig(max_tokens=8, temperature=0.0, stop=["STOP", "END"]),
+        )
+    )
+
+    assert "".join(chunks) == "fast "
+    assert runner.model.generate.call_args.kwargs["streamer"] is not None
+
+
+@patch(
+    "agents.architectures.transformers_runner.TextIteratorStreamer",
+    FakeTextIteratorStreamer,
+)
+def test_stream_messages_propagates_generation_thread_failure():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.model.generate.side_effect = RuntimeError("generation failed")
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        list(
+            runner.stream_messages(
+                [{"role": "user", "content": "hello"}],
+                GenerationConfig(max_tokens=8, temperature=0.0),
+            )
+        )
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec")

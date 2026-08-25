@@ -58,6 +58,20 @@ const flushAsyncWork = async () => {
 };
 
 describe('chatStreamReducer', () => {
+  it('appends every local-model delta to the visible active turn', () => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Hello',
+      chatId: null,
+    });
+
+    state = chatStreamReducer(state, { type: 'TEXT_DELTA', text: 'local ' });
+    state = chatStreamReducer(state, { type: 'TEXT_DELTA', text: 'answer' });
+
+    expect(state.activeTurn?.message).toBe('local answer');
+    expect(state.activeTurn?.status).toBe('streaming');
+  });
+
   it('reflects backend model loading state before the stream starts', () => {
     let state = chatStreamReducer(initialChatStreamState, {
       type: 'START',

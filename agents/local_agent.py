@@ -235,6 +235,19 @@ class LocalAgent(BaseAgent):
             used_native_tools=False,
         )
 
+    def _stream_runner_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> Iterator[str]:
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        stream_messages = getattr(self.runner, "stream_messages", None)
+        if callable(stream_messages):
+            yield from stream_messages(messages, generation_config)
+            return
+        yield from BaseRunner.stream_messages(self.runner, messages, generation_config)
+
     def stream_complete_text(
         self,
         prompt: str,
@@ -252,21 +265,30 @@ class LocalAgent(BaseAgent):
         system_prompt: str | None = None,
         chat_id: int | None = None,
     ):
-        """Stream text completion - delegates to complete_text for now."""
-        return self.complete_text(
-            prompt=prompt,
+        """Stream local text and persist the completed response once."""
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        generation_config = self._create_generation_config(
             max_tokens=max_tokens,
-            n=n,
             temperature=temperature,
             top_p=top_p,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
             stop=stop,
-            echo=echo,
-            best_of=best_of,
-            prompt_tokens=prompt_tokens,
-            response_format=response_format,
-            system_prompt=system_prompt,
+        )
+        messages: list[dict[str, str | None]] = [
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+        chunks: list[str] = []
+        for chunk in self._stream_runner_messages(messages, generation_config):
+            chunks.append(chunk)
+            yield chunk
+
+        self._agent_context._add_to_chat_history(
+            user_message=prompt,
+            ai_message="".join(chunks),
             chat_id=chat_id,
         )
 
@@ -297,22 +319,13 @@ class LocalAgent(BaseAgent):
         structured_messages = [
             {"role": message.role, "content": message.content} for message in messages
         ]
-        complete_messages = getattr(self.runner, "complete_messages", None)
-        if complete_messages is None:
-            result = BaseRunner.complete_messages(
-                self.runner,
-                structured_messages,
-                generation_config,
-            )
-        else:
-            result = complete_messages(structured_messages, generation_config)
-        completion = LlamaCompletion.from_dict(result)
-        text = next(
-            (message.content for message in completion.messages if message.role == "assistant"),
-            "",
-        )
-        if text:
-            yield ModelEvent.text_delta(text)
+        text_parts: list[str] = []
+        for text_delta in self._stream_runner_messages(structured_messages, generation_config):
+            if not text_delta:
+                continue
+            text_parts.append(text_delta)
+            yield ModelEvent.text_delta(text_delta)
+        text = "".join(text_parts)
         yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
 
     def complete_audio(

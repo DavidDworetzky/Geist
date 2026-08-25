@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 # MLX imports
@@ -703,7 +704,6 @@ class LlamaMLX:
     ) -> list[dict[str, str]]:
         """Complete a structured conversation using native chat-template roles."""
         logger.info("Beginning completion call...")
-        prompt = self._build_messages_prompt(messages)
         user_prompt = next(
             (
                 message.get("content") or ""
@@ -719,21 +719,7 @@ class LlamaMLX:
         )
 
         try:
-            # Generate
-            output_tokens = self.generate_text(prompt)
-            # Decode only newly generated IDs so prompt text cannot leak into the response.
-            output_list = output_tokens.tolist()[self._last_prompt_token_count :]
-            output_text = self.tokenizer.decode(
-                output_list,
-                skip_special_tokens=True,
-            ).strip()
-            self.last_stats = dict(getattr(self.model, "last_stats", {}))
-            self.last_stats.update(
-                {
-                    "prompt_tokens": self._last_prompt_token_count,
-                    "generation_tokens": len(output_list),
-                }
-            )
+            output_text = "".join(self.stream_messages(messages)).strip()
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")
@@ -743,3 +729,52 @@ class LlamaMLX:
         except Exception as e:
             logger.error(f"Error during text generation: {str(e)}")
             raise
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> Iterator[str]:
+        """Yield decoded text while the manual MLX model generates tokens."""
+        prompt = self._build_messages_prompt(messages)
+        prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        self._last_prompt_token_count = len(prompt_ids)
+        input_ids = mx.array([prompt_ids], dtype=mx.int64)
+        generated_ids: list[int] = []
+        decoded_text = ""
+        eos_ids = set(self.eos_token_ids or [self.tokenizer.eos_token_id])
+
+        for token_id in self.model.generate(
+            input_ids,
+            temp=self.temperature,
+            top_p=self.top_p,
+            max_new_tokens=self.max_new_tokens,
+            eos_token_id=list(eos_ids),
+        ):
+            if token_id in eos_ids:
+                logger.info("Generation complete: EOS token generated")
+                break
+            generated_ids.append(token_id)
+            current_text = self.tokenizer.decode(
+                generated_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )
+            if current_text.startswith(decoded_text):
+                delta = current_text[len(decoded_text) :]
+            else:
+                # Decoding should be prefix-stable with cleanup disabled. Keep
+                # the stream moving for custom tokenizers that violate that
+                # expectation without repeating the entire response.
+                common_prefix = os.path.commonprefix([decoded_text, current_text])
+                delta = current_text[len(common_prefix) :]
+            decoded_text = current_text
+            if delta:
+                yield delta
+
+        self.last_stats = dict(getattr(self.model, "last_stats", {}))
+        self.last_stats.update(
+            {
+                "prompt_tokens": self._last_prompt_token_count,
+                "generation_tokens": len(generated_ids),
+            }
+        )

@@ -301,6 +301,25 @@ def test_structured_messages_reach_mlx_backend_unchanged():
     runner.llama.complete_messages.assert_called_once_with(messages)
 
 
+def test_mlx_runner_streams_backend_chunks_and_hides_stop_sequence():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    runner.llama.stream_messages.return_value = iter(["local EN", "D ignored"])
+    messages = [{"role": "user", "content": "hello"}]
+
+    chunks = list(
+        runner.stream_messages(
+            messages,
+            GenerationConfig(max_tokens=12, temperature=0.2, stop=["STOP", "END"]),
+        )
+    )
+
+    assert "".join(chunks) == "local "
+    runner.llama.stream_messages.assert_called_once_with(messages)
+    assert runner.llama.max_new_tokens == 12
+    assert runner.llama.temperature == 0.2
+
+
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.tokenizer = MagicMock()

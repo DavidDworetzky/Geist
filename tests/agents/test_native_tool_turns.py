@@ -435,6 +435,18 @@ class UnsupportedNativeStreamLocalRunner(LocalRunner):
         yield from ()
 
 
+class StreamingLocalRunner(LocalRunner):
+    def __init__(self):
+        super().__init__()
+        self.generation_config = None
+
+    def stream_messages(self, messages, generation_config):
+        self.messages = messages
+        self.generation_config = generation_config
+        yield "local "
+        yield "answer"
+
+
 def local_agent_without_loading_model():
     agent = LocalAgent.__new__(LocalAgent)
     agent.runner_type = "test"
@@ -482,6 +494,26 @@ def test_local_runner_can_complete_persistence_free_without_tools():
     )
     assert events[0].text == "local answer"
     assert events[-1].turn.text == "local answer"
+
+
+def test_local_runner_forwards_each_streaming_delta_and_all_stop_sequences():
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "test"
+    agent.runner = StreamingLocalRunner()
+    events = list(
+        agent.stream_model_turn(
+            [ChatMessage(role="user", content="hello")],
+            [],
+            ModelRequestConfig(stop=["END", "STOP"]),
+        )
+    )
+
+    assert [event.text for event in events if event.kind == "text_delta"] == [
+        "local ",
+        "answer",
+    ]
+    assert events[-1].turn.text == "local answer"
+    assert agent.runner.generation_config.stop == ["END", "STOP"]
 
 
 def test_local_runner_preserves_structured_conversation_roles():

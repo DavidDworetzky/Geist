@@ -7,20 +7,43 @@ import importlib.util
 import logging
 import os
 import re
+import threading
+from collections.abc import Iterator
 from contextlib import suppress
 from importlib import metadata
 from typing import Any, cast
 
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    StoppingCriteria,
+    StoppingCriteriaList,
+    TextIteratorStreamer,
+)
 
-from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.base_runner import (
+    BaseRunner,
+    GenerationConfig,
+    stream_text_until_stop,
+)
 from agents.model_catalog import infer_model_spec
 from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import strings_to_message_dict
 
 
 logger = logging.getLogger(__name__)
+
+
+class _StopOnEvent(StoppingCriteria):
+    """Stop generation promptly when its consumer closes the text stream."""
+
+    def __init__(self, stopped: threading.Event):
+        self.stopped = stopped
+
+    def __call__(self, _input_ids, _scores, **_kwargs) -> bool:
+        return self.stopped.is_set()
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -251,6 +274,87 @@ class TransformersRunner(BaseRunner):
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
+        normalized_messages, inputs, input_length, generation_kwargs = self._prepare_generation(
+            messages, generation_config
+        )
+        model = cast(Any, self.model)
+        tokenizer = cast(Any, self.tokenizer)
+
+        with torch.inference_mode():
+            generated = model.generate(**inputs, **generation_kwargs)
+        response = tokenizer.decode(generated[0][input_length:], skip_special_tokens=True).strip()
+        if generation_config.stop:
+            stop_sequences = (
+                [generation_config.stop]
+                if isinstance(generation_config.stop, str)
+                else generation_config.stop
+            )
+            stop_positions = [
+                position
+                for stop_sequence in stop_sequences
+                if stop_sequence
+                if (position := response.find(stop_sequence)) >= 0
+            ]
+            if stop_positions:
+                response = response[: min(stop_positions)].rstrip()
+        user_prompt = next(
+            (
+                message["content"]
+                for message in reversed(normalized_messages)
+                if message["role"] == "user"
+            ),
+            "",
+        )
+        return strings_to_message_dict(user_prompt, response)
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> Iterator[str]:
+        """Yield decoded Transformers output as it is generated."""
+        _normalized_messages, inputs, _input_length, generation_kwargs = self._prepare_generation(
+            messages, generation_config
+        )
+        model = cast(Any, self.model)
+        tokenizer = cast(Any, self.tokenizer)
+        streamer = TextIteratorStreamer(
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+        )
+        generation_kwargs["streamer"] = streamer
+        generation_stopped = threading.Event()
+        generation_kwargs["stopping_criteria"] = StoppingCriteriaList(
+            [_StopOnEvent(generation_stopped)]
+        )
+        generation_errors: list[BaseException] = []
+
+        def generate() -> None:
+            try:
+                with torch.inference_mode():
+                    model.generate(**inputs, **generation_kwargs)
+            except BaseException as error:
+                generation_errors.append(error)
+                # TextIteratorStreamer otherwise waits forever for a terminal
+                # marker when generation raises in the worker thread.
+                streamer.on_finalized_text("", stream_end=True)
+
+        generation_thread = threading.Thread(target=generate, daemon=True)
+        generation_thread.start()
+        try:
+            yield from stream_text_until_stop(streamer, generation_config.stop)
+        finally:
+            generation_stopped.set()
+            generation_thread.join()
+        if generation_errors:
+            raise generation_errors[0]
+
+    def _prepare_generation(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> tuple[list[dict[str, str]], dict[str, Any], int, dict[str, Any]]:
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
@@ -328,35 +432,7 @@ class TransformersRunner(BaseRunner):
         if do_sample:
             generation_kwargs["temperature"] = generation_config.temperature
             generation_kwargs["top_p"] = generation_config.top_p
-
-        with torch.inference_mode():
-            generated = self.model.generate(**inputs, **generation_kwargs)
-        response = self.tokenizer.decode(
-            generated[0][input_length:], skip_special_tokens=True
-        ).strip()
-        if generation_config.stop:
-            stop_sequences = (
-                [generation_config.stop]
-                if isinstance(generation_config.stop, str)
-                else generation_config.stop
-            )
-            stop_positions = [
-                position
-                for stop_sequence in stop_sequences
-                if stop_sequence
-                if (position := response.find(stop_sequence)) >= 0
-            ]
-            if stop_positions:
-                response = response[: min(stop_positions)].rstrip()
-        user_prompt = next(
-            (
-                message["content"]
-                for message in reversed(normalized_messages)
-                if message["role"] == "user"
-            ),
-            "",
-        )
-        return strings_to_message_dict(user_prompt, response)
+        return normalized_messages, inputs, input_length, generation_kwargs
 
     def _apply_chat_template(self, messages: list[dict[str, str]]) -> Any:
         if self.tokenizer is None:

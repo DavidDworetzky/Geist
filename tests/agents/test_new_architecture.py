@@ -1,12 +1,17 @@
 """
 Tests for the new agent architecture (LocalAgent and OnlineAgent).
 """
+
 from unittest.mock import Mock, patch
 
 import pytest
 
 from agents.agent_settings import AgentSettings
-from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.base_runner import (
+    BaseRunner,
+    GenerationConfig,
+    stream_text_until_stop,
+)
 from agents.architectures.registry import clear_registry, get_runner, register_runner
 from agents.factory import AgentFactory
 
@@ -23,18 +28,26 @@ class MockRunner(BaseRunner):
         self.model_id = model_id
 
     def generate(self, prompt: str, generation_config: GenerationConfig):
-        return {
-            "generated_text": f"Generated: {prompt}",
-            "model": self.model_id
-        }
+        return {"generated_text": f"Generated: {prompt}", "model": self.model_id}
 
     def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
         return {
             "messages": [
                 {"role": "user", "content": user_prompt},
-                {"role": "assistant", "content": f"Response to: {user_prompt}"}
+                {"role": "assistant", "content": f"Response to: {user_prompt}"},
             ]
         }
+
+
+def test_stream_text_until_stop_handles_delimiter_split_across_chunks():
+    chunks = list(stream_text_until_stop(["hello EN", "D ignored"], ["STOP", "END"]))
+
+    assert "".join(chunks) == "hello "
+
+
+def test_stream_text_until_stop_preserves_native_chunks_without_delimiters():
+    assert list(stream_text_until_stop(["hello ", "world"], None)) == ["hello ", "world"]
+
 
 class TestRunnerRegistry:
     """Test the runner registry functionality."""
@@ -70,6 +83,7 @@ class TestRunnerRegistry:
         result = runner.generate("Hello", config)
         assert "Generated: Hello" in result["generated_text"]
 
+
 class TestAgentFactory:
     """Test the agent factory functionality."""
 
@@ -95,18 +109,15 @@ class TestAgentFactory:
         context.task_context = []
         context.execution_context = []
 
-        with patch('agents.local_agent.LocalAgent') as MockLocalAgent:
+        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
             AgentFactory.create_agent(
-                agent_type="local",
-                agent_context=context,
-                model="test-model",
-                runner_type="mock"
+                agent_type="local", agent_context=context, model="test-model", runner_type="mock"
             )
 
             MockLocalAgent.assert_called_once()
             args, kwargs = MockLocalAgent.call_args
-            assert kwargs['model_id'] == "test-model"
-            assert kwargs['runner_type'] == "mock"
+            assert kwargs["model_id"] == "test-model"
+            assert kwargs["runner_type"] == "mock"
 
     def test_create_online_agent(self):
         """Test creating an online agent."""
@@ -114,30 +125,27 @@ class TestAgentFactory:
         context = Mock()
         context.settings = settings
 
-        with patch('agents.online_agent.OnlineAgent') as MockOnlineAgent:
+        with patch("agents.online_agent.OnlineAgent") as MockOnlineAgent:
             AgentFactory.create_agent(
                 agent_type="online",
                 agent_context=context,
                 model="gpt-4",
                 endpoint="https://api.openai.com/v1/chat/completions",
-                api_key="test-key"
+                api_key="test-key",
             )
 
             MockOnlineAgent.assert_called_once()
             args, kwargs = MockOnlineAgent.call_args
-            assert kwargs['model'] == "gpt-4"
-            assert kwargs['base_url'] == "https://api.openai.com/v1/chat/completions"
-            assert kwargs['api_key'] == "test-key"
+            assert kwargs["model"] == "gpt-4"
+            assert kwargs["base_url"] == "https://api.openai.com/v1/chat/completions"
+            assert kwargs["api_key"] == "test-key"
 
     def test_invalid_agent_type(self):
         """Test that invalid agent types raise an error."""
         context = Mock()
 
         with pytest.raises(ValueError, match="Unknown agent type"):
-            AgentFactory.create_agent(
-                agent_type="invalid",
-                agent_context=context
-            )
+            AgentFactory.create_agent(agent_type="invalid", agent_context=context)
 
 
 def test_local_generation_config_preserves_zero_temperature():
@@ -155,6 +163,27 @@ def test_local_generation_config_preserves_zero_temperature():
 
     config = agent._create_generation_config()
     assert config.temperature == 0.4
+
+
+def test_local_stream_complete_text_persists_once_after_stream_finishes():
+    from agents.local_agent import LocalAgent
+
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner = MockRunner()
+    agent.runner.stream_messages = Mock(return_value=iter(["hello ", "world"]))
+    agent._agent_context = Mock(
+        settings=AgentSettings(name="test", version="1", description="test")
+    )
+
+    chunks = list(agent.stream_complete_text("Say hello", chat_id=7))
+
+    assert chunks == ["hello ", "world"]
+    agent._agent_context._add_to_chat_history.assert_called_once_with(
+        user_message="Say hello",
+        ai_message="hello world",
+        chat_id=7,
+    )
+
 
 class TestUserSettingsIntegration:
     """Test integration with user settings."""
@@ -187,7 +216,7 @@ class TestUserSettingsIntegration:
             backup_providers=[],
             ui_preferences={},
             create_date=datetime.now(),
-            update_date=datetime.now()
+            update_date=datetime.now(),
         )
 
         # Test local agent config
@@ -213,6 +242,7 @@ class TestUserSettingsIntegration:
         overrides = AgentConfigRequest(temperature=0.0)
         config = AgentFactoryConfig.from_user_settings(settings, overrides)
         assert config.generation_config["temperature"] == 0.0
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
