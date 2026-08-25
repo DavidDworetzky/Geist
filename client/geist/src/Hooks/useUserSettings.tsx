@@ -16,6 +16,13 @@ export interface BackupProvider {
   supports_native_tool_calling?: boolean;
 }
 
+export type AgentPermissionMode = 'default' | 'auto_approve' | 'require_approval';
+
+export interface AgentPermissions {
+  mode: AgentPermissionMode;
+  always_allow: string[];
+}
+
 export interface UserSettings {
   user_settings_id: number;
   user_id: number;
@@ -35,6 +42,7 @@ export interface UserSettings {
   default_presence_penalty: number;
   backup_providers: BackupProvider[];
   ui_preferences: Record<string, any>;
+  agent_permissions: AgentPermissions;
   create_date: string;
   update_date: string;
 }
@@ -56,6 +64,7 @@ export interface UserSettingsUpdate {
   default_presence_penalty?: number;
   backup_providers?: BackupProvider[];
   ui_preferences?: Record<string, any>;
+  agent_permissions?: AgentPermissions;
 }
 
 export interface UseUserSettingsReturn {

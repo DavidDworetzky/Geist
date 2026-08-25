@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agents.model_catalog import default_local_model_id
 from app.models.database.geist_user import get_default_user
-from app.models.user_settings import AgentConfigRequest, UserSettingsResponse, UserSettingsUpdate
+from app.models.user_settings import (
+    AgentConfigRequest,
+    AgentPermissionsSettings,
+    UserSettingsResponse,
+    UserSettingsUpdate,
+)
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -147,7 +152,8 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_frequency_penalty=0.0,
             default_presence_penalty=0.0,
             backup_providers=[],
-            ui_preferences={}
+            ui_preferences={},
+            agent_permissions=AgentPermissionsSettings()
         )
 
         settings = UserSettingsService.update_user_settings_by_id(

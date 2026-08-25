@@ -20,20 +20,32 @@ from app.models.database.user_settings import (
 from app.models.user_settings import (
     AgentConfigRequest,
     AgentFactoryConfig,
+    AgentPermissionsSettings,
     UserSettingsResponse,
     UserSettingsUpdate,
 )
+from app.services.agent_permissions import normalize_agent_permissions
 
 
 logger = logging.getLogger(__name__)
 
 
+def _permissions_from_stored(raw: object) -> AgentPermissionsSettings:
+    """Tolerantly hydrate stored agent permissions; malformed rows fall back to defaults."""
+    try:
+        return AgentPermissionsSettings.model_validate(raw or {})
+    except Exception:
+        logger.warning("Malformed stored agent_permissions %r; using defaults", raw)
+        return AgentPermissionsSettings()
+
+
 def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSettingsResponse:
-    response = UserSettingsResponse.model_validate(settings_model)
+    payload = vars(settings_model).copy()
+    payload["agent_permissions"] = _permissions_from_stored(settings_model.agent_permissions)
+    response = UserSettingsResponse.model_validate(payload)
     return response.model_copy(
         update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
     )
-
 
 class UserSettingsService:
     """Service for managing user settings and agent configuration."""
@@ -144,6 +156,13 @@ class UserSettingsService:
                     update_dict["llama_gpu_device_ids"] = list(canonical_device_ids)
                 elif next_backend == "cpu":
                     update_dict["llama_gpu_device_ids"] = []
+
+        if "agent_permissions" in update_dict:
+            # Canonicalize (dedupe/sort/strip tool names) before hitting the
+            # JSON column; raises ValueError -> 422 on malformed payloads.
+            update_dict["agent_permissions"] = normalize_agent_permissions(
+                update_dict["agent_permissions"]
+            )
         if (
             "default_local_model" in update_dict
             and "default_local_artifact_id" not in update_dict

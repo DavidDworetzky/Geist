@@ -10,6 +10,23 @@ from pydantic import BaseModel, Field
 
 from agents.model_catalog import default_local_model_id
 from agents.model_ids import canonicalize_local_model_id
+from agents.models.tool_calling import PERMISSION_MODE_DEFAULT, PermissionMode
+
+
+class AgentPermissionsSettings(BaseModel):
+    """User-configurable approval posture for agentic tool execution."""
+
+    mode: PermissionMode = Field(
+        default=PERMISSION_MODE_DEFAULT,
+        description=(
+            "Approval posture: 'default' (per-tool flags), 'auto_approve' "
+            "(never ask), or 'require_approval' (always ask)"
+        ),
+    )
+    always_allow: list[str] = Field(
+        default=[],
+        description="Tool names that never require approval, regardless of mode",
+    )
 
 
 class UserSettingsBase(BaseModel):
@@ -47,6 +64,10 @@ class UserSettingsBase(BaseModel):
         default=[], description="Backup provider configurations"
     )
     ui_preferences: dict[str, Any] = Field(default={}, description="UI preferences")
+    agent_permissions: AgentPermissionsSettings = Field(
+        default_factory=AgentPermissionsSettings,
+        description="Agent tool approval settings",
+    )
 
 
 class UserSettingsCreate(UserSettingsBase):
@@ -74,6 +95,7 @@ class UserSettingsUpdate(BaseModel):
     default_presence_penalty: float | None = None
     backup_providers: list[dict[str, Any]] | None = None
     ui_preferences: dict[str, Any] | None = None
+    agent_permissions: AgentPermissionsSettings | None = None
 
 
 class UserSettingsResponse(UserSettingsBase):

@@ -5,6 +5,7 @@ import AgentConfigSection from './Components/AgentConfigSection';
 import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
+import AgentPermissionsSection from './Components/AgentPermissionsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import AboutSection from './Components/AboutSection';
@@ -14,7 +15,7 @@ import {
   useHostDevelopmentEnabled,
 } from './plugins/runtime';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local Model' },
@@ -216,7 +217,8 @@ const Settings: React.FC = () => {
         default_frequency_penalty: localSettings.default_frequency_penalty,
         default_presence_penalty: localSettings.default_presence_penalty,
         backup_providers: localSettings.backup_providers,
-        ui_preferences: localSettings.ui_preferences
+        ui_preferences: localSettings.ui_preferences,
+        agent_permissions: localSettings.agent_permissions
       };
 
       await updateSettings(updates);
@@ -274,6 +276,7 @@ const Settings: React.FC = () => {
     { id: 'models' as Tab, label: 'Models and Providers' },
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
+    { id: 'permissions' as Tab, label: 'Permissions' },
     { id: 'ui' as Tab, label: 'Appearance' },
     ...(hostDevelopmentEnabled
       ? [{ id: 'developer' as Tab, label: 'Developer' }]
@@ -420,6 +423,13 @@ const Settings: React.FC = () => {
               defaultFileArchives={localSettings.default_file_archives}
               onEnableRagChange={(value) => updateLocalSetting('enable_rag_by_default', value)}
               onFileArchivesChange={(value) => updateLocalSetting('default_file_archives', value)}
+            />
+          )}
+
+          {activeTab === 'permissions' && (
+            <AgentPermissionsSection
+              agentPermissions={localSettings.agent_permissions}
+              onChange={(value) => updateLocalSetting('agent_permissions', value)}
             />
           )}
 

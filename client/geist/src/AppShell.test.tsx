@@ -27,6 +27,7 @@ const baseSettings = {
   default_presence_penalty: 0,
   backup_providers: [],
   ui_preferences: {},
+  agent_permissions: { mode: 'default' as const, always_allow: [] },
   create_date: '2026-07-27T00:00:00Z',
   update_date: '2026-07-27T00:00:00Z',
 };

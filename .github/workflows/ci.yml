@@ -3,8 +3,9 @@ name: CI Pipeline
 on:
   push:
     branches: [ main ]
+  # Run checks for every pull request, including PRs whose base is another
+  # feature branch in a review stack. Push builds remain limited to main.
   pull_request:
-    branches: [ main ]
 
 # Cancel superseded runs on PRs; let pushes to main run to completion
 concurrency:
