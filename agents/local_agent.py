@@ -292,7 +292,7 @@ class LocalAgent(BaseAgent):
             top_p=config.top_p,
             frequency_penalty=config.frequency_penalty,
             presence_penalty=config.presence_penalty,
-            stop=config.stop[0] if config.stop else None,
+            stop=config.stop,
         )
         structured_messages = [
             {"role": message.role, "content": message.content} for message in messages
