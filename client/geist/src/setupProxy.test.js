@@ -46,6 +46,13 @@ describe('development API proxy operator authentication', () => {
     );
     expect(proxyConfig.ws).toBe(true);
     expect(app.use).toHaveBeenCalledTimes(3);
+    expect(app.use.mock.calls.map(([path]) => path)).toEqual([
+      '/api',
+      '/agent',
+      '/adapter',
+    ]);
+    expect(createProxyMiddleware.mock.calls[1][0].ws).toBeUndefined();
+    expect(createProxyMiddleware.mock.calls[2][0].ws).toBeUndefined();
   });
 
   test('leaves authorization untouched when standalone proxy auth is not configured', () => {
