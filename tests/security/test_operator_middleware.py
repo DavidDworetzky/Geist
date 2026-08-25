@@ -3,6 +3,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.models.database.geist_user import WorkspaceModel
 from app.security.middleware import OperatorAuthenticationMiddleware
 from app.security.operator import OPERATOR_AUTHENTICATION_SCHEME
 
@@ -11,6 +12,10 @@ from app.security.operator import OPERATOR_AUTHENTICATION_SCHEME
 def protected_client(monkeypatch):
     monkeypatch.setenv("GEIST_OPERATOR_TOKEN", "m" * 43)
     monkeypatch.delenv("GEIST_OPERATOR_TOKEN_FILE", raising=False)
+    monkeypatch.setattr(
+        "app.security.operator.get_default_workspace",
+        lambda: WorkspaceModel(1, "default", "Local Workspace"),
+    )
     app = FastAPI()
     app.add_middleware(OperatorAuthenticationMiddleware)
 
