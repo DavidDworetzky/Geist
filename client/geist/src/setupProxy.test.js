@@ -10,6 +10,10 @@ describe('development API proxy operator authentication', () => {
   const originalToken = process.env.GEIST_OPERATOR_TOKEN;
   const originalTokenFile = process.env.GEIST_OPERATOR_TOKEN_FILE;
 
+  beforeEach(() => {
+    createProxyMiddleware.mockImplementation((_context, config) => config);
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
     if (originalToken === undefined) {
