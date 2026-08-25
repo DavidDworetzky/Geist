@@ -9,6 +9,7 @@ import glob
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import safetensors.torch
@@ -18,8 +19,9 @@ from huggingface_hub import login
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from agents.models.llama_completion import strings_to_message_dict
+from agents.models.tool_calling import GenerationStats
 
-from .base_runner import BaseRunner, GenerationConfig
+from .base_runner import BaseRunner, GenerationConfig, RunnerCompletion
 
 
 logger = logging.getLogger(__name__)
@@ -176,6 +178,41 @@ class VLLMRunner(BaseRunner):
     def complete(
         self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig
     ) -> list[dict[str, str]]:
+        return self._complete_with_stats(
+            system_prompt,
+            user_prompt,
+            generation_config,
+        ).messages
+
+    def complete_messages_with_stats(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> RunnerCompletion:
+        system_prompt = "\n\n".join(
+            message.get("content") or "" for message in messages if message.get("role") == "system"
+        )
+        conversation = []
+        for message in messages:
+            role = message.get("role")
+            if role == "system":
+                continue
+            label = "Assistant" if role == "assistant" else "User"
+            if role == "tool":
+                label = "Tool"
+            conversation.append(f"{label}: {message.get('content') or ''}")
+        return self._complete_with_stats(
+            system_prompt,
+            "\n".join(conversation),
+            generation_config,
+        )
+
+    def _complete_with_stats(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        generation_config: GenerationConfig,
+    ) -> RunnerCompletion:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load() first.")
 
@@ -210,6 +247,9 @@ class VLLMRunner(BaseRunner):
                 device=self.device,
             )
 
+        prompt_tokens = self._count_tokens(prompt_text)
+        self._synchronize_device()
+        generation_started = time.perf_counter()
         outputs = self._pipeline(
             prompt_text,
             max_new_tokens=generation_config.max_tokens,
@@ -219,6 +259,8 @@ class VLLMRunner(BaseRunner):
             else None,
             top_p=generation_config.top_p,
         )
+        self._synchronize_device()
+        total_seconds = time.perf_counter() - generation_started
 
         output_text = outputs[0]["generated_text"]
         response_text = (
@@ -231,11 +273,42 @@ class VLLMRunner(BaseRunner):
                 response_text = response_text[:idx]
 
         response_text = response_text.strip()
+        completion_tokens = self._count_tokens(response_text)
 
         logger.info("Completion successful")
         logger.info(f"Output: {response_text}")
 
-        return strings_to_message_dict(user_prompt, response_text)
+        return RunnerCompletion(
+            strings_to_message_dict(user_prompt, response_text),
+            GenerationStats(
+                backend="transformers-pipeline",
+                model_id=self.model_id,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_seconds=total_seconds,
+                completion_tps=(
+                    completion_tokens / total_seconds
+                    if completion_tokens > 0 and total_seconds > 0
+                    else None
+                ),
+            ),
+        )
+
+    def _count_tokens(self, text: str) -> int:
+        encode = getattr(self.tokenizer, "encode", None)
+        if not callable(encode):
+            return 0
+        try:
+            return len(encode(text, add_special_tokens=False))
+        except TypeError:
+            return len(encode(text))
+
+    def _synchronize_device(self) -> None:
+        device_type = getattr(self.device, "type", str(self.device))
+        if device_type == "cuda":
+            torch.cuda.synchronize(self.device)
+        elif device_type == "mps" and hasattr(torch.mps, "synchronize"):
+            torch.mps.synchronize()
 
     def cleanup(self) -> None:
         if self._pipeline:

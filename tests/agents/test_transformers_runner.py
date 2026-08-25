@@ -92,6 +92,42 @@ def test_complete_messages_preserves_structured_conversation_roles():
     assert applied_messages == messages
 
 
+def test_complete_messages_reports_end_to_end_token_throughput():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+    runner.device = torch.device("cpu")
+
+    with patch(
+        "agents.architectures.transformers_runner.time.perf_counter",
+        side_effect=[10.0, 10.5],
+    ):
+        result = runner.complete_messages_with_stats(
+            [{"role": "user", "content": "hello"}],
+            GenerationConfig(max_tokens=8, temperature=0.0),
+        )
+
+    assert result.generation_stats is not None
+    assert result.generation_stats.backend == "transformers"
+    assert result.generation_stats.prompt_tokens == 3
+    assert result.generation_stats.completion_tokens == 2
+    assert result.generation_stats.total_seconds == pytest.approx(0.5)
+    assert result.generation_stats.completion_tps == pytest.approx(4.0)
+    assert result.generation_stats.generation_tps is None
+
+
+def test_cuda_generation_timing_synchronizes_accelerator():
+    runner = TransformersRunner()
+    runner.device = torch.device("cuda")
+
+    with patch("agents.architectures.transformers_runner.torch.cuda.synchronize") as sync:
+        runner._synchronize_device()
+
+    sync.assert_called_once_with(torch.device("cuda"))
+
+
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
 @patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
 @patch("agents.architectures.transformers_runner.AutoTokenizer")

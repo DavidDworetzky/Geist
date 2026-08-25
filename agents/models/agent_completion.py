@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from agents.models.chat_result import ToolCallResult, WorkArtifact
 from agents.models.generic_completion import GenericCompletion
 from agents.models.llama_completion import LlamaCompletion
+from agents.models.tool_calling import GenerationStats
 
 
 # Create logger
@@ -19,6 +20,7 @@ class AgentCompletion:
     run_id: str | None = None
     tool_calls: list[ToolCallResult] = field(default_factory=list)
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    generation_stats: list[GenerationStats] = field(default_factory=list)
 
     @classmethod
     def from_completion(cls, completion: LlamaCompletion | GenericCompletion) -> "AgentCompletion":
@@ -33,6 +35,7 @@ class AgentCompletion:
                 run_id=getattr(completion, "run_id", None),
                 tool_calls=getattr(completion, "tool_calls", []),
                 artifacts=getattr(completion, "artifacts", []),
+                generation_stats=getattr(completion, "generation_stats", []),
             )
         elif isinstance(completion, LlamaCompletion):
             content = completion.get_assistant_content()
@@ -45,6 +48,7 @@ class AgentCompletion:
                 run_id=getattr(completion, "run_id", None),
                 tool_calls=getattr(completion, "tool_calls", []),
                 artifacts=getattr(completion, "artifacts", []),
+                generation_stats=getattr(completion, "generation_stats", []),
             )
         else:
             raise ValueError(f"Unsupported completion type: {type(completion).__name__}")

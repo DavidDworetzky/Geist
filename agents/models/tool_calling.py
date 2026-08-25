@@ -34,6 +34,25 @@ class ModelRequestConfig:
     stop: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class GenerationStats:
+    """Per-model-round token counts and timing measurements."""
+
+    backend: str
+    model_id: str | None
+    prompt_tokens: int
+    completion_tokens: int
+    cached_prompt_tokens: int | None = None
+    prompt_seconds: float | None = None
+    generation_seconds: float | None = None
+    total_seconds: float | None = None
+    time_to_first_token: float | None = None
+    prompt_tps: float | None = None
+    generation_tps: float | None = None
+    completion_tps: float | None = None
+    peak_memory_gb: float | None = None
+
+
 @dataclass
 class ToolCall:
     id: str
@@ -196,6 +215,7 @@ class ModelTurn:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
+    generation_stats: GenerationStats | None = None
 
 
 @dataclass

@@ -301,6 +301,42 @@ def test_structured_messages_reach_mlx_backend_unchanged():
     runner.llama.complete_messages.assert_called_once_with(messages)
 
 
+def test_structured_completion_exposes_existing_mlx_metrics():
+    runner = MLXLlamaRunner()
+    runner.model_id = "test/model"
+    runner.implementation = "mlx_lm"
+    runner.llama = MagicMock()
+    runner.llama.complete_messages.return_value = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
+    runner.llama.last_stats = {
+        "prompt_tokens": 40,
+        "prompt_tps": 200.0,
+        "generation_tokens": 10,
+        "generation_tps": 20.0,
+        "peak_memory_gb": 4.5,
+    }
+
+    with patch(
+        "agents.architectures.mlx_llama_runner.time.perf_counter",
+        side_effect=[10.0, 11.0],
+    ):
+        result = runner.complete_messages_with_stats(
+            [{"role": "user", "content": "hello"}],
+            GenerationConfig(max_tokens=10),
+        )
+
+    assert result.generation_stats is not None
+    assert result.generation_stats.backend == "mlx-lm"
+    assert result.generation_stats.prompt_tokens == 40
+    assert result.generation_stats.completion_tokens == 10
+    assert result.generation_stats.prompt_seconds == pytest.approx(0.2)
+    assert result.generation_stats.generation_seconds == pytest.approx(0.5)
+    assert result.generation_stats.completion_tps == pytest.approx(10.0)
+    assert result.generation_stats.peak_memory_gb == pytest.approx(4.5)
+
+
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.tokenizer = MagicMock()

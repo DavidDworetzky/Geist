@@ -333,6 +333,7 @@ const Chat = () => {
       ai: completedTurn.message,
       tool_calls: completedTurn.tool_calls,
       artifacts: completedTurn.artifacts,
+      generation_stats: completedTurn.generation_stats,
     };
     setChatHistory(previous => {
       const existingHistory = previous?.chatHistory ?? [];

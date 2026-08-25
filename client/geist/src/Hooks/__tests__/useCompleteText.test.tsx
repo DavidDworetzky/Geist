@@ -319,6 +319,13 @@ describe('useCompleteText', () => {
       chat_id: 7,
       tool_calls: [toolCall],
       artifacts: [artifact],
+      generation_stats: [{
+        backend: 'llama.cpp',
+        model_id: 'test/model',
+        prompt_tokens: 8,
+        completion_tokens: 4,
+        generation_tps: 20,
+      }],
     };
     const chunks = [
       'event: run_started\r\ndata: {"run_id":"run_1","chat_id":7}\r\n\r\nevent: delta\ndata: {"text":"Dra',
@@ -353,6 +360,9 @@ describe('useCompleteText', () => {
     });
     expect(result.current.completedTurn?.tool_calls).toEqual([toolCall]);
     expect(result.current.completedTurn?.artifacts).toEqual([artifact]);
+    expect(result.current.completedTurn?.generation_stats).toEqual(
+      finalEnvelope.generation_stats,
+    );
   });
 
   it('aborts the stream and posts cancellation for a started run', async () => {

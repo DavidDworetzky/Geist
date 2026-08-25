@@ -5,10 +5,18 @@ These cover the behavior formerly exercised through LlamaAgent, using a stub
 runner (registered in conftest) so no model weights are loaded.
 """
 
+import json
 from unittest.mock import patch
 
 from agents.models.agent_completion import AgentCompletion
-from app.main import AgentType, agent_cache, run_chat_completion, stream_chat_completion
+from agents.models.tool_calling import GenerationStats
+from app.main import (
+    AgentType,
+    agent_cache,
+    run_chat_completion,
+    sse_event,
+    stream_chat_completion,
+)
 from app.models.completion import CompleteTextParams
 from tests.agents.test_online_agent_routes import (
     completions_generator,
@@ -22,6 +30,44 @@ agent_completion = {
     "id": "EXISTS",
     "chat_id": "EXISTS",
 }
+
+
+def test_generation_stats_are_serialized_in_final_sse_response():
+    completion = AgentCompletion(
+        message=["hello"],
+        id="completion",
+        chat_id=7,
+        generation_stats=[
+            GenerationStats(
+                backend="transformers",
+                model_id="test/model",
+                prompt_tokens=8,
+                completion_tokens=4,
+                completion_tps=10.0,
+            )
+        ],
+    )
+
+    event = sse_event("final", completion)
+    payload = json.loads(event.split("data: ", maxsplit=1)[1])
+
+    assert payload["generation_stats"] == [
+        {
+            "backend": "transformers",
+            "model_id": "test/model",
+            "prompt_tokens": 8,
+            "completion_tokens": 4,
+            "cached_prompt_tokens": None,
+            "prompt_seconds": None,
+            "generation_seconds": None,
+            "total_seconds": None,
+            "time_to_first_token": None,
+            "prompt_tps": None,
+            "generation_tps": None,
+            "completion_tps": 10.0,
+            "peak_memory_gb": None,
+        }
+    ]
 
 
 def test_legacy_stream_generates_completion_once():

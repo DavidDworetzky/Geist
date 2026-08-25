@@ -164,6 +164,7 @@ export const chatStreamReducer = (
           started_at: action.startedAt ?? new Date().toISOString(),
           tool_calls: [],
           artifacts: [],
+          generation_stats: [],
         },
         completedTurn: null,
         loading: true,
@@ -246,6 +247,7 @@ export const chatStreamReducer = (
         origin_chat_id: state.activeTurn?.origin_chat_id ?? null,
         tool_calls: dedupeTools(action.data.tool_calls ?? []),
         artifacts: dedupeArtifacts(action.data.artifacts ?? []),
+        generation_stats: action.data.generation_stats ?? [],
       };
       return {
         ...state,
