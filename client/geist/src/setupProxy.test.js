@@ -1,5 +1,5 @@
 jest.mock('http-proxy-middleware', () => ({
-  createProxyMiddleware: jest.fn((config) => config),
+  createProxyMiddleware: jest.fn((_context, config) => config),
 }));
 
 const { createProxyMiddleware } = require('http-proxy-middleware');
@@ -30,7 +30,7 @@ describe('development API proxy operator authentication', () => {
     const app = { use: jest.fn() };
 
     setupProxy(app);
-    const proxyConfig = createProxyMiddleware.mock.calls[0][0];
+    const [backendPaths, proxyConfig] = createProxyMiddleware.mock.calls[0];
     const proxyRequest = { setHeader: jest.fn() };
     proxyConfig.onProxyReq(proxyRequest);
     const websocketRequest = { setHeader: jest.fn() };
@@ -45,14 +45,13 @@ describe('development API proxy operator authentication', () => {
       `GeistOperator ${'t'.repeat(32)}`,
     );
     expect(proxyConfig.ws).toBe(true);
-    expect(app.use).toHaveBeenCalledTimes(3);
-    expect(app.use.mock.calls.map(([path]) => path)).toEqual([
+    expect(backendPaths).toEqual([
       '/api',
       '/agent',
       '/adapter',
     ]);
-    expect(createProxyMiddleware.mock.calls[1][0].ws).toBeUndefined();
-    expect(createProxyMiddleware.mock.calls[2][0].ws).toBeUndefined();
+    expect(app.use).toHaveBeenCalledTimes(1);
+    expect(app.use).toHaveBeenCalledWith(proxyConfig);
   });
 
   test('leaves authorization untouched when standalone proxy auth is not configured', () => {
@@ -61,7 +60,7 @@ describe('development API proxy operator authentication', () => {
     const app = { use: jest.fn() };
 
     setupProxy(app);
-    const proxyConfig = createProxyMiddleware.mock.calls[0][0];
+    const proxyConfig = createProxyMiddleware.mock.calls[0][1];
     const proxyRequest = { setHeader: jest.fn() };
     proxyConfig.onProxyReq(proxyRequest);
 
@@ -75,7 +74,7 @@ describe('development API proxy operator authentication', () => {
     const app = { use: jest.fn() };
 
     setupProxy(app);
-    const proxyConfig = createProxyMiddleware.mock.calls[0][0];
+    const proxyConfig = createProxyMiddleware.mock.calls[0][1];
     const proxyRequest = { setHeader: jest.fn() };
     proxyConfig.onProxyReq(proxyRequest);
 

@@ -29,21 +29,17 @@ module.exports = function(app) {
       proxyRequest.setHeader('Authorization', authorization);
     }
   };
-  const httpProxyConfig = {
+  const proxyConfig = {
     target: target,
     changeOrigin: true,
     onProxyReq: injectOperatorAuthorization,
-  };
-  const apiProxyConfig = {
-    ...httpProxyConfig,
     ws: true,
     onProxyReqWs: injectOperatorAuthorization,
   };
 
-  // Proxy every backend namespace through the server-side credential boundary.
-  // Only /api contains a backend WebSocket endpoint. Keeping the other proxies
-  // HTTP-only prevents them from claiming the development server's /ws HMR socket.
-  app.use('/api', createProxyMiddleware(apiProxyConfig));
-  app.use('/agent', createProxyMiddleware(httpProxyConfig));
-  app.use('/adapter', createProxyMiddleware(httpProxyConfig));
+  // Give the proxy its own explicit path filter. WebSocket upgrades bypass
+  // Express mount paths, so mounting a contextless ws-enabled proxy under
+  // /api would also claim the development server's unrelated /ws HMR socket.
+  const backendPaths = ['/api', '/agent', '/adapter'];
+  app.use(createProxyMiddleware(backendPaths, proxyConfig));
 };
