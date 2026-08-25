@@ -40,7 +40,7 @@ def upgrade() -> None:
                 "UPDATE geist_user SET "
                 "workspace_key = :workspace_key, "
                 "username = CASE WHEN username = :legacy_username "
-                "THEN :username ELSE username END, "
+                "THEN NULL ELSE username END, "
                 "name = CASE WHEN name = :legacy_name THEN :name ELSE name END, "
                 "email = NULL, password = NULL "
                 "WHERE user_id = :user_id"
@@ -48,9 +48,8 @@ def upgrade() -> None:
             {
                 "workspace_key": "default",
                 "legacy_username": "ddworetzky",
-                "username": "local",
                 "legacy_name": "David Dworetzky",
-                "name": "Local User",
+                "name": "Local Workspace",
                 "user_id": legacy_user_id,
             },
         )
@@ -58,15 +57,14 @@ def upgrade() -> None:
             sa.text(
                 "UPDATE geist_user SET "
                 "username = CASE WHEN username = :legacy_username "
-                "THEN :username ELSE username END, "
+                "THEN NULL ELSE username END, "
                 "name = CASE WHEN name = :legacy_name THEN :name ELSE name END, "
                 "email = NULL, password = NULL WHERE email = :email"
             ),
             {
                 "legacy_username": "ddworetzky",
-                "username": "local",
                 "legacy_name": "David Dworetzky",
-                "name": "Local User",
+                "name": "Local Workspace",
                 "email": "david@phantasmal.ai",
             },
         )

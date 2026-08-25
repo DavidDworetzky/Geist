@@ -33,8 +33,8 @@ def memory_client(tmp_path, monkeypatch):
             GeistUser(
                 user_id=1,
                 workspace_key="default",
-                username="local",
-                name="Local User",
+                username=None,
+                name="Local Workspace",
             )
         )
         session.commit()

@@ -1,12 +1,14 @@
 """
 API endpoints for user settings management.
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from agents.model_catalog import default_local_model_id
-from app.models.database.geist_user import get_default_user
+from app.api.utils import get_current_workspace
+from app.models.database.geist_user import WorkspaceModel
 from app.models.user_settings import AgentConfigRequest, UserSettingsResponse, UserSettingsUpdate
 from app.services.user_settings_service import UserSettingsService
 
@@ -15,57 +17,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def get_current_user():
-    """
-    Get current user (placeholder - should integrate with actual auth system).
-    For now, returns the default user.
-    """
-    return get_default_user()
 
 @router.get("/", response_model=UserSettingsResponse)
-async def get_user_settings(current_user = Depends(get_current_user)):
-    """
-    Get user settings for the current user.
+async def get_workspace_settings(
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
+):
+    """Get settings for the local workspace.
 
     Returns:
         UserSettingsResponse: User settings
     """
     try:
-        settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)
+        settings = UserSettingsService.get_or_create_workspace_settings_by_id(
+            current_workspace.workspace_id
+        )
         return settings
     except Exception as e:
         logger.error(f"Error getting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
-@router.get("/{user_id}", response_model=UserSettingsResponse)
-async def get_user_settings_by_id(user_id: int):
-    """
-    Get user settings by user ID.
-
-    Args:
-        user_id: User ID to get settings for
-
-    Returns:
-        UserSettingsResponse: User settings
-    """
-    try:
-        settings = UserSettingsService.get_user_settings_by_id(user_id)
-        if not settings:
-            raise HTTPException(status_code=404, detail="User settings not found")
-        return settings
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting user settings for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.put("/", response_model=UserSettingsResponse)
-async def update_user_settings(
+async def update_workspace_settings(
     updates: UserSettingsUpdate,
-    current_user = Depends(get_current_user)
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ):
-    """
-    Update user settings for the current user.
+    """Update settings for the local workspace.
 
     Args:
         updates: Settings updates
@@ -74,12 +51,16 @@ async def update_user_settings(
         UserSettingsResponse: Updated user settings
     """
     try:
-        settings = UserSettingsService.update_user_settings_by_id(current_user.user_id, updates)
+        settings = UserSettingsService.update_workspace_settings_by_id(
+            current_workspace.workspace_id, updates
+        )
         if not settings:
-            # Create settings if they don't exist
-            settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)
-            # Try updating again
-            settings = UserSettingsService.update_user_settings_by_id(current_user.user_id, updates)
+            UserSettingsService.get_or_create_workspace_settings_by_id(
+                current_workspace.workspace_id
+            )
+            settings = UserSettingsService.update_workspace_settings_by_id(
+                current_workspace.workspace_id, updates
+            )
 
         if not settings:
             raise HTTPException(status_code=500, detail="Failed to update user settings")
@@ -93,38 +74,12 @@ async def update_user_settings(
         logger.error(f"Error updating user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
-@router.put("/{user_id}", response_model=UserSettingsResponse)
-async def update_user_settings_by_id(
-    user_id: int,
-    updates: UserSettingsUpdate
-):
-    """
-    Update user settings by user ID.
-
-    Args:
-        user_id: User ID to update settings for
-        updates: Settings updates
-
-    Returns:
-        UserSettingsResponse: Updated user settings
-    """
-    try:
-        settings = UserSettingsService.update_user_settings_by_id(user_id, updates)
-        if not settings:
-            raise HTTPException(status_code=404, detail="User not found")
-        return settings
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    except Exception as e:
-        logger.error(f"Error updating user settings for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.post("/reset", response_model=UserSettingsResponse)
-async def reset_user_settings(current_user = Depends(get_current_user)):
-    """
-    Reset user settings to defaults for the current user.
+async def reset_workspace_settings(
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
+):
+    """Reset workspace settings to defaults.
 
     Returns:
         UserSettingsResponse: Reset user settings
@@ -145,18 +100,22 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_frequency_penalty=0.0,
             default_presence_penalty=0.0,
             backup_providers=[],
-            ui_preferences={}
+            ui_preferences={},
         )
 
-        settings = UserSettingsService.update_user_settings_by_id(current_user.user_id, default_updates)
+        settings = UserSettingsService.update_workspace_settings_by_id(
+            current_workspace.workspace_id, default_updates
+        )
         if not settings:
-            # Create default settings if user doesn't exist
-            settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)
+            settings = UserSettingsService.get_or_create_workspace_settings_by_id(
+                current_workspace.workspace_id
+            )
 
         return settings
     except Exception as e:
         logger.error(f"Error resetting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
 
 @router.get("/agent-config/preview")
 async def preview_agent_config(
@@ -164,7 +123,7 @@ async def preview_agent_config(
     model: str | None = None,
     endpoint: str | None = None,
     runner_type: str | None = None,
-    current_user = Depends(get_current_user)
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ):
     """
     Preview agent configuration with optional overrides.
@@ -179,19 +138,18 @@ async def preview_agent_config(
         Dict: Preview of agent configuration that would be used
     """
     try:
-        # Get user settings
-        settings = UserSettingsService.get_or_create_user_settings_by_id(current_user.user_id)
+        settings = UserSettingsService.get_or_create_workspace_settings_by_id(
+            current_workspace.workspace_id
+        )
 
         # Create overrides
         overrides = AgentConfigRequest(
-            agent_type=agent_type,
-            model=model,
-            endpoint=endpoint,
-            runner_type=runner_type
+            agent_type=agent_type, model=model, endpoint=endpoint, runner_type=runner_type
         )
 
         # Generate config preview
         from app.models.user_settings import AgentFactoryConfig
+
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
 
         return {
@@ -200,7 +158,7 @@ async def preview_agent_config(
             "endpoint": factory_config.endpoint,
             "runner_type": factory_config.runner_type,
             "backup_providers": [provider.dict() for provider in factory_config.backup_providers],
-            "generation_config": factory_config.generation_config
+            "generation_config": factory_config.generation_config,
         }
     except Exception as e:
         logger.error(f"Error previewing agent config: {e}")

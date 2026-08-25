@@ -49,7 +49,7 @@ def test_changing_local_model_clears_stale_artifact_selection():
             return_value=updated,
         ) as update,
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(default_local_model="new/model"),
         )
@@ -75,7 +75,7 @@ def test_artifact_selection_must_match_model_and_be_installed():
         patch("app.services.local_models.get_local_model_manager", return_value=manager),
         pytest.raises(ValueError, match="belongs to other/model"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 default_local_model="new/model",
@@ -90,7 +90,7 @@ def test_artifact_selection_must_match_model_and_be_installed():
         patch("app.services.local_models.get_local_model_manager", return_value=manager),
         pytest.raises(ValueError, match="must be installed"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 default_local_model="new/model",

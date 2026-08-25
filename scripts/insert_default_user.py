@@ -1,10 +1,10 @@
-from app.models.database.geist_user import ensure_default_user
+from app.models.database.geist_user import ensure_default_workspace
 
 
 def insert_default_user():
     """Ensure the neutral local workspace identity exists."""
-    default_user = ensure_default_user()
-    print(f"Default workspace is ready with ID: {default_user.user_id}")
+    workspace = ensure_default_workspace()
+    print(f"Default workspace is ready with ID: {workspace.workspace_id}")
 
 if __name__ == '__main__':
     insert_default_user()

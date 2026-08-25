@@ -14,7 +14,7 @@ from app.models.database.database_config import DatabaseConfig
 from app.models.database.geist_user import (
     DEFAULT_WORKSPACE_KEY,
     GeistUser,
-    ensure_default_user,
+    ensure_default_workspace,
 )
 
 
@@ -38,17 +38,17 @@ def workspace_database(tmp_path):
 
 
 def test_bootstrap_creates_one_neutral_workspace_and_is_idempotent(workspace_database):
-    first = ensure_default_user()
-    second = ensure_default_user()
+    first = ensure_default_workspace()
+    second = ensure_default_workspace()
 
     assert first == second
     assert first.workspace_key == DEFAULT_WORKSPACE_KEY
-    assert first.username == "local"
-    assert first.name == "Local User"
-    assert first.email is None
+    assert first.display_name == "Local Workspace"
     with SessionLocal() as session:
         rows = session.query(GeistUser).all()
         assert len(rows) == 1
+        assert rows[0].username is None
+        assert rows[0].email is None
         assert rows[0].password is None
 
 
@@ -67,17 +67,41 @@ def test_bootstrap_adopts_legacy_row_without_changing_ownership(workspace_databa
         session.add(ChatSession(chat_session_id=73, user_id=41, chat_history="[]"))
         session.commit()
 
-    workspace = ensure_default_user()
+    workspace = ensure_default_workspace()
 
-    assert workspace.user_id == 41
+    assert workspace.workspace_id == 41
     assert workspace.workspace_key == DEFAULT_WORKSPACE_KEY
-    assert workspace.username == "local"
-    assert workspace.name == "Local User"
-    assert workspace.email is None
+    assert workspace.display_name == "Local Workspace"
     with SessionLocal() as session:
         chat = session.get(ChatSession, 73)
         database_user = session.get(GeistUser, 41)
         assert chat.user_id == 41
+        assert database_user.username is None
+        assert database_user.name == "Local Workspace"
+        assert database_user.email is None
+        assert database_user.password is None
+
+
+def test_bootstrap_normalizes_an_existing_default_workspace(workspace_database):
+    with SessionLocal() as session:
+        session.add(
+            GeistUser(
+                workspace_key="default",
+                username="local",
+                name="Local User",
+                email="obsolete@example.com",
+                password="obsolete",
+            )
+        )
+        session.commit()
+
+    workspace = ensure_default_workspace()
+
+    assert workspace.display_name == "Local Workspace"
+    with SessionLocal() as session:
+        database_user = session.query(GeistUser).filter_by(workspace_key="default").one()
+        assert database_user.username is None
+        assert database_user.email is None
         assert database_user.password is None
 
 
@@ -94,12 +118,14 @@ def test_bootstrap_preserves_customized_legacy_display_metadata(workspace_databa
         )
         session.commit()
 
-    workspace = ensure_default_user()
+    workspace = ensure_default_workspace()
 
-    assert workspace.user_id == 7
-    assert workspace.username == "custom-handle"
-    assert workspace.name == "Custom Display Name"
-    assert workspace.email is None
+    assert workspace.workspace_id == 7
+    assert workspace.display_name == "Custom Display Name"
+    with SessionLocal() as session:
+        database_user = session.get(GeistUser, 7)
+        assert database_user.username == "custom-handle"
+        assert database_user.email is None
 
 
 def test_bootstrap_scrubs_duplicate_legacy_rows(workspace_database):
@@ -124,12 +150,14 @@ def test_bootstrap_scrubs_duplicate_legacy_rows(workspace_database):
         )
         session.commit()
 
-    workspace = ensure_default_user()
+    workspace = ensure_default_workspace()
 
-    assert workspace.user_id == 3
+    assert workspace.workspace_id == 3
     with SessionLocal() as session:
         rows = session.query(GeistUser).order_by(GeistUser.user_id).all()
         assert [row.workspace_key for row in rows] == ["default", None]
         assert [row.email for row in rows] == [None, None]
         assert [row.password for row in rows] == [None, None]
+        assert rows[0].username is None
+        assert rows[0].name == "Local Workspace"
         assert rows[1].name == "Customized duplicate"

@@ -67,10 +67,10 @@ def upgrade_database() -> None:
             _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
         command.upgrade(alembic_config, "head")
 
-    from app.models.database.geist_user import ensure_default_user
+    from app.models.database.geist_user import ensure_default_workspace
     from scripts.insert_presets import main as insert_presets
 
-    ensure_default_user()
+    ensure_default_workspace()
     insert_presets(to_commit=True, overwrite=False)
 
 
