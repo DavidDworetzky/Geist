@@ -13,7 +13,10 @@ runs without per-call approval, while a backend that can reach host files
 
 from app.services.execution.base import ExecutionEnvironment, ExecutionResult
 from app.services.execution.docker import DockerExecutionEnvironment
-from app.services.execution.factory import create_execution_environment
+from app.services.execution.factory import (
+    create_execution_environment,
+    create_session_manager,
+)
 from app.services.execution.local import LocalExecutionEnvironment
 
 
@@ -23,4 +26,5 @@ __all__ = [
     "ExecutionResult",
     "LocalExecutionEnvironment",
     "create_execution_environment",
+    "create_session_manager",
 ]
