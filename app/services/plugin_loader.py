@@ -253,7 +253,9 @@ def _discover_skills(plugin_name: str, root: Path, manifest: dict) -> list[Plugi
                 return skills
             text = _read_text_inside(root, skill_file, maximum_bytes=_SKILL_FILE_MAX_BYTES)
             if text is None:
-                logger.warning("Plugin skill file is unavailable or unsafe, skipping: %s", skill_file)
+                logger.warning(
+                    "Plugin skill file is unavailable or unsafe, skipping: %s", skill_file
+                )
                 continue
             fields, _ = parse_frontmatter(text)
             raw_name = fields.get("name")
@@ -336,7 +338,9 @@ def _parse_mcp_server(
             or len(expanded_url) > 2048
             or any(len(value) > 8192 for value in headers.values())
         ):
-            logger.warning("Plugin %s MCP server %s exceeds HTTP limits, skipping", plugin_name, server_name)
+            logger.warning(
+                "Plugin %s MCP server %s exceeds HTTP limits, skipping", plugin_name, server_name
+            )
             return None
         return PluginMcpServer(
             plugin_name=plugin_name,
@@ -371,8 +375,12 @@ def _parse_mcp_server(
             server_name,
         )
         return None
-    if len(raw_args or []) > 64 or any(len(arg) > 4096 or "\x00" in arg for arg in (raw_args or [])):
-        logger.warning("Plugin %s MCP server %s exceeds argument limits, skipping", plugin_name, server_name)
+    if len(raw_args or []) > 64 or any(
+        len(arg) > 4096 or "\x00" in arg for arg in (raw_args or [])
+    ):
+        logger.warning(
+            "Plugin %s MCP server %s exceeds argument limits, skipping", plugin_name, server_name
+        )
         return None
     if len(raw_env or {}) > 64 or any(
         not isinstance(key, str)
@@ -385,19 +393,23 @@ def _parse_mcp_server(
         or "\x00" in value
         for key, value in (raw_env or {}).items()
     ):
-        logger.warning("Plugin %s MCP server %s has invalid environment, skipping", plugin_name, server_name)
+        logger.warning(
+            "Plugin %s MCP server %s has invalid environment, skipping", plugin_name, server_name
+        )
         return None
     expanded_command = _substitute_plugin_root(command, root)
     args = tuple(_substitute_plugin_root(arg, root) for arg in (raw_args or []))
-    env = {
-        key: _substitute_plugin_root(value, root) for key, value in (raw_env or {}).items()
-    }
+    env = {key: _substitute_plugin_root(value, root) for key, value in (raw_env or {}).items()}
     if (
         len(expanded_command) > 1024
         or any(len(argument) > 4096 for argument in args)
         or any(len(value) > 8192 for value in env.values())
     ):
-        logger.warning("Plugin %s MCP server %s exceeds expanded value limits, skipping", plugin_name, server_name)
+        logger.warning(
+            "Plugin %s MCP server %s exceeds expanded value limits, skipping",
+            plugin_name,
+            server_name,
+        )
         return None
     return PluginMcpServer(
         plugin_name=plugin_name,
@@ -530,7 +542,7 @@ class PluginRegistry:
                 return skill
         return None
 
-    def enabled_mcp_server_models(self, _user_id: int | None = None) -> list[McpServerModel]:
+    def enabled_mcp_server_models(self, workspace_id: int | None = None) -> list[McpServerModel]:
         """Plugin MCP servers, as models the shared MCP tool source can mount.
 
         Only plugins named in GEIST_ENABLED_PLUGINS contribute servers; the
@@ -547,7 +559,7 @@ class PluginRegistry:
                 models.append(
                     McpServerModel(
                         mcp_server_id=_synthetic_server_id(server.qualified_name),
-                        user_id=0,
+                        workspace_id=workspace_id or 0,
                         name=server.qualified_name,
                         transport=server.transport,
                         command=server.command,

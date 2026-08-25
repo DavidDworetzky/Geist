@@ -33,6 +33,9 @@ plugins/
 re-scans the directory without a restart. Both routes require the operator
 principal's `tools.manage` capability; in a Pitchblend-managed process that
 means the wrapper-injected `GeistOperator` credential.
+Plugin discovery and execution belong to the operator principal's local
+workspace. Human login remains a Pitchblend concern; a future remote controller
+must present a node-scoped credential for the target Geist workstation.
 
 ## Manifest
 

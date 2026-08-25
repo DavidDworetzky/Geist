@@ -29,7 +29,7 @@ def _write_skill(plugin_root, name="demo-skill", description="Demo description",
 
 
 def _context() -> ToolContext:
-    return ToolContext(user_id=1, chat_id=None, run_id="run-test")
+    return ToolContext(workspace_id=1, chat_id=None, run_id="run-test")
 
 
 class TestSkillsContext:
@@ -147,7 +147,7 @@ class TestPluginMcpMounting:
         result = tool_registry.execute(
             call,
             ToolContext(
-                user_id=1,
+                workspace_id=1,
                 chat_id=None,
                 run_id="run-test",
                 approved_call_ids=frozenset({call.id}),

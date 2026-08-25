@@ -60,8 +60,7 @@ def plugins_client(tmp_path, monkeypatch):
         session.add(
             GeistUser(
                 user_id=1,
-                username="local",
-                name="Local User",
+                name="Local Workspace",
                 workspace_key="default",
             )
         )
@@ -116,7 +115,10 @@ def test_plugin_routes_require_operator_token_when_configured(plugins_client, mo
 
     assert client.get("/api/v1/plugins").status_code == 401
     assert client.post("/api/v1/plugins/refresh").status_code == 401
-    assert client.get(
-        "/api/v1/plugins",
-        headers=_OPERATOR_HEADERS,
-    ).status_code == 200
+    assert (
+        client.get(
+            "/api/v1/plugins",
+            headers=_OPERATOR_HEADERS,
+        ).status_code
+        == 200
+    )
