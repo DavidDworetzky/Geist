@@ -18,7 +18,7 @@ from app.services.tool_registry import (
 
 def _context(*approved_call_ids: str) -> ToolContext:
     return ToolContext(
-        user_id=42,
+        workspace_id=42,
         chat_id=7,
         run_id="run-test",
         approved_call_ids=frozenset(approved_call_ids),

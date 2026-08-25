@@ -74,7 +74,7 @@ def _resolve_next(approvals, decision):
                     pending[0].run_id,
                     pending[0].call_id,
                     decision,
-                    user_id=pending[0].user_id,
+                    workspace_id=pending[0].workspace_id,
                 )
                 return
             time.sleep(0.01)
@@ -90,14 +90,14 @@ def test_approval_resolution_is_scoped_to_the_owning_user():
         "run-1",
         "call-1",
         "external.write",
-        user_id=7,
+        workspace_id=7,
         arguments_fingerprint="arguments",
         definition_fingerprint="definition",
     )
 
-    assert not approvals.resolve("run-1", "call-1", "approve", user_id=8)
+    assert not approvals.resolve("run-1", "call-1", "approve", workspace_id=8)
     assert approvals.pending() == [pending]
-    assert approvals.resolve("run-1", "call-1", "approve", user_id=7)
+    assert approvals.resolve("run-1", "call-1", "approve", workspace_id=7)
     assert pending.event.is_set()
 
 
@@ -111,7 +111,7 @@ def test_approved_call_resumes_and_executes_once():
         _orchestrator(approvals, calls).stream(
             backend=backend,
             prompt="write",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -137,7 +137,7 @@ def test_denied_call_fails_closed_and_reenters_model_as_blocked():
         _orchestrator(approvals, calls).stream(
             backend=backend,
             prompt="write",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -162,7 +162,7 @@ def test_unattended_call_denies_without_waiting():
         _orchestrator(approvals, calls).stream(
             backend=backend,
             prompt="write",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -185,7 +185,7 @@ def test_nonstream_completion_never_waits_for_interactive_approval():
     completion = _orchestrator(approvals, calls).complete(
         backend=backend,
         prompt="write",
-        user_id=1,
+        workspace_id=1,
         chat_id=None,
         config=ModelRequestConfig(),
         system_prompt=None,

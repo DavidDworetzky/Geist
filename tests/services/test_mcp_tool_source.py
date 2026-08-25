@@ -25,7 +25,7 @@ def _server_model(server_id: int = 1, name: str = "fake") -> McpServerModel:
     now = datetime.datetime(2026, 7, 28)
     return McpServerModel(
         mcp_server_id=server_id,
-        user_id=1,
+        workspace_id=1,
         name=name,
         transport="stdio",
         command="fake-command",
@@ -57,12 +57,12 @@ class FakeManager:
 
 
 def _context() -> ToolContext:
-    return ToolContext(user_id=1, chat_id=None, run_id="run-test")
+    return ToolContext(workspace_id=1, chat_id=None, run_id="run-test")
 
 
 def _approved_context(call: ToolCall) -> ToolContext:
     return ToolContext(
-        user_id=1,
+        workspace_id=1,
         chat_id=None,
         run_id="run-test",
         approved_call_ids=frozenset({call.id}),
@@ -71,7 +71,7 @@ def _approved_context(call: ToolCall) -> ToolContext:
 
 def test_definitions_namespace_and_schema_passthrough():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
 
     definitions = source.definitions()
     assert [definition.name for definition in definitions] == ["mcp.fake.echo"]
@@ -85,7 +85,7 @@ def test_definitions_namespace_and_schema_passthrough():
 
 def test_registry_executes_mcp_tool_through_source():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -105,7 +105,7 @@ def test_registry_executes_mcp_tool_through_source():
 
 def test_registry_rejects_missing_required_argument():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -119,7 +119,7 @@ def test_registry_rejects_missing_required_argument():
 
 def test_registry_rejects_wrong_argument_type():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
     registry = ToolRegistry()
     registry.add_source(source)
 
@@ -133,7 +133,7 @@ def test_registry_rejects_wrong_argument_type():
 def test_registry_rejects_approval_after_mcp_configuration_changes():
     server = _server_model()
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [server])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [server])
     registry = ToolRegistry()
     registry.add_source(source)
     call = ToolCall.create("mcp.fake.echo", {"text": "hello"})
@@ -160,7 +160,7 @@ def test_failing_server_is_skipped():
     )
     source = McpToolSource(
         manager,
-        servers_loader=lambda user_id=None: [
+        servers_loader=lambda workspace_id=None: [
             _server_model(1, "bad"),
             _server_model(2, "good"),
         ],
@@ -173,8 +173,8 @@ def test_failing_server_is_skipped():
 def test_definitions_cached_until_invalidated():
     loads = []
 
-    def loader(user_id=None):
-        loads.append(user_id)
+    def loader(workspace_id=None):
+        loads.append(workspace_id)
         return [_server_model()]
 
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
@@ -189,22 +189,22 @@ def test_definitions_cached_until_invalidated():
     assert len(loads) == 2
 
 
-def test_definitions_cache_and_loading_are_scoped_per_user():
-    loaded_user_ids = []
+def test_definitions_cache_and_loading_are_scoped_per_workspace():
+    loaded_workspace_ids = []
 
-    def loader(user_id=None):
-        loaded_user_ids.append(user_id)
-        return [_server_model(user_id or 0, f"user-{user_id}")]
+    def loader(workspace_id=None):
+        loaded_workspace_ids.append(workspace_id)
+        return [_server_model(workspace_id or 0, f"workspace-{workspace_id}")]
 
-    manager = FakeManager(tools_by_server={"user-1": [ECHO_TOOL], "user-2": [ECHO_TOOL]})
+    manager = FakeManager(tools_by_server={"workspace-1": [ECHO_TOOL], "workspace-2": [ECHO_TOOL]})
     source = McpToolSource(manager, servers_loader=loader, cache_ttl_seconds=3600)
 
-    user_1 = ToolContext(user_id=1, chat_id=None, run_id="one")
-    user_2 = ToolContext(user_id=2, chat_id=None, run_id="two")
-    assert source.definitions(user_1)[0].name == "mcp.user-1.echo"
-    assert source.definitions(user_2)[0].name == "mcp.user-2.echo"
-    source.definitions(user_1)
-    assert loaded_user_ids == [1, 2]
+    workspace_1 = ToolContext(workspace_id=1, chat_id=None, run_id="one")
+    workspace_2 = ToolContext(workspace_id=2, chat_id=None, run_id="two")
+    assert source.definitions(workspace_1)[0].name == "mcp.workspace-1.echo"
+    assert source.definitions(workspace_2)[0].name == "mcp.workspace-2.echo"
+    source.definitions(workspace_1)
+    assert loaded_workspace_ids == [1, 2]
 
 
 def test_invalidation_prevents_stale_discovery_from_repopulating_cache():
@@ -225,7 +225,7 @@ def test_invalidation_prevents_stale_discovery_from_repopulating_cache():
             return [{**ECHO_TOOL, "name": "fresh"}]
 
     manager = RacingManager()
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
     stale_result = []
     stale_thread = threading.Thread(
         target=lambda: stale_result.extend(source.definitions()),
@@ -243,7 +243,7 @@ def test_invalidation_prevents_stale_discovery_from_repopulating_cache():
     assert [definition.name for definition in source.definitions()] == ["mcp.fake.fresh"]
 
 
-def test_discovery_is_single_flight_per_user_and_generation():
+def test_discovery_is_single_flight_per_workspace_and_generation():
     first_started = threading.Event()
     release = threading.Event()
 
@@ -259,7 +259,7 @@ def test_discovery_is_single_flight_per_user_and_generation():
             return [ECHO_TOOL]
 
     manager = BlockingManager()
-    source = McpToolSource(manager, servers_loader=lambda user_id=None: [_server_model()])
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
     results: list[list] = []
     threads = [
         threading.Thread(target=lambda: results.append(source.definitions()), daemon=True)

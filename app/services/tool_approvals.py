@@ -18,7 +18,7 @@ class PendingToolApproval:
     run_id: str
     call_id: str
     tool_name: str
-    user_id: int
+    workspace_id: int
     arguments_fingerprint: str
     definition_fingerprint: str
     event: threading.Event = field(default_factory=threading.Event)
@@ -38,7 +38,7 @@ class ToolApprovalRegistry:
         call_id: str,
         tool_name: str,
         *,
-        user_id: int,
+        workspace_id: int,
         arguments_fingerprint: str,
         definition_fingerprint: str,
     ) -> PendingToolApproval:
@@ -46,7 +46,7 @@ class ToolApprovalRegistry:
             run_id=run_id,
             call_id=call_id,
             tool_name=tool_name,
-            user_id=user_id,
+            workspace_id=workspace_id,
             arguments_fingerprint=arguments_fingerprint,
             definition_fingerprint=definition_fingerprint,
         )
@@ -62,13 +62,13 @@ class ToolApprovalRegistry:
         call_id: str,
         decision: ToolApprovalDecision,
         *,
-        user_id: int,
+        workspace_id: int,
     ) -> bool:
         if decision not in {"approve", "deny"}:
             raise ValueError("decision must be 'approve' or 'deny'")
         with self._lock:
             pending = self._pending.get((run_id, call_id))
-            if pending is None or pending.user_id != user_id:
+            if pending is None or pending.workspace_id != workspace_id:
                 return False
             self._pending.pop((run_id, call_id), None)
         if pending is None:

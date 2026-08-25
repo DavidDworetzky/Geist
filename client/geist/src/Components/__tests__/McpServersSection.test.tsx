@@ -4,7 +4,7 @@ import McpServersSection from '../McpServersSection';
 
 const stdioServer = {
   mcp_server_id: 1,
-  user_id: 1,
+  workspace_id: 1,
   name: 'filesystem',
   transport: 'stdio',
   command: 'npx',

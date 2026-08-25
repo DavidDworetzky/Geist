@@ -1,7 +1,7 @@
 """
 API endpoints for configuring MCP (Model Context Protocol) servers.
 
-Configured servers are persisted per user; only servers explicitly marked
+Configured servers are persisted per workspace; only servers explicitly marked
 enabled contribute tools to chat via the registry's MCP tool source.
 """
 
@@ -124,7 +124,7 @@ class McpServerUpdate(BaseModel):
 
 class McpServerResponse(BaseModel):
     mcp_server_id: int
-    user_id: int
+    workspace_id: int
     name: str
     transport: str
     command: str | None
@@ -156,9 +156,9 @@ def _response(server: McpServerModel) -> McpServerResponse:
     return McpServerResponse(**values)
 
 
-def _owned_server_or_404(mcp_server_id: int, user_id: int) -> McpServerModel:
+def _owned_server_or_404(mcp_server_id: int, workspace_id: int) -> McpServerModel:
     server = get_mcp_server(mcp_server_id)
-    if server is None or server.user_id != user_id:
+    if server is None or server.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="MCP server not found")
     return server
 
@@ -194,7 +194,7 @@ async def list_servers(
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
     try:
-        return [_response(server) for server in list_mcp_servers(operator.user_id)]
+        return [_response(server) for server in list_mcp_servers(operator.workspace_id)]
     except Exception as e:
         logger.error(f"Error listing MCP servers: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -215,11 +215,11 @@ async def create_server(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        if any(server.name == request.name for server in list_mcp_servers(operator.user_id)):
+        if any(server.name == request.name for server in list_mcp_servers(operator.workspace_id)):
             raise HTTPException(
                 status_code=409, detail=f"An MCP server named '{request.name}' already exists"
             )
-        server = create_mcp_server(operator.user_id, request.model_dump())
+        server = create_mcp_server(operator.workspace_id, request.model_dump())
         _invalidate()
         return _response(server)
     except HTTPException:
@@ -236,7 +236,7 @@ async def get_server(
     mcp_server_id: int,
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
-    server = _owned_server_or_404(mcp_server_id, operator.user_id)
+    server = _owned_server_or_404(mcp_server_id, operator.workspace_id)
     return _response(server)
 
 
@@ -247,7 +247,7 @@ async def update_server(
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
     try:
-        existing = _owned_server_or_404(mcp_server_id, operator.user_id)
+        existing = _owned_server_or_404(mcp_server_id, operator.workspace_id)
         updates = request.model_dump(exclude_unset=True)
         try:
             _preserve_redacted_secrets(updates, existing)
@@ -271,7 +271,7 @@ async def update_server(
         if (
             new_name
             and new_name != existing.name
-            and any(server.name == new_name for server in list_mcp_servers(existing.user_id))
+            and any(server.name == new_name for server in list_mcp_servers(existing.workspace_id))
         ):
             raise HTTPException(
                 status_code=409, detail=f"An MCP server named '{new_name}' already exists"
@@ -280,7 +280,7 @@ async def update_server(
         server = update_mcp_server(
             mcp_server_id,
             updates,
-            user_id=operator.user_id,
+            workspace_id=operator.workspace_id,
         )
         if not server:
             raise HTTPException(status_code=404, detail="MCP server not found")
@@ -301,8 +301,8 @@ async def delete_server(
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
     try:
-        _owned_server_or_404(mcp_server_id, operator.user_id)
-        if not delete_mcp_server(mcp_server_id, user_id=operator.user_id):
+        _owned_server_or_404(mcp_server_id, operator.workspace_id)
+        if not delete_mcp_server(mcp_server_id, workspace_id=operator.workspace_id):
             raise HTTPException(status_code=404, detail="MCP server not found")
         _invalidate(mcp_server_id)
     except HTTPException:
@@ -318,7 +318,7 @@ async def test_server(
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
     """Connect to the server and list its tools without enabling it."""
-    server = _owned_server_or_404(mcp_server_id, operator.user_id)
+    server = _owned_server_or_404(mcp_server_id, operator.workspace_id)
     try:
         tools = await run_in_threadpool(
             get_mcp_manager().list_tools,
@@ -348,7 +348,7 @@ async def list_mounted_tools(
     """List the MCP tools currently mounted into the chat tool registry."""
     try:
         context = ToolContext(
-            user_id=operator.user_id,
+            workspace_id=operator.workspace_id,
             chat_id=None,
             run_id="mcp-catalog",
         )

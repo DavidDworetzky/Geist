@@ -114,7 +114,7 @@ class ChatMessage:
 
 @dataclass
 class ToolContext:
-    user_id: int
+    workspace_id: int
     chat_id: int | None
     run_id: str
     approved_call_ids: frozenset[str] = frozenset()

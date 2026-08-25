@@ -2,6 +2,7 @@
 McpServer database model: operator-configured MCP servers whose tools are
 mounted into the chat tool registry when enabled.
 """
+
 import datetime
 from dataclasses import dataclass
 from typing import Any
@@ -25,16 +26,16 @@ from app.models.database.database import Base, SessionLocal
 class McpServer(Base):
     """Connection settings for one MCP server (stdio or streamable HTTP)."""
 
-    __tablename__ = 'mcp_server'
+    __tablename__ = "mcp_server"
     __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_mcp_server_user_name"),
+        UniqueConstraint("workspace_id", "name", name="uq_mcp_server_workspace_name"),
     )
 
     mcp_server_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=False)
 
     name = Column(String, nullable=False)
-    transport = Column(String, nullable=False, default='stdio')  # 'stdio' or 'http'
+    transport = Column(String, nullable=False, default="stdio")  # 'stdio' or 'http'
 
     # stdio transport
     command = Column(String, nullable=True)
@@ -55,7 +56,7 @@ class McpServer(Base):
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
     )
 
-    user = relationship("GeistUser", backref="mcp_servers")
+    workspace = relationship("GeistUser", backref="mcp_servers")
 
 
 @dataclass
@@ -63,7 +64,7 @@ class McpServerModel:
     """Data model for a configured MCP server."""
 
     mcp_server_id: int
-    user_id: int
+    workspace_id: int
     name: str
     transport: str
     command: str | None
@@ -93,7 +94,7 @@ _MUTABLE_FIELDS = (
 def _to_model(server: McpServer) -> McpServerModel:
     return McpServerModel(
         mcp_server_id=server.mcp_server_id,
-        user_id=server.user_id,
+        workspace_id=server.workspace_id,
         name=server.name,
         transport=server.transport,
         command=server.command,
@@ -108,21 +109,21 @@ def _to_model(server: McpServer) -> McpServerModel:
     )
 
 
-def list_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
-    """List configured MCP servers, optionally scoped to one user."""
+def list_mcp_servers(workspace_id: int | None = None) -> list[McpServerModel]:
+    """List configured MCP servers, optionally scoped to one workspace."""
     with SessionLocal() as session:
         query = session.query(McpServer)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         return [_to_model(server) for server in query.order_by(McpServer.mcp_server_id).all()]
 
 
-def list_enabled_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
-    """List enabled MCP servers, optionally scoped to one user."""
+def list_enabled_mcp_servers(workspace_id: int | None = None) -> list[McpServerModel]:
+    """List enabled MCP servers, optionally scoped to one workspace."""
     with SessionLocal() as session:
         query = session.query(McpServer).filter_by(enabled=True)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         servers = query.order_by(McpServer.mcp_server_id).all()
         return [_to_model(server) for server in servers]
 
@@ -133,10 +134,10 @@ def get_mcp_server(mcp_server_id: int) -> McpServerModel | None:
         return _to_model(server) if server else None
 
 
-def create_mcp_server(user_id: int, values: dict[str, Any]) -> McpServerModel:
+def create_mcp_server(workspace_id: int, values: dict[str, Any]) -> McpServerModel:
     with SessionLocal() as session:
         server = McpServer(
-            user_id=user_id,
+            workspace_id=workspace_id,
             **{key: values[key] for key in _MUTABLE_FIELDS if key in values},
         )
         session.add(server)
@@ -149,12 +150,12 @@ def update_mcp_server(
     mcp_server_id: int,
     updates: dict[str, Any],
     *,
-    user_id: int | None = None,
+    workspace_id: int | None = None,
 ) -> McpServerModel | None:
     with SessionLocal() as session:
         query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         server = query.first()
         if not server:
             return None
@@ -167,11 +168,11 @@ def update_mcp_server(
         return _to_model(server)
 
 
-def delete_mcp_server(mcp_server_id: int, *, user_id: int | None = None) -> bool:
+def delete_mcp_server(mcp_server_id: int, *, workspace_id: int | None = None) -> bool:
     with SessionLocal() as session:
         query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         server = query.first()
         if not server:
             return False

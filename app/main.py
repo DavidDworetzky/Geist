@@ -298,10 +298,10 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
 def resolved_memory_settings(
     params: CompleteTextParams,
     chat_id: int | None,
-    user_id: int,
+    workspace_id: int,
 ) -> tuple[bool, str, int | None]:
     if chat_id is not None:
-        current = get_chat_memory_settings(user_id, chat_id)
+        current = get_chat_memory_settings(workspace_id, chat_id)
         if current is not None:
             return (
                 bool(current["memory_enabled"]),
@@ -316,7 +316,7 @@ def resolved_memory_settings(
                 session.query(MemoryFolder)
                 .filter(
                     MemoryFolder.folder_id == folder_id,
-                    MemoryFolder.user_id == user_id,
+                    MemoryFolder.user_id == workspace_id,
                 )
                 .first()
             )
@@ -363,7 +363,7 @@ def run_chat_completion(
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
-        user_id=workspace_id,
+        workspace_id=workspace_id,
         chat_id=chat_id,
         config=model_request_config(params),
         system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -393,7 +393,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
             for event in chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,
-                user_id=workspace_id,
+                workspace_id=workspace_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
                 system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -538,7 +538,7 @@ def create_app(
     ):
         return {
             "run_id": run_id,
-            "cancelled": run_controls.cancel(run_id, user_id=operator.user_id),
+            "cancelled": run_controls.cancel(run_id, workspace_id=operator.workspace_id),
         }
 
     @agent_router.post("/runs/{run_id}/tool_approval")
@@ -551,7 +551,7 @@ def create_app(
             run_id,
             params.call_id,
             params.decision,
-            user_id=operator.user_id,
+            workspace_id=operator.workspace_id,
         ):
             raise HTTPException(
                 status_code=404,
@@ -587,7 +587,7 @@ def create_app(
         operator: OperatorPrincipal = Depends(_require_tool_operator),
     ):
         context = ToolContext(
-            user_id=operator.workspace_id,
+            workspace_id=operator.workspace_id,
             chat_id=None,
             run_id="catalog",
         )

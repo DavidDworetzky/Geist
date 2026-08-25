@@ -64,18 +64,14 @@ class McpToolSource:
             self._cached.clear()
 
     def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]:
-        user_id = context.user_id if context is not None else None
+        workspace_id = context.workspace_id if context is not None else None
         while True:
             with self._lock:
                 generation = self._generation
-                cached = self._cached.get(user_id)
-                if (
-                    cached is not None
-                    and cached[2] == generation
-                    and time.monotonic() < cached[1]
-                ):
+                cached = self._cached.get(workspace_id)
+                if cached is not None and cached[2] == generation and time.monotonic() < cached[1]:
                     return list(cached[0])
-                flight_key = (user_id, generation)
+                flight_key = (workspace_id, generation)
                 flight = self._inflight.get(flight_key)
                 leader = flight is None
                 if leader:
@@ -87,14 +83,14 @@ class McpToolSource:
             flight.wait()
 
         try:
-            definitions = self._discover_definitions(user_id)
+            definitions = self._discover_definitions(workspace_id)
         except Exception:
             logger.exception("Could not discover MCP tool definitions")
             definitions = []
         with self._lock:
             self._inflight.pop(flight_key, None)
             if generation == self._generation:
-                self._cached[user_id] = (
+                self._cached[workspace_id] = (
                     list(definitions),
                     time.monotonic() + self._cache_ttl_seconds,
                     generation,
@@ -102,9 +98,9 @@ class McpToolSource:
             flight.set()
         return definitions
 
-    def _discover_definitions(self, user_id: int | None) -> list[ToolDefinition]:
+    def _discover_definitions(self, workspace_id: int | None) -> list[ToolDefinition]:
         try:
-            servers = self._servers_loader(user_id)
+            servers = self._servers_loader(workspace_id)
         except Exception:
             logger.exception("Could not load MCP server configurations")
             return []

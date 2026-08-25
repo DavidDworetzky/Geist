@@ -23,6 +23,7 @@ from app.services.mcp_client import McpError
 
 @pytest.fixture()
 def mcp_client(tmp_path, monkeypatch):
+    operator_token = "m" * 43
     original_config = DATABASE_CONFIG
     engine = configure_database(
         DatabaseConfig(
@@ -33,13 +34,14 @@ def mcp_client(tmp_path, monkeypatch):
     importlib.import_module("app.models.database")
     Base.metadata.create_all(bind=engine)
     monkeypatch.setenv("GEIST_JOB_WORKER_ENABLED", "false")
+    monkeypatch.setenv("GEIST_OPERATOR_TOKEN", operator_token)
+    monkeypatch.delenv("GEIST_OPERATOR_TOKEN_FILE", raising=False)
     with SessionLocal() as session:
         session.add(
             GeistUser(
                 user_id=1,
                 workspace_key="default",
-                username="local",
-                name="Local User",
+                name="Local Workspace",
             )
         )
         session.commit()
@@ -49,11 +51,16 @@ def mcp_client(tmp_path, monkeypatch):
     app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
         subject="test-operator",
         authentication_method="test",
-        user_id=1,
+        workspace_id=1,
         is_loopback=True,
         capabilities=ALL_OPERATOR_CAPABILITIES,
     )
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+        headers={"Authorization": f"GeistOperator {operator_token}"},
+    ) as client:
         yield client
     app.dependency_overrides.clear()
     Session.remove()
@@ -137,13 +144,13 @@ def test_mcp_secrets_are_redacted_and_redacted_updates_preserve_values(mcp_clien
     assert unknown_placeholder.status_code == 422
 
 
-def test_mcp_server_routes_hide_other_users_servers(mcp_client):
+def test_mcp_server_routes_hide_other_workspaces_servers(mcp_client):
     created = mcp_client.post("/api/v1/mcp/servers", json=_stdio_payload())
     server_id = created.json()["mcp_server_id"]
     mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
         subject="other-test-operator",
         authentication_method="test",
-        user_id=2,
+        workspace_id=2,
         is_loopback=True,
         capabilities=ALL_OPERATOR_CAPABILITIES,
     )
@@ -169,7 +176,7 @@ def test_remote_operator_cannot_configure_stdio_server(mcp_client):
     mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
         subject="remote-test-operator",
         authentication_method="test",
-        user_id=1,
+        workspace_id=1,
         is_loopback=False,
         capabilities=ALL_OPERATOR_CAPABILITIES,
     )
@@ -184,7 +191,7 @@ def test_local_token_file_operator_can_configure_stdio_server_through_proxy(mcp_
     mcp_client.app.dependency_overrides[get_operator_principal] = lambda: OperatorPrincipal(
         subject="local-managed",
         authentication_method="local-token-file",
-        user_id=1,
+        workspace_id=1,
         is_loopback=False,
         capabilities=ALL_OPERATOR_CAPABILITIES,
     )

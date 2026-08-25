@@ -332,7 +332,7 @@ def build_default_tool_registry() -> ToolRegistry:
         context: ToolContext, arguments: DocumentSearchArguments
     ) -> ToolExecutionOutput:
         results = DocumentSearchService.search(
-            user_id=context.user_id,
+            user_id=context.workspace_id,
             query=arguments.query,
             limit=arguments.limit,
         )
@@ -430,8 +430,8 @@ def build_default_tool_registry() -> ToolRegistry:
         ToolDefinition(
             name="documents.search",
             description=(
-                "Search the current user's uploaded documents by filename and extracted content. "
-                "Use when asked to find, list, or inspect the user's files; do not use for public web facts."
+                "Search the current workspace's uploaded documents by filename and extracted content. "
+                "Use when asked to find, list, or inspect workspace files; do not use for public web facts."
             ),
             arguments_model=DocumentSearchArguments,
             handler=document_search,

@@ -42,7 +42,7 @@ class ChatStreamEvent:
 
 @dataclass
 class _RunControl:
-    user_id: int
+    workspace_id: int
     cancellation: threading.Event
     on_cancel: Callable[[], bool] | None = None
     cancel_callback_claimed: bool = False
@@ -59,25 +59,25 @@ class RunControlRegistry:
         self,
         run_id: str,
         *,
-        user_id: int,
+        workspace_id: int,
         cancellation: threading.Event | None = None,
         on_cancel: Callable[[], bool] | None = None,
     ) -> threading.Event:
         cancellation = cancellation or threading.Event()
         with self._lock:
             self._runs[run_id] = _RunControl(
-                user_id=user_id,
+                workspace_id=workspace_id,
                 cancellation=cancellation,
                 on_cancel=on_cancel,
             )
         return cancellation
 
-    def cancel(self, run_id: str, *, user_id: int) -> bool:
+    def cancel(self, run_id: str, *, workspace_id: int) -> bool:
         callback: Callable[[], bool] | None = None
         control: _RunControl | None = None
         with self._lock:
             control = self._runs.get(run_id)
-            if control is None or control.user_id != user_id:
+            if control is None or control.workspace_id != workspace_id:
                 return False
             control.cancellation.set()
             if control.on_cancel is not None and not control.cancel_callback_claimed:
@@ -304,7 +304,7 @@ class ChatOrchestrator:
         *,
         backend: Any,
         prompt: str,
-        user_id: int,
+        workspace_id: int,
         chat_id: int | None,
         config: ModelRequestConfig,
         system_prompt: str | None,
@@ -314,7 +314,7 @@ class ChatOrchestrator:
         folder_id: int | None = None,
         interactive: bool = True,
     ) -> Iterator[ChatStreamEvent]:
-        conversation = ConversationState(chat_id=chat_id, user_id=user_id)
+        conversation = ConversationState(chat_id=chat_id, user_id=workspace_id)
         conversation.add_system_prompt(system_prompt)
         if chat_id is not None:
             try:
@@ -325,7 +325,7 @@ class ChatOrchestrator:
         approved_call_ids: set[str] = set()
         cancellation = threading.Event()
         context = ToolContext(
-            user_id=user_id,
+            workspace_id=workspace_id,
             chat_id=chat_id,
             run_id=run.run_id,
             cancellation=cancellation,
@@ -381,7 +381,7 @@ class ChatOrchestrator:
         # record merely because the browser closes the SSE response.
         self.run_controls.start(
             run.run_id,
-            user_id=user_id,
+            workspace_id=workspace_id,
             cancellation=cancellation,
             on_cancel=persist_cancelled_state,
         )
@@ -479,7 +479,7 @@ class ChatOrchestrator:
                                 run.run_id,
                                 call.id,
                                 call.name,
-                                user_id=user_id,
+                                workspace_id=workspace_id,
                                 arguments_fingerprint=tool_arguments_fingerprint(
                                     call.name,
                                     call.arguments,
@@ -501,7 +501,7 @@ class ChatOrchestrator:
                         if decision == "approve":
                             approved_call_ids.add(call.id)
                             context = ToolContext(
-                                user_id=user_id,
+                                workspace_id=workspace_id,
                                 chat_id=chat_id,
                                 run_id=run.run_id,
                                 approved_call_ids=frozenset(approved_call_ids),
