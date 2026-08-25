@@ -75,3 +75,13 @@ remote deployment restrictions.
 - Loopback and Pitchblend wrapper sessions remain usable without a second
   customer login.
 - Existing MCP, tool approval, frontend, Docker, and browser smoke checks pass.
+
+## Review remediation
+
+- Recognize unversioned databases created before the workspace migration,
+  including the existing pre-local-artifact compatibility shape.
+- Keep request-time workspace resolution read-only after startup establishes
+  the default workspace invariant.
+- Adopt a sole existing owner row when its legacy email was customized, and
+  fail explicitly instead of guessing when multiple unkeyed owners are
+  present.

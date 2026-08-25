@@ -2,6 +2,7 @@ import importlib
 
 import pytest
 
+import app.models.database.geist_user as geist_user_module
 from app.models.database.chat_session import ChatSession
 from app.models.database.database import (
     DATABASE_CONFIG,
@@ -15,6 +16,7 @@ from app.models.database.geist_user import (
     DEFAULT_WORKSPACE_KEY,
     GeistUser,
     ensure_default_workspace,
+    get_default_workspace,
 )
 
 
@@ -80,6 +82,70 @@ def test_bootstrap_adopts_legacy_row_without_changing_ownership(workspace_databa
         assert database_user.name == "Local Workspace"
         assert database_user.email is None
         assert database_user.password is None
+
+
+def test_bootstrap_adopts_sole_existing_owner_without_changing_ownership(workspace_database):
+    with SessionLocal() as session:
+        session.add(
+            GeistUser(
+                user_id=52,
+                username="custom-owner",
+                name="Custom Workspace",
+                email="custom@example.com",
+                password="legacy-value",
+            )
+        )
+        session.flush()
+        session.add(ChatSession(chat_session_id=74, user_id=52, chat_history="[]"))
+        session.commit()
+
+    workspace = ensure_default_workspace()
+
+    assert workspace.workspace_id == 52
+    assert workspace.display_name == "Custom Workspace"
+    with SessionLocal() as session:
+        chat = session.get(ChatSession, 74)
+        database_user = session.get(GeistUser, 52)
+        assert chat.user_id == 52
+        assert database_user.workspace_key == DEFAULT_WORKSPACE_KEY
+        assert database_user.username == "custom-owner"
+        assert database_user.email is None
+        assert database_user.password is None
+
+
+def test_bootstrap_rejects_multiple_ambiguous_owner_rows(workspace_database):
+    with SessionLocal() as session:
+        session.add_all(
+            [
+                GeistUser(name="First workspace", email="first@example.com"),
+                GeistUser(name="Second workspace", email="second@example.com"),
+            ]
+        )
+        session.commit()
+
+    with pytest.raises(RuntimeError, match="multiple unkeyed users"):
+        ensure_default_workspace()
+
+
+def test_default_workspace_lookup_does_not_run_bootstrap(workspace_database, monkeypatch):
+    with SessionLocal() as session:
+        session.add(
+            GeistUser(
+                workspace_key=DEFAULT_WORKSPACE_KEY,
+                name="Existing Workspace",
+            )
+        )
+        session.commit()
+
+    def fail_bootstrap():
+        pytest.fail("existing workspace lookup must not run the write-path bootstrap")
+
+    monkeypatch.setattr(geist_user_module, "ensure_default_workspace", fail_bootstrap)
+
+    workspace = get_default_workspace()
+
+    assert workspace.workspace_key == DEFAULT_WORKSPACE_KEY
+    assert workspace.display_name == "Existing Workspace"
 
 
 def test_bootstrap_normalizes_an_existing_default_workspace(workspace_database):

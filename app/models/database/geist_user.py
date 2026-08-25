@@ -63,14 +63,23 @@ def ensure_default_workspace() -> WorkspaceModel:
                 user = legacy_users[0]
                 user.workspace_key = DEFAULT_WORKSPACE_KEY
             else:
-                user = GeistUser(
-                    workspace_key=DEFAULT_WORKSPACE_KEY,
-                    username=None,
-                    name=DEFAULT_WORKSPACE_NAME,
-                    email=None,
-                    password=None,
-                )
-                session.add(user)
+                existing_users = session.query(GeistUser).order_by(GeistUser.user_id).limit(2).all()
+                if len(existing_users) == 1:
+                    user = existing_users[0]
+                    user.workspace_key = DEFAULT_WORKSPACE_KEY
+                elif existing_users:
+                    raise RuntimeError(
+                        "Cannot select the default workspace from multiple unkeyed users"
+                    )
+                else:
+                    user = GeistUser(
+                        workspace_key=DEFAULT_WORKSPACE_KEY,
+                        username=None,
+                        name=DEFAULT_WORKSPACE_NAME,
+                        email=None,
+                        password=None,
+                    )
+                    session.add(user)
 
         # Normalize a workspace created by an earlier version of this migration,
         # including local databases used to test the unmerged branch.
@@ -103,4 +112,8 @@ def ensure_default_workspace() -> WorkspaceModel:
 
 def get_default_workspace() -> WorkspaceModel:
     """Return the singleton local workspace used to partition owned data."""
+    with SessionLocal() as session:
+        user = session.query(GeistUser).filter_by(workspace_key=DEFAULT_WORKSPACE_KEY).first()
+        if user is not None:
+            return _to_workspace(user)
     return ensure_default_workspace()
