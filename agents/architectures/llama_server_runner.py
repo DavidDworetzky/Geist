@@ -17,7 +17,6 @@ from agents.architectures.llama_server_process import (
     LlamaServerManager,
     get_llama_server_manager,
 )
-from agents.models.llama_completion import strings_to_message_dict
 from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
@@ -62,9 +61,7 @@ class LlamaServerRunner(BaseRunner):
             self.client.close()
         self.model_id = artifact.model_id
         self.artifact_id = artifact.id
-        self.supports_native_tool_calling = bool(
-            getattr(artifact, "supports_tool_calling", False)
-        )
+        self.supports_native_tool_calling = bool(getattr(artifact, "supports_tool_calling", False))
         self.base_url = f"{connection.base_url}/v1"
         self.headers = {
             "Content-Type": "application/json",
@@ -87,59 +84,31 @@ class LlamaServerRunner(BaseRunner):
             raise RuntimeError("Model not loaded. Call load() first.")
         return self.client
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
-        return self.complete("", prompt, generation_config)
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        messages: list[dict[str, str | None]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
-        return self.complete_messages(messages, generation_config)
-
-    def complete_messages(
+    def _stream_messages(
         self,
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        client = self._require_client()
-        payload: dict[str, Any] = {
-            "model": self.model_id,
-            "messages": messages,
-            "max_tokens": generation_config.max_tokens,
-            "temperature": generation_config.temperature,
-            "top_p": generation_config.top_p,
-            "frequency_penalty": generation_config.frequency_penalty,
-            "presence_penalty": generation_config.presence_penalty,
-            "stream": False,
-        }
-        if generation_config.stop:
-            payload["stop"] = generation_config.stop
-        response = client.post(
-            f"{self.base_url}/chat/completions",
-            headers=self.headers,
-            json=payload,
-        )
-        response.raise_for_status()
-        body = response.json()
-        choices = body.get("choices") or []
-        if not choices:
-            raise RuntimeError("llama-server returned no completion choices")
-        content = (choices[0].get("message") or {}).get("content") or ""
-        user_prompt = next(
-            (
-                message.get("content") or ""
-                for message in reversed(messages)
-                if message.get("role") == "user"
+    ) -> Iterator[str]:
+        """Adapt llama-server's native event stream to the shared text stream."""
+        request_config = ModelRequestConfig(
+            max_tokens=generation_config.max_tokens,
+            temperature=generation_config.temperature,
+            top_p=generation_config.top_p,
+            frequency_penalty=generation_config.frequency_penalty,
+            presence_penalty=generation_config.presence_penalty,
+            stop=(
+                [generation_config.stop]
+                if isinstance(generation_config.stop, str)
+                else generation_config.stop
             ),
-            "",
         )
-        return strings_to_message_dict(user_prompt, str(content))
+        chat_messages = [
+            ChatMessage(role=str(message.get("role") or ""), content=message.get("content"))
+            for message in messages
+        ]
+        for event in self.stream_model_turn(chat_messages, [], request_config):
+            if event.kind == "text_delta" and event.text:
+                yield event.text
 
     @staticmethod
     def _provider_tool_name(name: str) -> str:
@@ -240,9 +209,7 @@ class LlamaServerRunner(BaseRunner):
                     yield ModelEvent.text_delta(str(content))
                 for fallback_index, tool_delta in enumerate(delta.get("tool_calls") or []):
                     index = int(tool_delta.get("index", fallback_index))
-                    current = call_parts.setdefault(
-                        index, {"id": "", "name": "", "arguments": ""}
-                    )
+                    current = call_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
                     current["id"] += tool_delta.get("id") or ""
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""

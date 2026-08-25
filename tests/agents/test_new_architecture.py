@@ -27,16 +27,11 @@ class MockRunner(BaseRunner):
         self.loaded = True
         self.model_id = model_id
 
-    def generate(self, prompt: str, generation_config: GenerationConfig):
-        return {"generated_text": f"Generated: {prompt}", "model": self.model_id}
-
-    def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
-        return {
-            "messages": [
-                {"role": "user", "content": user_prompt},
-                {"role": "assistant", "content": f"Response to: {user_prompt}"},
-            ]
-        }
+    def _stream_messages(self, messages, generation_config):
+        prompt = next(
+            message["content"] for message in reversed(messages) if message["role"] == "user"
+        )
+        yield f"Response to: {prompt}"
 
 
 def test_stream_text_until_stop_handles_delimiter_split_across_chunks():
@@ -81,7 +76,7 @@ class TestRunnerRegistry:
         # Test generation
         config = GenerationConfig(max_tokens=50, temperature=0.7)
         result = runner.generate("Hello", config)
-        assert "Generated: Hello" in result["generated_text"]
+        assert result[-1]["content"] == "Response to: Hello"
 
 
 class TestAgentFactory:
@@ -170,14 +165,14 @@ def test_local_stream_complete_text_persists_once_after_stream_finishes():
 
     agent = LocalAgent.__new__(LocalAgent)
     agent.runner = MockRunner()
-    agent.runner.stream_messages = Mock(return_value=iter(["hello ", "world"]))
+    agent.runner._stream_messages = Mock(return_value=iter(["hello ", "world"]))
     agent._agent_context = Mock(
         settings=AgentSettings(name="test", version="1", description="test")
     )
 
     chunks = list(agent.stream_complete_text("Say hello", chat_id=7))
 
-    assert chunks == ["hello ", "world"]
+    assert chunks == ["hello", " world"]
     agent._agent_context._add_to_chat_history.assert_called_once_with(
         user_message="Say hello",
         ai_message="hello world",

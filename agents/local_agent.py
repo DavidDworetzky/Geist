@@ -17,7 +17,6 @@ from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
     ModelRequestConfig,
-    ModelTurn,
     ToolDefinition,
 )
 from agents.tool_calling import ToolCompletion, run_prompt_tool_call
@@ -242,11 +241,7 @@ class LocalAgent(BaseAgent):
     ) -> Iterator[str]:
         if not self.runner:
             raise RuntimeError("Runner not initialized")
-        stream_messages = getattr(self.runner, "stream_messages", None)
-        if callable(stream_messages):
-            yield from stream_messages(messages, generation_config)
-            return
-        yield from BaseRunner.stream_messages(self.runner, messages, generation_config)
+        yield from self.runner.stream_messages(messages, generation_config)
 
     def stream_complete_text(
         self,
@@ -265,7 +260,11 @@ class LocalAgent(BaseAgent):
         system_prompt: str | None = None,
         chat_id: int | None = None,
     ):
-        """Stream local text and persist the completed response once."""
+        """Stream local text and persist the completed response once.
+
+        Legacy multi-choice and token-echo parameters are retained for API
+        compatibility; local chat produces one assistant text stream.
+        """
         if not self.runner:
             raise RuntimeError("Runner not initialized")
         generation_config = self._create_generation_config(
@@ -286,11 +285,12 @@ class LocalAgent(BaseAgent):
             chunks.append(chunk)
             yield chunk
 
-        self._agent_context._add_to_chat_history(
-            user_message=prompt,
-            ai_message="".join(chunks),
-            chat_id=chat_id,
-        )
+        if chunks:
+            self._agent_context._add_to_chat_history(
+                user_message=prompt,
+                ai_message="".join(chunks),
+                chat_id=chat_id,
+            )
 
     def stream_model_turn(
         self,
@@ -303,30 +303,7 @@ class LocalAgent(BaseAgent):
             raise RuntimeError("Runner not initialized")
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Runner {self.runner_type} does not support native tool calling")
-        native_stream = getattr(self.runner, "stream_model_turn", None)
-        if callable(native_stream):
-            yield from native_stream(messages, tools, config)
-            return
-
-        generation_config = GenerationConfig(
-            max_tokens=config.max_tokens,
-            temperature=config.temperature,
-            top_p=config.top_p,
-            frequency_penalty=config.frequency_penalty,
-            presence_penalty=config.presence_penalty,
-            stop=config.stop,
-        )
-        structured_messages = [
-            {"role": message.role, "content": message.content} for message in messages
-        ]
-        text_parts: list[str] = []
-        for text_delta in self._stream_runner_messages(structured_messages, generation_config):
-            if not text_delta:
-                continue
-            text_parts.append(text_delta)
-            yield ModelEvent.text_delta(text_delta)
-        text = "".join(text_parts)
-        yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+        yield from self.runner.stream_model_turn(messages, tools, config)
 
     def complete_audio(
         self,

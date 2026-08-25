@@ -200,6 +200,28 @@ def test_manual_backend_streams_decoded_token_deltas():
 
     chunks = list(backend.stream_messages([{"role": "user", "content": "Say hello"}]))
 
-    assert chunks == ["Hel", "lo"]
+    assert chunks == ["Hello"]
     assert backend.last_stats["prompt_tokens"] == 3
     assert backend.last_stats["generation_tokens"] == 2
+
+
+def test_manual_backend_holds_incomplete_unicode_until_decode_is_stable():
+    backend = _make_llama_mlx_stub()
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.max_new_tokens = 8
+    backend.eos_token_ids = [0]
+    backend.tokenizer = MagicMock(eos_token_id=0)
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.tokenizer.encode.return_value = [1, 2, 3]
+    backend.tokenizer.decode.side_effect = lambda token_ids, **_kwargs: {
+        (5,): "caf�",
+        (5, 6): "café ",
+    }[tuple(token_ids)]
+    backend.model = MagicMock(last_stats={})
+    backend.model.generate.return_value = iter([5, 6, 0])
+
+    chunks = list(backend.stream_messages([{"role": "user", "content": "Say café"}]))
+
+    assert "".join(chunks) == "café "
+    assert "�" not in "".join(chunks)

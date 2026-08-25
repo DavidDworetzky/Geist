@@ -13,7 +13,7 @@ import mlx.nn as nn
 
 # Tokenizer imports
 from mlx.utils import tree_flatten
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, TextStreamer
 
 from agents.models.llama_completion import strings_to_message_dict
 
@@ -21,6 +21,27 @@ from agents.models.llama_completion import strings_to_message_dict
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class _IncrementalTextStreamer(TextStreamer):
+    """Expose TextStreamer's Unicode-safe incremental decoder as an iterator."""
+
+    def __init__(self, tokenizer):
+        super().__init__(
+            tokenizer,
+            skip_prompt=False,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        self.ready_chunks: list[str] = []
+
+    def on_finalized_text(self, text: str, stream_end: bool = False) -> None:
+        if text:
+            self.ready_chunks.append(text)
+
+    def drain(self) -> Iterator[str]:
+        while self.ready_chunks:
+            yield self.ready_chunks.pop(0)
 
 
 class KVCache:
@@ -740,36 +761,29 @@ class LlamaMLX:
         self._last_prompt_token_count = len(prompt_ids)
         input_ids = mx.array([prompt_ids], dtype=mx.int64)
         generated_ids: list[int] = []
-        decoded_text = ""
-        eos_ids = set(self.eos_token_ids or [self.tokenizer.eos_token_id])
+        eos_ids = {
+            int(token_id)
+            for token_id in (self.eos_token_ids or [self.tokenizer.eos_token_id])
+            if token_id is not None
+        }
+        decoder = _IncrementalTextStreamer(self.tokenizer)
 
         for token_id in self.model.generate(
             input_ids,
             temp=self.temperature,
             top_p=self.top_p,
             max_new_tokens=self.max_new_tokens,
-            eos_token_id=list(eos_ids),
+            eos_token_id=list(eos_ids) or None,
         ):
             if token_id in eos_ids:
                 logger.info("Generation complete: EOS token generated")
                 break
             generated_ids.append(token_id)
-            current_text = self.tokenizer.decode(
-                generated_ids,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
-            )
-            if current_text.startswith(decoded_text):
-                delta = current_text[len(decoded_text) :]
-            else:
-                # Decoding should be prefix-stable with cleanup disabled. Keep
-                # the stream moving for custom tokenizers that violate that
-                # expectation without repeating the entire response.
-                common_prefix = os.path.commonprefix([decoded_text, current_text])
-                delta = current_text[len(common_prefix) :]
-            decoded_text = current_text
-            if delta:
-                yield delta
+            decoder.put(mx.array([token_id], dtype=mx.int64))
+            yield from decoder.drain()
+
+        decoder.end()
+        yield from decoder.drain()
 
         self.last_stats = dict(getattr(self.model, "last_stats", {}))
         self.last_stats.update(

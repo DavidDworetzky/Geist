@@ -233,23 +233,10 @@ def _phase_out_agent_safely(agent) -> None:
                 )
 
 
-def completion_to_response(completion) -> AgentCompletion:
-    if isinstance(completion, AgentCompletion):
-        return completion
-    if completion:
-        return AgentCompletion.from_completion(completion)
-    raise HTTPException(status_code=500, detail="Failed to generate completions.")
-
-
 def sse_event(event: str, payload: Any) -> str:
     if dataclasses.is_dataclass(payload):
         payload = dataclasses.asdict(cast(Any, payload))
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
-
-
-def chunk_completion_text(text: str, chunk_size: int = 160):
-    for index in range(0, len(text), chunk_size):
-        yield text[index : index + chunk_size]
 
 
 def resolve_agent_type(value) -> AgentType:
@@ -327,24 +314,6 @@ def run_chat_completion(
         memory_mode=memory_mode,
         folder_id=folder_id,
     )
-    if not hasattr(active_agent, "stream_model_turn"):
-        completion = active_agent.complete_text(
-            prompt=params.prompt,
-            max_tokens=params.max_tokens,
-            n=params.n,
-            stop=params.stop,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            echo=params.echo,
-            best_of=params.best_of,
-            prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT,
-            chat_id=chat_id,
-        )
-        return completion_to_response(completion)
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
@@ -362,65 +331,29 @@ def run_chat_completion(
 def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
-        if hasattr(agent, "stream_model_turn"):
-            user_id = int(get_default_user().user_id)
-            memory_enabled, memory_mode, folder_id = resolved_memory_settings(
-                params, chat_id, user_id
-            )
-            memory_context = build_memory_context(
-                user_id,
-                params.prompt,
-                chat_session_id=chat_id,
-                memory_enabled=memory_enabled,
-                memory_mode=memory_mode,
-                folder_id=folder_id,
-            )
-            for event in chat_orchestrator.stream(
-                backend=agent,
-                prompt=params.prompt,
-                user_id=user_id,
-                chat_id=chat_id,
-                config=model_request_config(params),
-                system_prompt=chat_system_prompt(params.enable_tools, memory_context),
-                enable_tools=params.enable_tools,
-                memory_enabled=memory_enabled,
-                memory_mode=memory_mode,
-                folder_id=folder_id,
-            ):
-                yield sse_event(event.event, event.payload)
-            return
-
-        # Legacy agents retain text-only behavior. Generate once and adapt the
-        # authoritative completion into SSE chunks; consuming a legacy text stream
-        # and then calling complete_text again can duplicate model work and database
-        # persistence.
-        completion = agent.complete_text(
+        user_id = int(get_default_user().user_id)
+        memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, user_id)
+        memory_context = build_memory_context(
+            user_id,
+            params.prompt,
+            chat_session_id=chat_id,
+            memory_enabled=memory_enabled,
+            memory_mode=memory_mode,
+            folder_id=folder_id,
+        )
+        for event in chat_orchestrator.stream(
+            backend=agent,
             prompt=params.prompt,
-            max_tokens=params.max_tokens,
-            n=params.n,
-            stop=params.stop,
-            temperature=params.temperature,
-            top_p=params.top_p,
-            frequency_penalty=params.frequency_penalty,
-            presence_penalty=params.presence_penalty,
-            echo=params.echo,
-            best_of=params.best_of,
-            prompt_tokens=params.prompt_tokens,
-            response_format=params.response_format,
-            system_prompt=DEFAULT_PROMPT,
+            user_id=user_id,
             chat_id=chat_id,
-        )
-        completion_object = completion_to_response(completion)
-        for chunk in chunk_completion_text(
-            completion_object.message[0] if completion_object.message else ""
+            config=model_request_config(params),
+            system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+            enable_tools=params.enable_tools,
+            memory_enabled=memory_enabled,
+            memory_mode=memory_mode,
+            folder_id=folder_id,
         ):
-            yield sse_event("delta", {"text": chunk})
-
-        yield sse_event("final", completion_object)
-        yield sse_event(
-            "done",
-            {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
-        )
+            yield sse_event(event.event, event.payload)
     except Exception:
         logger.exception("Chat stream failed before a terminal event")
         yield sse_event(
@@ -659,7 +592,9 @@ def _configured_inference_info() -> dict[str, str | None]:
     except Exception as error:
         logger.warning("Unable to read configured inference settings: %s", error)
         fallback_runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
+        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(
+            DEFAULT_LOCAL_MODEL
+        )
         return {
             "mode": "local",
             "engine": fallback_runner_type,

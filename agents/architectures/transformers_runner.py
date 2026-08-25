@@ -23,17 +23,13 @@ from transformers import (
     TextIteratorStreamer,
 )
 
-from agents.architectures.base_runner import (
-    BaseRunner,
-    GenerationConfig,
-    stream_text_until_stop,
-)
+from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.model_catalog import infer_model_spec
 from agents.model_load_status import model_load_status_registry
-from agents.models.llama_completion import strings_to_message_dict
 
 
 logger = logging.getLogger(__name__)
+GENERATION_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 class _StopOnEvent(StoppingCriteria):
@@ -254,60 +250,7 @@ class TransformersRunner(BaseRunner):
             return torch.bfloat16
         return "auto"
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
-        return self.complete("", prompt, generation_config)
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        messages: list[dict[str, str | None]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
-        return self.complete_messages(messages, generation_config)
-
-    def complete_messages(
-        self,
-        messages: list[dict[str, str | None]],
-        generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        normalized_messages, inputs, input_length, generation_kwargs = self._prepare_generation(
-            messages, generation_config
-        )
-        model = cast(Any, self.model)
-        tokenizer = cast(Any, self.tokenizer)
-
-        with torch.inference_mode():
-            generated = model.generate(**inputs, **generation_kwargs)
-        response = tokenizer.decode(generated[0][input_length:], skip_special_tokens=True).strip()
-        if generation_config.stop:
-            stop_sequences = (
-                [generation_config.stop]
-                if isinstance(generation_config.stop, str)
-                else generation_config.stop
-            )
-            stop_positions = [
-                position
-                for stop_sequence in stop_sequences
-                if stop_sequence
-                if (position := response.find(stop_sequence)) >= 0
-            ]
-            if stop_positions:
-                response = response[: min(stop_positions)].rstrip()
-        user_prompt = next(
-            (
-                message["content"]
-                for message in reversed(normalized_messages)
-                if message["role"] == "user"
-            ),
-            "",
-        )
-        return strings_to_message_dict(user_prompt, response)
-
-    def stream_messages(
+    def _stream_messages(
         self,
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
@@ -328,25 +271,27 @@ class TransformersRunner(BaseRunner):
         generation_kwargs["stopping_criteria"] = StoppingCriteriaList(
             [_StopOnEvent(generation_stopped)]
         )
-        generation_errors: list[BaseException] = []
+        generation_errors: list[Exception] = []
 
         def generate() -> None:
             try:
                 with torch.inference_mode():
                     model.generate(**inputs, **generation_kwargs)
-            except BaseException as error:
+            except Exception as error:
                 generation_errors.append(error)
                 # TextIteratorStreamer otherwise waits forever for a terminal
                 # marker when generation raises in the worker thread.
-                streamer.on_finalized_text("", stream_end=True)
+                streamer.end()
 
         generation_thread = threading.Thread(target=generate, daemon=True)
         generation_thread.start()
         try:
-            yield from stream_text_until_stop(streamer, generation_config.stop)
+            yield from streamer
         finally:
             generation_stopped.set()
-            generation_thread.join()
+            generation_thread.join(timeout=GENERATION_SHUTDOWN_TIMEOUT_SECONDS)
+        if generation_thread.is_alive():
+            raise RuntimeError("Transformers generation did not stop after stream cancellation")
         if generation_errors:
             raise generation_errors[0]
 

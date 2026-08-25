@@ -252,13 +252,10 @@ class MyCustomRunner(BaseRunner):
         # Load your model
         pass
     
-    def generate(self, prompt: str, generation_config: GenerationConfig):
-        # Generate text
-        pass
-    
-    def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
-        # Complete conversation
-        pass
+    def _stream_messages(self, messages, generation_config: GenerationConfig):
+        # Yield decoded text as the runtime produces it. BaseRunner provides
+        # stream_messages(), complete_messages(), complete(), and generate().
+        yield "model output"
 
 # Register the runner
 from agents.architectures import register_runner

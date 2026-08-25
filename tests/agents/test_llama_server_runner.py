@@ -63,11 +63,12 @@ def test_load_resolves_managed_artifact_and_starts_private_server(tmp_path):
 
 def test_complete_messages_adapts_openai_response(tmp_path):
     runner, client, _model_manager, _server_manager = _loaded_runner(tmp_path)
-    response = MagicMock()
-    response.json.return_value = {
-        "choices": [{"message": {"role": "assistant", "content": "hello"}}]
-    }
-    client.post.return_value = response
+    chunks = [
+        {"choices": [{"delta": {"content": "hel"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "lo"}, "finish_reason": "stop"}]},
+    ]
+    lines = [f"data: {json.dumps(chunk)}" for chunk in chunks] + ["data: [DONE]"]
+    client.stream.return_value = StreamResponse(lines)
 
     result = runner.complete_messages(
         [{"role": "user", "content": "hi"}],
@@ -75,9 +76,9 @@ def test_complete_messages_adapts_openai_response(tmp_path):
     )
 
     assert result[-1] == {"role": "assistant", "content": "hello"}
-    payload = client.post.call_args.kwargs["json"]
+    payload = client.stream.call_args.kwargs["json"]
     assert payload["model"] == "test/model"
-    assert payload["stream"] is False
+    assert payload["stream"] is True
 
 
 def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
@@ -103,11 +104,7 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
         {
             "choices": [
                 {
-                    "delta": {
-                        "tool_calls": [
-                            {"index": 0, "function": {"arguments": "7}"}}
-                        ]
-                    },
+                    "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "7}"}}]},
                     "finish_reason": "tool_calls",
                 }
             ]

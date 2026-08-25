@@ -1,6 +1,7 @@
 """
 Unit tests for voice session service.
 """
+
 from unittest.mock import Mock, patch
 
 import pytest
@@ -15,9 +16,9 @@ from app.services.voice_session import VoiceSessionService
 def mock_agent():
     """Create a mock agent for testing."""
     agent = Mock()
-    agent.complete_text = Mock(return_value=Mock(
-        choices=[Mock(message=Mock(content="Test response"))]
-    ))
+    agent.complete_text = Mock(
+        return_value=Mock(choices=[Mock(message=Mock(content="Test response"))])
+    )
     agent.stream_complete_text = Mock(return_value=iter(["Test ", "response"]))
     return agent
 
@@ -25,7 +26,7 @@ def mock_agent():
 @pytest.fixture
 def mock_stt():
     """Create a mock STT adapter."""
-    with patch('app.services.voice_session.MMSAdapter') as MockSTT:
+    with patch("app.services.voice_session.MMSAdapter") as MockSTT:
         stt = MockSTT.return_value
         stt.transcribe = Mock(return_value="test transcript")
         yield stt
@@ -34,7 +35,7 @@ def mock_stt():
 @pytest.fixture
 def mock_tts():
     """Create a mock TTS provider."""
-    with patch('app.services.voice_session.create_tts_provider') as mock_create:
+    with patch("app.services.voice_session.create_tts_provider") as mock_create:
         tts = Mock()
         tts.sample_rate = 24000
         tts.synthesize_streaming = Mock(return_value=iter([b"audio1", b"audio2"]))
@@ -45,11 +46,7 @@ def mock_tts():
 @pytest.fixture
 def voice_service(mock_agent, mock_stt, mock_tts):
     """Create a voice session service for testing."""
-    service = VoiceSessionService(
-        agent=mock_agent,
-        stt_provider="mms",
-        tts_provider="sesame"
-    )
+    service = VoiceSessionService(agent=mock_agent, stt_provider="mms", tts_provider="sesame")
     return service
 
 
@@ -141,9 +138,7 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript=transcript,
-            chat_id=1,
-            use_streaming=True
+            transcript=transcript, chat_id=1, use_streaming=True
         ):
             responses.append(response)
 
@@ -159,22 +154,18 @@ class TestVoiceSessionService:
 
     @pytest.mark.asyncio
     async def test_process_with_agent_non_streaming(self, voice_service, mock_agent, mock_tts):
-        """Test processing with non-streaming agent."""
-        # Make streaming raise NotImplementedError
-        mock_agent.stream_complete_text.side_effect = NotImplementedError()
+        """Buffered voice output still collects the canonical model stream."""
 
         transcript = "Hello, how are you?"
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript=transcript,
-            chat_id=1,
-            use_streaming=True
+            transcript=transcript, chat_id=1, use_streaming=False
         ):
             responses.append(response)
 
-        # Should fall back to complete_text
-        mock_agent.complete_text.assert_called_once()
+        mock_agent.stream_complete_text.assert_called_once()
+        mock_agent.complete_text.assert_not_called()
         assert any(r["type"] == "text_complete" for r in responses)
 
     def test_reset(self, voice_service):
@@ -201,8 +192,7 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript="test",
-            use_streaming=True
+            transcript="test", use_streaming=True
         ):
             responses.append(response)
 
@@ -212,7 +202,9 @@ class TestVoiceSessionService:
         assert "Test error" in error_response["message"]
 
     @pytest.mark.asyncio
-    async def test_missing_qwen_tts_dependency_returns_contract_error(self, voice_service, mock_tts):
+    async def test_missing_qwen_tts_dependency_returns_contract_error(
+        self, voice_service, mock_tts
+    ):
         """Test missing Qwen runtime dependency returns a legible voice contract error."""
         mock_tts.synthesize_streaming.side_effect = ModuleNotFoundError(
             "No module named 'qwen_tts'",
@@ -221,8 +213,7 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript="test",
-            use_streaming=True
+            transcript="test", use_streaming=True
         ):
             responses.append(response)
 

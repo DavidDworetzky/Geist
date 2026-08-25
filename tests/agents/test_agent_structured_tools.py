@@ -11,7 +11,6 @@ from agents.architectures import register_runner
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.exceptions import FunctionCallError
 from agents.local_agent import LocalAgent
-from agents.models.llama_completion import strings_to_message_dict
 from agents.online_agent import OnlineAgent
 
 
@@ -193,20 +192,20 @@ class ScriptedRunner(BaseRunner):
     def load(self, model_id, device_config=None):
         pass
 
-    def generate(self, prompt, generation_config: GenerationConfig):
-        return {}
-
-    def complete(self, system_prompt, user_prompt, generation_config: GenerationConfig):
+    def _stream_messages(self, messages, generation_config: GenerationConfig):
+        user_prompt = next(
+            message["content"]
+            for message in reversed(messages)
+            if message["role"] == "user"
+        )
         self.prompts.append(user_prompt)
         response = self.script[min(len(self.prompts) - 1, len(self.script) - 1)]
-        return strings_to_message_dict(user_prompt, response)
-
-
-register_runner("scripted_test_runner", ScriptedRunner)
+        yield response
 
 
 class TestLocalAgentPromptTools:
     def make_agent(self, adapter, script):
+        register_runner("scripted_test_runner", ScriptedRunner)
         ScriptedRunner.script = script
         context = make_context(adapter)
         return LocalAgent(

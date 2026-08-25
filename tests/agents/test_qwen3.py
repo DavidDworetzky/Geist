@@ -9,6 +9,7 @@ Covers:
 - Factory auto-detection of Qwen 3 models
 - Factory weights_dir propagation
 """
+
 # ---------------------------------------------------------------------------
 # Mock out MLX before any project imports — MLX is Apple-Silicon-only and the
 # agents.architectures package transitively imports it via the llama runner.
@@ -23,6 +24,7 @@ import json
 import os
 import platform
 import sys
+from queue import Queue
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -39,6 +41,7 @@ for _mod_name in _MLX_SUBMODULES:
         _mock.__package__ = _mod_name
         sys.modules[_mod_name] = _mock
 
+from agents.architectures import vllm_runner as vllm_runner_module
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import clear_registry, get_runner
 from agents.factory import AgentFactory
@@ -47,6 +50,7 @@ from agents.factory import AgentFactory
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_generation_config(**overrides):
     defaults = {"max_tokens": 64, "temperature": 0.7, "top_p": 0.9}
@@ -57,6 +61,8 @@ def _make_generation_config(**overrides):
 def _mock_tokenizer(has_chat_template=True):
     tok = MagicMock()
     tok.eos_token_id = 2
+    tok.pad_token_id = 2
+    tok.return_value = {"input_ids": MagicMock(), "attention_mask": MagicMock()}
     if has_chat_template:
         tok.apply_chat_template = MagicMock(
             return_value="<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n"
@@ -70,12 +76,47 @@ def _mock_model():
     model = MagicMock()
     model.num_parameters.return_value = 8_000_000_000
     model.to.return_value = model
+
+    def generate(**kwargs):
+        kwargs["streamer"].on_finalized_text("Hello ")
+        kwargs["streamer"].on_finalized_text("world!", stream_end=True)
+
+    model.generate.side_effect = generate
     return model
+
+
+class FakeTextIteratorStreamer:
+    def __init__(self, *_args, **_kwargs):
+        self.chunks = Queue()
+
+    def on_finalized_text(self, text, stream_end=False):
+        if text:
+            self.chunks.put(text)
+        if stream_end:
+            self.chunks.put(None)
+
+    def end(self):
+        self.chunks.put(None)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        chunk = self.chunks.get(timeout=1)
+        if chunk is None:
+            raise StopIteration
+        return chunk
+
+
+@pytest.fixture(autouse=True)
+def use_fake_text_streamer(monkeypatch):
+    monkeypatch.setattr(vllm_runner_module, "TextIteratorStreamer", FakeTextIteratorStreamer)
 
 
 # ---------------------------------------------------------------------------
 # Qwen3Runner: loading strategies
 # ---------------------------------------------------------------------------
+
 
 class TestQwen3RunnerLoadHub:
     """Loading from HuggingFace Hub (no local files)."""
@@ -118,7 +159,9 @@ class TestQwen3RunnerLoadHub:
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
-    def test_hub_no_login_without_token(self, mock_exists, mock_tok_cls, mock_model_cls, mock_login):
+    def test_hub_no_login_without_token(
+        self, mock_exists, mock_tok_cls, mock_model_cls, mock_login
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         mock_tok_cls.from_pretrained.return_value = _mock_tokenizer()
@@ -138,8 +181,10 @@ class TestQwen3RunnerLoadLocal:
         """Return True for config.json and model.safetensors.index.json."""
         hf_index_path = os.path.join(weights_dir, "model.safetensors.index.json")
         config_path = os.path.join(weights_dir, "config.json")
+
         def _side(path):
             return path in (config_path, hf_index_path)
+
         return _side
 
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
@@ -152,8 +197,10 @@ class TestQwen3RunnerLoadLocal:
 
         weights_dir = "app/model_weights/Qwen_Qwen3-8B"
 
-        with patch("agents.architectures.vllm_runner.os.path.exists",
-                    side_effect=self._exists_side_effect(weights_dir)):
+        with patch(
+            "agents.architectures.vllm_runner.os.path.exists",
+            side_effect=self._exists_side_effect(weights_dir),
+        ):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B")
 
@@ -171,8 +218,9 @@ class TestQwen3RunnerLoadSafetensors:
     @patch("agents.architectures.vllm_runner.AutoConfig")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.glob.glob")
-    def test_load_from_safetensors(self, mock_glob, mock_tok_cls, mock_config_cls,
-                                    mock_model_cls, mock_load_file):
+    def test_load_from_safetensors(
+        self, mock_glob, mock_tok_cls, mock_config_cls, mock_model_cls, mock_load_file
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         weights_dir = "/data/qwen3-weights"
@@ -184,8 +232,9 @@ class TestQwen3RunnerLoadSafetensors:
 
         # config.json exists but NO model.safetensors.index.json
         def _exists(path):
-            return path == os.path.join(weights_dir, "config.json") or \
-                   path == os.path.join(weights_dir, "tokenizer.json")
+            return path == os.path.join(weights_dir, "config.json") or path == os.path.join(
+                weights_dir, "tokenizer.json"
+            )
 
         mock_tok_cls.from_pretrained.return_value = _mock_tokenizer()
         mock_config = MagicMock()
@@ -197,8 +246,10 @@ class TestQwen3RunnerLoadSafetensors:
 
         config_data = {"torch_dtype": "bfloat16", "model_type": "qwen3"}
 
-        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
-             patch("builtins.open", create=True) as mock_open:
+        with (
+            patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists),
+            patch("builtins.open", create=True) as mock_open,
+        ):
             mock_open.return_value.__enter__ = lambda s: s
             mock_open.return_value.__exit__ = Mock(return_value=False)
             mock_open.return_value.read = Mock(return_value=json.dumps(config_data))
@@ -220,9 +271,9 @@ class TestQwen3RunnerLoadSafetensors:
     @patch("agents.architectures.vllm_runner.AutoConfig")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.glob.glob")
-    def test_safetensors_tokenizer_fallback_to_hub(self, mock_glob, mock_tok_cls,
-                                                    mock_config_cls, mock_model_cls,
-                                                    mock_load_file):
+    def test_safetensors_tokenizer_fallback_to_hub(
+        self, mock_glob, mock_tok_cls, mock_config_cls, mock_model_cls, mock_load_file
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         weights_dir = "/data/weights"
@@ -243,9 +294,11 @@ class TestQwen3RunnerLoadSafetensors:
         mock_file.__enter__ = Mock(return_value=mock_file)
         mock_file.__exit__ = Mock(return_value=False)
 
-        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
-             patch("builtins.open", return_value=mock_file), \
-             patch("agents.architectures.vllm_runner.json.load", return_value={}):
+        with (
+            patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists),
+            patch("builtins.open", return_value=mock_file),
+            patch("agents.architectures.vllm_runner.json.load", return_value={}),
+        ):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B", device_config={"weights_dir": weights_dir})
 
@@ -257,8 +310,8 @@ class TestQwen3RunnerLoadSafetensors:
 # Qwen3Runner: device selection
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerDevice:
 
+class TestQwen3RunnerDevice:
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
@@ -280,8 +333,8 @@ class TestQwen3RunnerDevice:
 # Qwen3Runner: inference (complete / generate)
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerInference:
 
+class TestQwen3RunnerInference:
     def _create_loaded_runner(self):
         """Create a Qwen3Runner with mocked model/tokenizer already loaded."""
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -293,15 +346,9 @@ class TestQwen3RunnerInference:
         runner.model_id = "Qwen/Qwen3-8B"
         return runner
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_with_chat_template(self, mock_pipeline_fn):
+    def test_complete_with_chat_template(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
-
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Hello world!"}]
-        mock_pipeline_fn.return_value = mock_pipe
 
         result = runner.complete("You are helpful.", "Say hello", config)
 
@@ -319,15 +366,9 @@ class TestQwen3RunnerInference:
         assert result[1]["role"] == "assistant"
         assert result[1]["content"] == "Hello world!"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_without_system_prompt(self, mock_pipeline_fn):
+    def test_complete_without_system_prompt(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
-
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Response"}]
-        mock_pipeline_fn.return_value = mock_pipe
 
         runner.complete("", "Just a user message", config)
 
@@ -336,36 +377,29 @@ class TestQwen3RunnerInference:
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_strips_chat_markers(self, mock_pipeline_fn):
+    def test_complete_hides_stop_markers(self):
         runner = self._create_loaded_runner()
-        config = _make_generation_config()
+        config = _make_generation_config(stop=["<|im_end|>"])
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [
-            {"generated_text": prompt_text + "Clean response<|im_end|>extra junk"}
-        ]
-        mock_pipeline_fn.return_value = mock_pipe
+        def generate(**kwargs):
+            kwargs["streamer"].on_finalized_text(
+                "Clean response<|im_end|>extra junk",
+                stream_end=True,
+            )
+
+        runner.model.generate.side_effect = generate
 
         result = runner.complete("", "test", config)
         assert result[1]["content"] == "Clean response"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_generate_delegates_to_complete(self, mock_pipeline_fn):
+    def test_generate_collects_the_stream(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Generated!"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         result = runner.generate("prompt text", config)
 
-        # generate() should produce same format as complete()
         assert result[1]["role"] == "assistant"
-        assert result[1]["content"] == "Generated!"
+        assert result[1]["content"] == "Hello world!"
 
     def test_generate_raises_when_not_loaded(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -385,34 +419,26 @@ class TestQwen3RunnerInference:
         with pytest.raises(RuntimeError, match="Model not loaded"):
             runner.complete("sys", "usr", config)
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_respects_temperature_zero(self, mock_pipeline_fn):
-        """Temperature 0 should set do_sample=False and temperature=None."""
+    def test_complete_respects_temperature_zero(self):
+        """Temperature 0 disables sampling-only generation arguments."""
         runner = self._create_loaded_runner()
         config = _make_generation_config(temperature=0.0)
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "deterministic"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         runner.complete("", "test", config)
 
-        pipe_call_kwargs = mock_pipe.call_args
-        # The pipeline is called as pipeline(prompt, **kwargs)
-        kwargs = pipe_call_kwargs[1] if pipe_call_kwargs[1] else {}
-        assert kwargs.get("do_sample") is False
-        assert kwargs.get("temperature") is None
+        kwargs = runner.model.generate.call_args.kwargs
+        assert kwargs["do_sample"] is False
+        assert "temperature" not in kwargs
+        assert "top_p" not in kwargs
 
 
 # ---------------------------------------------------------------------------
 # Qwen3Runner: pipeline caching
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerPipelineCaching:
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_pipeline_created_once(self, mock_pipeline_fn):
+class TestQwen3RunnerPipelineCaching:
+    def test_reuses_loaded_model_for_multiple_streams(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         runner = Qwen3Runner()
@@ -421,29 +447,20 @@ class TestQwen3RunnerPipelineCaching:
         runner.device = "cpu"
         runner.model_id = "Qwen/Qwen3-8B"
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "r1"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         config = _make_generation_config()
 
-        # Call complete twice
         runner.complete("", "first", config)
         runner.complete("", "second", config)
 
-        # Pipeline constructor should only be called once
-        mock_pipeline_fn.assert_called_once()
-        # But the pipeline itself should be called twice
-        assert mock_pipe.call_count == 2
+        assert runner.model.generate.call_count == 2
 
 
 # ---------------------------------------------------------------------------
 # Qwen3Runner: cleanup
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerCleanup:
 
+class TestQwen3RunnerCleanup:
     def test_cleanup_releases_resources(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -470,10 +487,9 @@ class TestQwen3RunnerCleanup:
 # Qwen3Runner: ChatML fallback
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerChatMLFallback:
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_fallback_chatml_format(self, mock_pipeline_fn):
+class TestQwen3RunnerChatMLFallback:
+    def test_fallback_chatml_format(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         runner = Qwen3Runner()
@@ -482,50 +498,45 @@ class TestQwen3RunnerChatMLFallback:
         runner.device = "cpu"
         runner.model_id = "Qwen/Qwen3-8B"
 
-        mock_pipe = MagicMock()
-        # The fallback will produce a ChatML-formatted prompt
         expected_prefix = (
             "<|im_start|>system\nBe helpful<|im_end|>\n"
             "<|im_start|>user\nHello<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
-        mock_pipe.return_value = [{"generated_text": expected_prefix + "Hi there!"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         config = _make_generation_config()
         result = runner.complete("Be helpful", "Hello", config)
 
-        # Verify the pipeline was called with the ChatML-formatted prompt
-        prompt_arg = mock_pipe.call_args[0][0]
-        assert "<|im_start|>system" in prompt_arg
-        assert "<|im_start|>user" in prompt_arg
-        assert "<|im_start|>assistant" in prompt_arg
+        prompt_arg = runner.tokenizer.call_args.args[0]
+        assert prompt_arg == expected_prefix
 
-        assert result[1]["content"] == "Hi there!"
+        assert result[1]["content"] == "Hello world!"
 
 
 # ---------------------------------------------------------------------------
 # Runner registry
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerRegistry:
 
+class TestQwen3RunnerRegistry:
     def setup_method(self):
         clear_registry()
 
     def test_qwen3_runner_registered(self):
         """After register_all_runners, 'qwen3' should be available."""
         from agents.architectures.registry import register_all_runners
+
         register_all_runners()
 
         runner_cls = get_runner("qwen3")
         assert runner_cls is not None
 
         from agents.architectures.qwen3_runner import Qwen3Runner
+
         assert runner_cls is Qwen3Runner
 
     def test_qwen3_runner_is_base_runner(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
+
         assert issubclass(Qwen3Runner, BaseRunner)
 
 
@@ -535,8 +546,7 @@ class TestQwen3RunnerRegistry:
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin"
-    or platform.machine().lower() not in {"arm64", "aarch64"},
+    sys.platform != "darwin" or platform.machine().lower() not in {"arm64", "aarch64"},
     reason="Qwen3.8 MLX dependencies are Apple Silicon-only",
 )
 def test_qwen3_8_declared_minimum_matches_installed_transformers():
@@ -555,7 +565,6 @@ def test_qwen3_8_declared_minimum_matches_installed_transformers():
 
 
 class TestFactoryGenericAutoDetection:
-
     def test_infer_runner_type_qwen_models(self):
         with patch("agents.factory.sys.platform", "linux"):
             assert AgentFactory._infer_runner_type("Qwen/Qwen3.8-27B") == "llama_server"
@@ -566,9 +575,9 @@ class TestFactoryGenericAutoDetection:
 
     def test_infer_runner_type_non_qwen(self):
         native = sys.platform in {"win32", "linux"}
-        assert AgentFactory._infer_runner_type(
-            "meta-llama/Meta-Llama-3.1-8B-Instruct"
-        ) == ("llama_server" if native else "mlx_llama")
+        assert AgentFactory._infer_runner_type("meta-llama/Meta-Llama-3.1-8B-Instruct") == (
+            "llama_server" if native else "mlx_llama"
+        )
         assert AgentFactory._infer_runner_type("future-org/future-model") == (
             "llama_server" if native else "transformers"
         )
@@ -676,8 +685,8 @@ class TestFactoryGenericAutoDetection:
 # Factory: create_from_config
 # ---------------------------------------------------------------------------
 
-class TestFactoryCreateFromConfig:
 
+class TestFactoryCreateFromConfig:
     def test_config_with_qwen3_model(self):
         context = Mock()
         context.settings = Mock()
@@ -701,7 +710,6 @@ class TestFactoryCreateFromConfig:
 
 
 class TestSettingsDrivenQwen3Creation:
-
     @patch("app.services.user_settings_service.AgentFactory.create_agent")
     @patch("app.services.user_settings_service.AgentFactoryConfig.from_user_settings")
     @patch(

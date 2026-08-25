@@ -35,21 +35,11 @@ class StubRunner(BaseRunner):
     def load(self, model_id, device_config=None):
         self.model_id = model_id
 
-    def generate(self, prompt, generation_config: GenerationConfig):
-        return {"generated_text": f"Generated: {prompt}"}
-
-    def complete(self, system_prompt, user_prompt, generation_config: GenerationConfig):
-        # Same shape as the real runners: a list of message dicts (see strings_to_message_dict)
-        return [
-            {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": f"Response to: {user_prompt}"},
-        ]
-
-    def complete_messages(self, messages, generation_config: GenerationConfig):
+    def _stream_messages(self, messages, generation_config: GenerationConfig):
         user_prompt = next(
             message["content"] for message in reversed(messages) if message["role"] == "user"
         )
-        return self.complete("", user_prompt, generation_config)
+        yield f"Response to: {user_prompt}"
 
 
 @pytest.fixture(scope="module")

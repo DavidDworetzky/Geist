@@ -46,6 +46,11 @@ def test_qwen3_8_27b_declares_runtime_compatibility():
     assert spec.parameter_count == "27B"
     assert spec.min_transformers_version == "5.8.0"
     assert spec.supports_vision is False
+    assert spec.supports_streaming is True
+
+
+def test_every_local_catalog_model_advertises_the_required_stream_contract():
+    assert all(spec.supports_streaming for spec in MODEL_SPECS if spec.local)
 
 
 @pytest.mark.parametrize(

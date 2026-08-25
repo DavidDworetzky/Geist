@@ -9,15 +9,21 @@ import glob
 import json
 import logging
 import os
+import threading
+from collections.abc import Iterator
 from typing import Any
 
 import safetensors.torch
 import torch
-import transformers
 from huggingface_hub import login
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
-from agents.models.llama_completion import strings_to_message_dict
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    StoppingCriteria,
+    StoppingCriteriaList,
+    TextIteratorStreamer,
+)
 
 from .base_runner import BaseRunner, GenerationConfig
 
@@ -25,6 +31,15 @@ from .base_runner import BaseRunner, GenerationConfig
 logger = logging.getLogger(__name__)
 
 DEFAULT_QWEN3_MODEL_ID = "Qwen/Qwen3-8B"
+GENERATION_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+class _StopOnEvent(StoppingCriteria):
+    def __init__(self, stopped: threading.Event):
+        self.stopped = stopped
+
+    def __call__(self, _input_ids, _scores, **_kwargs) -> bool:
+        return self.stopped.is_set()
 
 
 class VLLMRunner(BaseRunner):
@@ -167,75 +182,75 @@ class VLLMRunner(BaseRunner):
         self.model = self.model.to(self.device)
         logger.info(f"Model loaded from HuggingFace hub. Parameters: {self.model.num_parameters()}")
 
-    def generate(self, prompt: str, generation_config: GenerationConfig) -> list[dict[str, str]]:
+    def _stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> Iterator[str]:
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        return self.complete("", prompt, generation_config)
-
-    def complete(
-        self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig
-    ) -> list[dict[str, str]]:
-        if not self.model or not self.tokenizer:
-            raise RuntimeError("Model not loaded. Call load() first.")
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
-
+        normalized_messages = [
+            {"role": str(message.get("role") or ""), "content": message.get("content") or ""}
+            for message in messages
+        ]
         if hasattr(self.tokenizer, "apply_chat_template"):
             prompt_text = self.tokenizer.apply_chat_template(
-                messages,
+                normalized_messages,
                 tokenize=False,
                 add_generation_prompt=True,
             )
         else:
             prompt_text = ""
-            if system_prompt:
-                prompt_text += f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            prompt_text += f"<|im_start|>user\n{user_prompt}<|im_end|>\n"
+            for message in normalized_messages:
+                prompt_text += f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
             prompt_text += "<|im_start|>assistant\n"
 
-        logger.info(
-            f"Generating with temperature={generation_config.temperature}, "
-            f"top_p={generation_config.top_p}, max_tokens={generation_config.max_tokens}"
+        encoded = self.tokenizer(prompt_text, return_tensors="pt")
+        inputs = {
+            key: value.to(self.device) if hasattr(value, "to") else value
+            for key, value in encoded.items()
+        }
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
         )
+        stopped = threading.Event()
+        generation_kwargs: dict[str, Any] = {
+            **inputs,
+            "max_new_tokens": generation_config.max_tokens,
+            "do_sample": generation_config.temperature > 0,
+            "streamer": streamer,
+            "stopping_criteria": StoppingCriteriaList([_StopOnEvent(stopped)]),
+        }
+        if generation_config.temperature > 0:
+            generation_kwargs["temperature"] = generation_config.temperature
+            generation_kwargs["top_p"] = generation_config.top_p
+        if getattr(self.tokenizer, "pad_token_id", None) is not None:
+            generation_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
 
-        if self._pipeline is None:
-            self._pipeline = transformers.pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=self.device,
-            )
+        generation_errors: list[Exception] = []
 
-        outputs = self._pipeline(
-            prompt_text,
-            max_new_tokens=generation_config.max_tokens,
-            do_sample=generation_config.temperature > 0,
-            temperature=generation_config.temperature
-            if generation_config.temperature > 0
-            else None,
-            top_p=generation_config.top_p,
-        )
+        def generate() -> None:
+            try:
+                with torch.inference_mode():
+                    self.model.generate(**generation_kwargs)
+            except Exception as error:
+                generation_errors.append(error)
+                streamer.end()
 
-        output_text = outputs[0]["generated_text"]
-        response_text = (
-            output_text[len(prompt_text) :] if output_text.startswith(prompt_text) else output_text
-        )
-
-        for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]:
-            idx = response_text.find(marker)
-            if idx != -1:
-                response_text = response_text[:idx]
-
-        response_text = response_text.strip()
-
-        logger.info("Completion successful")
-        logger.info(f"Output: {response_text}")
-
-        return strings_to_message_dict(user_prompt, response_text)
+        generation_thread = threading.Thread(target=generate, daemon=True)
+        generation_thread.start()
+        try:
+            yield from streamer
+        finally:
+            stopped.set()
+            generation_thread.join(timeout=GENERATION_SHUTDOWN_TIMEOUT_SECONDS)
+        if generation_thread.is_alive():
+            raise RuntimeError("VLLM shim generation did not stop after stream cancellation")
+        if generation_errors:
+            raise generation_errors[0]
 
     def cleanup(self) -> None:
         if self._pipeline:
