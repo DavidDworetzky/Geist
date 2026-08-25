@@ -23,6 +23,12 @@ from agents.models.tool_calling import (
     tool_requires_approval,
 )
 from app.services.document_search import DocumentSearchService
+from app.services.execution import create_execution_environment
+from app.services.execution.base import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    MAX_COMMAND_TIMEOUT_SECONDS,
+)
+from app.services.execution.docker import DockerExecutionEnvironment
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +67,15 @@ class MarkdownListArguments(StrictToolArguments):
 
 class MarkdownWriteArguments(MarkdownPathArguments):
     content: str = Field(max_length=100_000)
+
+
+class TerminalRunArguments(StrictToolArguments):
+    command: str = Field(min_length=1, max_length=8_000)
+    timeout_seconds: int = Field(
+        default=DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        ge=1,
+        le=MAX_COMMAND_TIMEOUT_SECONDS,
+    )
 
 
 class EmailSendArguments(StrictToolArguments):
@@ -381,6 +396,62 @@ def build_default_tool_registry() -> ToolRegistry:
             availability=lambda context: False,
         )
     )
+    # Native tool execution backend (GEIST_EXEC_BACKEND). Sandboxed Docker
+    # runs approval-free; local or host-mounted Docker requires approval —
+    # isolation and approval are two implementations of the same safety
+    # budget, so a backend must hold at least one of them.
+    execution_environment = create_execution_environment()
+    if execution_environment is not None:
+
+        def terminal_run(
+            context: ToolContext, arguments: TerminalRunArguments
+        ) -> ToolExecutionOutput:
+            result = execution_environment.run(
+                arguments.command, timeout_seconds=arguments.timeout_seconds
+            )
+            summary = (
+                f"exit {result.exit_code}"
+                + (" (timed out)" if result.timed_out else "")
+                + f" in {result.duration_seconds:.1f}s"
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(
+                    {
+                        "exit_code": result.exit_code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "timed_out": result.timed_out,
+                        "truncated": result.truncated,
+                    },
+                    ensure_ascii=False,
+                ),
+                summary=summary,
+            )
+
+        def _execution_available(context: ToolContext) -> bool:
+            if isinstance(execution_environment, DockerExecutionEnvironment):
+                return execution_environment.is_available()
+            return True
+
+        registry.register(
+            ToolDefinition(
+                name="terminal.run",
+                description=(
+                    "Run a shell command in the configured execution backend "
+                    f"({execution_environment.describe()}). Returns exit code, "
+                    "stdout, and stderr."
+                ),
+                arguments_model=TerminalRunArguments,
+                handler=terminal_run,
+                side_effect="process",
+                requires_approval=not execution_environment.is_sandboxed,
+                enabled_by_default=False,
+                timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
+                source_adapter=f"execution.{execution_environment.name}",
+                availability=_execution_available,
+            )
+        )
+
     registry.register(
         ToolDefinition(
             name="communication.sms.send",
