@@ -198,7 +198,7 @@ User settings control default agent behavior and can be configured via API:
 - `MOONSHOT_API_KEY` - Moonshot API key for Kimi models
 - `ZAI_API_KEY` - Z.AI API key for hosted GLM models
 - `DEEPSEEK_API_KEY` - DeepSeek API key
-- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. Grok 4.6, Muse Spark 1.2 Contributor, Qwen 3.8 Max/Flash, and Ox Alpha)
+- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. GLM 5.3 Flash, Grok 4.6, Muse Spark 1.2 Contributor, and Qwen 3.8 Max/Flash)
 - `OPENAI_COMPATIBLE_BASE_URL` - Base `/v1` URL for a self-hosted inference server
 - `API_KEY` - Generic fallback API key
 

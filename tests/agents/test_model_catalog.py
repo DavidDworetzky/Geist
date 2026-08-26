@@ -91,15 +91,23 @@ def test_heavyweight_models_are_server_backed():
     assert qwen_max.local is False
     assert get_provider_endpoint(qwen_max.provider) == "https://openrouter.ai/api/v1"
 
-    ox_alpha = get_model_spec("stealth/ox-alpha")
-    assert ox_alpha.backend == "openai_compatible"
-    assert ox_alpha.local is False
-    assert ox_alpha.context_window == 1048576
-    assert ox_alpha.max_output_tokens == 131072
-    assert ox_alpha.supports_vision is True
-    assert ox_alpha.supports_function_calling is True
-    assert ox_alpha.supports_reasoning is True
-    assert get_provider_endpoint(ox_alpha.provider) == "https://openrouter.ai/api/v1"
+    glm_flash = get_model_spec("z-ai/glm-5.3-flash")
+    assert glm_flash.backend == "openai_compatible"
+    assert glm_flash.provider == "openrouter"
+    assert glm_flash.local is False
+    assert glm_flash.context_window == 1048576
+    assert glm_flash.max_output_tokens == 131072
+    assert glm_flash.parameter_count == "320B"
+    assert glm_flash.activated_parameters == "18B"
+    assert glm_flash.supports_vision is True
+    assert glm_flash.supports_function_calling is True
+    assert glm_flash.supports_reasoning is True
+    assert glm_flash.supports_streaming is True
+    assert glm_flash.recommended is True
+    assert glm_flash.mandatory_reasoning_effort == "max"
+    assert glm_flash.unsupported_parameters == ()
+    assert get_provider_endpoint(glm_flash.provider) == "https://openrouter.ai/api/v1"
+    assert get_model_spec("stealth/ox-alpha") is None
 
     muse = get_model_spec("meta/muse-spark-1.2-contributor")
     assert muse.backend == "openai_compatible"
@@ -299,7 +307,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "qwen/qwen3.8-max",
     "qwen3.8-max",
     "qwen/qwen3.8-flash",
-    "stealth/ox-alpha",
+    "z-ai/glm-5.3-flash",
     "meta/muse-spark-1.2-contributor",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
@@ -329,7 +337,7 @@ def test_hosted_glm_infers_zai_endpoint():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
-        "stealth/ox-alpha",
+        "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
     ],
 )
@@ -457,6 +465,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"]
     )
     assert any(
         model.id == "meta/muse-spark-1.2-contributor"
