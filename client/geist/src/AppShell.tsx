@@ -1,5 +1,6 @@
-import React, { ReactNode, useEffect, useState } from 'react';
+import React, { ReactNode, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import useLocalArtifacts from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 import { useBranding } from './branding';
 
@@ -12,14 +13,6 @@ interface NavItem {
   path: string;
   description: string;
   icon: JSX.Element;
-}
-
-interface InstalledLocalArtifact {
-  id: string;
-  model_id: string;
-  display_name: string;
-  status: string;
-  supported?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -90,52 +83,21 @@ function pageTitle(pathname: string): string {
 }
 
 function RuntimeSummary(): JSX.Element {
-  const { settings, loading, error, updateSettings } = useUserSettings();
-  const [installedArtifacts, setInstalledArtifacts] = useState<InstalledLocalArtifact[]>([]);
-  const [artifactsLoading, setArtifactsLoading] = useState(true);
+  const { settings, loading } = useUserSettings();
+  const mode = settings?.default_agent_type || 'local';
+  const {
+    artifacts,
+    loading: artifactsLoading,
+    error: artifactsError,
+    refreshLocalArtifacts,
+    activateArtifact,
+  } = useLocalArtifacts({ enabled: mode === 'local' });
   const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
-  const runtimeMode = settings?.default_agent_type;
-
-  useEffect(() => {
-    if (!runtimeMode || runtimeMode === 'online') {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    const fetchInstalledArtifacts = async () => {
-      try {
-        const response = await fetch('/api/v1/models/local/artifacts');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch installed models: ${response.statusText}`);
-        }
-        const payload = await response.json();
-        if (!cancelled) {
-          setInstalledArtifacts(
-            (payload.artifacts ?? []).filter(
-              (artifact: InstalledLocalArtifact) =>
-                artifact.status === 'installed' && artifact.supported !== false,
-            ),
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setModelSaveError('Installed models unavailable');
-        }
-      } finally {
-        if (!cancelled) {
-          setArtifactsLoading(false);
-        }
-      }
-    };
-
-    void fetchInstalledArtifacts();
-    return () => {
-      cancelled = true;
-    };
-  }, [runtimeMode]);
+  const installedArtifacts = artifacts.filter(
+    artifact => artifact.status === 'installed' && artifact.supported !== false,
+  );
 
   if (loading) {
     return <span className="runtime-chip">Runtime loading</span>;
@@ -145,7 +107,6 @@ function RuntimeSummary(): JSX.Element {
     return <span className="runtime-chip runtime-chip-warning">Settings unavailable</span>;
   }
 
-  const mode = runtimeMode || 'local';
   const model = mode === 'online' ? settings.default_online_model : settings.default_local_model;
   const activeArtifact = installedArtifacts.find(
     artifact => artifact.id === settings.default_local_artifact_id,
@@ -163,11 +124,7 @@ function RuntimeSummary(): JSX.Element {
     setModelSaveError(null);
 
     try {
-      await updateSettings({
-        default_agent_type: 'local',
-        default_local_model: nextArtifact.model_id,
-        default_local_artifact_id: nextArtifact.id,
-      });
+      await activateArtifact(nextArtifact);
     } catch {
       setModelSaveError('Model switch failed');
     } finally {
@@ -193,7 +150,7 @@ function RuntimeSummary(): JSX.Element {
           value={selectedArtifactId}
         >
           {!activeArtifact && (
-            <option value="">
+            <option value="" disabled>
               {artifactsLoading ? 'Loading installed models…' : model || 'No model selected'}
             </option>
           )}
@@ -207,9 +164,21 @@ function RuntimeSummary(): JSX.Element {
         <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
       )}
       {mode === 'local' && modelSaveError && (
-        <span className="runtime-model-error" role="alert" title={error ?? modelSaveError}>
+        <span className="runtime-model-error" role="alert" title={modelSaveError}>
           {modelSaveError}
         </span>
+      )}
+      {mode === 'local' && artifactsError && (
+        <>
+          <span className="runtime-model-error" role="alert">Installed models unavailable</span>
+          <button
+            className="button button-secondary button-small"
+            onClick={() => void refreshLocalArtifacts()}
+            type="button"
+          >
+            Retry
+          </button>
+        </>
       )}
     </div>
   );
