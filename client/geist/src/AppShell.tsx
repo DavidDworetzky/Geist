@@ -1,5 +1,6 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import useLocalArtifacts from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 import { useBranding } from './branding';
 
@@ -82,18 +83,55 @@ function pageTitle(pathname: string): string {
 }
 
 function RuntimeSummary(): JSX.Element {
-  const { settings, loading, error } = useUserSettings();
+  const { settings, loading } = useUserSettings();
+  const mode = settings?.default_agent_type || 'local';
+  const {
+    artifacts,
+    loading: artifactsLoading,
+    error: artifactsError,
+    refreshLocalArtifacts,
+    activateArtifact,
+  } = useLocalArtifacts({ enabled: mode === 'local' });
+  const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+  const installedArtifacts = artifacts.filter(
+    artifact => artifact.status === 'installed' && artifact.supported !== false,
+  );
 
   if (loading) {
     return <span className="runtime-chip">Runtime loading</span>;
   }
 
-  if (error || !settings) {
+  if (!settings) {
     return <span className="runtime-chip runtime-chip-warning">Settings unavailable</span>;
   }
 
-  const mode = settings.default_agent_type || 'local';
   const model = mode === 'online' ? settings.default_online_model : settings.default_local_model;
+  const activeArtifact = installedArtifacts.find(
+    artifact => artifact.id === settings.default_local_artifact_id,
+  ) ?? installedArtifacts.find(
+    artifact => artifact.model_id === settings.default_local_model,
+  );
+  const selectedArtifactId = pendingArtifactId ?? activeArtifact?.id ?? '';
+
+  const handleLocalModelChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextArtifact = installedArtifacts.find(artifact => artifact.id === event.target.value);
+    if (!nextArtifact) return;
+
+    setPendingArtifactId(nextArtifact.id);
+    setSavingModel(true);
+    setModelSaveError(null);
+
+    try {
+      await activateArtifact(nextArtifact);
+    } catch {
+      setModelSaveError('Model switch failed');
+    } finally {
+      setPendingArtifactId(null);
+      setSavingModel(false);
+    }
+  };
 
   return (
     <div className="runtime-summary" aria-label="Current runtime">
@@ -101,7 +139,47 @@ function RuntimeSummary(): JSX.Element {
       {mode === 'online' && (
         <span className="runtime-chip">{settings.default_online_provider}</span>
       )}
-      <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
+      {mode === 'local' ? (
+        <select
+          aria-label="Local model"
+          aria-invalid={modelSaveError ? 'true' : undefined}
+          className="runtime-model runtime-model-select"
+          disabled={artifactsLoading || savingModel || installedArtifacts.length === 0}
+          onChange={handleLocalModelChange}
+          title={activeArtifact?.display_name ?? model ?? 'No model selected'}
+          value={selectedArtifactId}
+        >
+          {!activeArtifact && (
+            <option value="" disabled>
+              {artifactsLoading ? 'Loading installed models…' : model || 'No model selected'}
+            </option>
+          )}
+          {installedArtifacts.map((artifact) => (
+            <option key={artifact.id} value={artifact.id}>
+              {artifact.display_name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
+      )}
+      {mode === 'local' && modelSaveError && (
+        <span className="runtime-model-error" role="alert" title={modelSaveError}>
+          {modelSaveError}
+        </span>
+      )}
+      {mode === 'local' && artifactsError && (
+        <>
+          <span className="runtime-model-error" role="alert">Installed models unavailable</span>
+          <button
+            className="button button-secondary button-small"
+            onClick={() => void refreshLocalArtifacts()}
+            type="button"
+          >
+            Retry
+          </button>
+        </>
+      )}
     </div>
   );
 }

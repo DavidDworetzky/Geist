@@ -1,5 +1,6 @@
-import React, { ChangeEvent, useCallback, useEffect, useState } from 'react';
+import React, { ChangeEvent, useState } from 'react';
 import useAvailableModels, { ModelInfo } from './Hooks/useAvailableModels';
+import useLocalArtifacts, { LocalArtifact } from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 
 function formatNumber(value: number | null): string {
@@ -18,25 +19,6 @@ function capabilityLabels(model: ModelInfo): string[] {
   return labels;
 }
 
-interface LocalArtifact {
-  id: string;
-  model_id: string;
-  display_name: string;
-  format: string;
-  backend: string;
-  quantization?: string | null;
-  status: string;
-  bytes_downloaded: number;
-  total_bytes?: number | null;
-  source: string;
-  error?: string | null;
-  supported?: boolean;
-  requires_auth?: boolean;
-  progress_unit?: 'bytes' | 'files';
-  progress_completed?: number | null;
-  progress_total?: number | null;
-}
-
 type ModelsTab = 'local' | 'providers';
 
 function formatBytes(value?: number | null): string {
@@ -48,41 +30,23 @@ function formatBytes(value?: number | null): string {
 
 export default function Models(): JSX.Element {
   const { models, loading, error, refetch, providers } = useAvailableModels();
-  const { settings, updateSettings } = useUserSettings();
-  const [localArtifacts, setLocalArtifacts] = useState<LocalArtifact[]>([]);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const { settings } = useUserSettings();
+  const {
+    artifacts: localArtifacts,
+    error: localArtifactsError,
+    refreshLocalArtifacts,
+    activateArtifact,
+  } = useLocalArtifacts({ pollWhileBusy: true });
+  const [localActionError, setLocalActionError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ModelsTab>('local');
-
-  const refreshLocalArtifacts = useCallback(async () => {
-    try {
-      const response = await fetch('/api/v1/models/local/artifacts');
-      if (!response.ok) throw new Error(`Local model status failed: ${response.statusText}`);
-      const payload = await response.json();
-      setLocalArtifacts(payload.artifacts ?? []);
-      setLocalError(null);
-    } catch (requestError) {
-      setLocalError(requestError instanceof Error ? requestError.message : 'Local model status failed');
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshLocalArtifacts();
-  }, [refreshLocalArtifacts]);
-
-  useEffect(() => {
-    if (!localArtifacts.some(artifact => ['queued', 'downloading', 'cancelling'].includes(artifact.status))) {
-      return undefined;
-    }
-    const interval = window.setInterval(() => void refreshLocalArtifacts(), 1000);
-    return () => window.clearInterval(interval);
-  }, [localArtifacts, refreshLocalArtifacts]);
 
   const runArtifactAction = async (
     artifactId: string,
     action: 'download' | 'cancel' | 'remove',
   ) => {
     setLocalAction(artifactId);
+    setLocalActionError(null);
     try {
       const endpoint = action === 'remove'
         ? `/api/v1/models/local/artifacts/${artifactId}`
@@ -93,7 +57,7 @@ export default function Models(): JSX.Element {
       if (!response.ok) throw new Error(`Model ${action} failed: ${response.statusText}`);
       await refreshLocalArtifacts();
     } catch (requestError) {
-      setLocalError(requestError instanceof Error ? requestError.message : `Model ${action} failed`);
+      setLocalActionError(requestError instanceof Error ? requestError.message : `Model ${action} failed`);
     } finally {
       setLocalAction(null);
     }
@@ -103,6 +67,7 @@ export default function Models(): JSX.Element {
     const file = event.target.files?.[0];
     if (!file) return;
     setLocalAction('import');
+    setLocalActionError(null);
     try {
       const body = new FormData();
       body.append('file', file);
@@ -110,23 +75,20 @@ export default function Models(): JSX.Element {
       if (!response.ok) throw new Error(`GGUF import failed: ${response.statusText}`);
       await refreshLocalArtifacts();
     } catch (requestError) {
-      setLocalError(requestError instanceof Error ? requestError.message : 'GGUF import failed');
+      setLocalActionError(requestError instanceof Error ? requestError.message : 'GGUF import failed');
     } finally {
       event.target.value = '';
       setLocalAction(null);
     }
   };
 
-  const activateArtifact = async (artifact: LocalArtifact) => {
+  const selectArtifact = async (artifact: LocalArtifact) => {
     setLocalAction(artifact.id);
+    setLocalActionError(null);
     try {
-      await updateSettings({
-        default_agent_type: 'local',
-        default_local_model: artifact.model_id,
-        default_local_artifact_id: artifact.id,
-      });
+      await activateArtifact(artifact);
     } catch (requestError) {
-      setLocalError(requestError instanceof Error ? requestError.message : 'Model selection failed');
+      setLocalActionError(requestError instanceof Error ? requestError.message : 'Model selection failed');
     } finally {
       setLocalAction(null);
     }
@@ -222,7 +184,9 @@ export default function Models(): JSX.Element {
             </label>
           )}
         </div>
-        {localError && <div className="notice notice-error">{localError}</div>}
+        {(localArtifactsError || localActionError) && (
+          <div className="notice notice-error">{localActionError ?? localArtifactsError}</div>
+        )}
         <div className="model-table">
           <div className="model-table-row model-table-heading">
             <span>Artifact</span>
@@ -262,7 +226,7 @@ export default function Models(): JSX.Element {
                       <button
                         className="button button-secondary button-small"
                         disabled={!supported || active || localAction === artifact.id}
-                        onClick={() => void activateArtifact(artifact)}
+                        onClick={() => void selectArtifact(artifact)}
                       >
                         {active ? 'Active' : 'Use'}
                       </button>
