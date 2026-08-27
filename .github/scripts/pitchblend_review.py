@@ -26,6 +26,9 @@ MAX_CHANGED_LINES = 1_000
 MAX_DIFF_CHARACTERS = 200_000
 MAX_CLASSIFIER_COMMENT_CHARACTERS = 400
 APPROVAL_MARKER_PREFIX = "<!-- pitchblend-command:"
+APPROVAL_GATE_CONTEXT = "Pitchblend approval gate"
+PITCHBLEND_REVIEW_LOGIN = "pitchblend-ai[bot]"
+WRITE_PERMISSIONS = {"admin", "write"}
 
 BLOCKED_PATH_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -438,6 +441,99 @@ def comment_marker(comment_id: int) -> str:
     return f"{APPROVAL_MARKER_PREFIX}{comment_id} -->"
 
 
+def approval_gate_source(
+    github: JsonHttpClient,
+    owner: str,
+    repo: str,
+    pull_request: dict[str, Any],
+    reviews: list[dict[str, Any]],
+) -> str | None:
+    """Return the current-head app or human approval that satisfies the OR gate."""
+    head_sha = str(pull_request.get("head", {}).get("sha", ""))
+    pull_author = str(pull_request.get("user", {}).get("login", ""))
+    if not head_sha or not pull_author:
+        raise ReviewError("GitHub did not return the pull request head and author")
+
+    latest_decisive_review: dict[str, dict[str, Any]] = {}
+    for review in sorted(reviews, key=lambda item: int(item.get("id", 0))):
+        state = str(review.get("state", "")).upper()
+        if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            continue
+        login = str(review.get("user", {}).get("login", ""))
+        if login:
+            latest_decisive_review[login.casefold()] = review
+
+    app_review = latest_decisive_review.get(PITCHBLEND_REVIEW_LOGIN.casefold())
+    if (
+        app_review
+        and str(app_review.get("state", "")).upper() == "APPROVED"
+        and str(app_review.get("commit_id", "")) == head_sha
+        and str(app_review.get("user", {}).get("type", "")) == "Bot"
+    ):
+        return "pitchblend"
+
+    for review in latest_decisive_review.values():
+        user = review.get("user", {})
+        login = str(user.get("login", ""))
+        if (
+            str(review.get("state", "")).upper() != "APPROVED"
+            or str(review.get("commit_id", "")) != head_sha
+            or str(user.get("type", "")) != "User"
+            or login.casefold() == pull_author.casefold()
+        ):
+            continue
+        encoded_login = urllib.parse.quote(login, safe="")
+        permission_response = github.request(
+            "GET", f"/repos/{owner}/{repo}/collaborators/{encoded_login}/permission"
+        )
+        if not isinstance(permission_response, dict):
+            raise ReviewError("GitHub did not return a reviewer permission")
+        if str(permission_response.get("permission", "")).lower() in WRITE_PERMISSIONS:
+            return f"human:{login}"
+    return None
+
+
+def publish_approval_gate(
+    github: JsonHttpClient,
+    owner: str,
+    repo: str,
+    pull_request: dict[str, Any],
+    source: str | None,
+) -> None:
+    head_sha = str(pull_request.get("head", {}).get("sha", ""))
+    if not head_sha:
+        raise ReviewError("GitHub did not return the pull request head")
+    if source == "pitchblend":
+        description = "Approved by Pitchblend"
+    elif source and source.startswith("human:"):
+        description = f"Approved by {source.removeprefix('human:')}"
+    else:
+        description = "Waiting for Pitchblend or human approval"
+    github.request(
+        "POST",
+        f"/repos/{owner}/{repo}/statuses/{head_sha}",
+        {
+            "state": "success" if source else "pending",
+            "context": APPROVAL_GATE_CONTEXT,
+            "description": description,
+            "target_url": str(pull_request.get("html_url", "")),
+        },
+    )
+
+
+def refresh_approval_gate(
+    github: JsonHttpClient,
+    owner: str,
+    repo: str,
+    pull_request: dict[str, Any],
+) -> str | None:
+    pull_number = int(pull_request["number"])
+    reviews = github.paginate(f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews")
+    source = approval_gate_source(github, owner, repo, pull_request, reviews)
+    publish_approval_gate(github, owner, repo, pull_request, source)
+    return source
+
+
 def format_classification_debug(
     classification: dict[str, Any], matched_pass_rule: str | None
 ) -> str:
@@ -529,6 +625,27 @@ def main() -> int:
     with open(event_path, encoding="utf-8") as event_file:
         event = json.load(event_file)
 
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "issue_comment")
+    repository = event["repository"]["full_name"]
+    owner, repo = repository.split("/", 1)
+    github = JsonHttpClient(
+        os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+        github_token,
+        "2022-11-28",
+    )
+    if event_name in {"pull_request_review", "pull_request_target"}:
+        event_pull_request = event.get("pull_request")
+        if not isinstance(event_pull_request, dict):
+            raise ReviewError("Review gate event did not include a pull request")
+        pull_number = int(event_pull_request["number"])
+        pull_request = github.request(
+            "GET", f"/repos/{owner}/{repo}/pulls/{pull_number}"
+        )
+        if not isinstance(pull_request, dict):
+            raise ReviewError("GitHub did not return the pull request")
+        refresh_approval_gate(github, owner, repo, pull_request)
+        return 0
+
     comment = event.get("comment", {})
     issue = event.get("issue", {})
     if not issue.get("pull_request") or not COMMAND_PATTERN.fullmatch(
@@ -538,14 +655,7 @@ def main() -> int:
 
     comment_id = int(comment["id"])
     association = str(comment.get("author_association", "")).upper()
-    repository = event["repository"]["full_name"]
-    owner, repo = repository.split("/", 1)
     pull_number = int(issue["number"])
-    github = JsonHttpClient(
-        os.environ.get("GITHUB_API_URL", "https://api.github.com"),
-        github_token,
-        "2022-11-28",
-    )
 
     existing_comments = github.paginate(f"/repos/{owner}/{repo}/issues/{pull_number}/comments")
     marker = comment_marker(comment_id)
@@ -588,6 +698,7 @@ def main() -> int:
         list(status_response.get("statuses", [])),
     )
     if not gate.eligible:
+        refresh_approval_gate(github, owner, repo, pull_request)
         github.request(
             "POST",
             f"/repos/{owner}/{repo}/issues/{pull_number}/comments",
@@ -608,6 +719,7 @@ def main() -> int:
             diagnostic = sanitize_comment_text(error)
         except ReviewError:
             diagnostic = "classifier response contained unsafe text"
+        refresh_approval_gate(github, owner, repo, pull_request)
         github.request(
             "POST",
             f"/repos/{owner}/{repo}/issues/{pull_number}/comments",
@@ -623,6 +735,7 @@ def main() -> int:
     if matched_pass_rule is None:
         reasons = [str(classification.get("reason", "classifier did not find a low-risk bug fix"))]
         reasons.extend(str(flag) for flag in classification.get("risk_flags", []))
+        refresh_approval_gate(github, owner, repo, pull_request)
         github.request(
             "POST",
             f"/repos/{owner}/{repo}/issues/{pull_number}/comments",
@@ -652,6 +765,7 @@ def main() -> int:
         f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews",
         {"commit_id": head_sha, "event": "APPROVE", "body": approval_body},
     )
+    publish_approval_gate(github, owner, repo, pull_request, "pitchblend")
     return 0
 
 

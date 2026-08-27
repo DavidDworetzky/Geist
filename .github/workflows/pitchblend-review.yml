@@ -3,6 +3,10 @@ name: Pitchblend low-risk review
 on:
   issue_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 # The workflow itself only reads trusted code from the default branch. All PR
 # content is fetched as untrusted data through the API and is never executed.
@@ -12,8 +16,9 @@ permissions:
 jobs:
   review:
     if: >-
-      github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '@pitchblend-ai')
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@pitchblend-ai'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -27,7 +32,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
-          permission-statuses: read
+          permission-statuses: write
           permission-contents: read
           permission-issues: write
           permission-pull-requests: write
