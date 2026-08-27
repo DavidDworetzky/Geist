@@ -132,6 +132,25 @@ def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
         assert spec.local is False
 
 
+def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("qwen/qwen3.8-flash")
+
+    assert flash.provider == "openrouter"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.context_window == 1000000
+    assert flash.max_output_tokens == 131072
+    assert flash.parameter_count is None
+    assert flash.activated_parameters is None
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n",)
+    assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     grok = get_model_spec("x-ai/grok-4.6")
 
@@ -279,6 +298,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "x-ai/grok-4.6",
     "qwen/qwen3.8-max",
     "qwen3.8-max",
+    "qwen/qwen3.8-flash",
     "stealth/ox-alpha",
     "meta/muse-spark-1.2-contributor",
 ])
@@ -308,6 +328,7 @@ def test_hosted_glm_infers_zai_endpoint():
         "x-ai/grok-4.6",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
+        "qwen/qwen3.8-flash",
         "stealth/ox-alpha",
         "meta/muse-spark-1.2-contributor",
     ],
@@ -434,6 +455,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert "self-hosted" in response.providers
     assert "openrouter" in response.providers
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
+    )
     assert any(
         model.id == "meta/muse-spark-1.2-contributor"
         for model in response.providers["openrouter"]

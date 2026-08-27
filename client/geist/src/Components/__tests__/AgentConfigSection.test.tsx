@@ -292,6 +292,43 @@ describe('AgentConfigSection', () => {
       })).toBeInTheDocument();
     });
 
+    it('shows Qwen3.8 Flash privacy guidance from live catalog data', async () => {
+      const performanceNote = 'The current endpoint is not OpenRouter ZDR; do not use it for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'qwen/qwen3.8-flash',
+              name: 'Qwen 3.8 Flash',
+              provider: 'openrouter',
+              context_window: 1000000,
+              max_output_tokens: 131072,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'qwen',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="qwen/qwen3.8-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Qwen 3.8 Flash' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 
