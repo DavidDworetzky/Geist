@@ -1,0 +1,31 @@
+name: Pitchblend reviewer deep eval
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deep-eval:
+    name: Evaluate frontend approval fixture
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out trusted evaluator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Run model-backed approval eval
+        env:
+          OPENAI_API_KEY: ${{ secrets.PITCHBLEND_EVAL_OPENAI_API_KEY }}
+          PITCHBLEND_MODEL: ${{ vars.PITCHBLEND_MODEL || 'gpt-5.6-luna' }}
+          PITCHBLEND_REASONING_EFFORT: ${{ vars.PITCHBLEND_REASONING_EFFORT || 'high' }}
+        run: python3 scripts/pitchblend_deep_eval.py
