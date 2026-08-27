@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -241,6 +242,123 @@ def test_comments_include_classifier_json_and_objective_matrix_decision() -> Non
     assert '"matched_pass_rule": "frontend-feature-low-or-medium"' in approved
     assert '"approved": false' in blocked
     assert '"matched_pass_rule": null' in blocked
+
+
+def gate_pull_request() -> dict:
+    return {
+        "number": 42,
+        "head": {"sha": "current-head"},
+        "user": {"login": "pull-author"},
+        "html_url": "https://github.test/org/repo/pull/42",
+    }
+
+
+def review(login: str, user_type: str = "User", **overrides: object) -> dict:
+    value = {
+        "id": 1,
+        "state": "APPROVED",
+        "commit_id": "current-head",
+        "user": {"login": login, "type": user_type},
+    }
+    value.update(overrides)
+    return value
+
+
+def test_approval_gate_accepts_current_pitchblend_or_write_human() -> None:
+    github = mock.Mock()
+    app_source = pitchblend.approval_gate_source(
+        github,
+        "org",
+        "repo",
+        gate_pull_request(),
+        [review("pitchblend-ai[bot]", "Bot")],
+    )
+    assert app_source == "pitchblend"
+    github.request.assert_not_called()
+
+    github.request.return_value = {"permission": "write"}
+    human_source = pitchblend.approval_gate_source(
+        github, "org", "repo", gate_pull_request(), [review("maintainer")]
+    )
+    assert human_source == "human:maintainer"
+
+
+def test_approval_gate_rejects_stale_author_read_and_superseded_reviews() -> None:
+    github = mock.Mock()
+    github.request.return_value = {"permission": "read"}
+    reviews = [
+        review("pitchblend-ai[bot]", "Bot", commit_id="old-head"),
+        review("pull-author"),
+        review("reader"),
+        review("former-approver", id=2),
+        review("former-approver", id=3, state="CHANGES_REQUESTED"),
+    ]
+
+    assert (
+        pitchblend.approval_gate_source(
+            github, "org", "repo", gate_pull_request(), reviews
+        )
+        is None
+    )
+
+
+def test_publish_approval_gate_sets_one_pending_or_success_context() -> None:
+    github = mock.Mock()
+    pull_request = gate_pull_request()
+
+    pitchblend.publish_approval_gate(github, "org", "repo", pull_request, None)
+    pending_payload = github.request.call_args.args[2]
+    assert pending_payload == {
+        "state": "pending",
+        "context": "Pitchblend approval gate",
+        "description": "Waiting for Pitchblend or human approval",
+        "target_url": pull_request["html_url"],
+    }
+
+    pitchblend.publish_approval_gate(
+        github, "org", "repo", pull_request, "human:maintainer"
+    )
+    success_payload = github.request.call_args.args[2]
+    assert success_payload["state"] == "success"
+    assert success_payload["description"] == "Approved by maintainer"
+
+
+def test_review_workflow_recomputes_gate_and_requests_status_write() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github/workflows/pitchblend-review.yml"
+    ).read_text(encoding="utf-8")
+    assert "pull_request_review:" in workflow
+    assert "types: [submitted, dismissed]" in workflow
+    assert "pull_request_target:" in workflow
+    assert "types: [opened, reopened, synchronize, ready_for_review]" in workflow
+    assert "permission-statuses: write" in workflow
+
+
+def test_pull_request_review_event_recomputes_current_head_gate() -> None:
+    event = {
+        "repository": {"full_name": "org/repo"},
+        "pull_request": {"number": 42},
+    }
+    pull_request = gate_pull_request()
+    github = mock.Mock()
+    github.request.side_effect = [pull_request, None]
+    github.paginate.return_value = [review("pitchblend-ai[bot]", "Bot")]
+    environment = {
+        "GITHUB_EVENT_PATH": "/event.json",
+        "GITHUB_EVENT_NAME": "pull_request_review",
+        "PITCHBLEND_GITHUB_TOKEN": "token",
+    }
+    with (
+        mock.patch.dict(os.environ, environment, clear=True),
+        mock.patch("builtins.open", mock.mock_open(read_data=json.dumps(event))),
+        mock.patch.object(pitchblend, "JsonHttpClient", return_value=github),
+    ):
+        assert pitchblend.main() == 0
+
+    status_call = github.request.call_args_list[-1]
+    assert status_call.args[0] == "POST"
+    assert status_call.args[1].endswith("/statuses/current-head")
+    assert status_call.args[2]["state"] == "success"
 
 
 def test_classifier_requires_every_non_frontend_low_risk_signal() -> None:
