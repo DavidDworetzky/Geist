@@ -51,6 +51,26 @@ explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
 
+## OpenRouter-hosted Qwen3.8 Flash
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`qwen/qwen3.8-flash`. OpenRouter added the stable route on August 26, 2026. It
+accepts text, image, and video input, has a 1,000,000-token context window and
+131,072-token output limit, and supports optional reasoning, streaming, native
+function calling, and JSON-schema structured outputs. Geist omits the
+unsupported `n` parameter. OpenRouter lists the current price as $0.15 per
+million input tokens, $0.47 per million output tokens, and $0.016 per million
+cached input tokens.
+
+The route currently has one Alibaba endpoint, so there is no provider fallback
+diversity. Alibaba states that Model Studio API data is not used for model
+training, while OpenRouter does not retain prompt or response content unless
+logging is explicitly enabled. However, this exact endpoint is absent from
+OpenRouter's ZDR endpoint list as of August 27, 2026. Do not send confidential
+workloads to this model. The hosted production model is based on the open-weight
+Qwen3.8-Flash-Next release, but Geist does not assume that their parameter
+metadata is identical.
+
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
