@@ -294,6 +294,20 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "tencent/hy4-preview", "Tencent Hy4 Preview", "hy", provider="openrouter",
+        backend="openai_compatible", context_window=1048576, max_output_tokens=64000,
+        supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True, parameter_count="770B",
+        activated_parameters="49B",
+        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        local=False,
+        performance_note=(
+            "Single Tencent FP8 preview route on OpenRouter with optional reasoning, "
+            "native tools, and structured outputs. Enforce OpenRouter ZDR routing "
+            "and review preview status before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "stealth/ox-alpha", "Ox Alpha (Preview)", "stealth", provider="openrouter",
         backend="openai_compatible", context_window=1048576, max_output_tokens=131072,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
