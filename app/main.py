@@ -43,7 +43,7 @@ from app.models.database.chat_session import (
     get_paginated_chat_sessions,
 )
 from app.models.database.database import SessionLocal
-from app.models.database.geist_user import get_default_user
+from app.models.database.geist_user import get_default_workspace
 from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
@@ -175,7 +175,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:
-    settings = UserSettingsService.get_default_user_settings()
+    settings = UserSettingsService.get_default_workspace_settings()
     return AgentFactoryConfig.from_user_settings(
         settings,
         AgentConfigRequest(agent_type="local"),
@@ -304,10 +304,10 @@ def run_chat_completion(
     agent=None,
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
-    user_id = int(get_default_user().user_id)
-    memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, user_id)
+    workspace_id = get_default_workspace().workspace_id
+    memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, workspace_id)
     memory_context = build_memory_context(
-        user_id,
+        workspace_id,
         params.prompt,
         chat_session_id=chat_id,
         memory_enabled=memory_enabled,
@@ -317,7 +317,7 @@ def run_chat_completion(
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
-        user_id=user_id,
+        user_id=workspace_id,
         chat_id=chat_id,
         config=model_request_config(params),
         system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -331,10 +331,12 @@ def run_chat_completion(
 def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
-        user_id = int(get_default_user().user_id)
-        memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, user_id)
+        workspace_id = get_default_workspace().workspace_id
+        memory_enabled, memory_mode, folder_id = resolved_memory_settings(
+            params, chat_id, workspace_id
+        )
         memory_context = build_memory_context(
-            user_id,
+            workspace_id,
             params.prompt,
             chat_session_id=chat_id,
             memory_enabled=memory_enabled,
@@ -344,7 +346,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
         for event in chat_orchestrator.stream(
             backend=agent,
             prompt=params.prompt,
-            user_id=user_id,
+            user_id=workspace_id,
             chat_id=chat_id,
             config=model_request_config(params),
             system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -418,7 +420,7 @@ def create_app(
         agent_context = get_default_agent_context()
 
         # Create agent using user settings
-        agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
+        agent = UserSettingsService.create_agent_from_default_workspace(agent_context, overrides)
 
         return run_chat_completion(params, agent=agent)
 
@@ -473,11 +475,11 @@ def create_app(
 
     @agent_router.get("/tools")
     async def get_chat_tool_catalog():
-        user = get_default_user()
+        workspace = get_default_workspace()
         enabled_names = {
             tool.name
             for tool in chat_orchestrator.registry.definitions_for_context(
-                ToolContext(user_id=user.user_id, chat_id=None, run_id="catalog")
+                ToolContext(user_id=workspace.workspace_id, chat_id=None, run_id="catalog")
             )
         }
         return {
@@ -587,7 +589,7 @@ def create_app(
 
 def _configured_inference_info() -> dict[str, str | None]:
     try:
-        settings = UserSettingsService.get_default_user_settings()
+        settings = UserSettingsService.get_default_workspace_settings()
         factory_config = AgentFactoryConfig.from_user_settings(settings)
     except Exception as error:
         logger.warning("Unable to read configured inference settings: %s", error)
@@ -690,7 +692,7 @@ def _create_local_agent(factory_config: AgentFactoryConfig):
 def get_online_agent():
     agent_context = get_default_agent_context()
     # Get user settings to determine provider-specific configuration
-    settings = UserSettingsService.get_default_user_settings()
+    settings = UserSettingsService.get_default_workspace_settings()
     factory_config = AgentFactoryConfig.from_user_settings(settings)
 
     return AgentFactory.create_agent(

@@ -715,7 +715,7 @@ class TestSettingsDrivenQwen3Creation:
     @patch("app.services.user_settings_service.AgentFactoryConfig.from_user_settings")
     @patch(
         "app.services.user_settings_service.UserSettingsService."
-        "get_or_create_user_settings_by_id"
+        "get_or_create_workspace_settings_by_id"
     )
     def test_local_settings_do_not_forward_online_backup_providers(
         self, mock_get_settings, mock_from_settings, mock_create_agent
@@ -734,7 +734,7 @@ class TestSettingsDrivenQwen3Creation:
         )
         mock_from_settings.return_value = factory_config
 
-        UserSettingsService.create_agent_from_user_settings(1, Mock())
+        UserSettingsService.create_agent_from_workspace_settings(1, Mock())
 
         assert "backup_providers" not in mock_create_agent.call_args.kwargs
 

@@ -1,6 +1,7 @@
 """
 Service layer for user settings management.
 """
+
 import logging
 from typing import Any
 
@@ -8,7 +9,7 @@ from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.factory import AgentFactory
 from agents.model_ids import canonicalize_local_model_id
-from app.models.database.geist_user import get_default_user
+from app.models.database.geist_user import get_default_workspace
 from app.models.database.user_settings import (
     get_or_create_user_settings,
     get_user_settings,
@@ -24,21 +25,22 @@ from app.models.user_settings import (
 
 logger = logging.getLogger(__name__)
 
+
 class UserSettingsService:
-    """Service for managing user settings and agent configuration."""
+    """Service for managing workspace settings and agent configuration."""
 
     @staticmethod
-    def get_user_settings_by_id(user_id: int) -> UserSettingsResponse | None:
+    def get_workspace_settings_by_id(workspace_id: int) -> UserSettingsResponse | None:
         """
-        Get user settings by user ID.
+        Get settings owned by a workspace.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
 
         Returns:
             UserSettingsResponse if found, None otherwise
         """
-        settings_model = get_user_settings(user_id)
+        settings_model = get_user_settings(workspace_id)
         if settings_model:
             return UserSettingsResponse(
                 user_settings_id=settings_model.user_settings_id,
@@ -58,22 +60,22 @@ class UserSettingsService:
                 backup_providers=settings_model.backup_providers,
                 ui_preferences=settings_model.ui_preferences,
                 create_date=settings_model.create_date,
-                update_date=settings_model.update_date
+                update_date=settings_model.update_date,
             )
         return None
 
     @staticmethod
-    def get_or_create_user_settings_by_id(user_id: int) -> UserSettingsResponse:
+    def get_or_create_workspace_settings_by_id(workspace_id: int) -> UserSettingsResponse:
         """
-        Get user settings by user ID, creating default ones if they don't exist.
+        Get workspace settings, creating defaults when they do not exist.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
 
         Returns:
             UserSettingsResponse
         """
-        settings_model = get_or_create_user_settings(user_id)
+        settings_model = get_or_create_user_settings(workspace_id)
         return UserSettingsResponse(
             user_settings_id=settings_model.user_settings_id,
             user_id=settings_model.user_id,
@@ -92,16 +94,18 @@ class UserSettingsService:
             backup_providers=settings_model.backup_providers,
             ui_preferences=settings_model.ui_preferences,
             create_date=settings_model.create_date,
-            update_date=settings_model.update_date
+            update_date=settings_model.update_date,
         )
 
     @staticmethod
-    def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> UserSettingsResponse | None:
+    def update_workspace_settings_by_id(
+        workspace_id: int, updates: UserSettingsUpdate
+    ) -> UserSettingsResponse | None:
         """
         Update user settings.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
             updates: Settings updates
 
         Returns:
@@ -110,7 +114,7 @@ class UserSettingsService:
         # Preserve explicitly supplied nulls so callers can clear a previously
         # selected concrete artifact when switching back to a catalog model.
         update_dict = updates.model_dump(exclude_unset=True)
-        current_settings = get_user_settings(user_id)
+        current_settings = get_user_settings(workspace_id)
         if current_settings is None:
             return None
 
@@ -131,10 +135,7 @@ class UserSettingsService:
         if selected_artifact_id:
             from app.services.local_models import get_local_model_manager
 
-            selected_model = (
-                update_dict.get("default_local_model")
-                or current_local_model
-            )
+            selected_model = update_dict.get("default_local_model") or current_local_model
             manager = get_local_model_manager()
             try:
                 artifact = manager.get_artifact(str(selected_artifact_id))
@@ -152,20 +153,22 @@ class UserSettingsService:
 
         # Backend validation: auto-infer agent_type based on model/provider changes
         # This acts as a safety net if the frontend doesn't set agent_type correctly
-        if 'default_agent_type' not in update_dict or update_dict.get('default_agent_type') is None:
+        if "default_agent_type" not in update_dict or update_dict.get("default_agent_type") is None:
             # If online model or online provider is being set, infer agent_type as 'online'
-            if 'default_online_model' in update_dict or 'default_online_provider' in update_dict:
-                provider = update_dict.get('default_online_provider', '')
+            if "default_online_model" in update_dict or "default_online_provider" in update_dict:
+                provider = update_dict.get("default_online_provider", "")
                 # Only set to online if provider is not 'offline'
-                if provider != 'offline':
-                    update_dict['default_agent_type'] = 'online'
-                    logger.info("Auto-inferred agent_type='online' based on online model/provider update")
+                if provider != "offline":
+                    update_dict["default_agent_type"] = "online"
+                    logger.info(
+                        "Auto-inferred agent_type='online' based on online model/provider update"
+                    )
             # If local model is being set, infer agent_type as 'local'
-            elif 'default_local_model' in update_dict or selected_artifact_id:
-                update_dict['default_agent_type'] = 'local'
+            elif "default_local_model" in update_dict or selected_artifact_id:
+                update_dict["default_agent_type"] = "local"
                 logger.info("Auto-inferred agent_type='local' based on local model update")
 
-        settings_model = update_user_settings(user_id, update_dict)
+        settings_model = update_user_settings(workspace_id, update_dict)
         if settings_model:
             return UserSettingsResponse(
                 user_settings_id=settings_model.user_settings_id,
@@ -185,40 +188,32 @@ class UserSettingsService:
                 backup_providers=settings_model.backup_providers,
                 ui_preferences=settings_model.ui_preferences,
                 create_date=settings_model.create_date,
-                update_date=settings_model.update_date
+                update_date=settings_model.update_date,
             )
         return None
 
     @staticmethod
-    def get_default_user_settings() -> UserSettingsResponse:
-        """
-        Get default user settings (for the default user).
-
-        Returns:
-            UserSettingsResponse for default user
-        """
-        default_user = get_default_user()
-        return UserSettingsService.get_or_create_user_settings_by_id(default_user.user_id)
+    def get_default_workspace_settings() -> UserSettingsResponse:
+        """Return settings for the singleton local workspace."""
+        workspace = get_default_workspace()
+        return UserSettingsService.get_or_create_workspace_settings_by_id(workspace.workspace_id)
 
     @staticmethod
-    def create_agent_from_user_settings(
-        user_id: int,
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+    def create_agent_from_workspace_settings(
+        workspace_id: int, agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
-        Create an agent instance based on user settings and optional overrides.
+        Create an agent instance based on workspace settings and optional overrides.
 
         Args:
-            user_id: User ID to get settings for
+            workspace_id: Workspace ID to get settings for
             agent_context: Agent context object
             overrides: Optional configuration overrides
 
         Returns:
             Agent instance
         """
-        # Get user settings
-        settings = UserSettingsService.get_or_create_user_settings_by_id(user_id)
+        settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
 
         # Create agent factory config
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
@@ -247,12 +242,11 @@ class UserSettingsService:
         return agent
 
     @staticmethod
-    def create_agent_from_default_user(
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+    def create_agent_from_default_workspace(
+        agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
-        Create an agent instance for the default user.
+        Create an agent instance for the default workspace.
 
         Args:
             agent_context: Agent context object
@@ -261,9 +255,7 @@ class UserSettingsService:
         Returns:
             Agent instance
         """
-        default_user = get_default_user()
-        return UserSettingsService.create_agent_from_user_settings(
-            default_user.user_id,
-            agent_context,
-            overrides
+        workspace = get_default_workspace()
+        return UserSettingsService.create_agent_from_workspace_settings(
+            workspace.workspace_id, agent_context, overrides
         )

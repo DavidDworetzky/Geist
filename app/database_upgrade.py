@@ -14,8 +14,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 MIGRATIONS_PATH = PROJECT_ROOT / "migrations"
-PRE_LOCAL_ARTIFACT_REVISION = "c3a1f5e7d9b2"
+# An unversioned schema missing only the local-artifact column already contains
+# the hierarchical-memory branch, so resume from that sibling branch head.
+PRE_LOCAL_ARTIFACT_REVISION = "e4b7a9c2d1f0"
 PRE_LOCAL_ARTIFACT_GAP = ("user_settings", "default_local_artifact_id")
+PRE_WORKSPACE_REVISION = "f5c8a1d3e7b9"
+PRE_WORKSPACE_GAP = ("geist_user", "workspace_key")
 
 
 def upgrade_database() -> None:
@@ -54,10 +58,22 @@ def upgrade_database() -> None:
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
         if schema_kind == "pre_local_artifact":
             logger.info(
-                "Adopting an unversioned legacy Geist database at %s before upgrading",
-                PRE_LOCAL_ARTIFACT_REVISION,
+                "Adopting an unversioned Geist database missing only the local-artifact "
+                "selection column"
             )
-            command.stamp(alembic_config, PRE_LOCAL_ARTIFACT_REVISION)
+            _add_default_local_artifact_column(Engine)
+            command.stamp(alembic_config, "head")
+        elif schema_kind != "current":
+            previous_revision = (
+                PRE_WORKSPACE_REVISION
+                if schema_kind == "pre_workspace"
+                else PRE_LOCAL_ARTIFACT_REVISION
+            )
+            logger.info(
+                "Adopting an unversioned legacy Geist database at %s before upgrading",
+                previous_revision,
+            )
+            command.stamp(alembic_config, previous_revision)
             command.upgrade(alembic_config, "head")
         else:
             logger.info("Adopting an unversioned legacy Geist database at Alembic head")
@@ -67,8 +83,10 @@ def upgrade_database() -> None:
             _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
         command.upgrade(alembic_config, "head")
 
+    from app.models.database.geist_user import ensure_default_workspace
     from scripts.insert_presets import main as insert_presets
 
+    ensure_default_workspace()
     insert_presets(to_commit=True, overwrite=False)
 
 
@@ -89,13 +107,32 @@ def _validate_legacy_schema(metadata, engine) -> None:
 
 
 def _classify_legacy_schema(metadata, engine) -> str:
-    """Recognize current metadata or the one safe pre-artifact legacy shape."""
+    """Recognize current metadata and the supported legacy upgrade shapes."""
 
     schema_kind, problems = _inspect_legacy_schema(metadata, engine)
-    if schema_kind in {"current", "pre_local_artifact"}:
+    if schema_kind in {
+        "current",
+        "pre_local_artifact",
+        "pre_workspace",
+        "pre_local_artifact_and_workspace",
+    }:
         return schema_kind
     _raise_legacy_schema_error(problems)
     raise AssertionError("unreachable")
+
+
+def _add_default_local_artifact_column(engine) -> None:
+    """Complete the only migration gap in a schema that already has workspace identity."""
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        operations.add_column(
+            "user_settings",
+            sa.Column("default_local_artifact_id", sa.String(), nullable=True),
+        )
 
 
 def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
@@ -121,6 +158,10 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
         return "current", problems
     if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP} and len(problems) == 1:
         return "pre_local_artifact", problems
+    if missing_column_gaps == {PRE_WORKSPACE_GAP} and len(problems) == 1:
+        return "pre_workspace", problems
+    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP, PRE_WORKSPACE_GAP} and len(problems) == 2:
+        return "pre_local_artifact_and_workspace", problems
     return "unknown", problems
 
 

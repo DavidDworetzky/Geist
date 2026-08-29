@@ -1,13 +1,26 @@
+import importlib
 import sqlite3
 
 import pytest
+from alembic import command
+from alembic.migration import MigrationContext
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
 
 from app.database_upgrade import (
+    PRE_WORKSPACE_REVISION,
+    _alembic_config,
     _backup_sqlite_database,
     _classify_legacy_schema,
     _validate_legacy_schema,
+    upgrade_database,
 )
+from app.models.database.database import (
+    DATABASE_CONFIG,
+    Base,
+    Session,
+    configure_database,
+)
+from app.models.database.database_config import DatabaseConfig
 
 
 def test_sqlite_backup_is_consistent_and_replaced_atomically(tmp_path):
@@ -90,3 +103,146 @@ def test_unversioned_schema_with_any_additional_gap_is_rejected():
 
     with pytest.raises(RuntimeError, match="another_required_column"):
         _classify_legacy_schema(expected_metadata, engine)
+
+
+@pytest.mark.parametrize(
+    ("removed_columns", "expected_kind"),
+    [
+        ({("geist_user", "workspace_key")}, "pre_workspace"),
+        (
+            {
+                ("geist_user", "workspace_key"),
+                ("user_settings", "default_local_artifact_id"),
+            },
+            "pre_local_artifact_and_workspace",
+        ),
+    ],
+)
+def test_real_metadata_recognizes_supported_pre_workspace_schemas(removed_columns, expected_kind):
+    importlib.import_module("app.models.database")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        if ("geist_user", "workspace_key") in removed_columns:
+            connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
+            connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
+        if ("user_settings", "default_local_artifact_id") in removed_columns:
+            connection.execute(
+                text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
+            )
+
+    assert _classify_legacy_schema(Base.metadata, engine) == expected_kind
+
+
+def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite",
+            database_url=f"sqlite:///{tmp_path / 'legacy.sqlite3'}",
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
+            connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
+            connection.execute(
+                text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO geist_user "
+                    "(user_id, username, name, email, password) "
+                    "VALUES (52, 'custom-owner', 'Custom Workspace', "
+                    "'custom@example.com', 'legacy-value')"
+                )
+            )
+
+        upgrade_database()
+
+        with engine.connect() as connection:
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "c6d9e2f4a7b1"
+            }
+            row = connection.execute(
+                text(
+                    "SELECT user_id, workspace_key, email, password "
+                    "FROM geist_user WHERE user_id = 52"
+                )
+            ).one()
+            assert row == (52, "default", None, None)
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite",
+            database_url=f"sqlite:///{tmp_path / 'bare-migration.sqlite3'}",
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
+            connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
+
+        alembic_config = _alembic_config()
+        command.stamp(alembic_config, PRE_WORKSPACE_REVISION)
+        command.upgrade(alembic_config, "head")
+
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT workspace_key, username, name, email, password " "FROM geist_user")
+            ).one()
+            assert row == ("default", None, "Local Workspace", None, None)
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite",
+            database_url=f"sqlite:///{tmp_path / 'branch-legacy.sqlite3'}",
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
+            )
+
+        upgrade_database()
+
+        with engine.connect() as connection:
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "c6d9e2f4a7b1"
+            }
+            columns = {
+                row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
+            }
+            assert "default_local_artifact_id" in columns
+            assert (
+                connection.execute(
+                    text("SELECT COUNT(*) FROM geist_user WHERE workspace_key = 'default'")
+                ).scalar_one()
+                == 1
+            )
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
