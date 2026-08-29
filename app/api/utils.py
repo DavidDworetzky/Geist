@@ -41,28 +41,32 @@ async def get_authenticated_workspace(
     try:
         # Compatibility-only test token. The operator-principal PR replaces this
         # endpoint-specific mechanism with a global request principal boundary.
-        if token.startswith("test_token_"):
-            # Extract user_id safely with proper validation
-            parts = token.split("_")
-            # Ensure exact format: ["test", "token", "{user_id}"]
-            if len(parts) != 3 or parts[0] != "test" or parts[1] != "token":
-                raise ValueError("Invalid test token format - expected 'test_token_{user_id}'")
-            try:
-                workspace_id = int(parts[2])
-            except ValueError:
-                raise ValueError(f"Invalid workspace_id in token: {parts[2]}") from None
-            workspace = get_default_workspace()
-            if workspace_id != workspace.workspace_id:
-                raise ValueError("Token does not identify the local workspace")
-            logger.info("Authorized request for workspace %s", workspace_id)
-            return workspace
-        else:
-            # Handle real tokens here in the future
+        if not token.startswith("test_token_"):
             raise ValueError("Invalid token format")
-    except Exception as e:
-        logger.error(f"Error authenticating user: {str(e)}")
+        parts = token.split("_")
+        if len(parts) != 3 or parts[0] != "test" or parts[1] != "token":
+            raise ValueError("Invalid test token format - expected 'test_token_{user_id}'")
+        try:
+            workspace_id = int(parts[2])
+        except ValueError:
+            raise ValueError(f"Invalid workspace_id in token: {parts[2]}") from None
+    except ValueError as error:
+        logger.error("Error authenticating user: %s", error)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        ) from e
+        ) from error
+
+    # Database failures are server errors, not invalid credentials. Resolve the
+    # workspace outside the token-validation exception boundary.
+    workspace = get_default_workspace()
+    if workspace_id != workspace.workspace_id:
+        logger.error("Token does not identify the local workspace")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    logger.info("Authorized request for workspace %s", workspace_id)
+    return workspace

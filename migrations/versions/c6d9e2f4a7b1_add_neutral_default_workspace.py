@@ -28,13 +28,37 @@ def upgrade() -> None:
 
     connection = op.get_bind()
     legacy_user_id = connection.execute(
-        sa.text(
-            "SELECT user_id FROM geist_user "
-            "WHERE email = :email ORDER BY user_id LIMIT 1"
-        ),
+        sa.text("SELECT user_id FROM geist_user " "WHERE email = :email ORDER BY user_id LIMIT 1"),
         {"email": "david@phantasmal.ai"},
     ).scalar()
-    if legacy_user_id is not None:
+    workspace_user_id = legacy_user_id
+    if workspace_user_id is None:
+        existing_user_ids = list(
+            connection.execute(
+                sa.text("SELECT user_id FROM geist_user ORDER BY user_id LIMIT 2")
+            ).scalars()
+        )
+        if len(existing_user_ids) == 1:
+            workspace_user_id = existing_user_ids[0]
+        elif len(existing_user_ids) > 1:
+            raise RuntimeError("Cannot select the default workspace from multiple unkeyed users")
+        else:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO geist_user "
+                    "(workspace_key, username, name, email, password) "
+                    "SELECT :workspace_key, NULL, :name, NULL, NULL "
+                    "WHERE NOT EXISTS ("
+                    "SELECT 1 FROM geist_user WHERE workspace_key = :workspace_key"
+                    ")"
+                ),
+                {
+                    "workspace_key": "default",
+                    "name": "Local Workspace",
+                },
+            )
+
+    if workspace_user_id is not None:
         connection.execute(
             sa.text(
                 "UPDATE geist_user SET "
@@ -50,9 +74,11 @@ def upgrade() -> None:
                 "legacy_username": "ddworetzky",
                 "legacy_name": "David Dworetzky",
                 "name": "Local Workspace",
-                "user_id": legacy_user_id,
+                "user_id": workspace_user_id,
             },
         )
+
+    if legacy_user_id is not None:
         connection.execute(
             sa.text(
                 "UPDATE geist_user SET "

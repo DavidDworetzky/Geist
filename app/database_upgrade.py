@@ -56,7 +56,14 @@ def upgrade_database() -> None:
     elif not current_heads:
         _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        if schema_kind != "current":
+        if schema_kind == "pre_local_artifact":
+            logger.info(
+                "Adopting an unversioned Geist database missing only the local-artifact "
+                "selection column"
+            )
+            _add_default_local_artifact_column(Engine)
+            command.stamp(alembic_config, "head")
+        elif schema_kind != "current":
             previous_revision = (
                 PRE_WORKSPACE_REVISION
                 if schema_kind == "pre_workspace"
@@ -112,6 +119,20 @@ def _classify_legacy_schema(metadata, engine) -> str:
         return schema_kind
     _raise_legacy_schema_error(problems)
     raise AssertionError("unreachable")
+
+
+def _add_default_local_artifact_column(engine) -> None:
+    """Complete the only migration gap in a schema that already has workspace identity."""
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        operations.add_column(
+            "user_settings",
+            sa.Column("default_local_artifact_id", sa.String(), nullable=True),
+        )
 
 
 def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:

@@ -80,8 +80,14 @@ remote deployment restrictions.
 
 - Recognize unversioned databases created before the workspace migration,
   including the existing pre-local-artifact compatibility shape.
+- Make the workspace migration establish a default workspace without relying on
+  the application startup bootstrap.
+- Keep database failures outside the compatibility-token validation boundary so
+  storage outages surface as server errors rather than authentication failures.
 - Keep request-time workspace resolution read-only after startup establishes
   the default workspace invariant.
 - Adopt a sole existing owner row when its legacy email was customized, and
   fail explicitly instead of guessing when multiple unkeyed owners are
   present.
+- Cover and safely adopt an unversioned branch database that already has
+  `workspace_key` but is missing only `default_local_artifact_id`.
