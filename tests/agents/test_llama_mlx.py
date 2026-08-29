@@ -1,10 +1,14 @@
 """Unit tests for MLX Llama shapes and helper behaviors."""
+
+from unittest.mock import MagicMock
+
 import pytest
 
 
 mlx = pytest.importorskip("mlx")
 import mlx.core as mx  # noqa: E402
 
+from agents.architectures.base_runner import GenerationConfig  # noqa: E402
 from agents.architectures.llama.llama_mlx import (  # noqa: E402
     Attention,
     KVCache,
@@ -14,6 +18,7 @@ from agents.architectures.llama.llama_mlx import (  # noqa: E402
     ModelConfig,
     sample_logits,
 )
+from agents.architectures.mlx_llama_runner import MLXLlamaRunner  # noqa: E402
 
 
 def _make_llama_mlx_stub():
@@ -43,7 +48,7 @@ def test_attention_cache_shapes():
     assert out.shape == (1, 3, 16)
     assert returned_cache is cache
 
-    k, v = cache.keys[..., :cache.offset, :], cache.values[..., :cache.offset, :]
+    k, v = cache.keys[..., : cache.offset, :], cache.values[..., : cache.offset, :]
     assert k.shape == (1, 2, 3, 4)
     assert v.shape == (1, 2, 3, 4)
     assert cache.keys.shape[2] == 256
@@ -53,8 +58,8 @@ def test_attention_cache_shapes():
     assert out2.shape == (1, 1, 16)
     assert cache2 is cache
 
-    k2 = cache2.keys[..., :cache2.offset, :]
-    v2 = cache2.values[..., :cache2.offset, :]
+    k2 = cache2.keys[..., : cache2.offset, :]
+    v2 = cache2.values[..., : cache2.offset, :]
     assert k2.shape == (1, 2, 4, 4)
     assert v2.shape == (1, 2, 4, 4)
     assert cache2.keys.shape[2] == 256
@@ -126,10 +131,22 @@ def test_map_hf_to_mlx_key():
     assert obj._map_hf_to_mlx_key("model.embed_tokens.weight") == "tok_embeddings.weight"
     assert obj._map_hf_to_mlx_key("model.norm.weight") == "norm.weight"
     assert obj._map_hf_to_mlx_key("lm_head.weight") == "output.weight"
-    assert obj._map_hf_to_mlx_key("model.layers.0.self_attn.q_proj.weight") == "layers.0.attention.wq.weight"
-    assert obj._map_hf_to_mlx_key("model.layers.1.mlp.down_proj.weight") == "layers.1.feed_forward.w2.weight"
-    assert obj._map_hf_to_mlx_key("model.layers.3.post_attention_layernorm.weight") == "layers.3.ffn_norm.weight"
-    assert obj._map_hf_to_mlx_key("model.layers.3.input_layernorm.weight") == "layers.3.attention_norm.weight"
+    assert (
+        obj._map_hf_to_mlx_key("model.layers.0.self_attn.q_proj.weight")
+        == "layers.0.attention.wq.weight"
+    )
+    assert (
+        obj._map_hf_to_mlx_key("model.layers.1.mlp.down_proj.weight")
+        == "layers.1.feed_forward.w2.weight"
+    )
+    assert (
+        obj._map_hf_to_mlx_key("model.layers.3.post_attention_layernorm.weight")
+        == "layers.3.ffn_norm.weight"
+    )
+    assert (
+        obj._map_hf_to_mlx_key("model.layers.3.input_layernorm.weight")
+        == "layers.3.attention_norm.weight"
+    )
     assert obj._map_hf_to_mlx_key("model.layers.3.unknown.weight") is None
 
 
@@ -165,3 +182,113 @@ def test_generate_stops_on_eos():
     tokens = list(model.generate(x, temp=0.0, top_p=1.0, max_new_tokens=5, eos_token_id=0))
 
     assert tokens == [0]
+
+
+def test_manual_backend_streams_decoded_token_deltas():
+    backend = _make_llama_mlx_stub()
+    backend.temperature = 0.2
+    backend.top_p = 0.9
+    backend.max_new_tokens = 8
+    backend.eos_token_ids = [0]
+    backend.tokenizer = MagicMock(eos_token_id=0)
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.tokenizer.encode.return_value = [1, 2, 3]
+    backend.tokenizer.decode.side_effect = lambda token_ids, **_kwargs: {
+        (5,): "Hello",
+        (5, 6): "Hello world",
+    }[tuple(token_ids)]
+    backend.model = MagicMock(last_stats={"generation_tps": 4.0})
+    backend.model.generate.return_value = iter([5, 6, 0])
+
+    chunks = list(backend.stream_messages([{"role": "user", "content": "Say hello"}]))
+
+    assert chunks == ["Hello", " world"]
+    assert backend.last_stats["prompt_tokens"] == 3
+    assert backend.last_stats["generation_tokens"] == 2
+
+
+def test_manual_backend_holds_incomplete_unicode_until_decode_is_stable():
+    backend = _make_llama_mlx_stub()
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.max_new_tokens = 8
+    backend.eos_token_ids = [0]
+    backend.tokenizer = MagicMock(eos_token_id=0)
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.tokenizer.encode.return_value = [1, 2, 3]
+    backend.tokenizer.decode.side_effect = lambda token_ids, **_kwargs: {
+        (5,): "caf�",
+        (5, 6): "café ",
+    }[tuple(token_ids)]
+    backend.model = MagicMock(last_stats={})
+    backend.model.generate.return_value = iter([5, 6, 0])
+
+    chunks = list(backend.stream_messages([{"role": "user", "content": "Say café"}]))
+
+    assert "".join(chunks) == "café "
+    assert "�" not in "".join(chunks)
+
+
+def test_manual_backend_streams_space_free_language_incrementally():
+    backend = _make_llama_mlx_stub()
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.max_new_tokens = 8
+    backend.eos_token_ids = [0]
+    backend.tokenizer = MagicMock(eos_token_id=0)
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.tokenizer.encode.return_value = [1, 2, 3]
+    backend.tokenizer.decode.side_effect = lambda token_ids, **_kwargs: {
+        (5,): "こ",
+        (5, 6): "こん",
+        (5, 6, 7): "こんにちは",
+    }[tuple(token_ids)]
+    backend.model = MagicMock(last_stats={})
+    backend.model.generate.return_value = iter([5, 6, 7, 0])
+
+    chunks = list(backend.stream_messages([{"role": "user", "content": "挨拶して"}]))
+
+    assert chunks == ["こ", "ん", "にちは"]
+
+
+def test_manual_backend_finalizes_stats_when_stop_closes_generation_early():
+    backend = _make_llama_mlx_stub()
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.max_new_tokens = 8
+    backend.eos_token_ids = [0]
+    backend.tokenizer = MagicMock(eos_token_id=0)
+    backend.tokenizer.apply_chat_template.return_value = "rendered prompt"
+    backend.tokenizer.encode.return_value = [1, 2, 3]
+    backend.tokenizer.decode.side_effect = lambda token_ids, **_kwargs: {
+        (5,): "answer EN",
+        (5, 6): "answer END hidden",
+        (5, 6, 7): "answer END hidden never reached",
+    }[tuple(token_ids)]
+    generation_closed = []
+
+    def generate(*_args, **_kwargs):
+        try:
+            yield 5
+            yield 6
+            yield 7
+        finally:
+            generation_closed.append(True)
+
+    backend.model = MagicMock(last_stats={"generation_tps": 4.0})
+    backend.model.generate.side_effect = generate
+    runner = MLXLlamaRunner()
+    runner.llama = backend
+    runner.implementation = "manual"
+
+    chunks = list(
+        runner.stream_messages(
+            [{"role": "user", "content": "answer"}],
+            GenerationConfig(max_tokens=8, temperature=0.0, stop=["END"]),
+        )
+    )
+
+    assert "".join(chunks) == "answer"
+    assert generation_closed == [True]
+    assert backend.last_stats["generation_tokens"] == 2
+    assert backend.last_stats["generation_tps"] == 4.0

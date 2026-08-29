@@ -51,7 +51,9 @@ class ModelSpec:
     supports_vision: bool = False
     supports_function_calling: bool = False
     supports_reasoning: bool = False
-    supports_streaming: bool = False
+    # All supported text backends implement the canonical incremental contract;
+    # buffered callers collect that same stream.
+    supports_streaming: bool = True
     recommended: bool = False
     gated: bool = False
     requires_remote_code: bool = False

@@ -71,6 +71,20 @@ def test_qwen3_8_uses_pinned_mlx_snapshot():
     assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
 
 
+def test_qwen3_8b_full_uses_pinned_mlx_snapshot():
+    artifact = next(
+        item for item in CURATED_LOCAL_ARTIFACTS if item.model_id == "Qwen/Qwen3-8B"
+    )
+
+    assert artifact.id == "qwen3-8b-full-mlx"
+    assert artifact.repo_id == "Qwen/Qwen3-8B"
+    assert artifact.revision == "b968826d9c46dd6066d109eabc6255188de91218"
+    assert artifact.backend == "mlx_llama"
+    assert artifact.quantization == "BF16"
+    assert local_artifact_supported(artifact, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
+
+
 @pytest.fixture
 def managers():
     active = []
@@ -323,7 +337,11 @@ def test_llama_artifacts_are_not_offered_as_runnable_on_macos_arm64(tmp_path, ma
 
 
 def test_curated_mlx_snapshot_is_pinned_and_gated():
-    artifact = next(item for item in CURATED_LOCAL_ARTIFACTS if item.backend == "mlx_llama")
+    artifact = next(
+        item
+        for item in CURATED_LOCAL_ARTIFACTS
+        if item.id == "meta-llama-3.1-8b-instruct-mlx"
+    )
 
     assert artifact.model_id == "meta-llama/Meta-Llama-3.1-8B-Instruct"
     assert artifact.revision and len(artifact.revision) == 40

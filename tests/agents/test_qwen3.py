@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import sys
+from queue import Queue
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -40,6 +41,7 @@ for _mod_name in _MLX_SUBMODULES:
         _mock.__package__ = _mod_name
         sys.modules[_mod_name] = _mock
 
+from agents.architectures import vllm_runner as vllm_runner_module
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import clear_registry, get_runner
 from agents.factory import AgentFactory
@@ -59,6 +61,8 @@ def _make_generation_config(**overrides):
 def _mock_tokenizer(has_chat_template=True):
     tok = MagicMock()
     tok.eos_token_id = 2
+    tok.pad_token_id = 2
+    tok.return_value = {"input_ids": MagicMock(), "attention_mask": MagicMock()}
     if has_chat_template:
         tok.apply_chat_template = MagicMock(
             return_value="<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n"
@@ -72,7 +76,42 @@ def _mock_model():
     model = MagicMock()
     model.num_parameters.return_value = 8_000_000_000
     model.to.return_value = model
+
+    def generate(**kwargs):
+        kwargs["streamer"].on_finalized_text("Hello ")
+        kwargs["streamer"].on_finalized_text("world!", stream_end=True)
+
+    model.generate.side_effect = generate
     return model
+
+
+class FakeTextIteratorStreamer:
+    def __init__(self, *_args, **kwargs):
+        self.chunks = Queue()
+        self.timeout = kwargs.get("timeout")
+
+    def on_finalized_text(self, text, stream_end=False):
+        if text:
+            self.chunks.put(text)
+        if stream_end:
+            self.chunks.put(None)
+
+    def end(self):
+        self.chunks.put(None)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        chunk = self.chunks.get(timeout=1)
+        if chunk is None:
+            raise StopIteration
+        return chunk
+
+
+@pytest.fixture(autouse=True)
+def use_fake_text_streamer(monkeypatch):
+    monkeypatch.setattr(vllm_runner_module, "TextIteratorStreamer", FakeTextIteratorStreamer)
 
 
 # ---------------------------------------------------------------------------
@@ -308,15 +347,9 @@ class TestQwen3RunnerInference:
         runner.model_id = "Qwen/Qwen3-8B"
         return runner
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_with_chat_template(self, mock_pipeline_fn):
+    def test_complete_with_chat_template(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
-
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Hello world!"}]
-        mock_pipeline_fn.return_value = mock_pipe
 
         result = runner.complete("You are helpful.", "Say hello", config)
 
@@ -334,15 +367,9 @@ class TestQwen3RunnerInference:
         assert result[1]["role"] == "assistant"
         assert result[1]["content"] == "Hello world!"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_without_system_prompt(self, mock_pipeline_fn):
+    def test_complete_without_system_prompt(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
-
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Response"}]
-        mock_pipeline_fn.return_value = mock_pipe
 
         runner.complete("", "Just a user message", config)
 
@@ -351,36 +378,31 @@ class TestQwen3RunnerInference:
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_strips_chat_markers(self, mock_pipeline_fn):
+    def test_complete_hides_stop_markers(self):
         runner = self._create_loaded_runner()
-        config = _make_generation_config()
+        config = _make_generation_config(stop=["<|im_end|>"])
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [
-            {"generated_text": prompt_text + "Clean response<|im_end|>extra junk"}
-        ]
-        mock_pipeline_fn.return_value = mock_pipe
+        def generate(**kwargs):
+            kwargs["streamer"].on_finalized_text(
+                "Clean response<|im_end|>extra junk",
+                stream_end=True,
+            )
+
+        runner.model.generate.side_effect = generate
 
         result = runner.complete("", "test", config)
         assert result[1]["content"] == "Clean response"
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_generate_delegates_to_complete(self, mock_pipeline_fn):
+    def test_generate_collects_the_stream(self):
         runner = self._create_loaded_runner()
         config = _make_generation_config()
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "Generated!"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         result = runner.generate("prompt text", config)
 
-        # generate() should produce same format as complete()
         assert result[1]["role"] == "assistant"
-        assert result[1]["content"] == "Generated!"
+        assert result[1]["content"] == "Hello world!"
+        streamer = runner.model.generate.call_args.kwargs["streamer"]
+        assert streamer.timeout == vllm_runner_module.GENERATION_STREAM_TIMEOUT_SECONDS
 
     def test_generate_raises_when_not_loaded(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -400,34 +422,26 @@ class TestQwen3RunnerInference:
         with pytest.raises(RuntimeError, match="Model not loaded"):
             runner.complete("sys", "usr", config)
 
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_complete_respects_temperature_zero(self, mock_pipeline_fn):
-        """Temperature 0 should set do_sample=False and temperature=None."""
+    def test_complete_respects_temperature_zero(self):
+        """Temperature 0 disables sampling-only generation arguments."""
         runner = self._create_loaded_runner()
         config = _make_generation_config(temperature=0.0)
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "deterministic"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         runner.complete("", "test", config)
 
-        pipe_call_kwargs = mock_pipe.call_args
-        # The pipeline is called as pipeline(prompt, **kwargs)
-        kwargs = pipe_call_kwargs[1] if pipe_call_kwargs[1] else {}
-        assert kwargs.get("do_sample") is False
-        assert kwargs.get("temperature") is None
+        kwargs = runner.model.generate.call_args.kwargs
+        assert kwargs["do_sample"] is False
+        assert "temperature" not in kwargs
+        assert "top_p" not in kwargs
 
 
 # ---------------------------------------------------------------------------
-# Qwen3Runner: pipeline caching
+# Qwen3Runner: model reuse
 # ---------------------------------------------------------------------------
 
 
 class TestQwen3RunnerPipelineCaching:
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_pipeline_created_once(self, mock_pipeline_fn):
+    def test_reuses_loaded_model_for_multiple_streams(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         runner = Qwen3Runner()
@@ -436,21 +450,12 @@ class TestQwen3RunnerPipelineCaching:
         runner.device = "cpu"
         runner.model_id = "Qwen/Qwen3-8B"
 
-        prompt_text = runner.tokenizer.apply_chat_template.return_value
-        mock_pipe = MagicMock()
-        mock_pipe.return_value = [{"generated_text": prompt_text + "r1"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         config = _make_generation_config()
 
-        # Call complete twice
         runner.complete("", "first", config)
         runner.complete("", "second", config)
 
-        # Pipeline constructor should only be called once
-        mock_pipeline_fn.assert_called_once()
-        # But the pipeline itself should be called twice
-        assert mock_pipe.call_count == 2
+        assert runner.model.generate.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -465,13 +470,11 @@ class TestQwen3RunnerCleanup:
         runner = Qwen3Runner()
         runner.model = _mock_model()
         runner.tokenizer = _mock_tokenizer()
-        runner._pipeline = MagicMock()
 
         runner.cleanup()
 
         assert runner.model is None
         assert runner.tokenizer is None
-        assert runner._pipeline is None
 
     def test_cleanup_on_fresh_runner(self):
         """Cleanup on a never-loaded runner should not raise."""
@@ -487,8 +490,7 @@ class TestQwen3RunnerCleanup:
 
 
 class TestQwen3RunnerChatMLFallback:
-    @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_fallback_chatml_format(self, mock_pipeline_fn):
+    def test_fallback_chatml_format(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         runner = Qwen3Runner()
@@ -497,26 +499,18 @@ class TestQwen3RunnerChatMLFallback:
         runner.device = "cpu"
         runner.model_id = "Qwen/Qwen3-8B"
 
-        mock_pipe = MagicMock()
-        # The fallback will produce a ChatML-formatted prompt
         expected_prefix = (
             "<|im_start|>system\nBe helpful<|im_end|>\n"
             "<|im_start|>user\nHello<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
-        mock_pipe.return_value = [{"generated_text": expected_prefix + "Hi there!"}]
-        mock_pipeline_fn.return_value = mock_pipe
-
         config = _make_generation_config()
         result = runner.complete("Be helpful", "Hello", config)
 
-        # Verify the pipeline was called with the ChatML-formatted prompt
-        prompt_arg = mock_pipe.call_args[0][0]
-        assert "<|im_start|>system" in prompt_arg
-        assert "<|im_start|>user" in prompt_arg
-        assert "<|im_start|>assistant" in prompt_arg
+        prompt_arg = runner.tokenizer.call_args.args[0]
+        assert prompt_arg == expected_prefix
 
-        assert result[1]["content"] == "Hi there!"
+        assert result[1]["content"] == "Hello world!"
 
 
 # ---------------------------------------------------------------------------

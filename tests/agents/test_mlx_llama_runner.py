@@ -234,10 +234,7 @@ def test_generation_config_and_response_contract():
     runner = MLXLlamaRunner()
     runner.llama = MagicMock()
     runner.implementation = "mlx_lm"
-    runner.llama.complete.return_value = [
-        {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "hi"},
-    ]
+    runner.llama.stream_messages.return_value = iter(["hi"])
     config = GenerationConfig(
         max_tokens=8,
         temperature=0.2,
@@ -256,9 +253,8 @@ def test_generation_config_and_response_contract():
     assert runner.llama.frequency_penalty == 0.3
     assert runner.llama.presence_penalty == 0.5
     assert runner.llama.stop == ["STOP", "END"]
-    runner.llama.complete.assert_called_once_with(
-        system_prompt="system",
-        user_prompt="hello",
+    runner.llama.stream_messages.assert_called_once_with(
+        [{"role": "system", "content": "system"}, {"role": "user", "content": "hello"}]
     )
 
 
@@ -290,15 +286,31 @@ def test_structured_messages_reach_mlx_backend_unchanged():
         {"role": "assistant", "content": "I will remember cobalt."},
         {"role": "user", "content": "What should you remember?"},
     ]
-    runner.llama.complete_messages.return_value = [
-        {"role": "user", "content": messages[-1]["content"]},
-        {"role": "assistant", "content": "cobalt"},
-    ]
+    runner.llama.stream_messages.return_value = iter(["cobalt"])
 
     result = runner.complete_messages(messages, GenerationConfig(max_tokens=12))
 
     assert result[-1]["content"] == "cobalt"
-    runner.llama.complete_messages.assert_called_once_with(messages)
+    runner.llama.stream_messages.assert_called_once_with(messages)
+
+
+def test_mlx_runner_streams_backend_chunks_and_hides_stop_sequence():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    runner.llama.stream_messages.return_value = iter(["local EN", "D ignored"])
+    messages = [{"role": "user", "content": "hello"}]
+
+    chunks = list(
+        runner.stream_messages(
+            messages,
+            GenerationConfig(max_tokens=12, temperature=0.2, stop=["STOP", "END"]),
+        )
+    )
+
+    assert "".join(chunks) == "local"
+    runner.llama.stream_messages.assert_called_once_with(messages)
+    assert runner.llama.max_new_tokens == 12
+    assert runner.llama.temperature == 0.2
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():

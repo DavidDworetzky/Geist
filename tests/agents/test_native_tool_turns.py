@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
+from agents.architectures.base_runner import BaseRunner
+from agents.base_agent import BaseAgent
 from agents.local_agent import LocalAgent
 from agents.models.tool_calling import (
     ChatMessage,
@@ -405,24 +407,22 @@ def test_native_tool_capability_is_known_provider_or_explicit_override():
         openai.client.close()
 
 
-class LocalRunner:
+def test_base_agent_defaults_to_no_native_tool_support():
+    assert BaseAgent.supports_native_tool_calling is False
+
+
+class LocalRunner(BaseRunner):
     def __init__(self):
         self.messages = None
         self.generation_config = None
 
-    def complete(self, system_prompt, user_prompt, generation_config):
-        return [
-            {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": "local answer"},
-        ]
+    def load(self, model_id, device_config=None):
+        pass
 
-    def complete_messages(self, messages, generation_config):
+    def _stream_messages(self, messages, generation_config):
         self.messages = messages
         self.generation_config = generation_config
-        return [
-            {"role": "user", "content": messages[-1]["content"]},
-            {"role": "assistant", "content": "local answer"},
-        ]
+        yield "local answer"
 
 
 class UnsupportedNativeStreamLocalRunner(LocalRunner):
@@ -433,6 +433,18 @@ class UnsupportedNativeStreamLocalRunner(LocalRunner):
     def stream_model_turn(self, messages, tools, config):
         self.stream_called = True
         yield from ()
+
+
+class StreamingLocalRunner(LocalRunner):
+    def __init__(self):
+        super().__init__()
+        self.generation_config = None
+
+    def _stream_messages(self, messages, generation_config):
+        self.messages = messages
+        self.generation_config = generation_config
+        yield "local "
+        yield "answer"
 
 
 def local_agent_without_loading_model():
@@ -484,6 +496,38 @@ def test_local_runner_can_complete_persistence_free_without_tools():
     assert events[-1].turn.text == "local answer"
 
 
+def test_local_agent_buffered_model_turn_collects_the_canonical_stream():
+    agent = local_agent_without_loading_model()
+
+    turn = agent.complete_model_turn(
+        [ChatMessage(role="user", content="hello")],
+        [],
+        ModelRequestConfig(),
+    )
+
+    assert turn.text == "local answer"
+    assert agent.runner.messages == [{"role": "user", "content": "hello"}]
+
+
+def test_local_runner_forwards_each_streaming_delta_and_all_stop_sequences():
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "test"
+    agent.runner = StreamingLocalRunner()
+    events = list(
+        agent.stream_model_turn(
+            [ChatMessage(role="user", content="hello")],
+            [],
+            ModelRequestConfig(stop=["END", "STOP"]),
+        )
+    )
+
+    deltas = [event.text for event in events if event.kind == "text_delta"]
+    assert len(deltas) > 1
+    assert "".join(deltas) == "local answer"
+    assert events[-1].turn.text == "local answer"
+    assert agent.runner.generation_config.stop == ["END", "STOP"]
+
+
 def test_local_runner_preserves_structured_conversation_roles():
     agent = local_agent_without_loading_model()
     messages = [
@@ -500,6 +544,52 @@ def test_local_runner_preserves_structured_conversation_roles():
         {"role": "user", "content": "Remember cobalt."},
         {"role": "assistant", "content": "I will remember cobalt."},
         {"role": "user", "content": "What should you remember?"},
+    ]
+
+
+def test_local_runner_preserves_structured_tool_history():
+    agent = local_agent_without_loading_model()
+    messages = [
+        ChatMessage(role="user", content="Look it up"),
+        ChatMessage(
+            role="assistant",
+            content=None,
+            name="researcher",
+            tool_calls=[ToolCall(id="call_1", name="web.search", arguments={"q": "Geist"})],
+        ),
+        ChatMessage(
+            role="tool",
+            content="result",
+            name="web.search",
+            tool_call_id="call_1",
+        ),
+    ]
+
+    list(agent.stream_model_turn(messages, [], ModelRequestConfig()))
+
+    assert agent.runner.messages == [
+        {"role": "user", "content": "Look it up"},
+        {
+            "role": "assistant",
+            "content": "",
+            "name": "researcher",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web.search",
+                        "arguments": '{"q": "Geist"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": "result",
+            "name": "web.search",
+            "tool_call_id": "call_1",
+        },
     ]
 
 

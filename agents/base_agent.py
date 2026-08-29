@@ -11,6 +11,13 @@ import psutil
 from adapters.tool_schema import render_tool_prompt
 from agents.agent_context import AgentContext
 from agents.exceptions import AgentError, CompletionFormatError, FunctionCallError
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
 from agents.tool_calling import ToolCallError, parse_tool_call, validate_tool_call
 from app.models.database.chat_session import get_chat_history
 
@@ -54,11 +61,13 @@ class BaseAgent(ABC):
     """
     Base class for all agents.
 
-    Subclasses implement the completion methods (`complete_text`,
-    `stream_complete_text`, `complete_audio`, `connect_realtime_audio`).
+    Subclasses implement the canonical `stream_model_turn` method plus legacy
+    completion adapters, audio processing, and realtime connections.
     The OODA tick loop, adapter function dispatch, chat-history hydration,
     and subprocess lifecycle are shared here.
     """
+
+    supports_native_tool_calling = False
 
     def __init__(self, agent_context: AgentContext, as_subprocess: bool = False):
         self._agent_context = agent_context
@@ -68,6 +77,32 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
     # Completion interface (provider-specific)
     # ------------------------------------------------------------------
+
+    @abstractmethod
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Yield incremental model events and exactly one completed turn."""
+
+    def complete_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> ModelTurn:
+        """Collect the canonical stream for callers that need a buffered turn."""
+        completed_turn: ModelTurn | None = None
+        for event in self.stream_model_turn(messages, tools, config):
+            if event.kind == "turn_complete":
+                if completed_turn is not None:
+                    raise RuntimeError("Model backend completed a turn more than once")
+                completed_turn = event.turn
+        if completed_turn is None:
+            raise RuntimeError("Model backend did not complete its turn")
+        return completed_turn
 
     @abstractmethod
     def complete_text(

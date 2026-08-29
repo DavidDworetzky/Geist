@@ -17,7 +17,6 @@ from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
     ModelRequestConfig,
-    ModelTurn,
     ToolDefinition,
 )
 from agents.tool_calling import ToolCompletion, run_prompt_tool_call
@@ -235,6 +234,15 @@ class LocalAgent(BaseAgent):
             used_native_tools=False,
         )
 
+    def _stream_runner_messages(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> Iterator[str]:
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        yield from self.runner.stream_messages(messages, generation_config)
+
     def stream_complete_text(
         self,
         prompt: str,
@@ -252,23 +260,37 @@ class LocalAgent(BaseAgent):
         system_prompt: str | None = None,
         chat_id: int | None = None,
     ):
-        """Stream text completion - delegates to complete_text for now."""
-        return self.complete_text(
-            prompt=prompt,
+        """Stream local text and persist the completed response once.
+
+        Legacy multi-choice and token-echo parameters are retained for API
+        compatibility; local chat produces one assistant text stream.
+        """
+        if not self.runner:
+            raise RuntimeError("Runner not initialized")
+        generation_config = self._create_generation_config(
             max_tokens=max_tokens,
-            n=n,
             temperature=temperature,
             top_p=top_p,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
             stop=stop,
-            echo=echo,
-            best_of=best_of,
-            prompt_tokens=prompt_tokens,
-            response_format=response_format,
-            system_prompt=system_prompt,
-            chat_id=chat_id,
         )
+        messages: list[dict[str, str | None]] = [
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+        chunks: list[str] = []
+        for chunk in self._stream_runner_messages(messages, generation_config):
+            chunks.append(chunk)
+            yield chunk
+
+        if chunks:
+            self._agent_context._add_to_chat_history(
+                user_message=prompt,
+                ai_message="".join(chunks),
+                chat_id=chat_id,
+            )
 
     def stream_model_turn(
         self,
@@ -281,39 +303,7 @@ class LocalAgent(BaseAgent):
             raise RuntimeError("Runner not initialized")
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Runner {self.runner_type} does not support native tool calling")
-        native_stream = getattr(self.runner, "stream_model_turn", None)
-        if callable(native_stream):
-            yield from native_stream(messages, tools, config)
-            return
-
-        generation_config = GenerationConfig(
-            max_tokens=config.max_tokens,
-            temperature=config.temperature,
-            top_p=config.top_p,
-            frequency_penalty=config.frequency_penalty,
-            presence_penalty=config.presence_penalty,
-            stop=config.stop,
-        )
-        structured_messages = [
-            {"role": message.role, "content": message.content} for message in messages
-        ]
-        complete_messages = getattr(self.runner, "complete_messages", None)
-        if complete_messages is None:
-            result = BaseRunner.complete_messages(
-                self.runner,
-                structured_messages,
-                generation_config,
-            )
-        else:
-            result = complete_messages(structured_messages, generation_config)
-        completion = LlamaCompletion.from_dict(result)
-        text = next(
-            (message.content for message in completion.messages if message.role == "assistant"),
-            "",
-        )
-        if text:
-            yield ModelEvent.text_delta(text)
-        yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+        yield from self.runner.stream_model_turn(messages, tools, config)
 
     def complete_audio(
         self,

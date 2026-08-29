@@ -6,7 +6,7 @@ import json
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -213,13 +213,14 @@ class ModelEvent:
         return cls(kind="turn_complete", turn=turn)
 
 
-class ToolCallingBackend:
+class ToolCallingBackend(Protocol):
     """Structural interface documented for chat-capable agents."""
+
+    supports_native_tool_calling: bool
 
     def stream_model_turn(
         self,
         messages: list[ChatMessage],
         tools: list[ToolDefinition],
         config: ModelRequestConfig,
-    ) -> Iterator[ModelEvent]:
-        raise NotImplementedError
+    ) -> Iterator[ModelEvent]: ...

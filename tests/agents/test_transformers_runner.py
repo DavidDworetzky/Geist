@@ -1,7 +1,9 @@
 """Unit tests for the generic Transformers causal-LM runner."""
 
 import os
+import threading
 from collections import UserDict
+from queue import Queue
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from agents.architectures import transformers_runner as transformers_runner_module
 from agents.architectures.base_runner import GenerationConfig
 from agents.architectures.transformers_runner import TransformersRunner
 from agents.model_load_status import model_load_status_registry
@@ -32,15 +35,55 @@ def _model():
     model.to.return_value = model
     model.device = torch.device("cpu")
     model.hf_device_map = None
-    model.generate.return_value = torch.tensor([[1, 2, 3, 8, 9]])
+
+    def generate(**kwargs):
+        streamer = kwargs.get("streamer")
+        if streamer is not None:
+            streamer.on_finalized_text("fast response", stream_end=True)
+        return torch.tensor([[1, 2, 3, 8, 9]])
+
+    model.generate.side_effect = generate
     return model
+
+
+class FakeTextIteratorStreamer:
+    def __init__(self, *_args, **kwargs):
+        self.chunks = Queue()
+        self.timeout = kwargs.get("timeout")
+
+    def on_finalized_text(self, text, stream_end=False):
+        if text:
+            self.chunks.put(text)
+        if stream_end:
+            self.chunks.put(None)
+
+    def end(self):
+        self.chunks.put(None)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        chunk = self.chunks.get(timeout=1)
+        if chunk is None:
+            raise StopIteration
+        return chunk
+
+
+@pytest.fixture(autouse=True)
+def use_fake_text_streamer(monkeypatch):
+    monkeypatch.setattr(
+        transformers_runner_module,
+        "TextIteratorStreamer",
+        FakeTextIteratorStreamer,
+    )
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
 @patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
 @patch("agents.architectures.transformers_runner.AutoTokenizer")
 @patch("agents.architectures.transformers_runner.AutoConfig")
-def test_load_and_generate_uses_direct_suffix_decode(
+def test_load_and_generate_collects_the_canonical_stream(
     config_cls, tokenizer_cls, model_cls, _find_spec
 ):
     config_cls.from_pretrained.return_value = MagicMock(
@@ -64,9 +107,6 @@ def test_load_and_generate_uses_direct_suffix_decode(
     assert model.generate.call_args.kwargs["do_sample"] is False
     assert model.generate.call_args.kwargs["use_cache"] is True
     assert model.generate.call_args.kwargs["max_new_tokens"] == 61
-    tokenizer.decode.assert_called_once()
-    decoded_ids = tokenizer.decode.call_args.args[0]
-    assert decoded_ids.tolist() == [8, 9]
     assert result[1]["content"] == "fast response"
 
 
@@ -170,14 +210,101 @@ def test_multiple_stop_sequences_use_the_earliest_match():
     runner.model_id = "test/model"
     runner.model = _model()
     runner.tokenizer = _tokenizer()
-    runner.tokenizer.decode.return_value = "first END trailing STOP ignored"
     runner.config = MagicMock(max_position_embeddings=64)
+
+    def generate(**kwargs):
+        kwargs["streamer"].on_finalized_text(
+            "first END trailing STOP ignored",
+            stream_end=True,
+        )
+
+    runner.model.generate.side_effect = generate
 
     result = runner.complete(
         "", "hello", GenerationConfig(max_tokens=8, temperature=0.0, stop=["STOP", "END"])
     )
 
     assert result[1]["content"] == "first"
+
+
+@patch(
+    "agents.architectures.transformers_runner.TextIteratorStreamer",
+    FakeTextIteratorStreamer,
+)
+def test_stream_messages_forwards_multiple_chunks_and_hides_split_stop_sequence():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    def generate(**kwargs):
+        streamer = kwargs["streamer"]
+        streamer.on_finalized_text("fast EN")
+        streamer.on_finalized_text("D ignored", stream_end=True)
+
+    runner.model.generate.side_effect = generate
+
+    chunks = list(
+        runner.stream_messages(
+            [{"role": "user", "content": "hello"}],
+            GenerationConfig(max_tokens=8, temperature=0.0, stop=["STOP", "END"]),
+        )
+    )
+
+    assert "".join(chunks) == "fast"
+    streamer = runner.model.generate.call_args.kwargs["streamer"]
+    assert streamer.timeout == transformers_runner_module.GENERATION_STREAM_TIMEOUT_SECONDS
+
+
+def test_stop_sequence_cancels_the_generation_worker():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+    cancellation_observed = threading.Event()
+
+    def generate(**kwargs):
+        kwargs["streamer"].on_finalized_text("fast END ignored")
+        criterion = kwargs["stopping_criteria"][0]
+        criterion.stopped.wait(timeout=1)
+        if criterion(None, None):
+            cancellation_observed.set()
+        kwargs["streamer"].end()
+
+    runner.model.generate.side_effect = generate
+
+    chunks = list(
+        runner.stream_messages(
+            [{"role": "user", "content": "hello"}],
+            GenerationConfig(max_tokens=8, temperature=0.0, stop=["END"]),
+        )
+    )
+
+    assert "".join(chunks) == "fast"
+    assert cancellation_observed.is_set()
+
+
+@patch(
+    "agents.architectures.transformers_runner.TextIteratorStreamer",
+    FakeTextIteratorStreamer,
+)
+def test_stream_messages_propagates_generation_thread_failure():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.model.generate.side_effect = RuntimeError("generation failed")
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        list(
+            runner.stream_messages(
+                [{"role": "user", "content": "hello"}],
+                GenerationConfig(max_tokens=8, temperature=0.0),
+            )
+        )
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec")

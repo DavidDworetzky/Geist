@@ -18,6 +18,7 @@ from agents.models.tool_calling import (
     ModelEvent,
     ModelRequestConfig,
     ToolCall,
+    ToolCallingBackend,
     ToolContext,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
@@ -284,7 +285,7 @@ class ChatOrchestrator:
     def stream(
         self,
         *,
-        backend: Any,
+        backend: ToolCallingBackend,
         prompt: str,
         user_id: int,
         chat_id: int | None,

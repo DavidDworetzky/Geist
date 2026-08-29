@@ -10,6 +10,7 @@ from unittest.mock import patch
 from agents.models.agent_completion import AgentCompletion
 from app.main import AgentType, agent_cache, run_chat_completion, stream_chat_completion
 from app.models.completion import CompleteTextParams
+from app.services.chat_orchestrator import ChatStreamEvent
 from tests.agents.test_online_agent_routes import (
     completions_generator,
     expected_world_context,
@@ -24,36 +25,25 @@ agent_completion = {
 }
 
 
-def test_legacy_stream_generates_completion_once():
-    class LegacyAgent:
-        def __init__(self):
-            self.complete_calls = 0
-            self.stream_calls = 0
+def test_stream_always_uses_the_canonical_orchestrator_path():
+    agent = object()
+    params = CompleteTextParams(prompt="stream request", enable_tools=False)
+    canonical_events = [
+        ChatStreamEvent("delta", {"text": "streamed response"}),
+        ChatStreamEvent("final", {"message": ["streamed response"]}),
+        ChatStreamEvent("done", {"run_id": "stream-run", "chat_id": 14}),
+    ]
 
-        def complete_text(self, **_kwargs):
-            self.complete_calls += 1
-            return AgentCompletion(
-                message=["legacy response"],
-                id="legacy-completion",
-                chat_id=14,
-                run_id="legacy-run",
-            )
-
-        def stream_complete_text(self, **_kwargs):
-            self.stream_calls += 1
-            yield "duplicate response"
-
-    agent = LegacyAgent()
-    params = CompleteTextParams(prompt="legacy request", enable_tools=False)
-
-    with patch("app.main.get_active_agent", return_value=agent):
+    with (
+        patch("app.main.get_active_agent", return_value=agent),
+        patch("app.main.chat_orchestrator.stream", return_value=canonical_events) as stream,
+    ):
         events = list(stream_chat_completion(params))
 
-    assert agent.complete_calls == 1
-    assert agent.stream_calls == 0
-    assert any('event: delta\ndata: {"text": "legacy response"}' in event for event in events)
+    assert stream.call_args.kwargs["backend"] is agent
+    assert any('event: delta\ndata: {"text": "streamed response"}' in event for event in events)
     assert any("event: final\n" in event for event in events)
-    assert events[-1] == ('event: done\ndata: {"run_id": "legacy-run", "chat_id": 14}\n\n')
+    assert events[-1] == ('event: done\ndata: {"run_id": "stream-run", "chat_id": 14}\n\n')
 
 
 def test_stream_emits_terminal_error_when_agent_initialization_fails():
@@ -70,6 +60,41 @@ def test_stream_emits_terminal_error_when_agent_initialization_fails():
     assert '"code": "chat_backend_error"' in events[0]
     assert "private initialization detail" not in events[0]
     assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
+
+
+def test_local_stream_endpoint_preserves_normalized_runner_deltas(local_agent, client):
+    def stream_messages(_messages, _generation_config):
+        yield "local "
+        yield "answer"
+
+    runner = local_agent.runner
+    had_instance_stream = "_stream_messages" in runner.__dict__
+    original_stream = runner.__dict__.get("_stream_messages")
+    runner._stream_messages = stream_messages
+    agent_cache[AgentType.LLAMA] = local_agent
+    try:
+        response = client.post(
+            "/agent/complete_text_stream",
+            json={
+                "prompt": "stream locally",
+                "agent_type": "LLAMA",
+                "enable_tools": False,
+            },
+        )
+    finally:
+        agent_cache[AgentType.LLAMA] = None
+        if had_instance_stream:
+            runner._stream_messages = original_stream
+        else:
+            del runner._stream_messages
+
+    assert response.status_code == 200
+    first_delta = 'event: delta\ndata: {"text": "local"}\n\n'
+    second_delta = 'event: delta\ndata: {"text": " answer"}\n\n'
+    assert first_delta in response.text
+    assert second_delta in response.text
+    assert response.text.index(first_delta) < response.text.index(second_delta)
+    assert "event: final\n" in response.text
 
 
 def test_modern_non_streaming_completion_uses_orchestrator_without_tools():

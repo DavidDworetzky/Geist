@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 # MLX imports
@@ -20,6 +21,53 @@ from agents.models.llama_completion import strings_to_message_dict
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class _IncrementalTextStreamer:
+    """Decode stable token fragments without buffering to word boundaries."""
+
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        self.token_cache: list[int] = []
+        self.print_len = 0
+        self.ready_chunks: list[str] = []
+
+    def put(self, value) -> None:
+        token_ids = value.tolist()
+        if token_ids and isinstance(token_ids[0], list):
+            if len(token_ids) != 1:
+                raise ValueError("Incremental decoding supports batch size 1")
+            token_ids = token_ids[0]
+        self.token_cache.extend(int(token_id) for token_id in token_ids)
+        text = self.tokenizer.decode(
+            self.token_cache,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        if not text or text.endswith("\ufffd"):
+            return
+        printable_text = text[self.print_len :]
+        self.print_len = len(text)
+        if printable_text:
+            self.ready_chunks.append(printable_text)
+
+    def end(self) -> None:
+        if not self.token_cache:
+            return
+        text = self.tokenizer.decode(
+            self.token_cache,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        printable_text = text[self.print_len :]
+        self.token_cache.clear()
+        self.print_len = 0
+        if printable_text and not text.endswith("\ufffd"):
+            self.ready_chunks.append(printable_text)
+
+    def drain(self) -> Iterator[str]:
+        while self.ready_chunks:
+            yield self.ready_chunks.pop(0)
 
 
 class KVCache:
@@ -703,7 +751,6 @@ class LlamaMLX:
     ) -> list[dict[str, str]]:
         """Complete a structured conversation using native chat-template roles."""
         logger.info("Beginning completion call...")
-        prompt = self._build_messages_prompt(messages)
         user_prompt = next(
             (
                 message.get("content") or ""
@@ -719,21 +766,7 @@ class LlamaMLX:
         )
 
         try:
-            # Generate
-            output_tokens = self.generate_text(prompt)
-            # Decode only newly generated IDs so prompt text cannot leak into the response.
-            output_list = output_tokens.tolist()[self._last_prompt_token_count :]
-            output_text = self.tokenizer.decode(
-                output_list,
-                skip_special_tokens=True,
-            ).strip()
-            self.last_stats = dict(getattr(self.model, "last_stats", {}))
-            self.last_stats.update(
-                {
-                    "prompt_tokens": self._last_prompt_token_count,
-                    "generation_tokens": len(output_list),
-                }
-            )
+            output_text = "".join(self.stream_messages(messages)).strip()
 
             logger.info("Text generation completed successfully.")
             logger.info(f"Output: {output_text}")
@@ -743,3 +776,50 @@ class LlamaMLX:
         except Exception as e:
             logger.error(f"Error during text generation: {str(e)}")
             raise
+
+    def stream_messages(
+        self,
+        messages: list[dict[str, str | None]],
+    ) -> Iterator[str]:
+        """Yield decoded text while the manual MLX model generates tokens."""
+        prompt = self._build_messages_prompt(messages)
+        prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+        self._last_prompt_token_count = len(prompt_ids)
+        input_ids = mx.array([prompt_ids], dtype=mx.int64)
+        generated_ids: list[int] = []
+        eos_ids = {
+            int(token_id)
+            for token_id in (self.eos_token_ids or [self.tokenizer.eos_token_id])
+            if token_id is not None
+        }
+        decoder = _IncrementalTextStreamer(self.tokenizer)
+
+        generation = self.model.generate(
+            input_ids,
+            temp=self.temperature,
+            top_p=self.top_p,
+            max_new_tokens=self.max_new_tokens,
+            eos_token_id=list(eos_ids) or None,
+        )
+        try:
+            for token_id in generation:
+                if token_id in eos_ids:
+                    logger.info("Generation complete: EOS token generated")
+                    break
+                generated_ids.append(token_id)
+                decoder.put(mx.array([token_id], dtype=mx.int64))
+                yield from decoder.drain()
+
+            decoder.end()
+            yield from decoder.drain()
+        finally:
+            close_generation = getattr(generation, "close", None)
+            if close_generation is not None:
+                close_generation()
+            self.last_stats = dict(getattr(self.model, "last_stats", {}))
+            self.last_stats.update(
+                {
+                    "prompt_tokens": self._last_prompt_token_count,
+                    "generation_tokens": len(generated_ids),
+                }
+            )

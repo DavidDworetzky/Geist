@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from .base_runner import BaseRunner, GenerationConfig
@@ -22,12 +23,10 @@ class _MLXBackend(Protocol):
     presence_penalty: float
     stop: str | list[str] | None
 
-    def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]: ...
-
-    def complete_messages(
+    def stream_messages(
         self,
         messages: list[dict[str, str | None]],
-    ) -> list[dict[str, str]]: ...
+    ) -> Iterator[str]: ...
 
 
 class MLXLlamaRunner(BaseRunner):
@@ -179,44 +178,23 @@ class MLXLlamaRunner(BaseRunner):
             backend.presence_penalty = generation_config.presence_penalty
             backend.stop = generation_config.stop
         elif (
-            generation_config.frequency_penalty
-            or generation_config.presence_penalty
-            or generation_config.stop
+            generation_config.frequency_penalty or generation_config.presence_penalty
         ) and not self._unsupported_generation_controls_warned:
             logger.warning(
                 "The manual MLX implementation ignores frequency_penalty, "
-                "presence_penalty, and stop; select implementation='mlx_lm' "
-                "to use those controls."
+                "and presence_penalty; select implementation='mlx_lm' to use "
+                "those controls. Stop sequences are enforced by the shared stream."
             )
             self._unsupported_generation_controls_warned = True
         return backend
 
-    def generate(
-        self,
-        prompt: str,
-        generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        return self.complete("", prompt, generation_config)
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
-        backend = self._apply_generation_config(generation_config)
-        return backend.complete(
-            system_prompt=system_prompt or "You are a helpful assistant.",
-            user_prompt=user_prompt,
-        )
-
-    def complete_messages(
+    def _stream_messages(
         self,
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
-    ) -> list[dict[str, str]]:
+    ) -> Iterator[str]:
         backend = self._apply_generation_config(generation_config)
-        return backend.complete_messages(messages)
+        yield from backend.stream_messages(messages)
 
     def cleanup(self) -> None:
         self.llama = None

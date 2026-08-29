@@ -175,7 +175,8 @@ class VoiceSessionService:
             transcript: User transcript to process
             chat_id: Chat session ID
             system_prompt: Optional system prompt
-            use_streaming: Whether to use streaming LLM
+            use_streaming: Whether to forward model deltas individually. Model
+                inference always uses the canonical streaming path.
 
         Yields:
             Dict with 'type' and data:
@@ -186,56 +187,28 @@ class VoiceSessionService:
             - {'type': 'audio_complete'}
         """
         try:
-            # Try streaming if supported and requested
+            chunks = self.agent.stream_complete_text(
+                prompt=transcript,
+                chat_id=chat_id,
+                system_prompt=system_prompt,
+            )
+            yield {"type": "text_start"}
+            full_text = ""
             if use_streaming:
-                try:
-                    yield {"type": "text_start"}
-
-                    full_text = ""
-                    for chunk in self.agent.stream_complete_text(
-                        prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
-                    ):
-                        full_text += chunk
+                for chunk in chunks:
+                    full_text += chunk
+                    if chunk:
                         yield {"type": "text_chunk", "text": chunk}
+            else:
+                full_text = "".join(chunks)
+                if full_text:
+                    yield {"type": "text_chunk", "text": full_text}
 
-                    yield {"type": "text_complete", "text": full_text}
+            yield {"type": "text_complete", "text": full_text}
+            for audio_chunk in self.tts.synthesize_streaming(full_text):
+                yield {"type": "audio_chunk", "audio": audio_chunk}
 
-                    # Generate TTS from complete text
-                    for audio_chunk in self.tts.synthesize_streaming(full_text):
-                        yield {"type": "audio_chunk", "audio": audio_chunk}
-
-                    yield {"type": "audio_complete"}
-
-                except NotImplementedError:
-                    # Fall back to non-streaming
-                    self.logger.info("Streaming not supported, falling back to non-streaming")
-                    use_streaming = False
-
-            if not use_streaming:
-                # Non-streaming path
-                completion = self.agent.complete_text(
-                    prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
-                )
-
-                # Extract text from completion
-                if hasattr(completion, "choices") and completion.choices:
-                    response_text = completion.choices[0].message.content
-                elif hasattr(completion, "messages"):
-                    response_text = next(
-                        (msg.content for msg in completion.messages if msg.role == "assistant"), ""
-                    )
-                else:
-                    response_text = str(completion)
-
-                yield {"type": "text_start"}
-                yield {"type": "text_chunk", "text": response_text}
-                yield {"type": "text_complete", "text": response_text}
-
-                # Generate TTS
-                for audio_chunk in self.tts.synthesize_streaming(response_text):
-                    yield {"type": "audio_chunk", "audio": audio_chunk}
-
-                yield {"type": "audio_complete"}
+            yield {"type": "audio_complete"}
 
         except ModuleNotFoundError as e:
             if e.name == "qwen_tts":
