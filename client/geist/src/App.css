@@ -311,6 +311,23 @@ textarea:focus-visible {
   color: var(--geist-color-accent-strong);
 }
 
+.runtime-model-select {
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.runtime-model-select:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.runtime-model-error {
+  color: var(--geist-color-danger);
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .workspace-content {
   min-width: 0;
   min-height: 0;
