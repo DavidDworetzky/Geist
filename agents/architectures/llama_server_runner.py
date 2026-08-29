@@ -7,12 +7,17 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 import httpx
 
-from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.base_runner import (
+    BaseRunner,
+    GenerationConfig,
+    stream_text_until_stop,
+    strip_streamed_text,
+)
 from agents.architectures.llama_server_process import (
     LlamaServerManager,
     get_llama_server_manager,
@@ -102,11 +107,8 @@ class LlamaServerRunner(BaseRunner):
                 else generation_config.stop
             ),
         )
-        chat_messages = [
-            ChatMessage(role=str(message.get("role") or ""), content=message.get("content"))
-            for message in messages
-        ]
-        for event in self.stream_model_turn(chat_messages, [], request_config):
+        chat_messages = [ChatMessage.from_dict(message) for message in messages]
+        for event in self._stream_model_turn_raw(chat_messages, [], request_config):
             if event.kind == "text_delta" and event.text:
                 yield event.text
 
@@ -151,7 +153,7 @@ class LlamaServerRunner(BaseRunner):
             return {"__raw_arguments__": value}
         return parsed if isinstance(parsed, dict) else {"__raw_arguments__": value}
 
-    def stream_model_turn(
+    def _stream_model_turn_raw(
         self,
         messages: list[ChatMessage],
         tools: list[ToolDefinition],
@@ -230,6 +232,41 @@ class LlamaServerRunner(BaseRunner):
                 text="".join(text_parts),
                 tool_calls=calls,
                 finish_reason=finish_reason,
+            )
+        )
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Apply shared text semantics while preserving native tool events."""
+        completed_turn: ModelTurn | None = None
+        raw_events = self._stream_model_turn_raw(messages, tools, config)
+
+        def text_chunks() -> Generator[str, None, None]:
+            nonlocal completed_turn
+            for event in raw_events:
+                if event.kind == "text_delta" and event.text:
+                    yield event.text
+                elif event.kind == "turn_complete":
+                    completed_turn = event.turn
+
+        normalized_parts: list[str] = []
+        text_stream = text_chunks()
+        try:
+            for text_delta in strip_streamed_text(stream_text_until_stop(text_stream, config.stop)):
+                normalized_parts.append(text_delta)
+                yield ModelEvent.text_delta(text_delta)
+        finally:
+            text_stream.close()
+
+        yield ModelEvent.turn_complete(
+            ModelTurn(
+                text="".join(normalized_parts),
+                tool_calls=(completed_turn.tool_calls if completed_turn else []),
+                finish_reason=(completed_turn.finish_reason if completed_turn else "stop"),
             )
         )
 

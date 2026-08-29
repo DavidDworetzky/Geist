@@ -13,7 +13,7 @@ import mlx.nn as nn
 
 # Tokenizer imports
 from mlx.utils import tree_flatten
-from transformers import AutoTokenizer, TextStreamer
+from transformers import AutoTokenizer
 
 from agents.models.llama_completion import strings_to_message_dict
 
@@ -23,21 +23,47 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class _IncrementalTextStreamer(TextStreamer):
-    """Expose TextStreamer's Unicode-safe incremental decoder as an iterator."""
+class _IncrementalTextStreamer:
+    """Decode stable token fragments without buffering to word boundaries."""
 
     def __init__(self, tokenizer):
-        super().__init__(
-            tokenizer,
-            skip_prompt=False,
+        self.tokenizer = tokenizer
+        self.token_cache: list[int] = []
+        self.print_len = 0
+        self.ready_chunks: list[str] = []
+
+    def put(self, value) -> None:
+        token_ids = value.tolist()
+        if token_ids and isinstance(token_ids[0], list):
+            if len(token_ids) != 1:
+                raise ValueError("Incremental decoding supports batch size 1")
+            token_ids = token_ids[0]
+        self.token_cache.extend(int(token_id) for token_id in token_ids)
+        text = self.tokenizer.decode(
+            self.token_cache,
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )
-        self.ready_chunks: list[str] = []
+        if not text or text.endswith("\ufffd"):
+            return
+        printable_text = text[self.print_len :]
+        self.print_len = len(text)
+        if printable_text:
+            self.ready_chunks.append(printable_text)
 
-    def on_finalized_text(self, text: str, stream_end: bool = False) -> None:
-        if text:
-            self.ready_chunks.append(text)
+    def end(self) -> None:
+        if not self.token_cache:
+            return
+        text = self.tokenizer.decode(
+            self.token_cache,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        printable_text = text[self.print_len :]
+        self.token_cache.clear()
+        self.print_len = 0
+        if printable_text and not text.endswith("\ufffd"):
+            self.ready_chunks.append(printable_text)
 
     def drain(self) -> Iterator[str]:
         while self.ready_chunks:
@@ -768,27 +794,32 @@ class LlamaMLX:
         }
         decoder = _IncrementalTextStreamer(self.tokenizer)
 
-        for token_id in self.model.generate(
+        generation = self.model.generate(
             input_ids,
             temp=self.temperature,
             top_p=self.top_p,
             max_new_tokens=self.max_new_tokens,
             eos_token_id=list(eos_ids) or None,
-        ):
-            if token_id in eos_ids:
-                logger.info("Generation complete: EOS token generated")
-                break
-            generated_ids.append(token_id)
-            decoder.put(mx.array([token_id], dtype=mx.int64))
-            yield from decoder.drain()
-
-        decoder.end()
-        yield from decoder.drain()
-
-        self.last_stats = dict(getattr(self.model, "last_stats", {}))
-        self.last_stats.update(
-            {
-                "prompt_tokens": self._last_prompt_token_count,
-                "generation_tokens": len(generated_ids),
-            }
         )
+        try:
+            for token_id in generation:
+                if token_id in eos_ids:
+                    logger.info("Generation complete: EOS token generated")
+                    break
+                generated_ids.append(token_id)
+                decoder.put(mx.array([token_id], dtype=mx.int64))
+                yield from decoder.drain()
+
+            decoder.end()
+            yield from decoder.drain()
+        finally:
+            close_generation = getattr(generation, "close", None)
+            if close_generation is not None:
+                close_generation()
+            self.last_stats = dict(getattr(self.model, "last_stats", {}))
+            self.last_stats.update(
+                {
+                    "prompt_tokens": self._last_prompt_token_count,
+                    "generation_tokens": len(generated_ids),
+                }
+            )

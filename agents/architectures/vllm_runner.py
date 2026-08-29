@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 from collections.abc import Iterator
+from queue import Empty
 from typing import Any
 
 import safetensors.torch
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_QWEN3_MODEL_ID = "Qwen/Qwen3-8B"
 GENERATION_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+GENERATION_STREAM_TIMEOUT_SECONDS = 300.0
 
 
 class _StopOnEvent(StoppingCriteria):
@@ -48,7 +50,6 @@ class VLLMRunner(BaseRunner):
     def __init__(self):
         self.model: Any = None
         self.tokenizer: Any = None
-        self._pipeline: Any = None
         self.model_id: str | None = None
         self.weights_dir: str | None = None
         self.device: Any = None
@@ -215,6 +216,7 @@ class VLLMRunner(BaseRunner):
             self.tokenizer,
             skip_prompt=True,
             skip_special_tokens=True,
+            timeout=GENERATION_STREAM_TIMEOUT_SECONDS,
         )
         stopped = threading.Event()
         generation_kwargs: dict[str, Any] = {
@@ -243,19 +245,21 @@ class VLLMRunner(BaseRunner):
         generation_thread = threading.Thread(target=generate, daemon=True)
         generation_thread.start()
         try:
-            yield from streamer
+            try:
+                yield from streamer
+            except Empty as error:
+                raise RuntimeError(
+                    "VLLM shim generation timed out waiting for streamed output"
+                ) from error
         finally:
             stopped.set()
             generation_thread.join(timeout=GENERATION_SHUTDOWN_TIMEOUT_SECONDS)
-        if generation_thread.is_alive():
-            raise RuntimeError("VLLM shim generation did not stop after stream cancellation")
+            if generation_thread.is_alive():
+                raise RuntimeError("VLLM shim generation did not stop after stream cancellation")
         if generation_errors:
             raise generation_errors[0]
 
     def cleanup(self) -> None:
-        if self._pipeline:
-            del self._pipeline
-            self._pipeline = None
         if self.model:
             del self.model
             self.model = None

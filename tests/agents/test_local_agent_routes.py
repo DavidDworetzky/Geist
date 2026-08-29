@@ -62,15 +62,15 @@ def test_stream_emits_terminal_error_when_agent_initialization_fails():
     assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
 
 
-def test_local_stream_endpoint_preserves_multiple_runner_deltas(local_agent, client):
+def test_local_stream_endpoint_preserves_normalized_runner_deltas(local_agent, client):
     def stream_messages(_messages, _generation_config):
         yield "local "
         yield "answer"
 
     runner = local_agent.runner
-    had_instance_stream = "stream_messages" in runner.__dict__
-    original_stream = runner.__dict__.get("stream_messages")
-    runner.stream_messages = stream_messages
+    had_instance_stream = "_stream_messages" in runner.__dict__
+    original_stream = runner.__dict__.get("_stream_messages")
+    runner._stream_messages = stream_messages
     agent_cache[AgentType.LLAMA] = local_agent
     try:
         response = client.post(
@@ -84,13 +84,13 @@ def test_local_stream_endpoint_preserves_multiple_runner_deltas(local_agent, cli
     finally:
         agent_cache[AgentType.LLAMA] = None
         if had_instance_stream:
-            runner.stream_messages = original_stream
+            runner._stream_messages = original_stream
         else:
-            del runner.stream_messages
+            del runner._stream_messages
 
     assert response.status_code == 200
-    first_delta = 'event: delta\ndata: {"text": "local "}\n\n'
-    second_delta = 'event: delta\ndata: {"text": "answer"}\n\n'
+    first_delta = 'event: delta\ndata: {"text": "local"}\n\n'
+    second_delta = 'event: delta\ndata: {"text": " answer"}\n\n'
     assert first_delta in response.text
     assert second_delta in response.text
     assert response.text.index(first_delta) < response.text.index(second_delta)

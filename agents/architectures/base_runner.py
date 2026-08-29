@@ -5,7 +5,7 @@ Base runner abstract class for all inference backends.
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from agents.models.tool_calling import (
     ChatMessage,
@@ -110,7 +110,7 @@ class BaseRunner(ABC):
     def generate(
         self, prompt: str, generation_config: GenerationConfig
     ) -> dict[str, Any] | list[dict[str, str]]:
-        """Collect a plain prompt through the canonical message stream."""
+        """Render a plain prompt as one user chat message and collect the stream."""
         return self.complete("", prompt, generation_config)
 
     def complete(
@@ -183,9 +183,13 @@ class BaseRunner(ABC):
             stop=config.stop,
         )
         text_parts: list[str] = []
-        structured_messages = [
-            {"role": message.role, "content": message.content} for message in messages
-        ]
+        structured_messages: list[dict[str, str | None]] = []
+        for message in messages:
+            provider_message = message.to_openai()
+            provider_message["content"] = message.content or ""
+            if message.name:
+                provider_message["name"] = message.name
+            structured_messages.append(cast(dict[str, str | None], provider_message))
         for text_delta in self.stream_messages(structured_messages, generation_config):
             text_parts.append(text_delta)
             yield ModelEvent.text_delta(text_delta)

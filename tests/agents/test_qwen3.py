@@ -86,8 +86,9 @@ def _mock_model():
 
 
 class FakeTextIteratorStreamer:
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *_args, **kwargs):
         self.chunks = Queue()
+        self.timeout = kwargs.get("timeout")
 
     def on_finalized_text(self, text, stream_end=False):
         if text:
@@ -400,6 +401,8 @@ class TestQwen3RunnerInference:
 
         assert result[1]["role"] == "assistant"
         assert result[1]["content"] == "Hello world!"
+        streamer = runner.model.generate.call_args.kwargs["streamer"]
+        assert streamer.timeout == vllm_runner_module.GENERATION_STREAM_TIMEOUT_SECONDS
 
     def test_generate_raises_when_not_loaded(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -433,7 +436,7 @@ class TestQwen3RunnerInference:
 
 
 # ---------------------------------------------------------------------------
-# Qwen3Runner: pipeline caching
+# Qwen3Runner: model reuse
 # ---------------------------------------------------------------------------
 
 
@@ -467,13 +470,11 @@ class TestQwen3RunnerCleanup:
         runner = Qwen3Runner()
         runner.model = _mock_model()
         runner.tokenizer = _mock_tokenizer()
-        runner._pipeline = MagicMock()
 
         runner.cleanup()
 
         assert runner.model is None
         assert runner.tokenizer is None
-        assert runner._pipeline is None
 
     def test_cleanup_on_fresh_runner(self):
         """Cleanup on a never-loaded runner should not raise."""

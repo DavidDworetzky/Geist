@@ -47,8 +47,9 @@ def _model():
 
 
 class FakeTextIteratorStreamer:
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *_args, **kwargs):
         self.chunks = Queue()
+        self.timeout = kwargs.get("timeout")
 
     def on_finalized_text(self, text, stream_end=False):
         if text:
@@ -252,7 +253,8 @@ def test_stream_messages_forwards_multiple_chunks_and_hides_split_stop_sequence(
     )
 
     assert "".join(chunks) == "fast"
-    assert runner.model.generate.call_args.kwargs["streamer"] is not None
+    streamer = runner.model.generate.call_args.kwargs["streamer"]
+    assert streamer.timeout == transformers_runner_module.GENERATION_STREAM_TIMEOUT_SECONDS
 
 
 def test_stop_sequence_cancels_the_generation_worker():

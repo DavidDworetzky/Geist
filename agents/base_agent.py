@@ -67,6 +67,8 @@ class BaseAgent(ABC):
     and subprocess lifecycle are shared here.
     """
 
+    supports_native_tool_calling = False
+
     def __init__(self, agent_context: AgentContext, as_subprocess: bool = False):
         self._agent_context = agent_context
         self.as_subprocess = as_subprocess

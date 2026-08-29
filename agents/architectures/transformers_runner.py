@@ -11,6 +11,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import suppress
 from importlib import metadata
+from queue import Empty
 from typing import Any, cast
 
 import torch
@@ -30,6 +31,7 @@ from agents.model_load_status import model_load_status_registry
 
 logger = logging.getLogger(__name__)
 GENERATION_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+GENERATION_STREAM_TIMEOUT_SECONDS = 300.0
 
 
 class _StopOnEvent(StoppingCriteria):
@@ -265,6 +267,7 @@ class TransformersRunner(BaseRunner):
             tokenizer,
             skip_prompt=True,
             skip_special_tokens=True,
+            timeout=GENERATION_STREAM_TIMEOUT_SECONDS,
         )
         generation_kwargs["streamer"] = streamer
         generation_stopped = threading.Event()
@@ -286,12 +289,17 @@ class TransformersRunner(BaseRunner):
         generation_thread = threading.Thread(target=generate, daemon=True)
         generation_thread.start()
         try:
-            yield from streamer
+            try:
+                yield from streamer
+            except Empty as error:
+                raise RuntimeError(
+                    "Transformers generation timed out waiting for streamed output"
+                ) from error
         finally:
             generation_stopped.set()
             generation_thread.join(timeout=GENERATION_SHUTDOWN_TIMEOUT_SECONDS)
-        if generation_thread.is_alive():
-            raise RuntimeError("Transformers generation did not stop after stream cancellation")
+            if generation_thread.is_alive():
+                raise RuntimeError("Transformers generation did not stop after stream cancellation")
         if generation_errors:
             raise generation_errors[0]
 

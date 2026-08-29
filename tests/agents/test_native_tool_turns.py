@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.architectures.base_runner import BaseRunner
+from agents.base_agent import BaseAgent
 from agents.local_agent import LocalAgent
 from agents.models.tool_calling import (
     ChatMessage,
@@ -406,6 +407,10 @@ def test_native_tool_capability_is_known_provider_or_explicit_override():
         openai.client.close()
 
 
+def test_base_agent_defaults_to_no_native_tool_support():
+    assert BaseAgent.supports_native_tool_calling is False
+
+
 class LocalRunner(BaseRunner):
     def __init__(self):
         self.messages = None
@@ -539,6 +544,52 @@ def test_local_runner_preserves_structured_conversation_roles():
         {"role": "user", "content": "Remember cobalt."},
         {"role": "assistant", "content": "I will remember cobalt."},
         {"role": "user", "content": "What should you remember?"},
+    ]
+
+
+def test_local_runner_preserves_structured_tool_history():
+    agent = local_agent_without_loading_model()
+    messages = [
+        ChatMessage(role="user", content="Look it up"),
+        ChatMessage(
+            role="assistant",
+            content=None,
+            name="researcher",
+            tool_calls=[ToolCall(id="call_1", name="web.search", arguments={"q": "Geist"})],
+        ),
+        ChatMessage(
+            role="tool",
+            content="result",
+            name="web.search",
+            tool_call_id="call_1",
+        ),
+    ]
+
+    list(agent.stream_model_turn(messages, [], ModelRequestConfig()))
+
+    assert agent.runner.messages == [
+        {"role": "user", "content": "Look it up"},
+        {
+            "role": "assistant",
+            "content": "",
+            "name": "researcher",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web.search",
+                        "arguments": '{"q": "Geist"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": "result",
+            "name": "web.search",
+            "tool_call_id": "call_1",
+        },
     ]
 
 

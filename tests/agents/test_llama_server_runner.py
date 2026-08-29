@@ -84,7 +84,7 @@ def test_complete_messages_adapts_openai_response(tmp_path):
 def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
     runner, client, _model_manager, _server_manager = _loaded_runner(tmp_path)
     chunks = [
-        {"choices": [{"delta": {"content": "Use "}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "\nUse "}, "finish_reason": None}]},
         {
             "choices": [
                 {
@@ -122,8 +122,31 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
     )
 
     assert events[0].kind == "text_delta"
-    assert events[0].text == "Use "
+    assert events[0].text == "Use"
     turn = events[-1].turn
     assert turn is not None
+    assert turn.text == "Use"
     assert turn.tool_calls[0].name == "lookup"
     assert turn.tool_calls[0].arguments == {"id": 7}
+
+
+def test_stream_model_turn_hides_split_stop_sequence(tmp_path):
+    runner, client, _model_manager, _server_manager = _loaded_runner(tmp_path)
+    chunks = [
+        {"choices": [{"delta": {"content": "\nanswer EN"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "D hidden"}, "finish_reason": "stop"}]},
+    ]
+    lines = [f"data: {json.dumps(chunk)}" for chunk in chunks] + ["data: [DONE]"]
+    client.stream.return_value = StreamResponse(lines)
+
+    events = list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="answer")],
+            [],
+            ModelRequestConfig(stop=["END"]),
+        )
+    )
+
+    assert "".join(event.text for event in events if event.kind == "text_delta") == "answer"
+    assert events[-1].turn is not None
+    assert events[-1].turn.text == "answer"

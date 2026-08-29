@@ -255,12 +255,22 @@ class MyCustomRunner(BaseRunner):
     def _stream_messages(self, messages, generation_config: GenerationConfig):
         # Yield decoded text as the runtime produces it. BaseRunner provides
         # stream_messages(), complete_messages(), complete(), and generate().
+        # generate(prompt, ...) renders prompt as one user chat message rather
+        # than performing an untemplated raw-token continuation.
         yield "model output"
 
 # Register the runner
 from agents.architectures import register_runner
 register_runner("my_custom_runner", MyCustomRunner)
 ```
+
+### Custom Agent Streaming Contract
+
+`BaseAgent.stream_model_turn()` is the required agent-side inference contract. Custom or host
+plugin agents must yield incremental `ModelEvent.text_delta(...)` values followed by exactly one
+`ModelEvent.turn_complete(...)`; implementing only `complete_text()` is no longer sufficient for
+registration. `BaseAgent.complete_model_turn()` collects that canonical stream for buffered
+callers, and `supports_native_tool_calling` defaults to `False` unless the agent overrides it.
 
 ## Migration Guide
 
