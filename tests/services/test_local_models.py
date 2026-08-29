@@ -337,7 +337,11 @@ def test_llama_artifacts_are_not_offered_as_runnable_on_macos_arm64(tmp_path, ma
 
 
 def test_curated_mlx_snapshot_is_pinned_and_gated():
-    artifact = next(item for item in CURATED_LOCAL_ARTIFACTS if item.backend == "mlx_llama")
+    artifact = next(
+        item
+        for item in CURATED_LOCAL_ARTIFACTS
+        if item.id == "meta-llama-3.1-8b-instruct-mlx"
+    )
 
     assert artifact.model_id == "meta-llama/Meta-Llama-3.1-8B-Instruct"
     assert artifact.revision and len(artifact.revision) == 40
