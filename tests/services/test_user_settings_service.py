@@ -37,7 +37,7 @@ def test_returns_canonical_local_model_for_legacy_settings():
         "app.services.user_settings_service.get_user_settings",
         return_value=settings_model,
     ):
-        response = UserSettingsService.get_user_settings_by_id(1)
+        response = UserSettingsService.get_workspace_settings_by_id(1)
 
     assert response is not None
     assert response.default_local_model == "meta-llama/Meta-Llama-3.1-8B-Instruct"
@@ -56,7 +56,7 @@ def test_persists_canonical_local_model_for_legacy_update():
             return_value=settings_model,
         ) as update_settings,
     ):
-        response = UserSettingsService.update_user_settings_by_id(
+        response = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(default_local_model="Meta-Llama-3.1-8B-Instruct"),
         )
