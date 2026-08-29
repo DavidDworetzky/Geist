@@ -71,6 +71,20 @@ def test_qwen3_8_uses_pinned_mlx_snapshot():
     assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
 
 
+def test_qwen3_8b_full_uses_pinned_mlx_snapshot():
+    artifact = next(
+        item for item in CURATED_LOCAL_ARTIFACTS if item.model_id == "Qwen/Qwen3-8B"
+    )
+
+    assert artifact.id == "qwen3-8b-full-mlx"
+    assert artifact.repo_id == "Qwen/Qwen3-8B"
+    assert artifact.revision == "b968826d9c46dd6066d109eabc6255188de91218"
+    assert artifact.backend == "mlx_llama"
+    assert artifact.quantization == "BF16"
+    assert local_artifact_supported(artifact, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
+
+
 @pytest.fixture
 def managers():
     active = []
