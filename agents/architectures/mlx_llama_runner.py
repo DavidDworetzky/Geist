@@ -4,9 +4,12 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Protocol
 
-from .base_runner import BaseRunner, GenerationConfig
+from agents.models.tool_calling import GenerationStats
+
+from .base_runner import BaseRunner, GenerationConfig, RunnerCompletion
 
 
 logger = logging.getLogger(__name__)
@@ -217,6 +220,54 @@ class MLXLlamaRunner(BaseRunner):
     ) -> list[dict[str, str]]:
         backend = self._apply_generation_config(generation_config)
         return backend.complete_messages(messages)
+
+    def complete_messages_with_stats(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> RunnerCompletion:
+        backend = self._apply_generation_config(generation_config)
+        started = time.perf_counter()
+        completed_messages = backend.complete_messages(messages)
+        total_seconds = time.perf_counter() - started
+        raw_stats = getattr(backend, "last_stats", {})
+        stats = dict(raw_stats) if isinstance(raw_stats, dict) else {}
+        prompt_tokens = int(stats.get("prompt_tokens", 0))
+        completion_tokens = int(stats.get("generation_tokens", 0))
+        prompt_tps = self._positive_float(stats.get("prompt_tps"))
+        generation_tps = self._positive_float(stats.get("generation_tps"))
+        generation_stats = GenerationStats(
+            backend="mlx-lm" if self.implementation == "mlx_lm" else "mlx-manual",
+            model_id=self.model_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            prompt_seconds=self._duration(prompt_tokens, prompt_tps),
+            generation_seconds=self._duration(completion_tokens, generation_tps),
+            total_seconds=total_seconds,
+            prompt_tps=prompt_tps,
+            generation_tps=generation_tps,
+            completion_tps=self._rate(completion_tokens, total_seconds),
+            peak_memory_gb=self._positive_float(stats.get("peak_memory_gb")),
+        )
+        return RunnerCompletion(completed_messages, generation_stats)
+
+    @staticmethod
+    def _positive_float(value: Any) -> float | None:
+        if not isinstance(value, int | float) or value <= 0:
+            return None
+        return float(value)
+
+    @staticmethod
+    def _rate(token_count: int, seconds: float | None) -> float | None:
+        if token_count <= 0 or seconds is None or seconds <= 0:
+            return None
+        return token_count / seconds
+
+    @classmethod
+    def _duration(cls, token_count: int, rate: float | None) -> float | None:
+        if token_count <= 0 or rate is None:
+            return None
+        return token_count / rate
 
     def cleanup(self) -> None:
         self.llama = None

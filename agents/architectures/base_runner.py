@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from agents.models.tool_calling import GenerationStats
+
 
 @dataclass
 class GenerationConfig:
@@ -17,6 +19,14 @@ class GenerationConfig:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     stop: str | list[str] | None = None
+
+
+@dataclass(frozen=True)
+class RunnerCompletion:
+    """Messages and request-local metrics returned by a model runner."""
+
+    messages: list[dict[str, str]]
+    generation_stats: GenerationStats | None = None
 
 
 class BaseRunner(ABC):
@@ -88,6 +98,16 @@ class BaseRunner(ABC):
             system_prompt=system_prompt,
             user_prompt="\n".join(conversation),
             generation_config=generation_config,
+        )
+
+    def complete_messages_with_stats(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> RunnerCompletion:
+        """Complete messages with optional request-local generation metrics."""
+        return RunnerCompletion(
+            messages=self.complete_messages(messages, generation_config),
         )
 
     def cleanup(self) -> None:  # noqa: B027 - optional hook, runners override as needed

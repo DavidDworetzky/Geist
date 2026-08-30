@@ -8,7 +8,7 @@ from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.architectures import get_runner
-from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.base_runner import BaseRunner, GenerationConfig, RunnerCompletion
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
 from agents.model_load_status import model_load_status_registry
@@ -297,23 +297,34 @@ class LocalAgent(BaseAgent):
         structured_messages = [
             {"role": message.role, "content": message.content} for message in messages
         ]
-        complete_messages = getattr(self.runner, "complete_messages", None)
-        if complete_messages is None:
-            result = BaseRunner.complete_messages(
-                self.runner,
-                structured_messages,
-                generation_config,
-            )
+        complete_with_stats = getattr(self.runner, "complete_messages_with_stats", None)
+        if callable(complete_with_stats):
+            result = complete_with_stats(structured_messages, generation_config)
         else:
-            result = complete_messages(structured_messages, generation_config)
-        completion = LlamaCompletion.from_dict(result)
+            complete_messages = getattr(self.runner, "complete_messages", None)
+            if callable(complete_messages):
+                messages_result = complete_messages(structured_messages, generation_config)
+            else:
+                messages_result = BaseRunner.complete_messages(
+                    self.runner,
+                    structured_messages,
+                    generation_config,
+                )
+            result = RunnerCompletion(messages_result)
+        completion = LlamaCompletion.from_dict(result.messages)
         text = next(
             (message.content for message in completion.messages if message.role == "assistant"),
             "",
         )
         if text:
             yield ModelEvent.text_delta(text)
-        yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+        yield ModelEvent.turn_complete(
+            ModelTurn(
+                text=text,
+                finish_reason="stop",
+                generation_stats=result.generation_stats,
+            )
+        )
 
     def complete_audio(
         self,

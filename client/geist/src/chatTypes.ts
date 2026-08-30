@@ -27,12 +27,29 @@ export interface WorkArtifact {
   url?: string;
 }
 
+export interface GenerationStats {
+  backend: string;
+  model_id: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_prompt_tokens?: number | null;
+  prompt_seconds?: number | null;
+  generation_seconds?: number | null;
+  total_seconds?: number | null;
+  time_to_first_token?: number | null;
+  prompt_tps?: number | null;
+  generation_tps?: number | null;
+  completion_tps?: number | null;
+  peak_memory_gb?: number | null;
+}
+
 export interface CompleteTextResponse {
   message: string | string[];
   chat_id: number | null;
   run_id?: string | null;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  generation_stats?: GenerationStats[];
 }
 
 export interface ChatTurnResult {
@@ -43,6 +60,7 @@ export interface ChatTurnResult {
   origin_chat_id: number | null;
   tool_calls: ToolCallResult[];
   artifacts: WorkArtifact[];
+  generation_stats: GenerationStats[];
 }
 
 export type ModelLoadState = 'unloaded' | 'loading' | 'ready' | 'failed';
@@ -79,6 +97,7 @@ export interface ChatPair {
   model_load?: ModelLoadStatus;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  generation_stats?: GenerationStats[];
 }
 
 export interface ChatHistory {

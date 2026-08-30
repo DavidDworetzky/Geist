@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import os
 import re
+import time
 from contextlib import suppress
 from importlib import metadata
 from typing import Any, cast
@@ -14,10 +15,11 @@ from typing import Any, cast
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.base_runner import BaseRunner, GenerationConfig, RunnerCompletion
 from agents.model_catalog import infer_model_spec
 from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import strings_to_message_dict
+from agents.models.tool_calling import GenerationStats
 
 
 logger = logging.getLogger(__name__)
@@ -251,6 +253,13 @@ class TransformersRunner(BaseRunner):
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
+        return self.complete_messages_with_stats(messages, generation_config).messages
+
+    def complete_messages_with_stats(
+        self,
+        messages: list[dict[str, str | None]],
+        generation_config: GenerationConfig,
+    ) -> RunnerCompletion:
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
@@ -329,8 +338,13 @@ class TransformersRunner(BaseRunner):
             generation_kwargs["temperature"] = generation_config.temperature
             generation_kwargs["top_p"] = generation_config.top_p
 
+        self._synchronize_device()
+        generation_started = time.perf_counter()
         with torch.inference_mode():
             generated = self.model.generate(**inputs, **generation_kwargs)
+        self._synchronize_device()
+        total_seconds = time.perf_counter() - generation_started
+        completion_tokens = max(0, int(generated.shape[-1]) - int(input_length))
         response = self.tokenizer.decode(
             generated[0][input_length:], skip_special_tokens=True
         ).strip()
@@ -356,7 +370,28 @@ class TransformersRunner(BaseRunner):
             ),
             "",
         )
-        return strings_to_message_dict(user_prompt, response)
+        stats = GenerationStats(
+            backend="transformers",
+            model_id=self.model_id,
+            prompt_tokens=int(input_length),
+            completion_tokens=completion_tokens,
+            total_seconds=total_seconds,
+            completion_tps=(
+                completion_tokens / total_seconds
+                if completion_tokens > 0 and total_seconds > 0
+                else None
+            ),
+        )
+        return RunnerCompletion(strings_to_message_dict(user_prompt, response), stats)
+
+    def _synchronize_device(self) -> None:
+        """Wait for queued accelerator work before reading the wall clock."""
+        if self.device is None:
+            return
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+        elif self.device.type == "mps" and hasattr(torch.mps, "synchronize"):
+            torch.mps.synchronize()
 
     def _apply_chat_template(self, messages: list[dict[str, str]]) -> Any:
         if self.tokenizer is None:

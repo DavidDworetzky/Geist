@@ -15,6 +15,7 @@ from agents.models.agent_state import ConversationState, RunStatus
 from agents.models.chat_result import ToolCallResult, WorkArtifact
 from agents.models.tool_calling import (
     ChatMessage,
+    GenerationStats,
     ModelEvent,
     ModelRequestConfig,
     ToolCall,
@@ -303,6 +304,7 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
+        generation_stats: list[GenerationStats] = []
         context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = (
@@ -383,6 +385,24 @@ class ChatOrchestrator:
 
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")
+                if completed_turn.generation_stats is not None:
+                    stats = completed_turn.generation_stats
+                    generation_stats.append(stats)
+                    logger.info(
+                        "Local generation metrics backend=%s model=%s "
+                        "prompt_tokens=%s completion_tokens=%s prompt_tps=%s "
+                        "generation_tps=%s completion_tps=%s ttft_seconds=%s "
+                        "total_seconds=%s",
+                        stats.backend,
+                        stats.model_id,
+                        stats.prompt_tokens,
+                        stats.completion_tokens,
+                        stats.prompt_tps,
+                        stats.generation_tps,
+                        stats.completion_tps,
+                        stats.time_to_first_token,
+                        stats.total_seconds,
+                    )
 
                 assistant_message = ChatMessage(
                     role="assistant",
@@ -479,6 +499,7 @@ class ChatOrchestrator:
                 run_id=run.run_id,
                 tool_calls=run.tool_calls,
                 artifacts=run.artifacts,
+                generation_stats=generation_stats,
             )
             yield ChatStreamEvent("final", completion)
             yield ChatStreamEvent(

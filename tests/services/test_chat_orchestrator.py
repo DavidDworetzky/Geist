@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agents.models.chat_result import WorkArtifact
 from agents.models.tool_calling import (
+    GenerationStats,
     ModelEvent,
     ModelRequestConfig,
     ModelTurn,
@@ -303,6 +304,64 @@ def test_backend_without_native_tools_receives_empty_registry():
     )
 
     assert backend.requests[0]["tools"] == []
+
+
+def test_final_completion_collects_generation_stats_for_each_model_round():
+    first_stats = GenerationStats(
+        backend="llama.cpp",
+        model_id="test/model",
+        prompt_tokens=10,
+        completion_tokens=2,
+        generation_tps=20.0,
+    )
+    second_stats = GenerationStats(
+        backend="llama.cpp",
+        model_id="test/model",
+        prompt_tokens=20,
+        completion_tokens=4,
+        generation_tps=18.0,
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall(id="call_1", name="lookup", arguments={"query": "x"})],
+                finish_reason="tool_calls",
+                generation_stats=first_stats,
+            ),
+            ModelTurn(
+                text="done",
+                finish_reason="stop",
+                generation_stats=second_stats,
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="lookup",
+            description="Look up a value",
+            arguments_model=LookupArguments,
+            handler=lambda context, arguments: ToolExecutionOutput(content="found"),
+        )
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=9),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="find x",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    completion = next(event.payload for event in events if event.event == "final")
+    assert completion.generation_stats == [first_stats, second_stats]
 
 
 def test_aggregate_tool_result_budget_truncates_model_context():
