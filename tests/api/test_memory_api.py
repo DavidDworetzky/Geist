@@ -40,7 +40,11 @@ def memory_client(tmp_path, monkeypatch):
         session.commit()
     from app.main import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    ) as client:
         yield client
     Session.remove()
     Base.metadata.drop_all(bind=engine)

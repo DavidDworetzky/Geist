@@ -1,4 +1,24 @@
 services:
+  operator-token-init:
+    image: python:3.11-slim
+    network_mode: none
+    command:
+      - python
+      - -c
+      - |
+        import os, secrets
+        path = "/run/geist-operator/token"
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            raise SystemExit(0)
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(f"geist_{secrets.token_urlsafe(48)}\n")
+        os.chmod(temporary, 0o444)
+        os.replace(temporary, path)
+    volumes:
+      - geist_operator_token:/run/geist-operator
+    restart: "no"
+
   backend:
     mem_limit: 32G
     build:
@@ -12,14 +32,19 @@ services:
       # MLX is a native macOS runtime. Linux containers use Transformers unless
       # an operator deliberately selects another registered runner.
       - GEIST_LOCAL_RUNNER=${GEIST_LOCAL_RUNNER:-transformers}
+      - GEIST_OPERATOR_TOKEN_FILE=/run/geist-operator/token
     env_file:
       - path: .env
         required: false
     volumes:
       - ./:/opt/geist
+      - geist_operator_token:/run/geist-operator:ro
+    depends_on:
+      operator-token-init:
+        condition: service_completed_successfully
     ports:
-      - "5001:5001"
-      - "5678:5678"
+      - "127.0.0.1:5001:5001"
+      - "127.0.0.1:5678:5678"
     networks:
       test_net:
         aliases:
@@ -31,18 +56,26 @@ services:
       context: .
       dockerfile: client/geist/Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./client/geist:/app
       - /app/node_modules
+      - geist_operator_token:/run/geist-operator:ro
     environment:
       - NODE_ENV=development
       - REACT_APP_BACKEND_HOST=backend
       - REACT_APP_BACKEND_PORT=5001
+      - GEIST_OPERATOR_TOKEN_FILE=/run/geist-operator/token
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      operator-token-init:
+        condition: service_completed_successfully
     networks:
       - test_net
 
 networks:
   test_net:
+
+volumes:
+  geist_operator_token:

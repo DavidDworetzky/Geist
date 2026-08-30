@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.utils import get_authenticated_workspace
+from app.api.utils import get_current_workspace
 from app.models.database.geist_user import WorkspaceModel
 from app.models.database.job import get_job, get_jobs
 from app.schemas.job import JobResponse
@@ -17,7 +17,7 @@ router = APIRouter()
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job_endpoint(
     job_id: int,
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> JobResponse:
     """Get the status and result of a background job."""
     job = get_job(job_id, user_id=current_workspace.workspace_id)
@@ -30,7 +30,7 @@ async def get_job_endpoint(
 async def list_jobs_endpoint(
     status_filter: str | None = None,
     limit: int = 50,
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> list[JobResponse]:
     """List background jobs, newest first, optionally filtered by status."""
     jobs = get_jobs(

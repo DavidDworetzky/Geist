@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.utils import get_authenticated_workspace
+from app.api.utils import get_current_workspace
 from app.models.database.database import SessionLocal
 from app.models.database.geist_user import WorkspaceModel
 from app.models.database.workflow import (
@@ -36,7 +36,7 @@ def get_db():
 async def create_new_workflow(
     workflow: WorkflowCreate,
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Create a new workflow."""
     db_workflow = Workflow(name=workflow.name, user_id=current_workspace.workspace_id)
@@ -68,7 +68,7 @@ async def create_new_workflow(
 @router.get("/", response_model=list[WorkflowResponse])
 async def list_workflows(
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> list[Workflow]:
     """List all workflows in the authenticated workspace."""
     return get_workflows_for_user(user_id=current_workspace.workspace_id, db=db)
@@ -78,7 +78,7 @@ async def list_workflows(
 async def get_workflow(
     workflow_id: int,
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Get a specific workflow by ID."""
     workflow = (
@@ -101,7 +101,7 @@ async def update_existing_workflow(
     workflow_id: int,
     workflow_update: WorkflowUpdate,
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Update an existing workflow."""
     # First check if the user owns this workflow
@@ -147,7 +147,7 @@ async def update_existing_workflow(
 async def delete_workflow(
     workflow_id: int,
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> None:
     """Delete a workflow."""
     # First check if the user owns this workflow
@@ -178,7 +178,7 @@ async def run_workflow(
     input_data: dict[str, Any] | None = None,
     background: bool = False,
     db: Session = Depends(get_db),
-    current_workspace: WorkspaceModel = Depends(get_authenticated_workspace),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> dict[str, Any]:
     """Execute a workflow synchronously, or queue it with background=true."""
     # First check if the user owns this workflow

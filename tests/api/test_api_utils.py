@@ -3,10 +3,20 @@ from fastapi import HTTPException
 
 import app.api.utils as api_utils
 from app.models.database.geist_user import WorkspaceModel
+from app.security.operator import ALL_OPERATOR_CAPABILITIES, OperatorPrincipal
 
 
-@pytest.mark.asyncio
-async def test_authenticated_workspace_returns_matching_workspace(monkeypatch):
+def principal(workspace_id: int) -> OperatorPrincipal:
+    return OperatorPrincipal(
+        subject="test",
+        authentication_method="test",
+        workspace_id=workspace_id,
+        is_loopback=True,
+        capabilities=ALL_OPERATOR_CAPABILITIES,
+    )
+
+
+def test_current_workspace_returns_matching_workspace(monkeypatch):
     workspace = WorkspaceModel(
         workspace_id=7,
         workspace_key="default",
@@ -14,27 +24,12 @@ async def test_authenticated_workspace_returns_matching_workspace(monkeypatch):
     )
     monkeypatch.setattr(api_utils, "get_default_workspace", lambda: workspace)
 
-    result = await api_utils.get_authenticated_workspace("test_token_7")
+    result = api_utils.get_current_workspace(principal(7))
 
     assert result == workspace
 
 
-@pytest.mark.asyncio
-async def test_authenticated_workspace_rejects_invalid_token(monkeypatch):
-    monkeypatch.setattr(
-        api_utils,
-        "get_default_workspace",
-        lambda: pytest.fail("invalid credentials must not query the database"),
-    )
-
-    with pytest.raises(HTTPException) as raised:
-        await api_utils.get_authenticated_workspace("not-a-test-token")
-
-    assert raised.value.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_authenticated_workspace_rejects_mismatched_workspace(monkeypatch):
+def test_current_workspace_rejects_mismatched_principal(monkeypatch):
     workspace = WorkspaceModel(
         workspace_id=7,
         workspace_key="default",
@@ -43,17 +38,16 @@ async def test_authenticated_workspace_rejects_mismatched_workspace(monkeypatch)
     monkeypatch.setattr(api_utils, "get_default_workspace", lambda: workspace)
 
     with pytest.raises(HTTPException) as raised:
-        await api_utils.get_authenticated_workspace("test_token_8")
+        api_utils.get_current_workspace(principal(8))
 
-    assert raised.value.status_code == 401
+    assert raised.value.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_authenticated_workspace_does_not_mask_database_failures(monkeypatch):
+def test_current_workspace_does_not_mask_database_failures(monkeypatch):
     def fail_lookup():
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(api_utils, "get_default_workspace", fail_lookup)
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await api_utils.get_authenticated_workspace("test_token_7")
+        api_utils.get_current_workspace(principal(7))
