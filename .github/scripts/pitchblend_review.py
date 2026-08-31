@@ -29,6 +29,16 @@ APPROVAL_MARKER_PREFIX = "<!-- pitchblend-command:"
 APPROVAL_GATE_CONTEXT = "Pitchblend approval gate"
 PITCHBLEND_REVIEW_LOGIN = "pitchblend-ai[bot]"
 WRITE_PERMISSIONS = {"admin", "write"}
+MODEL_CATALOG_PATH = "agents/model_catalog.py"
+MODEL_CATALOG_REVIEW_PATHS = frozenset(
+    {
+        MODEL_CATALOG_PATH,
+        "docs/agents.md",
+        "docs/open_weight_models.md",
+        "tests/agents/test_model_catalog.py",
+        "tests/agents/test_online_agent.py",
+    }
+)
 
 BLOCKED_PATH_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -106,6 +116,20 @@ CLASSIFICATION_SCHEMA: dict[str, Any] = {
 # These rows are the only semantic routes to approval. Narrative model output
 # such as `reason` and `risk_flags` is intentionally absent from the policy.
 CLASSIFICATION_PASS_MATRIX: tuple[dict[str, Any], ...] = (
+    {
+        "name": "model-catalog-low-or-medium",
+        "scope": "model_catalog_only",
+        "equals": {
+            "is_frontend": False,
+            "data_migration": False,
+            "security_change": False,
+            "regression_test_present": True,
+        },
+        "one_of": {
+            "change_type": frozenset({"bugfix", "feature", "refactor"}),
+            "complexity": frozenset({"low", "medium"}),
+        },
+    },
     {
         "name": "frontend-bugfix-low-or-medium",
         "equals": {"is_frontend": True, "change_type": "bugfix"},
@@ -213,6 +237,11 @@ def blocked_path_reasons(files: list[dict[str, Any]]) -> list[str]:
     return sorted(set(reasons))
 
 
+def is_model_catalog_only_change(files: list[dict[str, Any]]) -> bool:
+    filenames = {str(file.get("filename", "")) for file in files}
+    return MODEL_CATALOG_PATH in filenames and filenames <= MODEL_CATALOG_REVIEW_PATHS
+
+
 def deterministic_gate(
     pull_request: dict[str, Any],
     files: list[dict[str, Any]],
@@ -266,6 +295,7 @@ def deterministic_gate(
         str(status.get("context", "unnamed status"))
         for status in statuses
         if status.get("state") != "success"
+        and status.get("context") != APPROVAL_GATE_CONTEXT
     ]
     if unsuccessful_statuses:
         reasons.append("commit statuses are pending or unsuccessful: " + ", ".join(unsuccessful_statuses[:8]))
@@ -273,8 +303,12 @@ def deterministic_gate(
     return GateResult(not reasons, tuple(reasons), changed_lines)
 
 
-def classification_pass_rule(classification: dict[str, Any]) -> str | None:
+def classification_pass_rule(
+    classification: dict[str, Any], *, model_catalog_only: bool = False
+) -> str | None:
     for rule in CLASSIFICATION_PASS_MATRIX:
+        if rule.get("scope") == "model_catalog_only" and not model_catalog_only:
+            continue
         if all(
             classification.get(field) == value
             for field, value in rule["equals"].items()
@@ -286,8 +320,15 @@ def classification_pass_rule(classification: dict[str, Any]) -> str | None:
     return None
 
 
-def classification_is_eligible(classification: dict[str, Any]) -> bool:
-    return classification_pass_rule(classification) is not None
+def classification_is_eligible(
+    classification: dict[str, Any], *, model_catalog_only: bool = False
+) -> bool:
+    return (
+        classification_pass_rule(
+            classification, model_catalog_only=model_catalog_only
+        )
+        is not None
+    )
 
 
 def sanitize_comment_text(value: Any) -> str:
@@ -600,7 +641,12 @@ def format_approved_comment(
     )
     complexity = sanitize_comment_text(classification.get("complexity", "low")).capitalize()
     change_type = classification.get("change_type")
-    change_label = "bug fix" if change_type == "bugfix" else f"frontend {change_type}"
+    if matched_pass_rule == "model-catalog-low-or-medium":
+        change_label = f"model catalog {change_type}"
+    elif change_type == "bugfix":
+        change_label = "bug fix"
+    else:
+        change_label = f"frontend {change_type}"
     debug = format_classification_debug(classification, matched_pass_rule)
     return (
         f"{comment_marker(comment_id)}\n"
@@ -731,7 +777,10 @@ def main() -> int:
             },
         )
         return 0
-    matched_pass_rule = classification_pass_rule(classification)
+    matched_pass_rule = classification_pass_rule(
+        classification,
+        model_catalog_only=is_model_catalog_only_change(files),
+    )
     if matched_pass_rule is None:
         reasons = [str(classification.get("reason", "classifier did not find a low-risk bug fix"))]
         reasons.extend(str(flag) for flag in classification.get("risk_flags", []))
