@@ -1,79 +1,87 @@
 # Agent Plugins
 
-Geist consumes plugins in the [Agent Plugins](https://agent-plugins.org) 1.0.0
-format — the vendor-neutral packaging standard for agent extensions also used
-by Claude Code, ChatGPT, Cursor, GitHub Copilot, and VS Code. Geist implements
-the portable core of the standard: the `plugin.json` manifest, markdown skills,
-and MCP server declarations. Host-specific extensions found in richer
-manifests (hooks, subagents, LSP servers, themes, `userConfig`) are ignored,
-so plugins written for those hosts still load — their portable components just
-work and the rest is skipped.
+Geist implements the portable core of the [Agent Plugins 1.0.0](https://agent-plugins.org/specification) standard: root `plugin.json`, Agent Skills under `skills/`, and stdio or Streamable HTTP servers in root `mcp.json`. Unsupported legacy SSE entries and client-extension namespaces are ignored without disabling independent portable components.
 
 ## Installing a plugin
 
-Copy (or clone) a plugin directory into the plugin root:
+Copy or clone a plugin directory into `GEIST_PLUGIN_DIR`, or into `<data dir>/plugins` when that variable is unset. Each immediate child directory is one plugin:
 
-- `GEIST_PLUGIN_DIR` if set, otherwise
-- `<data dir>/plugins` (for example `~/.local/share/geist/plugins` on Linux).
-
-Each immediate subdirectory is one plugin:
-
-```
+```text
 plugins/
 └── my-plugin/
-    ├── .claude-plugin/
-    │   └── plugin.json          # manifest (also accepted at the plugin root)
+    ├── plugin.json
     ├── skills/
     │   └── code-review/
-    │       └── SKILL.md         # YAML frontmatter + markdown instructions
-    └── .mcp.json                # optional MCP server declarations (or mcp.json)
+    │       ├── SKILL.md
+    │       ├── scripts/
+    │       ├── references/
+    │       └── assets/
+    └── mcp.json
 ```
 
-`GET /api/v1/plugins` lists what was discovered; `POST /api/v1/plugins/refresh`
-re-scans the directory without a restart. Both routes require the operator
-principal's `tools.manage` capability; in a Pitchblend-managed process that
-means the wrapper-injected `GeistOperator` credential.
-Plugin discovery and execution belong to the operator principal's local
-workspace. Human login remains a Pitchblend concern; a future remote controller
-must present a node-scoped credential for the target Geist workstation.
+`GET /api/v1/plugins` lists discovered portable components. `POST /api/v1/plugins/refresh` rescans without restarting Geist. Both routes require the operator principal's `tools.manage` capability. Installation and execution belong to the operator's local workspace.
 
 ## Manifest
 
-`name` is required and must be kebab-case (`^[a-z0-9][a-z0-9_-]{0,63}$`).
-`version`, `description`, and `displayName` are read when present; `skills`
-may add extra skill directories (paths must stay inside the plugin); and
-`mcpServers` may declare servers inline or point at a JSON file inside the
-plugin. All other fields are ignored per the standard.
+Every plugin requires root `plugin.json` with the canonical schema identifier and a valid name:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Review and research workflows"
+}
+```
+
+The closed portable manifest also permits `author`, `homepage`, `repository`, `license`, `keywords`, and `extensions`. Unknown top-level fields are reported and ignored; other schema violations reject the plugin. Geist does not treat `.claude-plugin/plugin.json` or manifest-level `skills`/`mcpServers` fields as portable Agent Plugins configuration.
 
 ## Skills
 
-Every `skills/*/SKILL.md` with a `description` in its frontmatter becomes an
-installed skill, namespaced `<plugin>:<skill>`. Skills use progressive
-disclosure: the chat system prompt lists only names and descriptions, and the
-model fetches a skill's full markdown body on demand through the built-in
-`skills.load` tool. Skills with `disable-model-invocation: true` are parsed
-but never advertised to the model.
+Every immediate `skills/*/SKILL.md` follows the Agent Skills specification. Its YAML frontmatter requires `name` and `description`; the name must match its parent directory. Optional standard fields are `license`, `compatibility`, `metadata`, and `allowed-tools`.
+
+```markdown
+---
+name: code-review
+description: Review changed code for correctness and security when preparing a PR.
+---
+
+# Code review
+
+Inspect the diff and report findings by severity.
+```
+
+Geist namespaces the skill as `<plugin>:<skill>`. Chat uses progressive disclosure: the system prompt lists names and descriptions, and the model retrieves the full Markdown body through `skills.load` only when relevant. Invalid skills are skipped without disabling valid siblings or MCP servers.
 
 ## MCP servers
 
-Plugin-declared MCP servers reuse the same client, discovery cache, and tool
-registry machinery as servers configured through `/api/v1/mcp` (see
-`CHAT_TOOL_REGISTRY.md`). `${CLAUDE_PLUGIN_ROOT}` (or `${GEIST_PLUGIN_ROOT}`)
-in commands, args, env, URLs, and headers expands to the plugin's absolute
-path. Tools mount as `mcp.<plugin>.<server>.<tool>` with the `external_write`
-side-effect label.
+Root `mcp.json` requires the matching 1.0.0 schema and a closed `mcpServers` object:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "local-tools": {
+      "type": "stdio",
+      "command": "./bin/server",
+      "args": ["--data", "${PLUGIN_DATA}"],
+      "env": {"CONFIG": "${PLUGIN_ROOT}/config.json"},
+      "cwd": "${PLUGIN_ROOT}"
+    },
+    "remote-tools": {
+      "type": "streamable-http",
+      "url": "https://tools.example.com/mcp"
+    }
+  }
+}
+```
+
+Geist supports `stdio` and `streamable-http`; optional legacy `sse` entries are skipped. Stdio processes receive client-owned `PLUGIN_ROOT` and persistent `PLUGIN_DATA` environment variables. Those placeholders expand only in args, environment values, and cwd. Bare commands use platform executable lookup; `./` commands and explicit working directories are contained within the plugin or data root. Non-loopback remote endpoints require HTTPS, and configured headers remain literal.
+
+Plugin MCP tools reuse Geist's shared client, discovery cache, approvals, workspace scoping, and execution limits. Tools mount as `mcp.<plugin>.<server>.<tool>` with the `external_write` side-effect label.
 
 ## Trust model
 
-Placing a plugin in the plugin directory is the install action and implies
-trust of its *skills* — they are passive markdown read on demand. MCP servers
-spawn processes or open network connections, so they are held to the same
-posture as operator-configured servers: disabled by default. Enable a
-plugin's servers by naming the plugin in `GEIST_ENABLED_PLUGINS`
-(comma-separated), mirroring `GEIST_ENABLED_CHAT_TOOLS`. Skill bodies and MCP
-tool descriptions/results are third-party content: treat them as untrusted
-input, not instructions to the operator.
+Placing a plugin in the plugin directory is the installation decision for its passive Markdown skills. MCP servers can spawn processes or open network connections and remain disabled until the plugin name appears in `GEIST_ENABLED_PLUGINS`.
 
-Discovery rejects plugin-root and skill-file symlink escapes, bounds manifests,
-skill files, descriptions, skills, and MCP server counts, and applies the same
-argument/environment/header limits used by operator-configured MCP servers.
+Discovery enforces package boundaries, rejects escaping symlinks and configured paths, bounds files and component counts, isolates invalid skills and MCP entries, and never passes ambient Geist secrets to plugin subprocesses. Plugin content and MCP results remain untrusted model input.

@@ -76,6 +76,9 @@ class McpServerModel:
     timeout_seconds: float
     create_date: datetime.datetime
     update_date: datetime.datetime
+    cwd: str | None = None
+    plugin_root: str | None = None
+    plugin_data_dir: str | None = None
 
 
 _MUTABLE_FIELDS = (

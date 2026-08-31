@@ -2,6 +2,7 @@
 
 import sys
 import threading
+from io import StringIO
 
 import pytest
 
@@ -12,6 +13,7 @@ from app.services.mcp_client import (
     McpServerConfig,
     _filtered_child_environment,
     _HttpTransport,
+    _StdioTransport,
     _unwrap_response,
 )
 
@@ -151,6 +153,47 @@ def test_stdio_child_environment_does_not_inherit_application_secrets(monkeypatc
     assert "OPENAI_API_KEY" not in environment
 
 
+def test_plugin_stdio_launch_sets_reserved_environment_cwd_and_data_dir(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        stdin = StringIO()
+        stdout = StringIO()
+        stderr = StringIO()
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "app.services.mcp_client.shutil.which", lambda *_args, **_kwargs: "/bin/tool"
+    )
+    monkeypatch.setattr("app.services.mcp_client.subprocess.Popen", fake_popen)
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    plugin_data = tmp_path / "data"
+    config = McpServerConfig(
+        server_id=-1,
+        name="plugin.tool",
+        transport="stdio",
+        command="tool",
+        env={"PLUGIN_ROOT": "untrusted", "EXPLICIT": "yes"},
+        cwd=str(plugin_root),
+        plugin_root=str(plugin_root),
+        plugin_data_dir=str(plugin_data),
+    )
+
+    _StdioTransport(config)
+
+    assert captured["command"] == ["/bin/tool"]
+    assert captured["cwd"] == str(plugin_root)
+    assert captured["env"]["PLUGIN_ROOT"] == str(plugin_root)
+    assert captured["env"]["PLUGIN_DATA"] == str(plugin_data)
+    assert captured["env"]["EXPLICIT"] == "yes"
+    assert plugin_data.is_dir()
+
+
 def test_missing_command_fails_fast():
     config = McpServerConfig(server_id=2, name="broken", transport="stdio", command=None)
     with pytest.raises(McpError, match="no command"):
@@ -275,6 +318,31 @@ def test_sse_response_without_answer_raises():
     lines = ['data: {"jsonrpc": "2.0", "method": "noise"}', ""]
     with pytest.raises(McpError, match="ended without a response"):
         _HttpTransport._read_sse_response(_FakeSseResponse(lines), "req-1", "tools/list")
+
+
+def test_http_transport_client_headers_take_precedence():
+    transport = _HttpTransport(
+        McpServerConfig(
+            server_id=1,
+            name="remote",
+            transport="http",
+            url="https://example.test/mcp",
+            headers={
+                "Accept": "text/plain",
+                "content-type": "text/plain",
+                "Mcp-Session-Id": "plugin-value",
+                "MCP-Protocol-Version": "plugin-value",
+                "X-Tenant": "public",
+            },
+        )
+    )
+
+    assert transport._session.headers["Accept"] == "application/json, text/event-stream"
+    assert transport._session.headers["Content-Type"] == "application/json"
+    assert "Mcp-Session-Id" not in transport._session.headers
+    assert "MCP-Protocol-Version" not in transport._session.headers
+    assert transport._session.headers["X-Tenant"] == "public"
+    transport.close()
 
 
 def test_http_transport_rejects_redirects():

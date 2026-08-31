@@ -31,7 +31,6 @@ class PluginSkillResponse(BaseModel):
     name: str
     qualified_name: str
     description: str
-    disable_model_invocation: bool
 
 
 class PluginMcpServerResponse(BaseModel):
@@ -43,7 +42,6 @@ class PluginMcpServerResponse(BaseModel):
 
 class PluginResponse(BaseModel):
     name: str
-    display_name: str | None
     version: str | None
     description: str | None
     enabled_for_mcp: bool
@@ -65,7 +63,6 @@ def _plugin_list() -> PluginListResponse:
         plugins.append(
             PluginResponse(
                 name=plugin.name,
-                display_name=plugin.display_name,
                 version=plugin.version,
                 description=plugin.description,
                 enabled_for_mcp=plugin_enabled,
@@ -74,7 +71,6 @@ def _plugin_list() -> PluginListResponse:
                         name=skill.name,
                         qualified_name=skill.qualified_name,
                         description=skill.description,
-                        disable_model_invocation=skill.disable_model_invocation,
                     )
                     for skill in plugin.skills
                 ],

@@ -38,17 +38,16 @@ def build_plugin_skills_context(registry: PluginRegistry | None = None) -> str:
     except Exception:
         logger.exception("Could not load plugin skills; continuing without them")
         return ""
-    invocable = [skill for skill in skills if not skill.disable_model_invocation]
-    if not invocable:
+    if not skills:
         return ""
-    if len(invocable) > _MAX_PROMPT_SKILLS:
+    if len(skills) > _MAX_PROMPT_SKILLS:
         logger.warning(
             "%d plugin skills installed; only the first %d are advertised",
-            len(invocable),
+            len(skills),
             _MAX_PROMPT_SKILLS,
         )
-        invocable = invocable[:_MAX_PROMPT_SKILLS]
-    lines = [f"- {skill.qualified_name}: {skill.description}" for skill in invocable]
+        skills = skills[:_MAX_PROMPT_SKILLS]
+    lines = [f"- {skill.qualified_name}: {skill.description}" for skill in skills]
     return "\n".join([_SKILLS_CONTEXT_HEADER, *lines])
 
 

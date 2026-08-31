@@ -19,12 +19,14 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 import threading
 import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -77,6 +79,25 @@ def _filtered_child_environment(configured: dict[str, str]) -> dict[str, str]:
     return {**inherited, **configured}
 
 
+def _set_reserved_environment_value(environment: dict[str, str], name: str, value: str) -> None:
+    """Set a client-owned variable using platform environment-name semantics."""
+    if os.name == "nt":
+        for existing in list(environment):
+            if existing.upper() == name.upper():
+                environment.pop(existing)
+    environment[name] = value
+
+
+def _resolve_stdio_command(command: str) -> str:
+    """Resolve bare commands before configured environment overrides are applied."""
+    if Path(command).is_absolute():
+        return command
+    resolved = shutil.which(command, path=os.environ.get("PATH"))
+    if resolved is None:
+        raise McpError(f"MCP stdio command is not available: {command}")
+    return resolved
+
+
 @dataclass(frozen=True)
 class McpServerConfig:
     """Connection settings for one configured MCP server."""
@@ -90,6 +111,9 @@ class McpServerConfig:
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0
+    cwd: str | None = None
+    plugin_root: str | None = None
+    plugin_data_dir: str | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -101,6 +125,9 @@ class McpServerConfig:
                 "env": self.env,
                 "url": self.url,
                 "headers": self.headers,
+                "cwd": self.cwd,
+                "plugin_root": self.plugin_root,
+                "plugin_data_dir": self.plugin_data_dir,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -115,13 +142,26 @@ class _StdioTransport:
     def __init__(self, config: McpServerConfig):
         if not config.command:
             raise McpError(f"MCP server '{config.name}' has no command configured")
+        environment = _filtered_child_environment(config.env)
+        if config.plugin_root is not None:
+            _set_reserved_environment_value(environment, "PLUGIN_ROOT", config.plugin_root)
+        if config.plugin_data_dir is not None:
+            try:
+                Path(config.plugin_data_dir).mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise McpError(
+                    f"Could not create MCP plugin data directory for '{config.name}': {error}"
+                ) from error
+            _set_reserved_environment_value(environment, "PLUGIN_DATA", config.plugin_data_dir)
+        command = _resolve_stdio_command(config.command)
         try:
             self._process = subprocess.Popen(
-                [config.command, *config.args],
+                [command, *config.args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=_filtered_child_environment(config.env),
+                env=environment,
+                cwd=config.cwd,
                 text=True,
                 bufsize=1,
             )
@@ -279,11 +319,17 @@ class _HttpTransport:
             raise McpError(f"MCP server '{config.name}' has an invalid HTTP URL")
         self._url = config.url
         self._session = requests.Session()
+        configured_headers = {
+            name: value
+            for name, value in config.headers.items()
+            if name.lower()
+            not in {"accept", "content-type", "mcp-protocol-version", "mcp-session-id"}
+        }
+        self._session.headers.update(configured_headers)
         self._session.headers.update(
             {
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
-                **config.headers,
             }
         )
         self._mcp_session_id: str | None = None

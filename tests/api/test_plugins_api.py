@@ -15,6 +15,7 @@ from app.models.database.database import (
 )
 from app.models.database.database_config import DatabaseConfig
 from app.models.database.geist_user import GeistUser
+from app.services.plugin_loader import MCP_SCHEMA_ID, PLUGIN_SCHEMA_ID
 
 
 _OPERATOR_TOKEN = "p" * 32
@@ -23,17 +24,25 @@ _OPERATOR_HEADERS = {"Authorization": f"GeistOperator {_OPERATOR_TOKEN}"}
 
 def _write_plugin(root, name, skills=(), mcp_servers=None):
     plugin_root = root / name
-    manifest_dir = plugin_root / ".claude-plugin"
-    manifest_dir.mkdir(parents=True)
-    manifest = {"name": name, "version": "2.0.0", "description": f"{name} plugin"}
+    plugin_root.mkdir(parents=True)
+    manifest = {
+        "$schema": PLUGIN_SCHEMA_ID,
+        "name": name,
+        "version": "2.0.0",
+        "description": f"{name} plugin",
+    }
+    (plugin_root / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     if mcp_servers is not None:
-        manifest["mcpServers"] = mcp_servers
-    (manifest_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (plugin_root / "mcp.json").write_text(
+            json.dumps({"$schema": MCP_SCHEMA_ID, "mcpServers": mcp_servers}),
+            encoding="utf-8",
+        )
     for skill_name in skills:
         skill_dir = plugin_root / "skills" / skill_name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\ndescription: {skill_name} does things\n---\nBody", encoding="utf-8"
+            f"---\nname: {skill_name}\ndescription: {skill_name} does things\n---\nBody",
+            encoding="utf-8",
         )
     return plugin_root
 
@@ -88,7 +97,7 @@ def test_refresh_discovers_plugins(plugins_client, monkeypatch):
         plugin_dir,
         "reviewer",
         skills=("code-review",),
-        mcp_servers={"db": {"command": "run-server"}},
+        mcp_servers={"db": {"type": "stdio", "command": "run-server"}},
     )
 
     refreshed = client.post("/api/v1/plugins/refresh", headers=_OPERATOR_HEADERS)

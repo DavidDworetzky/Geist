@@ -4,26 +4,28 @@ import json
 
 from agents.models.tool_calling import ToolCall, ToolContext
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
-from app.services.plugin_loader import PluginRegistry
+from app.services.plugin_loader import MCP_SCHEMA_ID, PLUGIN_SCHEMA_ID, PluginRegistry
 from app.services.tool_registry import ToolRegistry
 
 
 def _write_plugin(root, name="demo-plugin", mcp_servers=None):
     plugin_root = root / name
-    manifest_dir = plugin_root / ".claude-plugin"
-    manifest_dir.mkdir(parents=True)
-    manifest = {"name": name}
+    plugin_root.mkdir(parents=True)
+    manifest = {"$schema": PLUGIN_SCHEMA_ID, "name": name}
+    (plugin_root / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     if mcp_servers is not None:
-        manifest["mcpServers"] = mcp_servers
-    (manifest_dir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (plugin_root / "mcp.json").write_text(
+            json.dumps({"$schema": MCP_SCHEMA_ID, "mcpServers": mcp_servers}),
+            encoding="utf-8",
+        )
     return plugin_root
 
 
-def _write_skill(plugin_root, name="demo-skill", description="Demo description", extra=""):
+def _write_skill(plugin_root, name="demo-skill", description="Demo description"):
     skill_dir = plugin_root / "skills" / name
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {name}\ndescription: {description}\n{extra}---\n\nSkill body text.\n",
+        f"---\nname: {name}\ndescription: {description}\n---\n\nSkill body text.\n",
         encoding="utf-8",
     )
 
@@ -43,11 +45,6 @@ class TestSkillsContext:
         assert "demo-plugin:demo-skill" in context
         assert "Demo description" in context
         assert "skills.load" in context
-
-    def test_model_hidden_skills_are_excluded(self, tmp_path):
-        plugin_root = _write_plugin(tmp_path)
-        _write_skill(plugin_root, extra="disable-model-invocation: true\n")
-        assert build_plugin_skills_context(PluginRegistry(tmp_path)) == ""
 
 
 class TestSkillLoadTool:
@@ -106,7 +103,7 @@ class TestPluginMcpMounting:
         _write_plugin(
             tmp_path,
             "demo-plugin",
-            mcp_servers={"srv": {"command": "fake-server"}},
+            mcp_servers={"srv": {"type": "stdio", "command": "fake-server"}},
         )
         monkeypatch.setenv("GEIST_ENABLED_PLUGINS", "demo-plugin")
         plugin_registry = PluginRegistry(tmp_path)
