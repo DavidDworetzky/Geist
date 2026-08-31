@@ -255,7 +255,7 @@ def _load_manifest(root: Path) -> dict | None:
         logger.warning("Plugin %s has a missing or unsupported $schema", root)
         return None
     name = manifest.get("name")
-    if not isinstance(name, str) or _PLUGIN_NAME_PATTERN.fullmatch(name) is None:
+    if not isinstance(name, str) or len(name) > 64 or _PLUGIN_NAME_PATTERN.fullmatch(name) is None:
         logger.warning("Plugin %s has an invalid name", root)
         return None
     for field_name in _MANIFEST_STRING_FIELDS:
@@ -512,13 +512,19 @@ def _resolve_plugin_cwd(value: object, root: Path, data_dir: Path) -> Path | Non
     if not isinstance(value, str) or not value or "\x00" in value:
         return None
     if value.startswith("./"):
-        return _resolve_under(root, value[2:])
+        expanded = _expand_plugin_variables(value, root, data_dir)
+        return _resolve_under(root, expanded[2:])
     for placeholder, base in (("${PLUGIN_ROOT}", root), ("${PLUGIN_DATA}", data_dir)):
         if value == placeholder:
             return base
         prefix = f"{placeholder}/"
         if value.startswith(prefix):
-            return _resolve_under(base, value[len(prefix) :])
+            expanded = _expand_plugin_variables(value, root, data_dir)
+            try:
+                expanded_relative = Path(expanded).relative_to(base)
+            except ValueError:
+                return None
+            return _resolve_under(base, str(expanded_relative))
     return None
 
 

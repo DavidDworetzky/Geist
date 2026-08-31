@@ -127,7 +127,10 @@ class TestLoadPlugin:
     def test_accepts_standard_plugin_names(self, tmp_path, name):
         assert load_plugin(_write_plugin(tmp_path, name=name)) is not None
 
-    @pytest.mark.parametrize("name", ["bad_name", "-bad", "bad-", "bad--name", "bad..name"])
+    @pytest.mark.parametrize(
+        "name",
+        ["bad_name", "-bad", "bad-", "bad--name", "bad..name", "a" * 65],
+    )
     def test_rejects_nonstandard_plugin_names(self, tmp_path, name):
         assert load_plugin(_write_plugin(tmp_path, name=name)) is None
 
@@ -286,6 +289,26 @@ class TestMcpDiscovery:
         assert server.plugin_root == str(plugin_root)
         assert server.plugin_data_dir == f"{data_root}/demo-plugin"
         assert server.qualified_name == "demo-plugin.database"
+
+    def test_cwd_expands_every_standard_placeholder_occurrence(self, tmp_path, monkeypatch):
+        plugin_root = _write_plugin(tmp_path)
+        data_root = tmp_path / "plugin-data"
+        monkeypatch.setenv("GEIST_PLUGIN_DATA_DIR", str(data_root))
+        _write_mcp(
+            plugin_root,
+            {
+                "database": {
+                    "type": "stdio",
+                    "command": "server",
+                    "cwd": "${PLUGIN_DATA}/nested-${PLUGIN_DATA}",
+                }
+            },
+        )
+
+        server = load_plugin(plugin_root).mcp_servers[0]
+
+        assert "${PLUGIN_DATA}" not in server.cwd
+        assert server.cwd == f"{data_root}/demo-plugin/nested-{data_root}/demo-plugin"
 
     def test_parses_http_server(self, tmp_path):
         plugin_root = _write_plugin(tmp_path)
