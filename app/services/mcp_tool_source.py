@@ -36,6 +36,9 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
         url=server.url,
         headers=dict(server.headers or {}),
         timeout_seconds=server.timeout_seconds,
+        cwd=server.cwd,
+        plugin_root=server.plugin_root,
+        plugin_data_dir=server.plugin_data_dir,
     )
 
 
