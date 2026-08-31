@@ -36,6 +36,16 @@ def passing_checks() -> list[dict]:
     return [{"name": "tests", "status": "completed", "conclusion": "success"}]
 
 
+def pr_330_files() -> list[dict]:
+    return [
+        {"filename": "agents/model_catalog.py"},
+        {"filename": "docs/agents.md"},
+        {"filename": "docs/open_weight_models.md"},
+        {"filename": "tests/agents/test_model_catalog.py"},
+        {"filename": "tests/agents/test_online_agent.py"},
+    ]
+
+
 def test_exact_review_command() -> None:
     assert pitchblend.COMMAND_PATTERN.fullmatch("@pitchblend-ai review")
     assert pitchblend.COMMAND_PATTERN.fullmatch("@Pitchblend-AI   review")
@@ -111,6 +121,58 @@ def test_gate_blocks_size_limits_and_pending_checks() -> None:
     assert any("pending or unsuccessful" in reason for reason in result.reasons)
 
 
+def test_gate_ignores_its_own_pending_status_but_not_other_statuses() -> None:
+    files = [
+        {
+            "filename": "agents/model_catalog.py",
+            "status": "modified",
+            "additions": 4,
+            "deletions": 2,
+            "patch": "@@ -1 +1 @@",
+        },
+        {
+            "filename": "tests/agents/test_model_catalog.py",
+            "status": "modified",
+            "additions": 8,
+            "deletions": 1,
+            "patch": "@@ -1 +1 @@",
+        },
+    ]
+    own_status = {
+        "context": pitchblend.APPROVAL_GATE_CONTEXT,
+        "state": "pending",
+    }
+
+    result = pitchblend.deterministic_gate(
+        eligible_pull_request(), files, passing_checks(), [own_status]
+    )
+
+    assert result.eligible
+
+    unrelated_status = {"context": "external policy", "state": "pending"}
+    result = pitchblend.deterministic_gate(
+        eligible_pull_request(),
+        files,
+        passing_checks(),
+        [own_status, unrelated_status],
+    )
+
+    assert not result.eligible
+    assert result.reasons == (
+        "commit statuses are pending or unsuccessful: external policy",
+    )
+
+
+def test_model_catalog_scope_matches_pr_330_and_rejects_near_misses() -> None:
+    assert pitchblend.is_model_catalog_only_change(pr_330_files())
+    assert not pitchblend.is_model_catalog_only_change(
+        [{"filename": "tests/agents/test_model_catalog.py"}]
+    )
+    assert not pitchblend.is_model_catalog_only_change(
+        pr_330_files() + [{"filename": "agents/online_agent.py"}]
+    )
+
+
 def base_classification(**overrides: object) -> dict:
     classification = {
         "change_type": "bugfix",
@@ -153,6 +215,41 @@ def test_classifier_matrix_covers_major_decision_boundaries() -> None:
     assert pitchblend.classification_pass_rule(
         base_classification(complexity="medium", contract_change=True)
     ) is None
+
+
+def test_catalog_only_matrix_route_accepts_pr_330_classifier_shape() -> None:
+    classification = base_classification(
+        change_type="feature",
+        complexity="medium",
+        contract_change=True,
+        reason="Adds a hosted OpenRouter model entry and exposes its metadata.",
+    )
+
+    assert pitchblend.classification_pass_rule(classification) is None
+    assert (
+        pitchblend.classification_pass_rule(
+            classification,
+            model_catalog_only=pitchblend.is_model_catalog_only_change(pr_330_files()),
+        )
+        == "model-catalog-low-or-medium"
+    )
+    approved = pitchblend.format_approved_comment(
+        330,
+        "8383580aa22b0ff7",
+        len(pr_330_files()),
+        103,
+        classification,
+        "model-catalog-low-or-medium",
+    )
+    assert "Medium-complexity model catalog feature" in approved
+
+    classification["security_change"] = True
+    assert (
+        pitchblend.classification_pass_rule(
+            classification, model_catalog_only=True
+        )
+        is None
+    )
 
 
 def test_geist_pr_325_classifier_shape_passes_despite_subjective_diagnostics() -> None:
