@@ -20,6 +20,8 @@ PRE_LOCAL_ARTIFACT_REVISION = "e4b7a9c2d1f0"
 PRE_LOCAL_ARTIFACT_GAP = ("user_settings", "default_local_artifact_id")
 PRE_WORKSPACE_REVISION = "f5c8a1d3e7b9"
 PRE_WORKSPACE_GAP = ("geist_user", "workspace_key")
+PRE_MCP_REVISION = "c6d9e2f4a7b1"
+PRE_MCP_TABLE = "mcp_server"
 
 
 def upgrade_database() -> None:
@@ -63,12 +65,21 @@ def upgrade_database() -> None:
             )
             _add_default_local_artifact_column(Engine)
             command.stamp(alembic_config, "head")
-        elif schema_kind != "current":
-            previous_revision = (
-                PRE_WORKSPACE_REVISION
-                if schema_kind == "pre_workspace"
-                else PRE_LOCAL_ARTIFACT_REVISION
+        elif schema_kind == "pre_local_artifact_and_mcp":
+            logger.info(
+                "Adopting an unversioned Geist database missing the local-artifact "
+                "selection column and MCP server table"
             )
+            _add_default_local_artifact_column(Engine)
+            command.stamp(alembic_config, PRE_MCP_REVISION)
+            command.upgrade(alembic_config, "head")
+        elif schema_kind != "current":
+            if schema_kind == "pre_workspace":
+                previous_revision = PRE_WORKSPACE_REVISION
+            elif schema_kind == "pre_mcp":
+                previous_revision = PRE_MCP_REVISION
+            else:
+                previous_revision = PRE_LOCAL_ARTIFACT_REVISION
             logger.info(
                 "Adopting an unversioned legacy Geist database at %s before upgrading",
                 previous_revision,
@@ -113,6 +124,8 @@ def _classify_legacy_schema(metadata, engine) -> str:
     if schema_kind in {
         "current",
         "pre_local_artifact",
+        "pre_local_artifact_and_mcp",
+        "pre_mcp",
         "pre_workspace",
         "pre_local_artifact_and_workspace",
     }:
@@ -141,9 +154,11 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     problems: list[str] = []
+    missing_tables: set[str] = set()
     missing_column_gaps: set[tuple[str, str]] = set()
     for table in metadata.sorted_tables:
         if table.name not in existing_tables:
+            missing_tables.add(table.name)
             problems.append(f"missing table {table.name}")
             continue
         existing_columns = {column["name"] for column in inspector.get_columns(table.name)}
@@ -154,13 +169,19 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
                 f"table {table.name} missing columns {', '.join(sorted(missing_columns))}"
             )
 
-    if not problems:
+    if not missing_tables and not missing_column_gaps:
         return "current", problems
-    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP} and len(problems) == 1:
+    if not missing_tables and missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP}:
         return "pre_local_artifact", problems
-    if missing_column_gaps == {PRE_WORKSPACE_GAP} and len(problems) == 1:
+    if missing_tables != {PRE_MCP_TABLE}:
+        return "unknown", problems
+    if not missing_column_gaps:
+        return "pre_mcp", problems
+    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP}:
+        return "pre_local_artifact_and_mcp", problems
+    if missing_column_gaps == {PRE_WORKSPACE_GAP}:
         return "pre_workspace", problems
-    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP, PRE_WORKSPACE_GAP} and len(problems) == 2:
+    if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP, PRE_WORKSPACE_GAP}:
         return "pre_local_artifact_and_workspace", problems
     return "unknown", problems
 
