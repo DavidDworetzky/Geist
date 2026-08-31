@@ -199,9 +199,7 @@ class _StdioTransport:
                 stdin.write(payload + "\n")
                 stdin.flush()
             except (BrokenPipeError, OSError) as error:
-                raise McpError(
-                    f"MCP server pipe closed: {self._stderr_summary()}"
-                ) from error
+                raise McpError(f"MCP server pipe closed: {self._stderr_summary()}") from error
 
     def _stderr_summary(self) -> str:
         return " | ".join(self._stderr_tail) or "no stderr output"
