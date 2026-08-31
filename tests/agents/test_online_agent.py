@@ -227,7 +227,12 @@ class TestOnlineAgentInitialization:
 
     @pytest.mark.parametrize(
         "model_id",
-        ["x-ai/grok-4.6", "qwen/qwen3.8-flash", "z-ai/glm-5.3-flash"],
+        [
+            "x-ai/grok-4.6",
+            "qwen/qwen3.8-flash",
+            "tencent/hy4-preview",
+            "z-ai/glm-5.3-flash",
+        ],
     )
     def test_openrouter_initialization(self, model_id):
         """Test OpenRouter key discovery and native tool support."""
@@ -384,6 +389,52 @@ class TestOnlineAgentAPIRequests:
                 assert "n" not in payload
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_hy4_preview_omits_unsupported_defaults_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="tencent/hy4-preview",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "tencent/hy4-preview",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "temperature": 0.9,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert "reasoning" not in payload
+                assert payload["temperature"] == 0.9
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
 
     def test_openai_complete_text(self):
         """Test complete_text with OpenAI API."""

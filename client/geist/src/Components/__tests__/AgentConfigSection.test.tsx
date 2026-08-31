@@ -329,6 +329,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Tencent Hy4 Preview guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Single Tencent FP8 preview route; enforce ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'tencent/hy4-preview',
+              name: 'Tencent Hy4 Preview',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 64000,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'hy',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="tencent/hy4-preview"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Tencent Hy4 Preview' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 

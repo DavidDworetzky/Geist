@@ -159,6 +159,31 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
+    hy4 = get_model_spec("tencent/hy4-preview")
+
+    assert hy4.provider == "openrouter"
+    assert hy4.backend == "openai_compatible"
+    assert hy4.local is False
+    assert hy4.family == "hy"
+    assert hy4.context_window == 1048576
+    assert hy4.max_output_tokens == 64000
+    assert hy4.parameter_count == "770B"
+    assert hy4.activated_parameters == "49B"
+    assert hy4.supports_vision is False
+    assert hy4.supports_function_calling is True
+    assert hy4.supports_reasoning is True
+    assert hy4.supports_streaming is True
+    assert hy4.mandatory_reasoning_effort is None
+    assert hy4.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     grok = get_model_spec("x-ai/grok-4.6")
 
@@ -307,6 +332,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "qwen/qwen3.8-max",
     "qwen3.8-max",
     "qwen/qwen3.8-flash",
+    "tencent/hy4-preview",
     "z-ai/glm-5.3-flash",
     "meta/muse-spark-1.2-contributor",
 ])
@@ -337,6 +363,7 @@ def test_hosted_glm_infers_zai_endpoint():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
     ],
@@ -465,6 +492,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "tencent/hy4-preview" for model in response.providers["openrouter"]
     )
     assert any(
         model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"]
