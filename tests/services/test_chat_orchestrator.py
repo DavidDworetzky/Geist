@@ -51,7 +51,7 @@ def test_tool_result_reenters_model_context_and_turn_persists_once():
     calls = []
 
     def lookup(context, arguments):
-        calls.append((context.user_id, arguments.query))
+        calls.append((context.workspace_id, arguments.query))
         return ToolExecutionOutput(
             content='{"answer": "2023-tax-return.pdf"}', summary="Found tax return"
         )
@@ -93,7 +93,7 @@ def test_tool_result_reenters_model_context_and_turn_persists_once():
         orchestrator.stream(
             backend=backend,
             prompt="Find my tax return",
-            user_id=7,
+            workspace_id=7,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt="Use tools when needed.",
@@ -161,7 +161,7 @@ def test_artifact_bytes_are_live_but_not_persisted_inline():
         orchestrator.stream(
             backend=backend,
             prompt="Make a cat",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -198,7 +198,7 @@ def test_round_limit_emits_error_and_does_not_persist():
         orchestrator.stream(
             backend=backend,
             prompt="loop",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -225,14 +225,15 @@ def test_run_can_be_cancelled_after_run_started():
     stream = orchestrator.stream(
         backend=backend,
         prompt="stop",
-        user_id=1,
+        workspace_id=1,
         chat_id=None,
         config=ModelRequestConfig(),
         system_prompt=None,
     )
 
     started = next(stream)
-    assert controls.cancel(started.payload["run_id"])
+    assert not controls.cancel(started.payload["run_id"], workspace_id=2)
+    assert controls.cancel(started.payload["run_id"], workspace_id=1)
     cancelled = next(stream)
     assert cancelled.event == "cancelled"
     assert cancelled.payload["chat_id"] == 9
@@ -253,7 +254,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     stream = orchestrator.stream(
         backend=ScriptedBackend([ModelTurn(text="unused")]),
         prompt="cancel and disconnect",
-        user_id=1,
+        workspace_id=1,
         chat_id=None,
         config=ModelRequestConfig(),
         system_prompt=None,
@@ -261,7 +262,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
 
     started = next(stream)
     run_id = started.payload["run_id"]
-    assert controls.cancel(run_id)
+    assert controls.cancel(run_id, workspace_id=1)
     assert len(writes) == 1
     assert writes[0]["status"] == "cancelled"
     assert writes[0]["run_id"] == run_id
@@ -271,7 +272,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     stream.close()
 
     assert len(writes) == 1
-    assert not controls.cancel(run_id)
+    assert not controls.cancel(run_id, workspace_id=1)
 
 
 def test_backend_without_native_tools_receives_empty_registry():
@@ -295,7 +296,7 @@ def test_backend_without_native_tools_receives_empty_registry():
         orchestrator.stream(
             backend=backend,
             prompt="news",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -334,7 +335,7 @@ def test_aggregate_tool_result_budget_truncates_model_context():
         orchestrator.stream(
             backend=backend,
             prompt="search",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -422,7 +423,7 @@ def test_persistence_failure_does_not_emit_unpersisted_final():
         orchestrator.stream(
             backend=backend,
             prompt="hello",
-            user_id=1,
+            workspace_id=1,
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
@@ -434,3 +435,109 @@ def test_persistence_failure_does_not_emit_unpersisted_final():
     assert error_event.payload["message"] == "Chat completion failed"
     assert "database unavailable" not in error_event.payload["message"]
     assert [attempt["status"] for attempt in write_attempts] == ["completed", "failed"]
+
+
+def test_doom_loop_interrupts_repeated_identical_tool_calls():
+    executions = []
+
+    def lookup(context, arguments):
+        executions.append(arguments.query)
+        return ToolExecutionOutput(content='{"answer": "same thing"}')
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lookup,
+        )
+    )
+
+    def repeated_turn(call_id):
+        return ModelTurn(
+            tool_calls=[ToolCall(id=call_id, name="documents.search", arguments={"query": "loop"})],
+            finish_reason="tool_calls",
+        )
+
+    backend = ScriptedBackend(
+        [repeated_turn("call_1"), repeated_turn("call_2"), repeated_turn("call_3")]
+    )
+    writes = []
+
+    def write_history(**kwargs):
+        writes.append(kwargs)
+        return SimpleNamespace(chat_session_id=42)
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=write_history,
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Loop forever",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    # The third identical call is interrupted before execution.
+    assert executions == ["loop", "loop"]
+    error = next(event.payload for event in events if event.event == "error")
+    assert error["message"].startswith("Doom loop detected")
+    assert "documents.search" in error["message"]
+    assert writes[0]["status"] == "failed"
+
+
+def test_doom_loop_not_triggered_by_varied_arguments():
+    def lookup(context, arguments):
+        return ToolExecutionOutput(content='{"answer": "ok"}')
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lookup,
+        )
+    )
+
+    def turn(call_id, query):
+        return ModelTurn(
+            tool_calls=[ToolCall(id=call_id, name="documents.search", arguments={"query": query})],
+            finish_reason="tool_calls",
+        )
+
+    backend = ScriptedBackend(
+        [
+            turn("call_1", "alpha"),
+            turn("call_2", "beta"),
+            turn("call_3", "alpha"),
+            ModelTurn(text="Done.", finish_reason="stop"),
+        ]
+    )
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=42),
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Search a few things",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    completion = next(event.payload for event in events if event.event == "final")
+    assert completion.message == ["Done."]
+    assert not [event for event in events if event.event == "error"]

@@ -308,13 +308,15 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
-        "stealth/ox-alpha", "Ox Alpha (Preview)", "stealth", provider="openrouter",
+        "z-ai/glm-5.3-flash", "GLM 5.3 Flash", "glm", provider="openrouter",
         backend="openai_compatible", context_window=1048576, max_output_tokens=131072,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
-        supports_streaming=True, local=False,
+        supports_streaming=True, recommended=True,
+        parameter_count="320B", activated_parameters="18B",
+        mandatory_reasoning_effort="max", local=False,
         performance_note=(
-            "Anonymous OpenRouter preview with mandatory reasoning; pricing and "
-            "availability may change."
+            "Hosted through OpenRouter; Geist applies Z.AI's recommended max reasoning "
+            "effort. Enable OpenRouter ZDR routing for confidential workloads."
         ),
     ),
     ModelSpec(

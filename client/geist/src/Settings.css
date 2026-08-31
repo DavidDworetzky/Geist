@@ -646,3 +646,46 @@
     flex-direction: column;
   }
 }
+
+.mcp-server-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.mcp-server-item {
+  padding: 12px;
+  background: var(--geist-color-surface-muted);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.mcp-server-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.mcp-server-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mcp-server-copy .settings-description {
+  overflow-wrap: anywhere;
+}
+
+.mcp-server-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mcp-server-form {
+  display: grid;
+  gap: 14px;
+}

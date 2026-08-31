@@ -198,7 +198,7 @@ User settings control default agent behavior and can be configured via API:
 - `MOONSHOT_API_KEY` - Moonshot API key for Kimi models
 - `ZAI_API_KEY` - Z.AI API key for hosted GLM models
 - `DEEPSEEK_API_KEY` - DeepSeek API key
-- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. Grok 4.6, Tencent Hy4 Preview, Muse Spark 1.2 Contributor, Qwen 3.8 Max/Flash, and Ox Alpha)
+- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. GLM 5.3 Flash, Grok 4.6, Tencent Hy4 Preview, Muse Spark 1.2 Contributor, and Qwen 3.8 Max/Flash)
 - `OPENAI_COMPATIBLE_BASE_URL` - Base `/v1` URL for a self-hosted inference server
 - `API_KEY` - Generic fallback API key
 
@@ -213,8 +213,8 @@ from agents.agent_context import AgentContext
 # Get agent context
 context = get_default_agent_context()
 
-# Create agent from user settings
-agent = UserSettingsService.create_agent_from_default_user(context)
+# Create agent from workspace settings
+agent = UserSettingsService.create_agent_from_default_workspace(context)
 
 # Complete text
 completion = agent.complete_text(
@@ -236,7 +236,7 @@ overrides = AgentConfigRequest(
     temperature=0.5
 )
 
-agent = UserSettingsService.create_agent_from_default_user(
+agent = UserSettingsService.create_agent_from_default_workspace(
     context, 
     overrides=overrides
 )
@@ -303,16 +303,16 @@ and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
 
 ### Configuration Migration
 
-Update your configuration files to use the new user settings format:
+Update your configuration code to use workspace-owned settings:
 
 ```python
 # Old agent instantiation
 agent = LlamaAgent(agent_context, ckpt_dir=None)
 
-# New user settings based approach
-settings = UserSettingsService.get_or_create_user_settings_by_id(user_id)
-agent = UserSettingsService.create_agent_from_user_settings(
-    user_id, 
+# New workspace settings based approach
+settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+agent = UserSettingsService.create_agent_from_workspace_settings(
+    workspace_id,
     agent_context
 )
 ```

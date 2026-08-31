@@ -10,13 +10,12 @@ catalog lives in `agents/model_catalog.py`.
 Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
-8x7B, gpt-oss 120B, and OpenRouter's Grok 4.6 route are intentionally
-server-backed.
+8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8
+Flash routes are intentionally server-backed.
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
-The anonymous Ox Alpha preview is also server-backed because it is available
-only through OpenRouter as `stealth/ox-alpha`; the catalog does not guess its
-undisclosed model family or parameter count.
+The retired anonymous `stealth/ox-alpha` preview has been replaced by its
+stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
 its parameter count or a fixed maximum output limit, so the catalog leaves
 both fields unset.
@@ -89,6 +88,19 @@ change. As of August 28, 2026, OpenRouter identifies the Tencent endpoint as
 zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
+
+## OpenRouter-hosted GLM 5.3 Flash
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`z-ai/glm-5.3-flash`. The stable route supports a 1,048,576-token context,
+131,072-token maximum output, image and video input, streaming, response-format
+JSON, and native function calling. Reasoning cannot be disabled; Geist sends
+Z.ai's recommended `max` effort.
+
+OpenRouter may route this model across providers with different context limits,
+supported parameters, and data policies. Enable OpenRouter Zero Data Retention
+routing for confidential workloads and retain normal retry handling for
+provider availability changes.
 
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 
