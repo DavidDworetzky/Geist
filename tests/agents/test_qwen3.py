@@ -41,8 +41,15 @@ for _mod_name in _MLX_SUBMODULES:
         sys.modules[_mod_name] = _mock
 
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.chat_template_tools import provider_tool_name
 from agents.architectures.registry import clear_registry, get_runner
 from agents.factory import AgentFactory
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +82,15 @@ def _mock_model():
     return model
 
 
+def _search_tool():
+    return ToolDefinition(
+        name="web.search",
+        description="Search the web",
+        arguments_schema={"type": "object", "properties": {}},
+        handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Qwen3Runner: loading strategies
 # ---------------------------------------------------------------------------
@@ -100,6 +116,27 @@ class TestQwen3RunnerLoadHub:
         mock_model_cls.from_pretrained.assert_called_once()
         assert runner.model is not None
         assert runner.tokenizer is not None
+
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
+    def test_load_enables_tools_when_template_renders_catalog(
+        self, _mock_exists, mock_tok_cls, mock_model_cls
+    ):
+        tokenizer = _mock_tokenizer()
+        tokenizer.chat_template = "{{ tools }}"
+        tokenizer.apply_chat_template.side_effect = lambda _messages, **kwargs: str(
+            kwargs.get("tools") or []
+        )
+        mock_tok_cls.from_pretrained.return_value = tokenizer
+        mock_model_cls.from_pretrained.return_value = _mock_model()
+
+        from agents.architectures.qwen3_runner import Qwen3Runner
+
+        runner = Qwen3Runner()
+        runner.load("Qwen/Qwen3-8B")
+
+        assert runner.supports_native_tool_calling is True
 
     @patch("agents.architectures.vllm_runner.login")
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
@@ -418,6 +455,57 @@ class TestQwen3RunnerInference:
         kwargs = pipe_call_kwargs[1] if pipe_call_kwargs[1] else {}
         assert kwargs.get("do_sample") is False
         assert kwargs.get("temperature") is None
+
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
+    def test_compatibility_runner_returns_native_tool_turn(self, mock_pipeline_fn):
+        runner = self._create_loaded_runner()
+        runner.supports_native_tool_calling = True
+        safe_name = provider_tool_name("web.search")
+        prompt_text = runner.tokenizer.apply_chat_template.return_value
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [
+            {
+                "generated_text": (
+                    prompt_text + f'<tool_call>{{"name":"{safe_name}",'
+                    '"arguments":{"query":"news"}}</tool_call>'
+                )
+            }
+        ]
+        mock_pipeline_fn.return_value = mock_pipe
+
+        events = list(
+            runner.stream_model_turn(
+                [ChatMessage(role="user", content="Search")],
+                [_search_tool()],
+                ModelRequestConfig(temperature=0.0),
+            )
+        )
+
+        template_kwargs = runner.tokenizer.apply_chat_template.call_args.kwargs
+        assert template_kwargs["tools"][0]["function"]["name"] == safe_name
+        assert template_kwargs["enable_thinking"] is False
+        turn = events[-1].turn
+        assert turn is not None
+        assert turn.tool_calls[0].name == "web.search"
+
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
+    def test_stream_without_tools_preserves_text_completion(self, mock_pipeline_fn):
+        runner = self._create_loaded_runner()
+        prompt_text = runner.tokenizer.apply_chat_template.return_value
+        mock_pipe = MagicMock(return_value=[{"generated_text": prompt_text + "Plain answer"}])
+        mock_pipeline_fn.return_value = mock_pipe
+
+        events = list(
+            runner.stream_model_turn(
+                [ChatMessage(role="user", content="hello")],
+                [],
+                ModelRequestConfig(temperature=0.0),
+            )
+        )
+
+        assert "tools" not in runner.tokenizer.apply_chat_template.call_args.kwargs
+        assert events[-1].turn is not None
+        assert events[-1].turn.text == "Plain answer"
 
 
 # ---------------------------------------------------------------------------

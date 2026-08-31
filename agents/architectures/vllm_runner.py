@@ -9,6 +9,7 @@ import glob
 import json
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any
 
 import safetensors.torch
@@ -17,7 +18,20 @@ import transformers
 from huggingface_hub import login
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+from agents.architectures.chat_template_tools import (
+    build_tool_payload,
+    parse_tool_response,
+    tokenizer_supports_tools,
+)
+from agents.model_catalog import infer_model_spec
 from agents.models.llama_completion import strings_to_message_dict
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
 
 from .base_runner import BaseRunner, GenerationConfig
 
@@ -37,6 +51,7 @@ class VLLMRunner(BaseRunner):
         self.model_id: str | None = None
         self.weights_dir: str | None = None
         self.device: Any = None
+        self.supports_native_tool_calling = False
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """Load a model for inference from local files or HuggingFace Hub."""
@@ -93,7 +108,22 @@ class VLLMRunner(BaseRunner):
             logger.info(f"Loading model from HuggingFace Hub: {self.model_id}")
             self._load_from_hub()
 
+        model_spec = infer_model_spec(model_id)
+        self.supports_native_tool_calling = bool(
+            model_spec
+            and model_spec.supports_function_calling
+            and tokenizer_supports_tools(
+                self.tokenizer,
+                template_options=self._native_template_options(),
+            )
+        )
         logger.info(f"Runner loaded for model: {model_id}")
+
+    def _native_template_options(self) -> dict[str, Any]:
+        model_spec = infer_model_spec(self.model_id or "")
+        if model_spec is not None and model_spec.family == "qwen":
+            return {"enable_thinking": False}
+        return {}
 
     @staticmethod
     def _find_safetensors_files(directory: str) -> list[str]:
@@ -237,6 +267,94 @@ class VLLMRunner(BaseRunner):
 
         return strings_to_message_dict(user_prompt, response_text)
 
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Run a native tool turn through the legacy Transformers shim."""
+
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+        if not tools:
+            result = self.complete_messages(
+                [{"role": message.role, "content": message.content} for message in messages],
+                GenerationConfig(
+                    max_tokens=config.max_tokens,
+                    temperature=config.temperature,
+                    top_p=config.top_p,
+                    frequency_penalty=config.frequency_penalty,
+                    presence_penalty=config.presence_penalty,
+                    stop=config.stop,
+                ),
+            )
+            text = next(
+                (
+                    str(message.get("content") or "")
+                    for message in reversed(result)
+                    if message.get("role") == "assistant"
+                ),
+                "",
+            )
+            if text:
+                yield ModelEvent.text_delta(text)
+            yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+            return
+        if tools and not self.supports_native_tool_calling:
+            raise ValueError(f"Model {self.model_id} does not support native tool calling")
+        payload = build_tool_payload(messages, tools)
+        template_options = self._native_template_options()
+        template_options.update(
+            {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+        )
+        if payload.tools:
+            template_options["tools"] = payload.tools
+        prompt_text = self.tokenizer.apply_chat_template(
+            payload.messages,
+            **template_options,
+        )
+        if self._pipeline is None:
+            self._pipeline = transformers.pipeline(
+                "text-generation",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                device=self.device,
+            )
+        outputs = self._pipeline(
+            prompt_text,
+            max_new_tokens=config.max_tokens,
+            do_sample=config.temperature > 0,
+            temperature=config.temperature if config.temperature > 0 else None,
+            top_p=config.top_p,
+        )
+        output_text = outputs[0]["generated_text"]
+        response = (
+            output_text[len(prompt_text) :] if output_text.startswith(prompt_text) else output_text
+        )
+        for marker in ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]:
+            marker_index = response.find(marker)
+            if marker_index >= 0:
+                response = response[:marker_index]
+        stop_positions = [
+            position
+            for stop_sequence in config.stop or []
+            if stop_sequence
+            if (position := response.find(stop_sequence)) >= 0
+        ]
+        if stop_positions:
+            response = response[: min(stop_positions)]
+        turn = parse_tool_response(
+            response,
+            provider_to_internal=payload.provider_to_internal,
+        )
+        if turn.text:
+            yield ModelEvent.text_delta(turn.text)
+        yield ModelEvent.turn_complete(turn)
+
     def cleanup(self) -> None:
         if self._pipeline:
             del self._pipeline
@@ -247,6 +365,7 @@ class VLLMRunner(BaseRunner):
         if self.tokenizer:
             del self.tokenizer
             self.tokenizer = None
+        self.supports_native_tool_calling = False
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         logger.info("Runner cleaned up")

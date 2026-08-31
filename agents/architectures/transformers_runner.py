@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import os
 import re
+from collections.abc import Iterator
 from contextlib import suppress
 from importlib import metadata
 from typing import Any, cast
@@ -15,9 +16,21 @@ import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.chat_template_tools import (
+    build_tool_payload,
+    parse_tool_response,
+    tokenizer_supports_tools,
+)
 from agents.model_catalog import infer_model_spec
 from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import strings_to_message_dict
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +52,7 @@ class TransformersRunner(BaseRunner):
         self.device: torch.device | None = None
         self.model_spec = None
         self.trust_remote_code = False
+        self.supports_native_tool_calling = False
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         model_load_status_registry.mark_loading(
@@ -180,6 +194,14 @@ class TransformersRunner(BaseRunner):
 
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        self.supports_native_tool_calling = bool(
+            self.model_spec
+            and self.model_spec.supports_function_calling
+            and tokenizer_supports_tools(
+                self.tokenizer,
+                template_options=self._native_template_options(),
+            )
+        )
 
     def _check_transformers_version(self) -> None:
         required = self.model_spec.min_transformers_version if self.model_spec else None
@@ -369,10 +391,122 @@ class TransformersRunner(BaseRunner):
             return_tensors="pt",
         )
 
+    def _native_template_options(self) -> dict[str, Any]:
+        if self.model_spec is not None and self.model_spec.family == "qwen":
+            return {"enable_thinking": False}
+        return {}
+
+    def _generate_native_response(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        config: ModelRequestConfig,
+    ) -> str:
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        template_options = self._native_template_options()
+        template_options.update(
+            {
+                "add_generation_prompt": True,
+                "tokenize": True,
+                "return_dict": True,
+                "return_tensors": "pt",
+            }
+        )
+        if tools:
+            template_options["tools"] = tools
+        inputs = self.tokenizer.apply_chat_template(messages, **template_options)
+        inputs = dict(inputs) if hasattr(inputs, "items") else {"input_ids": inputs}
+        target_device = getattr(self.model, "device", self.device)
+        inputs = {name: value.to(target_device) for name, value in inputs.items()}
+        input_length = inputs["input_ids"].shape[-1]
+        max_new_tokens = config.max_tokens
+        max_context = getattr(self.config, "max_position_embeddings", None)
+        if isinstance(max_context, int) and max_context > 0:
+            available_tokens = max_context - input_length
+            if available_tokens <= 0:
+                raise ValueError(
+                    f"Prompt uses {input_length} tokens, exceeding the model context "
+                    f"window of {max_context}."
+                )
+            max_new_tokens = min(max_new_tokens, available_tokens)
+
+        do_sample = config.temperature > 0
+        generation_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": do_sample,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "use_cache": True,
+        }
+        if do_sample:
+            generation_kwargs["temperature"] = config.temperature
+            generation_kwargs["top_p"] = config.top_p
+        with torch.inference_mode():
+            generated = self.model.generate(**inputs, **generation_kwargs)
+        response = str(
+            self.tokenizer.decode(
+                generated[0][input_length:],
+                skip_special_tokens=True,
+            )
+        ).strip()
+        stop_positions = [
+            position
+            for stop_sequence in config.stop or []
+            if stop_sequence
+            if (position := response.find(stop_sequence)) >= 0
+        ]
+        return response[: min(stop_positions)].rstrip() if stop_positions else response
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Generate and normalize one structured local model turn."""
+
+        if not tools:
+            result = self.complete_messages(
+                [{"role": message.role, "content": message.content} for message in messages],
+                GenerationConfig(
+                    max_tokens=config.max_tokens,
+                    temperature=config.temperature,
+                    top_p=config.top_p,
+                    frequency_penalty=config.frequency_penalty,
+                    presence_penalty=config.presence_penalty,
+                    stop=config.stop,
+                ),
+            )
+            text = next(
+                (
+                    str(message.get("content") or "")
+                    for message in reversed(result)
+                    if message.get("role") == "assistant"
+                ),
+                "",
+            )
+            if text:
+                yield ModelEvent.text_delta(text)
+            yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+            return
+        if tools and not self.supports_native_tool_calling:
+            raise ValueError(f"Model {self.model_id} does not support native tool calling")
+        payload = build_tool_payload(messages, tools)
+        response = self._generate_native_response(payload.messages, payload.tools, config)
+        turn = parse_tool_response(
+            response,
+            provider_to_internal=payload.provider_to_internal,
+        )
+        if turn.text:
+            yield ModelEvent.text_delta(turn.text)
+        yield ModelEvent.turn_complete(turn)
+
     def cleanup(self) -> None:
         self.model = None
         self.tokenizer = None
         self.config = None
+        self.supports_native_tool_calling = False
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

@@ -1,15 +1,29 @@
 """Adapter from Geist's completion contract to the optional mlx-lm runtime."""
 
 import importlib
+import logging
 import re
 import time
 from collections.abc import Iterator
 from typing import Any
 
+from agents.architectures.chat_template_tools import (
+    build_tool_payload,
+    parse_tool_response,
+    tokenizer_supports_tools,
+)
+from agents.model_catalog import infer_model_spec
 from agents.models.llama_completion import strings_to_message_dict
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ToolDefinition,
+)
 
 
 QWEN3_TOP_K = 20
+logger = logging.getLogger(__name__)
 
 
 def _is_qwen3_model(model_id: str) -> bool:
@@ -76,6 +90,22 @@ class MLXLMBackend:
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
         self.model, self.tokenizer = load(weights_dir or model_id)
         self.last_stats: dict[str, float] = {}
+        self._unsupported_penalties_warned = False
+        model_spec = infer_model_spec(model_id)
+        self.supports_native_tool_calling = bool(
+            model_spec
+            and model_spec.supports_function_calling
+            and tokenizer_supports_tools(
+                self.tokenizer,
+                template_options=self._template_options(),
+            )
+        )
+
+    def _template_options(self) -> dict[str, Any]:
+        template_options = dict(self.chat_template_kwargs)
+        if _is_qwen3_model(self.model_id):
+            template_options.setdefault("enable_thinking", False)
+        return template_options
 
     def _build_prompt(self, system_prompt: str, user_prompt: str) -> str:
         messages = []
@@ -84,20 +114,21 @@ class MLXLMBackend:
         messages.append({"role": "user", "content": user_prompt})
         return self._build_messages_prompt(messages)
 
-    def _build_messages_prompt(self, messages: list[dict[str, str | None]]) -> str:
-        normalized = [
-            {"role": message["role"], "content": message.get("content") or ""}
-            for message in messages
-        ]
-        template_options = dict(self.chat_template_kwargs)
-        if _is_qwen3_model(self.model_id):
-            template_options.setdefault("enable_thinking", False)
+    def _build_messages_prompt(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        normalized = [dict(message) for message in messages]
+        template_options = self._template_options()
         template_options.update(
             {
                 "tokenize": False,
                 "add_generation_prompt": True,
             }
         )
+        if tools:
+            template_options["tools"] = tools
         return self.tokenizer.apply_chat_template(
             normalized,
             **template_options,
@@ -113,13 +144,14 @@ class MLXLMBackend:
 
     def stream_messages(
         self,
-        messages: list[dict[str, str | None]],
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
         """Yield decoded text for a structured conversation."""
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
-        prompt = self._build_messages_prompt(messages)
+        prompt = self._build_messages_prompt(messages, tools)
         sampler_options: dict[str, float | int] = {
             "temp": self.temperature,
             "top_p": self.top_p,
@@ -127,10 +159,15 @@ class MLXLMBackend:
         if _is_qwen3_model(self.model_id):
             sampler_options["top_k"] = QWEN3_TOP_K
         sampler = make_sampler(**sampler_options)
-        logits_processors = make_logits_processors(
-            presence_penalty=self.presence_penalty,
-            frequency_penalty=self.frequency_penalty,
-        )
+        if (self.presence_penalty or self.frequency_penalty) and not getattr(
+            self, "_unsupported_penalties_warned", False
+        ):
+            logger.warning(
+                "mlx-lm does not expose OpenAI-style presence/frequency penalties; "
+                "these controls are ignored for this runtime"
+            )
+            self._unsupported_penalties_warned = True
+        logits_processors = make_logits_processors()
         stops = _normalize_stops(self.stop)
         started = time.perf_counter()
         final_response = None
@@ -200,3 +237,24 @@ class MLXLMBackend:
             "",
         )
         return strings_to_message_dict(user_prompt, response)
+
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Generate and normalize one mlx-lm structured model turn."""
+
+        del config  # Generation controls are applied by MLXLlamaRunner.
+        if tools and not self.supports_native_tool_calling:
+            raise ValueError(f"Model {self.model_id} does not support native tool calling")
+        payload = build_tool_payload(messages, tools)
+        response = "".join(self.stream_messages(payload.messages, payload.tools)).strip()
+        turn = parse_tool_response(
+            response,
+            provider_to_internal=payload.provider_to_internal,
+        )
+        if turn.text:
+            yield ModelEvent.text_delta(turn.text)
+        yield ModelEvent.turn_complete(turn)

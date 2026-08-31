@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agents.architectures.base_runner import GenerationConfig
+from agents.architectures.chat_template_tools import provider_tool_name
 from agents.architectures.llama.mlx_lm_backend import (
     MLXLMBackend,
     _first_stop_index,
@@ -15,6 +16,24 @@ from agents.architectures.llama.mlx_lm_backend import (
     _stop_prefix_length,
 )
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
+
+
+def _search_tool():
+    return ToolDefinition(
+        name="web.search",
+        description="Search the web",
+        arguments_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+        handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+    )
 
 
 def _backend_module(name, class_name, backend_class):
@@ -368,6 +387,63 @@ def test_mlx_lm_prompt_keeps_structural_template_options():
     )
 
 
+def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call():
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.supports_native_tool_calling = True
+    safe_name = provider_tool_name("web.search")
+    backend.stream_messages = MagicMock(
+        return_value=iter(
+            [
+                "<tool_",
+                f'call>{{"name":"{safe_name}","arguments":',
+                '{"query":"celebrity news"}}</tool_call>',
+            ]
+        )
+    )
+    messages = [
+        ChatMessage(role="user", content="Find news"),
+        ChatMessage(
+            role="assistant",
+            content="Earlier answer",
+        ),
+        ChatMessage(role="user", content="Search now"),
+    ]
+
+    events = list(
+        backend.stream_model_turn(
+            messages,
+            [_search_tool()],
+            ModelRequestConfig(),
+        )
+    )
+
+    rendered_messages, rendered_tools = backend.stream_messages.call_args.args
+    assert rendered_messages[1] == {"role": "assistant", "content": "Earlier answer"}
+    assert rendered_tools[0]["function"]["name"] == safe_name
+    turn = events[-1].turn
+    assert turn is not None
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "celebrity news"}
+
+
+def test_manual_mlx_stays_tool_disabled():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    runner.model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    runner.implementation = "manual"
+    runner.supports_native_tool_calling = False
+
+    with pytest.raises(ValueError, match="does not support native tool calling"):
+        list(
+            runner.stream_model_turn(
+                [ChatMessage(role="user", content="search")],
+                [_search_tool()],
+                ModelRequestConfig(),
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [
@@ -394,7 +470,7 @@ def test_stop_sequence_helpers_handle_chunk_boundaries_and_duplicates():
     assert _stop_prefix_length("answer", stops) == 0
 
 
-def test_qwen3_stream_applies_sampler_penalties_and_cross_chunk_stop():
+def test_qwen3_stream_warns_for_unsupported_penalties_and_cross_chunk_stop(caplog):
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model = object()
     backend.tokenizer = MagicMock()
@@ -456,10 +532,8 @@ def test_qwen3_stream_applies_sampler_penalties_and_cross_chunk_stop():
 
     assert chunks == ["answer"]
     make_sampler.assert_called_once_with(temp=1.0, top_p=0.95, top_k=20)
-    make_logits_processors.assert_called_once_with(
-        presence_penalty=0.5,
-        frequency_penalty=0.2,
-    )
+    make_logits_processors.assert_called_once_with()
+    assert "presence/frequency penalties" in caplog.text
     stream_generate.assert_called_once_with(
         backend.model,
         backend.tokenizer,
@@ -506,10 +580,7 @@ def test_non_qwen_stream_omits_top_k_and_empty_logits_processors():
         assert list(backend.stream_messages([{"role": "user", "content": "hello"}])) == []
 
     make_sampler.assert_called_once_with(temp=0.7, top_p=0.9)
-    make_logits_processors.assert_called_once_with(
-        presence_penalty=0.0,
-        frequency_penalty=0.0,
-    )
+    make_logits_processors.assert_called_once_with()
     assert stream_generate.call_args.kwargs["logits_processors"] is None
 
 
@@ -518,7 +589,12 @@ def test_mlx_lm_uses_a_thread_local_generation_stream():
     generation_module = MagicMock()
     thread_local_stream = MagicMock()
     mlx_lm_module = ModuleType("mlx_lm")
-    mlx_lm_module.load = MagicMock(return_value=(MagicMock(), MagicMock()))
+    tokenizer = MagicMock()
+    tokenizer.chat_template = "{{ tools }}"
+    tokenizer.apply_chat_template.side_effect = lambda _messages, **kwargs: str(
+        kwargs.get("tools") or []
+    )
+    mlx_lm_module.load = MagicMock(return_value=(MagicMock(), tokenizer))
     mlx_core.new_thread_local_stream.return_value = thread_local_stream
 
     with (
@@ -528,6 +604,7 @@ def test_mlx_lm_uses_a_thread_local_generation_stream():
             side_effect=lambda name: (mlx_core if name == "mlx.core" else generation_module),
         ),
     ):
-        MLXLMBackend(max_new_tokens=8, model_id="Qwen/Qwen3.8-27B")
+        backend = MLXLMBackend(max_new_tokens=8, model_id="Qwen/Qwen3.8-27B")
 
     assert generation_module.generation_stream is thread_local_stream
+    assert backend.supports_native_tool_calling is True

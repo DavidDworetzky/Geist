@@ -10,8 +10,28 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from agents.architectures.base_runner import GenerationConfig
+from agents.architectures.chat_template_tools import provider_tool_name
 from agents.architectures.transformers_runner import TransformersRunner
 from agents.model_load_status import model_load_status_registry
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
+
+
+def _search_tool():
+    return ToolDefinition(
+        name="web.search",
+        description="Search the web",
+        arguments_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+    )
 
 
 def _tokenizer():
@@ -70,6 +90,36 @@ def test_load_and_generate_uses_direct_suffix_decode(
     assert result[1]["content"] == "fast response"
 
 
+@patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)
+@patch("agents.architectures.transformers_runner.AutoModelForCausalLM")
+@patch("agents.architectures.transformers_runner.AutoTokenizer")
+@patch("agents.architectures.transformers_runner.AutoConfig")
+def test_load_enables_tools_only_when_qwen_template_renders_catalog(
+    config_cls, tokenizer_cls, model_cls, _find_spec
+):
+    config_cls.from_pretrained.return_value = MagicMock(
+        architectures=["Qwen3ForCausalLM"], max_position_embeddings=64
+    )
+    tokenizer = _tokenizer()
+
+    def apply_template(_messages, **kwargs):
+        if kwargs.get("tokenize") is False:
+            return str(kwargs.get("tools") or [])
+        return {
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "attention_mask": torch.tensor([[1, 1, 1]]),
+        }
+
+    tokenizer.apply_chat_template.side_effect = apply_template
+    tokenizer_cls.from_pretrained.return_value = tokenizer
+    model_cls.from_pretrained.return_value = _model()
+
+    runner = TransformersRunner()
+    runner.load("Qwen/Qwen3-4B", {"device": "cpu"})
+
+    assert runner.supports_native_tool_calling is True
+
+
 def test_complete_messages_preserves_structured_conversation_roles():
     runner = TransformersRunner()
     runner.model_id = "test/model"
@@ -90,6 +140,56 @@ def test_complete_messages_preserves_structured_conversation_roles():
 
     applied_messages = runner.tokenizer.apply_chat_template.call_args.args[0]
     assert applied_messages == messages
+
+
+def test_native_tool_turn_injects_catalog_and_returns_structured_call():
+    runner = TransformersRunner()
+    runner.model_id = "Qwen/Qwen3-4B"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+    runner.model_spec = MagicMock(family="qwen", supports_function_calling=True)
+    runner.supports_native_tool_calling = True
+    safe_name = provider_tool_name("web.search")
+    runner.tokenizer.decode.return_value = (
+        f'<tool_call>{{"name":"{safe_name}",' '"arguments":{"query":"celebrity news"}}</tool_call>'
+    )
+
+    events = list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="Find celebrity news")],
+            [_search_tool()],
+            ModelRequestConfig(max_tokens=40, temperature=0.0),
+        )
+    )
+
+    template_call = runner.tokenizer.apply_chat_template.call_args
+    assert template_call.kwargs["tools"][0]["function"]["name"] == safe_name
+    assert template_call.kwargs["enable_thinking"] is False
+    turn = events[-1].turn
+    assert turn is not None
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "celebrity news"}
+
+
+def test_stream_without_tools_preserves_existing_text_completion_path():
+    runner = TransformersRunner()
+    runner.model_id = "test/model"
+    runner.model = _model()
+    runner.tokenizer = _tokenizer()
+    runner.config = MagicMock(max_position_embeddings=64)
+
+    events = list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="hello")],
+            [],
+            ModelRequestConfig(max_tokens=8, temperature=0.0),
+        )
+    )
+
+    assert "tools" not in runner.tokenizer.apply_chat_template.call_args.kwargs
+    assert events[-1].turn is not None
+    assert events[-1].turn.text == "fast response"
 
 
 @patch("agents.architectures.transformers_runner.importlib.util.find_spec", return_value=None)

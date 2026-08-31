@@ -4,7 +4,17 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
 from typing import Any, Protocol
+
+from agents.models.llama_completion import LlamaCompletion
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelEvent,
+    ModelRequestConfig,
+    ModelTurn,
+    ToolDefinition,
+)
 
 from .base_runner import BaseRunner, GenerationConfig
 
@@ -41,6 +51,7 @@ class MLXLlamaRunner(BaseRunner):
         self.weights_dir: str | None = None
         self.implementation: str | None = None
         self._unsupported_generation_controls_warned = False
+        self.supports_native_tool_calling = False
 
     @staticmethod
     def _manual_implementation_supports(model_id: str, weights_dir: str) -> bool:
@@ -159,6 +170,9 @@ class MLXLlamaRunner(BaseRunner):
         self.weights_dir = weights_dir
         self.implementation = implementation
         self._unsupported_generation_controls_warned = False
+        self.supports_native_tool_calling = bool(
+            implementation == "mlx_lm" and getattr(backend, "supports_native_tool_calling", False)
+        )
 
         logger.info(
             "MLX Llama runner loaded implementation=%s model=%s weights=%s",
@@ -218,6 +232,44 @@ class MLXLlamaRunner(BaseRunner):
         backend = self._apply_generation_config(generation_config)
         return backend.complete_messages(messages)
 
+    def stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
+        """Run a structured turn through mlx-lm, keeping manual MLX text-only."""
+
+        if tools and not self.supports_native_tool_calling:
+            raise ValueError(f"Model {self.model_id} does not support native tool calling")
+        backend = self._apply_generation_config(
+            GenerationConfig(
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                top_p=config.top_p,
+                frequency_penalty=config.frequency_penalty,
+                presence_penalty=config.presence_penalty,
+                stop=config.stop,
+            )
+        )
+        native_stream = getattr(backend, "stream_model_turn", None)
+        if callable(native_stream):
+            yield from native_stream(messages, tools, config)
+            return
+
+        structured_messages = [
+            {"role": message.role, "content": message.content} for message in messages
+        ]
+        completion = LlamaCompletion.from_dict(backend.complete_messages(structured_messages))
+        text = next(
+            (message.content for message in completion.messages if message.role == "assistant"),
+            "",
+        )
+        if text:
+            yield ModelEvent.text_delta(text)
+        yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
+
     def cleanup(self) -> None:
         self.llama = None
+        self.supports_native_tool_calling = False
         logger.info("MLX Llama runner cleaned up")
