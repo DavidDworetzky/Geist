@@ -6,12 +6,23 @@ executes exact registry handlers, appends normalized tool results to the model
 transcript, and persists the turn once. It does not route through the legacy
 adapter reflection mechanism.
 
+`ToolRegistry` is the single registry for every tool exposed to chat. Besides
+the statically registered defaults below, it accepts pluggable *tool sources*
+(`ToolSource` in `app/services/tool_registry.py`) whose definitions are merged
+into the catalog on every turn: MCP servers (`app/services/mcp_tool_source.py`)
+and bridged adapter actions (`app/services/adapter_tool_source.py`). Statically
+registered names win collisions, and a failing source contributes no tools
+instead of breaking chat. Source-provided tools carry raw JSON schemas
+(`ToolDefinition.arguments_schema`); the registry checks required keys and
+primitive types before dispatch and leaves full constraint enforcement to the
+tool's own backend.
+
 The default registry is intentionally explicit:
 
 | Tool | Backing implementation | Default | Policy |
 | --- | --- | --- | --- |
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
-| `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current user's uploaded files. |
+| `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current workspace's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
 | `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
 | `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
@@ -61,10 +72,125 @@ run output associated with the chat in which the run started.
 Every terminal run is persisted with `completed`, `failed`, or `cancelled`
 status so completed tool activity is auditable even if a later model request
 fails. Recent-history and aggregate tool-result budgets bound provider context.
-Tool execution uses a bounded worker pool; Python cannot forcibly stop a handler
-already running after a timeout, which is another reason side-effect mappings
-remain unavailable.
+Tool execution uses a bounded worker pool. Cancellation is cooperative: MCP
+stdio requests observe the run cancellation event, while HTTP operations are
+bounded by the same end-to-end server deadline and have their connection closed
+when invalidated. Side-effect mappings additionally require an interactive,
+call-specific approval before dispatch.
 
-A future authenticated approve/reject-and-resume endpoint plus durable
-idempotency is required before filesystem writes, email, or SMS can become
-operational chat tools.
+## Security and identity model
+
+Geist deliberately separates three identities that older code conflated:
+
+- The **workspace identity** is the durable local owner of chats, memories,
+  files, settings, workflows, jobs, and MCP configuration. It is the neutral
+  `geist_user` row with `workspace_key="default"`; its numeric primary key is
+  preserved when older databases are migrated. The physical table and several
+  legacy foreign keys retain the `user_id` column name for migration compatibility,
+  but application-facing ownership contracts use `workspace_id`. Display name and email are
+  profile metadata, not credentials, and the legacy password column is not an
+  authentication mechanism.
+- The **operator principal** is the process or person authorized to control the
+  local workspace. It is immutable and request-scoped, carries `workspace_id`,
+  an authentication method, loopback status, and explicit capabilities. It can
+  also carry controller-node, target-node, audience, expiry, and credential IDs
+  for a future multi-node deployment. There is no built-in admin user account
+  and no email-based login.
+- **Pitchblend Cloud identity** remains Pitchblend's OIDC login for account,
+  licensing, and sync. Its access and refresh tokens are not accepted by Geist
+  and never become local tool credentials.
+
+An unwrapped standalone Geist process accepts an operator only from a loopback
+client. The supported Docker Compose and native `make run` flows generate a
+local operator-token file. The backend and server-side development proxy read
+that file, and the proxy attaches the `GeistOperator` scheme without exposing
+the credential to the browser bundle. Compose publishes its UI, API, and debug
+ports on loopback only. A token-file principal is therefore local even when the
+development proxy reaches the backend over a private container address.
+
+A Pitchblend-managed launch instead generates a high-entropy secret for that
+process, passes it to the Geist child as `GEIST_OPERATOR_TOKEN`, and attaches
+the same authorization scheme inside a dedicated Electron webview session.
+The secret is not exposed to page JavaScript. When either supported credential
+source is configured, missing, duplicate, malformed, and incorrect credentials
+fail closed; conflicting environment and file credentials also fail closed.
+Pitchblend login and logout do not rotate workspace ownership or require a
+second Geist login.
+
+MCP configuration, connection tests, tool catalog inspection, approval, and
+run cancellation require operator capabilities. Stdio server configuration is
+accepted only from a local operator: a direct loopback request or the generated
+local token-file principal. A future remote wrapper-token deployment remains
+unable to configure process-spawning transports. A remote deployment must
+provide its own strong operator credential and transport boundary; it must not
+treat a Host or Origin header as authentication.
+
+Approval is authorization for one exact operation, not a reusable boolean.
+The pending record binds the operator's `workspace_id`, run ID, call ID, tool name,
+canonical argument hash, and tool-definition fingerprint. The definition
+fingerprint includes the MCP configuration revision. If arguments or server
+configuration change between review and dispatch, execution fails with a stale
+approval and the operator must review again. Non-streaming callers are always
+unattended and deny approval-requiring tools immediately instead of waiting for
+the interactive timeout.
+
+The authentication middleware protects HTTP and WebSocket requests globally;
+only health, readiness, and generated API-documentation endpoints are exempt.
+For a future Tailscale topology, each workstation remains a separate Geist node
+with its own local workspace and node-scoped credential. Pitchblend is the
+controller: it authenticates the human with OIDC, chooses a target node, and
+presents a short-lived operator credential whose audience and `target_node_id`
+match that Geist instance. Tailscale supplies encrypted reachability and device
+policy, but is defense in depth rather than the application authentication
+decision. Node credentials should not be shared or interpreted as a global
+multi-user database identity.
+
+## MCP servers
+
+Operators can mount external tools from MCP (Model Context Protocol) servers,
+configured in Settings → MCP Servers or via `/api/v1/mcp/servers`. Two
+transports are supported: `stdio` (a locally spawned process) and `http`
+(streamable HTTP). Configured servers are persisted in the `mcp_server` table
+and **start disabled**; only explicitly enabled servers contribute tools, and
+a test-connection endpoint (`POST /api/v1/mcp/servers/{id}/test`) lists a
+server's tools without enabling it.
+
+Mounted tools are named `mcp.<server>.<tool>`, labelled with the
+`external_write` side effect, and executed through the same bounded worker
+pool, timeouts, and result budgets as every other chat tool. The client in
+`app/services/mcp_client.py` is a deliberately minimal synchronous JSON-RPC
+implementation (initialize, paginated `tools/list`, `tools/call`); server
+initiated requests such as sampling are declined. Tool descriptions and
+results from MCP servers are untrusted third-party content — enable only
+servers you trust, since their tool output re-enters the model context.
+
+The transport boundary also:
+
+- inherits only a small process-launch environment allowlist; secrets are
+  passed to stdio servers only when explicitly configured for that server;
+- rejects HTTP redirects and credential-bearing URLs so an MCP endpoint cannot
+  redirect an authorized request into a different SSRF target;
+- applies one deadline across initialization and paginated discovery rather
+  than resetting the timeout on each page;
+- caps response bytes, SSE events, stdio line length, page count, discovered
+  tool count, and returned tool-result text;
+- performs server discovery off the FastAPI event loop, in bounded parallel
+  workers, with generation-aware single-flight caches so invalidation cannot
+  publish a stale tool definition or connection.
+
+## Bridged adapter actions
+
+`AdapterToolSource` converts adapter reflection schemas
+(`adapters/tool_schema.py`) into ordinary registry definitions named
+`adapter.<Adapter>.<action>`, replacing the need for a second dispatch
+mechanism. Bridged actions are disabled by default and must be opted into by
+name through `GEIST_ENABLED_CHAT_TOOLS`; the default registry bridges only the
+read-only `JobStatusAdapter`. Migrating the legacy agent tick loop onto the
+unified registry is follow-up work.
+
+## Doom-loop interrupt
+
+`ChatOrchestrator` interrupts a run when the model issues the same tool call
+(identical name and arguments) three times consecutively. The repeated call is
+not executed; the run fails with a `Doom loop detected` error so a stuck model
+cannot burn its round and tool budgets on identical requests.

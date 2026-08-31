@@ -12,6 +12,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
@@ -27,6 +28,7 @@ from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS, TOOL_USE_PROMPT
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
+from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
@@ -34,7 +36,7 @@ from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
 from app.loopback_security import install_loopback_security
-from app.models.completion import CompleteTextParams, InitializeAgentParams
+from app.models.completion import CompleteTextParams, InitializeAgentParams, ToolApprovalParams
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
     get_all_chat_history,
@@ -48,11 +50,18 @@ from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
 from app.security.middleware import OperatorAuthenticationMiddleware
+from app.security.operator import (
+    OperatorCapability,
+    OperatorPrincipal,
+    require_operator_capability,
+)
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
+from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.tool_approvals import approval_registry as tool_approval_registry
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -95,8 +104,12 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 run_controls = RunControlRegistry()
+_tool_registry = build_default_tool_registry()
+# Enabled MCP servers contribute their tools through the same registry as the
+# curated defaults; configuration lives behind /api/v1/mcp.
+_tool_registry.add_source(get_mcp_tool_source())
 chat_orchestrator = ChatOrchestrator(
-    build_default_tool_registry(),
+    _tool_registry,
     run_controls=run_controls,
 )
 
@@ -106,6 +119,7 @@ if enhanced_logging:
     )
     logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
+_require_tool_operator = require_operator_capability(OperatorCapability.TOOLS_EXECUTE)
 
 
 def get_envs() -> dict[str, str]:
@@ -284,10 +298,10 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
 def resolved_memory_settings(
     params: CompleteTextParams,
     chat_id: int | None,
-    user_id: int,
+    workspace_id: int,
 ) -> tuple[bool, str, int | None]:
     if chat_id is not None:
-        current = get_chat_memory_settings(user_id, chat_id)
+        current = get_chat_memory_settings(workspace_id, chat_id)
         if current is not None:
             return (
                 bool(current["memory_enabled"]),
@@ -302,7 +316,7 @@ def resolved_memory_settings(
                 session.query(MemoryFolder)
                 .filter(
                     MemoryFolder.folder_id == folder_id,
-                    MemoryFolder.user_id == user_id,
+                    MemoryFolder.user_id == workspace_id,
                 )
                 .first()
             )
@@ -349,7 +363,7 @@ def run_chat_completion(
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
-        user_id=workspace_id,
+        workspace_id=workspace_id,
         chat_id=chat_id,
         config=model_request_config(params),
         system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -379,7 +393,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
             for event in chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,
-                user_id=workspace_id,
+                workspace_id=workspace_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
                 system_prompt=chat_system_prompt(params.enable_tools, memory_context),
@@ -518,8 +532,36 @@ def create_app(
         return run_chat_completion(params, chat_id=session_id)
 
     @agent_router.post("/runs/{run_id}/cancel")
-    def cancel_chat_run(run_id: str):
-        return {"run_id": run_id, "cancelled": run_controls.cancel(run_id)}
+    def cancel_chat_run(
+        run_id: str,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        return {
+            "run_id": run_id,
+            "cancelled": run_controls.cancel(run_id, workspace_id=operator.workspace_id),
+        }
+
+    @agent_router.post("/runs/{run_id}/tool_approval")
+    def resolve_tool_approval(
+        run_id: str,
+        params: ToolApprovalParams,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        if not tool_approval_registry.resolve(
+            run_id,
+            params.call_id,
+            params.decision,
+            workspace_id=operator.workspace_id,
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="No pending approval for this run and call",
+            )
+        return {
+            "run_id": run_id,
+            "call_id": params.call_id,
+            "decision": params.decision,
+        }
 
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
@@ -541,27 +583,29 @@ def create_app(
         return chat_sessions
 
     @agent_router.get("/tools")
-    async def get_chat_tool_catalog():
-        workspace = get_default_workspace()
-        enabled_names = {
-            tool.name
-            for tool in chat_orchestrator.registry.definitions_for_context(
-                ToolContext(user_id=workspace.workspace_id, chat_id=None, run_id="catalog")
-            )
-        }
+    async def get_chat_tool_catalog(
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        context = ToolContext(
+            workspace_id=operator.workspace_id,
+            chat_id=None,
+            run_id="catalog",
+        )
+        catalog = await run_in_threadpool(chat_orchestrator.registry.catalog, context)
         return {
             "tools": [
                 {
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.parameters_schema(),
-                    "enabled": tool.name in enabled_names,
+                    "enabled": chat_orchestrator.registry.is_enabled(tool)
+                    and (tool.availability is None or tool.availability(context)),
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }
-                for tool in chat_orchestrator.registry.catalog()
+                for tool in catalog
             ]
         }
 
@@ -606,6 +650,7 @@ def create_app(
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
+    app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
 
     @app.get("/health", include_in_schema=False)
     def health():

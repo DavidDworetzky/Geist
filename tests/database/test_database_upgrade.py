@@ -124,6 +124,7 @@ def test_real_metadata_recognizes_supported_pre_workspace_schemas(removed_column
     Base.metadata.create_all(engine)
 
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_server"))
         if ("geist_user", "workspace_key") in removed_columns:
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
@@ -133,6 +134,44 @@ def test_real_metadata_recognizes_supported_pre_workspace_schemas(removed_column
             )
 
     assert _classify_legacy_schema(Base.metadata, engine) == expected_kind
+
+
+def test_real_metadata_recognizes_pre_mcp_schema():
+    importlib.import_module("app.models.database")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_server"))
+
+    assert _classify_legacy_schema(Base.metadata, engine) == "pre_mcp"
+
+
+def test_upgrade_adopts_pre_mcp_schema(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite",
+            database_url=f"sqlite:///{tmp_path / 'pre-mcp.sqlite3'}",
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE mcp_server"))
+
+        upgrade_database()
+
+        with engine.connect() as connection:
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "b3e5d7f9a1c3"
+            }
+            assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
 
 
 def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
@@ -147,6 +186,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
             connection.execute(
@@ -165,8 +205,9 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c6d9e2f4a7b1"
+                "b3e5d7f9a1c3"
             }
+            assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
                 text(
                     "SELECT user_id, workspace_key, email, password "
@@ -192,6 +233,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
 
@@ -204,6 +246,10 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
                 text("SELECT workspace_key, username, name, email, password " "FROM geist_user")
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "b3e5d7f9a1c3"
+            }
+            assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
         Session.remove()
         engine.dispose()
@@ -222,6 +268,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(
                 text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
             )
@@ -230,7 +277,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c6d9e2f4a7b1"
+                "b3e5d7f9a1c3"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
@@ -242,6 +289,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
                 ).scalar_one()
                 == 1
             )
+            assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
         Session.remove()
         engine.dispose()
