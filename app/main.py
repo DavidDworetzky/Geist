@@ -736,17 +736,15 @@ def _configured_inference_info() -> dict[str, str | None]:
             "acceleration": None,
         }
 
-    runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip() or factory_config.runner_type
-    artifact_id = settings.default_local_artifact_id
-    if artifact_id:
-        try:
-            from app.services.local_models import get_local_model_manager
-
-            runner_type = get_local_model_manager().get_artifact(artifact_id).backend
-        except KeyError:
-            logger.warning("Configured local artifact %s is not available", artifact_id)
-
-    runner_type = runner_type or AgentFactory._infer_runner_type(factory_config.model)
+    try:
+        runner_type, _runner_was_explicit = AgentFactory._resolve_local_runner_type(
+            factory_config.model,
+            factory_config.runner_type,
+            factory_config.device_config,
+        )
+    except ValueError as error:
+        logger.warning("Configured local inference runtime is unavailable: %s", error)
+        runner_type = "unavailable"
     return {
         "mode": "local",
         "engine": runner_type,
