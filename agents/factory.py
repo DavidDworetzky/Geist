@@ -96,6 +96,46 @@ class AgentFactory:
         return "transformers"
 
     @staticmethod
+    def _resolve_local_runner_type(
+        model: str,
+        runner_type: str | None,
+        device_config: dict[str, Any] | None,
+    ) -> tuple[str, bool]:
+        """Resolve the effective runner without contradicting a selected artifact."""
+        requested_runner = (runner_type or "").strip()
+        configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
+        explicit_runner = requested_runner or configured_runner
+
+        artifact_backend: str | None = None
+        artifact_id = (device_config or {}).get("artifact_id")
+        if artifact_id is not None:
+            if not isinstance(artifact_id, str) or not artifact_id.strip():
+                raise ValueError("artifact_id must be a non-empty string")
+
+            from app.services.local_models import get_local_model_manager
+
+            try:
+                artifact = get_local_model_manager().get_artifact(artifact_id)
+            except KeyError as error:
+                raise ValueError(str(error)) from error
+
+            selected_model = canonicalize_local_model_id(artifact.model_id)
+            if selected_model != model:
+                raise ValueError(f"Artifact {artifact.id} belongs to {selected_model}, not {model}")
+            artifact_backend = artifact.backend
+            if explicit_runner and explicit_runner != artifact_backend:
+                raise ValueError(
+                    f"Runner '{explicit_runner}' is incompatible with selected artifact "
+                    f"{artifact.id}, which requires '{artifact_backend}'"
+                )
+
+        if explicit_runner:
+            return explicit_runner, True
+        if artifact_backend:
+            return artifact_backend, False
+        return AgentFactory._infer_runner_type(model), False
+
+    @staticmethod
     def _create_local_agent(
         agent_context: AgentContext,
         model: str | None = None,
@@ -120,20 +160,20 @@ class AgentFactory:
 
             model = canonicalize_local_model_id(model)
 
-            configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-            runner_was_explicit = runner_type is not None or bool(configured_runner)
-            # Auto-detect runner type from model ID when not explicitly set
-            if not runner_type:
-                runner_type = configured_runner or AgentFactory._infer_runner_type(model)
+            device_config_supplied = "device_config" in kwargs
+            device_config = dict(kwargs.pop("device_config", None) or {})
+            runner_type, runner_was_explicit = AgentFactory._resolve_local_runner_type(
+                model,
+                runner_type,
+                device_config,
+            )
 
             if not runner_was_explicit and runner_type == "mlx_llama":
                 from agents.model_catalog import infer_model_spec
 
                 spec = infer_model_spec(model)
                 if spec is not None and spec.family != "llama":
-                    device_config = kwargs.pop("device_config", None) or {}
                     device_config.setdefault("implementation", "mlx_lm")
-                    kwargs["device_config"] = device_config
 
             # Automatic selection protects users from accidental 32B+ loads.
             # A deliberate Transformers override is the opt-in for capable
@@ -143,15 +183,14 @@ class AgentFactory:
 
                 spec = infer_model_spec(model)
                 if spec and not spec.local:
-                    device_config = kwargs.pop("device_config", None) or {}
                     device_config.setdefault("allow_server_backed", True)
-                    kwargs["device_config"] = device_config
 
             # Propagate weights_dir into device_config so the runner can
             # load safetensors / pretrained weights from a custom path.
             if "weights_dir" in kwargs:
-                device_config = kwargs.pop("device_config", None) or {}
                 device_config["weights_dir"] = kwargs.pop("weights_dir")
+
+            if device_config or device_config_supplied:
                 kwargs["device_config"] = device_config
 
             logger.info(f"Creating LocalAgent with runner: {runner_type}, model: {model}")
