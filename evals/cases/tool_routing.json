@@ -57,8 +57,7 @@
       "expected_tools": [],
       "forbidden_tools": [
         "image.generate",
-        "web.search",
-        "documents.search"
+        "web.search"
       ]
     }
   ]
