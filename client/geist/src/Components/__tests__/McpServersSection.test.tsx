@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import McpServersSection from '../McpServersSection';
 
 const stdioServer = {
@@ -53,6 +53,37 @@ describe('McpServersSection', () => {
     expect(await screen.findByText('No MCP servers configured yet.')).toBeInTheDocument();
   });
 
+  it('prefills Gmail and Proton Mail from the starter catalogue', async () => {
+    global.fetch = jest.fn(() => jsonResponse([])) as any;
+
+    render(<McpServersSection />);
+    await screen.findByText('No MCP servers configured yet.');
+
+    const catalogue = screen.getByTestId('mcp-catalogue');
+    expect(catalogue).toHaveTextContent('Gmail');
+    expect(catalogue).toHaveTextContent('Google Workspace Mail');
+    expect(catalogue).toHaveTextContent('Outlook / Microsoft 365');
+    expect(catalogue).toHaveTextContent('Proton Mail');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Gmail' }));
+
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Google OAuth 2.0 delegated authorization'
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+    expect(screen.getByLabelText('Server URL')).toHaveValue(
+      'https://gmailmcp.googleapis.com/mcp/v1'
+    );
+
+    fireEvent.click(screen.getByText('Cancel'));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Proton Mail' }));
+    expect(screen.getByLabelText('Name')).toHaveValue('proton-mail');
+    expect(screen.getByLabelText('Command')).toHaveValue('');
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Proton Mail Bridge'
+    );
+  });
+
   it('creates a server through the form', async () => {
     const fetchMock = jest.fn((url: string, options?: RequestInit) => {
       if (url === '/api/v1/mcp/servers' && options?.method === 'POST') {
@@ -68,9 +99,7 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Add MCP Server'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'my-server' } });
     fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'npx' } });
-    await act(async () => {
-      fireEvent.click(screen.getByText('Add Server'));
-    });
+    fireEvent.click(screen.getByText('Add Server'));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

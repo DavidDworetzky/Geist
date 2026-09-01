@@ -7,6 +7,7 @@ import WorkflowBuilder from './WorkflowBuilder';
 import Files from './Files';
 import Models from './Models';
 import Settings from './Settings';
+import Tools from './Tools';
 import { BrandingProvider } from './branding';
 import { UserSettingsProvider } from './Hooks/useUserSettings';
 import { GeistPluginHost } from './plugins/runtime';
@@ -27,6 +28,7 @@ function App() {
               <Route path="/workflows/:workflowId" element={<WorkflowBuilder />} />
               <Route path="/files" element={<Files />} />
               <Route path="/models" element={<Models />} />
+              <Route path="/tools" element={<Tools />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </AppShell>
