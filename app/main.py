@@ -64,6 +64,7 @@ from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
 from app.services.tool_approvals import approval_registry as tool_approval_registry
+from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -116,6 +117,7 @@ install_plugin_support(_tool_registry)
 chat_orchestrator = ChatOrchestrator(
     _tool_registry,
     run_controls=run_controls,
+    intent_router=ToolIntentRouter(),
 )
 
 if enhanced_logging:
@@ -304,6 +306,11 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
     return "\n\n".join(sections)
 
 
+def intent_router_enabled(workspace_id: int) -> bool:
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+    return settings.ui_preferences.get("intentRouterEnabled") is not False
+
+
 def resolved_memory_settings(
     params: CompleteTextParams,
     chat_id: int | None,
@@ -377,6 +384,7 @@ def run_chat_completion(
         config=model_request_config(params),
         system_prompt=chat_system_prompt(params.enable_tools, memory_context),
         enable_tools=params.enable_tools,
+        enable_intent_router=intent_router_enabled(workspace_id),
         memory_enabled=memory_enabled,
         memory_mode=memory_mode,
         folder_id=folder_id,
@@ -407,6 +415,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 config=model_request_config(params),
                 system_prompt=chat_system_prompt(params.enable_tools, memory_context),
                 enable_tools=params.enable_tools,
+                enable_intent_router=intent_router_enabled(workspace_id),
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
@@ -613,6 +622,7 @@ def create_app(
                     "requires_approval": tool.requires_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
+                    "semantic_tags": sorted(tool.semantic_tags),
                 }
                 for tool in catalog
             ]

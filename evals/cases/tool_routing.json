@@ -48,6 +48,17 @@
       "forbidden_tools": [
         "documents.search"
       ]
+    },
+    {
+      "id": "creative_writing_haiku_no_tool",
+      "prompt": "Write a haiku about the moon.",
+      "actual_output": "Moonlight on still waves\nNight holds its silver silence\nDawn waits beyond stars",
+      "called_tools": [],
+      "expected_tools": [],
+      "forbidden_tools": [
+        "image.generate",
+        "web.search"
+      ]
     }
   ]
 }

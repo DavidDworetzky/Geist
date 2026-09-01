@@ -20,7 +20,9 @@ from agents.models.tool_calling import (
     ToolContext,
     ToolDefinition,
     ToolExecutionOutput,
+    ToolIntent,
     ToolResult,
+    ToolSemanticTag,
 )
 from app.services.document_search import DocumentSearchService
 
@@ -200,6 +202,41 @@ class ToolRegistry:
             if enabled and available:
                 definitions.append(definition)
         return definitions
+
+    def definitions_for_intent(
+        self,
+        context: ToolContext,
+        intent: ToolIntent,
+        *,
+        include_retrieval: bool = True,
+    ) -> list[ToolDefinition]:
+        definitions = self.definitions_for_context(context)
+        if intent in {"answer", "sensitive_answer"} and not include_retrieval:
+            return []
+        if intent == "answer":
+            allowed_tags: frozenset[ToolSemanticTag] = frozenset(
+                {"public_retrieval", "local_retrieval"}
+            )
+            return [
+                definition for definition in definitions if definition.semantic_tags & allowed_tags
+            ]
+        if intent == "sensitive_answer":
+            return [
+                definition
+                for definition in definitions
+                if "local_retrieval" in definition.semantic_tags
+            ]
+        if intent == "image_generation":
+            return [
+                definition
+                for definition in definitions
+                if "image_generation" in definition.semantic_tags
+            ]
+        return [
+            definition
+            for definition in definitions
+            if "image_generation" not in definition.semantic_tags
+        ]
 
     def execute(
         self,
@@ -424,6 +461,7 @@ def build_default_tool_registry() -> ToolRegistry:
             handler=web_search,
             timeout_seconds=20,
             source_adapter="SearchAdapter.search",
+            semantic_tags=frozenset({"public_retrieval"}),
         )
     )
     registry.register(
@@ -436,6 +474,7 @@ def build_default_tool_registry() -> ToolRegistry:
             arguments_model=DocumentSearchArguments,
             handler=document_search,
             source_adapter="DocumentSearchService.search",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
     registry.register(
@@ -448,6 +487,7 @@ def build_default_tool_registry() -> ToolRegistry:
             timeout_seconds=120,
             source_adapter="ImageGenerationAdapter.generate_image",
             availability=lambda context: bool(image_adapter.api_key),
+            semantic_tags=frozenset({"image_generation"}),
         )
     )
 
@@ -461,6 +501,7 @@ def build_default_tool_registry() -> ToolRegistry:
             handler=markdown_list,
             enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.get_files",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
     registry.register(
@@ -471,6 +512,7 @@ def build_default_tool_registry() -> ToolRegistry:
             handler=markdown_read,
             enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.read_file",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
     registry.register(
@@ -487,6 +529,7 @@ def build_default_tool_registry() -> ToolRegistry:
             # Keep the reviewed mapping visible in the catalog but unavailable
             # to model turns even if an operator enables its name.
             availability=lambda context: False,
+            semantic_tags=frozenset({"action"}),
         )
     )
     registry.register(
@@ -500,6 +543,7 @@ def build_default_tool_registry() -> ToolRegistry:
             enabled_by_default=False,
             source_adapter="SendGridAdapter.send_email",
             availability=lambda context: False,
+            semantic_tags=frozenset({"action"}),
         )
     )
     registry.register(
@@ -513,6 +557,7 @@ def build_default_tool_registry() -> ToolRegistry:
             enabled_by_default=False,
             source_adapter="SMSAdapter.send_text",
             availability=lambda context: False,
+            semantic_tags=frozenset({"action"}),
         )
     )
 

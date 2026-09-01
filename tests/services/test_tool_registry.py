@@ -100,6 +100,49 @@ def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
     assert registry.is_enabled(registry.get("workspace.write_markdown")) is False
 
 
+def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "GEIST_ENABLED_CHAT_TOOLS",
+        "workspace.list_markdown,workspace.read_markdown",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-catalog-only")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    registry = build_default_tool_registry()
+
+    answer = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "answer")
+    }
+    sensitive = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "sensitive_answer")
+    }
+    action = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "action")
+    }
+    image = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "image_generation")
+    }
+
+    assert answer == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive == {
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive < answer
+    assert image == {"image.generate"}
+    assert "image.generate" not in action
+    assert {"web.search", "documents.search"} <= action
+
+    assert registry.definitions_for_intent(_context(), "answer", include_retrieval=False) == []
+
+
 def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",

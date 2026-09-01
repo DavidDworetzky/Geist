@@ -155,7 +155,12 @@ def parse_tool_response(
                 candidate = json.loads(raw_response)
             except json.JSONDecodeError:
                 candidate = None
-            if isinstance(candidate, dict) and {"name", "arguments"} <= candidate.keys():
+            if (
+                isinstance(candidate, dict)
+                and isinstance(candidate.get("name"), str)
+                and candidate["name"] in provider_to_internal
+                and ("arguments" in candidate or "parameters" in candidate)
+            ):
                 payloads = [raw_response]
                 text = ""
 
@@ -170,7 +175,10 @@ def parse_tool_response(
         provider_name = value.get("name")
         if not isinstance(provider_name, str) or provider_name not in provider_to_internal:
             raise ValueError(f"Model requested unknown tool: {provider_name!r}")
-        arguments = value.get("arguments", {})
+        # This tokenizer path follows the OpenAI-shaped contract, so arguments
+        # intentionally wins if a model emits both keys. Parameters remains a
+        # compatibility alias for Qwen responses that mirror the tool schema.
+        arguments = value.get("arguments", value.get("parameters", {}))
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)

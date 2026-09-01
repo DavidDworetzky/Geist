@@ -320,6 +320,35 @@ describe('Settings page', () => {
     });
   });
 
+  it('defaults the intent router on and persists disabling it', async () => {
+    let savedUpdates: any = null;
+    // @ts-ignore
+    global.fetch = jest.fn((_url: string, options?: any) => {
+      if (options?.method === 'PUT') {
+        savedUpdates = JSON.parse(options.body);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...baseSettings, ...savedUpdates }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+
+    const intentRouter = await screen.findByRole('button', { name: 'Intent Router' });
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(intentRouter);
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByText(/Save Changes/i));
+
+    await waitFor(() => {
+      expect(savedUpdates?.ui_preferences?.intentRouterEnabled).toBe(false);
+    });
+    expect(await screen.findByText('Settings saved successfully.')).toBeInTheDocument();
+  });
+
   it('selects the stored canonical local model', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);

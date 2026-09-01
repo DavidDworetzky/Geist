@@ -28,6 +28,7 @@ from app.services.tool_approvals import (
     approval_registry,
     tool_arguments_fingerprint,
 )
+from app.services.tool_intent_router import ToolIntentDecision, ToolIntentRouter
 from app.services.tool_registry import ToolRegistry
 
 
@@ -124,9 +125,11 @@ class ChatOrchestrator:
         history_writer: Callable[..., Any] = update_chat_history,
         approvals: ToolApprovalRegistry = approval_registry,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        intent_router: ToolIntentRouter | None = None,
     ) -> None:
         self.registry = registry
         self.run_controls = run_controls or RunControlRegistry()
+        self.intent_router = intent_router
         self.max_rounds = max_rounds
         self.max_tool_calls = max_tool_calls
         self.doom_loop_threshold = doom_loop_threshold
@@ -309,6 +312,7 @@ class ChatOrchestrator:
         config: ModelRequestConfig,
         system_prompt: str | None,
         enable_tools: bool = True,
+        enable_intent_router: bool = True,
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,
@@ -331,9 +335,7 @@ class ChatOrchestrator:
             cancellation=cancellation,
         )
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
-        tools = (
-            self.registry.definitions_for_context(context) if enable_tools and native_tools else []
-        )
+        tools = []
 
         def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
             with run.persistence_lock:
@@ -391,6 +393,31 @@ class ChatOrchestrator:
                 "run_started",
                 {"run_id": run.run_id, "chat_id": conversation.chat_id},
             )
+
+            if enable_tools and native_tools:
+                if self.intent_router is None or not enable_intent_router:
+                    tools = self.registry.definitions_for_context(context)
+                else:
+                    try:
+                        route_decision = self.intent_router.classify(backend, run.model_messages)
+                    except Exception:
+                        logger.exception(
+                            "Tool intent classification failed for run %s; using Action",
+                            run.run_id,
+                        )
+                        route_decision = ToolIntentDecision()
+                    tools = self.registry.definitions_for_intent(
+                        context,
+                        route_decision.intent,
+                        include_retrieval=route_decision.needs_retrieval,
+                    )
+                    logger.info(
+                        "Tool intent for run %s: %s, retrieval=%s (%s)",
+                        run.run_id,
+                        route_decision.intent,
+                        route_decision.needs_retrieval,
+                        ", ".join(tool.name for tool in tools) or "no tools",
+                    )
 
             doom_signature: str | None = None
             doom_count = 0
