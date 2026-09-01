@@ -1,4 +1,4 @@
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import useLocalArtifacts from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
@@ -14,6 +14,8 @@ interface NavItem {
   description: string;
   icon: JSX.Element;
 }
+
+const BUSY_ARTIFACT_STATUSES = new Set(['queued', 'downloading', 'cancelling']);
 
 const navItems: NavItem[] = [
   {
@@ -88,16 +90,93 @@ function RuntimeSummary(): JSX.Element {
   const {
     artifacts,
     loading: artifactsLoading,
+    loaded: artifactsLoaded,
     error: artifactsError,
     refreshLocalArtifacts,
+    downloadArtifact,
     activateArtifact,
-  } = useLocalArtifacts({ enabled: mode === 'local' });
+  } = useLocalArtifacts({
+    enabled: mode === 'local',
+    pollWhileBusy: true,
+    pollModelId: settings?.default_local_model,
+  });
   const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
+  const [autoDownloadingArtifactId, setAutoDownloadingArtifactId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+  const autoDownloadAttempts = useRef(new Set<string>());
   const installedArtifacts = artifacts.filter(
     artifact => artifact.status === 'installed' && artifact.supported !== false,
   );
+
+  const model = mode === 'online'
+    ? settings?.default_online_model
+    : settings?.default_local_model;
+  const configuredArtifact = settings
+    ? artifacts.find(
+      artifact => artifact.id === settings.default_local_artifact_id,
+    ) ?? artifacts.find(
+      artifact => artifact.model_id === settings.default_local_model,
+    )
+    : undefined;
+  const activeArtifact = configuredArtifact?.status === 'installed'
+    ? configuredArtifact
+    : installedArtifacts.find(artifact => artifact.model_id === settings?.default_local_model);
+  const selectedArtifact = configuredArtifact ?? activeArtifact;
+  const selectorArtifacts = [selectedArtifact, ...installedArtifacts].filter(
+    (artifact, index, candidates): artifact is NonNullable<typeof artifact> => (
+      Boolean(artifact) && candidates.findIndex(candidate => candidate?.id === artifact?.id) === index
+    ),
+  );
+  const catalogLoading = mode === 'local' && artifactsLoading && !artifactsLoaded;
+  const selectedArtifactBusy = Boolean(
+    selectedArtifact && BUSY_ARTIFACT_STATUSES.has(selectedArtifact.status),
+  );
+  const autoDownloadingSelectedArtifact = Boolean(
+    selectedArtifact && autoDownloadingArtifactId === selectedArtifact.id,
+  );
+  const modelControlBusy = catalogLoading
+    || savingModel
+    || selectedArtifactBusy
+    || autoDownloadingSelectedArtifact;
+  const selectedArtifactId = pendingArtifactId ?? selectedArtifact?.id ?? '';
+  const loadedEmpty = artifactsLoaded && artifacts.length === 0;
+  const selectedModelUnavailable = artifactsLoaded && artifacts.length > 0 && !selectedArtifact;
+  const selectedArtifactError = selectedArtifact?.status === 'failed'
+    ? selectedArtifact.error || 'Model download failed'
+    : null;
+
+  useEffect(() => {
+    if (
+      !settings
+      || loading
+      || mode !== 'local'
+      || !artifactsLoaded
+      || !selectedArtifact
+      || selectedArtifact.supported === false
+      || selectedArtifact.status === 'installed'
+      || BUSY_ARTIFACT_STATUSES.has(selectedArtifact.status)
+      || !['not_installed', 'failed'].includes(selectedArtifact.status)
+      || autoDownloadAttempts.current.has(selectedArtifact.id)
+    ) {
+      return;
+    }
+
+    autoDownloadAttempts.current.add(selectedArtifact.id);
+    setAutoDownloadingArtifactId(selectedArtifact.id);
+    setModelSaveError(null);
+    void downloadArtifact(selectedArtifact)
+      .catch((requestError) => {
+        setModelSaveError(
+          requestError instanceof Error ? requestError.message : 'Model download failed',
+        );
+      })
+      .finally(() => {
+        setAutoDownloadingArtifactId(currentId => (
+          currentId === selectedArtifact.id ? null : currentId
+        ));
+      });
+  }, [artifactsLoaded, downloadArtifact, loading, mode, selectedArtifact, settings]);
 
   if (loading) {
     return <span className="runtime-chip">Runtime loading</span>;
@@ -106,14 +185,6 @@ function RuntimeSummary(): JSX.Element {
   if (!settings) {
     return <span className="runtime-chip runtime-chip-warning">Settings unavailable</span>;
   }
-
-  const model = mode === 'online' ? settings.default_online_model : settings.default_local_model;
-  const activeArtifact = installedArtifacts.find(
-    artifact => artifact.id === settings.default_local_artifact_id,
-  ) ?? installedArtifacts.find(
-    artifact => artifact.model_id === settings.default_local_model,
-  );
-  const selectedArtifactId = pendingArtifactId ?? activeArtifact?.id ?? '';
 
   const handleLocalModelChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
     const nextArtifact = installedArtifacts.find(artifact => artifact.id === event.target.value);
@@ -140,33 +211,57 @@ function RuntimeSummary(): JSX.Element {
         <span className="runtime-chip">{settings.default_online_provider}</span>
       )}
       {mode === 'local' ? (
-        <select
-          aria-label="Local model"
-          aria-invalid={modelSaveError ? 'true' : undefined}
-          className="runtime-model runtime-model-select"
-          disabled={artifactsLoading || savingModel || installedArtifacts.length === 0}
-          onChange={handleLocalModelChange}
-          title={activeArtifact?.display_name ?? model ?? 'No model selected'}
-          value={selectedArtifactId}
-        >
-          {!activeArtifact && (
-            <option value="" disabled>
-              {artifactsLoading ? 'Loading installed models…' : model || 'No model selected'}
-            </option>
+        <div className="runtime-model-control">
+          <select
+            aria-busy={modelControlBusy || undefined}
+            aria-label="Local model"
+            aria-invalid={modelSaveError || selectedArtifactError ? 'true' : undefined}
+            className="runtime-model runtime-model-select"
+            disabled={modelControlBusy || installedArtifacts.length === 0}
+            onChange={handleLocalModelChange}
+            title={selectedArtifact?.display_name ?? model ?? 'No model selected'}
+            value={selectedArtifactId}
+          >
+            {!selectedArtifact && (
+              <option value="" disabled>
+                {catalogLoading
+                  ? 'Loading model catalogue…'
+                  : loadedEmpty
+                    ? 'No models available'
+                    : model || 'No model selected'}
+              </option>
+            )}
+            {selectorArtifacts.map((artifact) => (
+              <option key={artifact.id} value={artifact.id}>
+                {artifact.display_name}
+              </option>
+            ))}
+          </select>
+          {modelControlBusy && (
+            <span className="runtime-model-loading-chip" role="status">
+              <span className="runtime-model-spinner" aria-hidden="true" />
+              {catalogLoading
+                ? 'Loading models'
+                : savingModel
+                  ? 'Switching model'
+                  : 'Downloading model'}
+            </span>
           )}
-          {installedArtifacts.map((artifact) => (
-            <option key={artifact.id} value={artifact.id}>
-              {artifact.display_name}
-            </option>
-          ))}
-        </select>
+        </div>
       ) : (
         <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
       )}
-      {mode === 'local' && modelSaveError && (
-        <span className="runtime-model-error" role="alert" title={modelSaveError}>
-          {modelSaveError}
+      {mode === 'local' && (modelSaveError || selectedArtifactError) && (
+        <span
+          className="runtime-model-error"
+          role="alert"
+          title={modelSaveError ?? selectedArtifactError ?? undefined}
+        >
+          {modelSaveError ?? selectedArtifactError}
         </span>
+      )}
+      {mode === 'local' && selectedModelUnavailable && (
+        <span className="runtime-model-error" role="alert">Selected model unavailable</span>
       )}
       {mode === 'local' && artifactsError && (
         <>
