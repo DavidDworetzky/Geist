@@ -56,6 +56,8 @@ class OnlineModelNames(Enum):
     GROK_2_VISION_2 = "grok-2-vision-2"
     GROK_3 = "grok-3"
     # Anthropic models
+    CLAUDE_FABLE_51 = "claude-fable-5-1"
+    CLAUDE_MYTHOS_51 = "claude-mythos-5-1"
     CLAUDE_3_OPUS = "claude-3-opus-20240229"
     CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
     CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
@@ -496,6 +498,30 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
         ),
     ],
     OnlineModelProviders.ANTHROPIC: [
+        ModelInfo(
+            id="claude-fable-5-1",
+            name="Claude Fable 5.1",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=True,
+            family="claude-fable",
+        ),
+        ModelInfo(
+            id="claude-mythos-5-1",
+            name="Claude Mythos 5.1 (Invite Only)",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="claude-mythos",
+        ),
         ModelInfo(
             id="claude-3-opus-20240229",
             name="Claude 3 Opus",
@@ -1242,6 +1268,30 @@ DISCOVERED_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
         ),
     ],
     OnlineModelProviders.ANTHROPIC: [
+        ModelInfo(
+            id="claude-fable-5-1",
+            name="Claude Fable 5.1",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=True,
+            family="claude-fable",
+        ),
+        ModelInfo(
+            id="claude-mythos-5-1",
+            name="Claude Mythos 5.1 (Invite Only)",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="claude-mythos",
+        ),
         ModelInfo(
             id="claude-opus-4-5-20251101",
             name="Claude Opus 4.5",
