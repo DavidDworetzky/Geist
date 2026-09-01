@@ -6,6 +6,8 @@ from typing import Any, cast
 
 import pytest
 
+from agents.prompt.prompt import TOOL_USE_PROMPT
+
 
 pytestmark = pytest.mark.eval
 
@@ -52,3 +54,14 @@ def test_swapped_routes_are_rejected() -> None:
     )
 
     assert score == 0.0
+
+
+def test_creative_writing_no_tool_policy_is_in_system_prompt() -> None:
+    haiku_case = next(
+        case for case in ROUTING_CASES if case["id"] == "creative_writing_haiku_no_tool"
+    )
+
+    assert haiku_case["expected_tools"] == []
+    assert "image.generate" in haiku_case["forbidden_tools"]
+    assert "answer directly without calling a tool" in TOOL_USE_PROMPT
+    assert "poem or haiku" in TOOL_USE_PROMPT
