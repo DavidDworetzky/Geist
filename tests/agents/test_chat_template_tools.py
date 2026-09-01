@@ -93,6 +93,21 @@ def test_qwen_tool_markup_parses_to_internal_call():
     assert turn.tool_calls[0].arguments == {"query": "celebrity news", "max_results": 3}
 
 
+def test_bare_tool_json_accepts_parameters_alias():
+    payload = build_tool_payload([ChatMessage(role="user", content="news")], [search_tool()])
+    provider_name = next(iter(payload.provider_to_internal))
+
+    turn = parse_tool_response(
+        (f'{{"name":"{provider_name}","parameters":' '{"query":"celebrity news","max_results":3}}'),
+        provider_to_internal=payload.provider_to_internal,
+    )
+
+    assert turn.finish_reason == "tool_calls"
+    assert turn.text == ""
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "celebrity news", "max_results": 3}
+
+
 @pytest.mark.parametrize(
     "response,match",
     [

@@ -155,7 +155,11 @@ def parse_tool_response(
                 candidate = json.loads(raw_response)
             except json.JSONDecodeError:
                 candidate = None
-            if isinstance(candidate, dict) and {"name", "arguments"} <= candidate.keys():
+            if (
+                isinstance(candidate, dict)
+                and "name" in candidate
+                and ("arguments" in candidate or "parameters" in candidate)
+            ):
                 payloads = [raw_response]
                 text = ""
 
@@ -170,7 +174,11 @@ def parse_tool_response(
         provider_name = value.get("name")
         if not isinstance(provider_name, str) or provider_name not in provider_to_internal:
             raise ValueError(f"Model requested unknown tool: {provider_name!r}")
-        arguments = value.get("arguments", {})
+        # Some tokenizer-native models mirror the tool schema's ``parameters``
+        # key in their call instead of emitting OpenAI's ``arguments`` key.
+        # Accept that known variant without weakening tool-name or schema
+        # validation downstream.
+        arguments = value.get("arguments", value.get("parameters", {}))
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
