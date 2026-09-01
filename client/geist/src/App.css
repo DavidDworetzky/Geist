@@ -311,14 +311,69 @@ textarea:focus-visible {
   color: var(--geist-color-accent-strong);
 }
 
+.runtime-model-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .runtime-model-select {
   min-width: 180px;
   cursor: pointer;
 }
 
 .runtime-model-select:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.7;
+}
+
+.runtime-model-select[aria-busy="true"] {
+  cursor: wait;
+}
+
+.runtime-model-loading-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  color: var(--geist-color-accent-strong);
+  font-size: 0.72rem;
+  font-weight: 680;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--geist-color-accent) 10%, var(--geist-color-surface-strong));
+  border: 1px solid color-mix(in srgb, var(--geist-color-accent) 36%, var(--geist-color-border));
+  border-radius: 999px;
+  animation: runtime-model-chip-pulse 1.4s ease-in-out infinite;
+}
+
+.runtime-model-spinner {
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 2px solid color-mix(in srgb, var(--geist-color-accent) 30%, transparent);
+  border-top-color: var(--geist-color-accent);
+  border-radius: 50%;
+  animation: runtime-model-spin 0.8s linear infinite;
+}
+
+@keyframes runtime-model-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes runtime-model-chip-pulse {
+  50% {
+    border-color: color-mix(in srgb, var(--geist-color-accent) 65%, var(--geist-color-border));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runtime-model-loading-chip,
+  .runtime-model-spinner {
+    animation: none;
+  }
 }
 
 .runtime-model-error {
