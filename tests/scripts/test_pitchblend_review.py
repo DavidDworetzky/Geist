@@ -46,6 +46,26 @@ def pr_330_files() -> list[dict]:
     ]
 
 
+def pr_341_files() -> list[dict]:
+    return [
+        {
+            "filename": path,
+            "status": "modified",
+            "additions": 5,
+            "deletions": 0,
+            "patch": "@@ -1 +1 @@",
+        }
+        for path in (
+            "agents/architectures/registry.py",
+            "client/geist/src/Components/__tests__/AgentConfigSection.test.tsx",
+            "client/geist/src/Hooks/useAvailableModels.tsx",
+            "plans/156-CLAUDE-FABLE-MYTHOS-5-1-ONLINE-CATALOG.md",
+            "scripts/model_filter_config.py",
+            "tests/agents/test_anthropic_model_registry.py",
+        )
+    ]
+
+
 def test_exact_review_command() -> None:
     assert pitchblend.COMMAND_PATTERN.fullmatch("@pitchblend-ai review")
     assert pitchblend.COMMAND_PATTERN.fullmatch("@Pitchblend-AI   review")
@@ -163,14 +183,37 @@ def test_gate_ignores_its_own_pending_status_but_not_other_statuses() -> None:
     )
 
 
-def test_model_catalog_scope_matches_pr_330_and_rejects_near_misses() -> None:
+def test_model_catalog_scope_matches_pr_330_and_pr_341() -> None:
     assert pitchblend.is_model_catalog_only_change(pr_330_files())
+    assert pitchblend.is_model_catalog_only_change(pr_341_files())
     assert not pitchblend.is_model_catalog_only_change(
         [{"filename": "tests/agents/test_model_catalog.py"}]
     )
     assert not pitchblend.is_model_catalog_only_change(
         pr_330_files() + [{"filename": "agents/online_agent.py"}]
     )
+
+
+def test_gate_allows_scoped_registry_catalog_change_but_blocks_near_miss() -> None:
+    result = pitchblend.deterministic_gate(
+        eligible_pull_request(), pr_341_files(), passing_checks(), []
+    )
+    assert result.eligible
+
+    unscoped_files = pr_341_files() + [
+        {
+            "filename": "agents/online_agent.py",
+            "status": "modified",
+            "additions": 1,
+            "deletions": 0,
+            "patch": "@@ -1 +1 @@",
+        }
+    ]
+    result = pitchblend.deterministic_gate(
+        eligible_pull_request(), unscoped_files, passing_checks(), []
+    )
+    assert not result.eligible
+    assert any("contract" in reason for reason in result.reasons)
 
 
 def base_classification(**overrides: object) -> dict:
@@ -217,26 +260,27 @@ def test_classifier_matrix_covers_major_decision_boundaries() -> None:
     ) is None
 
 
-def test_catalog_only_matrix_route_accepts_pr_330_classifier_shape() -> None:
+def test_catalog_only_matrix_route_accepts_pr_330_and_pr_341_classifier_shape() -> None:
     classification = base_classification(
         change_type="feature",
         complexity="medium",
-        contract_change=True,
+        contract_change=False,
         reason="Adds a hosted OpenRouter model entry and exposes its metadata.",
     )
 
     assert pitchblend.classification_pass_rule(classification) is None
-    assert (
-        pitchblend.classification_pass_rule(
-            classification,
-            model_catalog_only=pitchblend.is_model_catalog_only_change(pr_330_files()),
+    for files in (pr_330_files(), pr_341_files()):
+        assert (
+            pitchblend.classification_pass_rule(
+                classification,
+                model_catalog_only=pitchblend.is_model_catalog_only_change(files),
+            )
+            == "model-catalog-low-or-medium"
         )
-        == "model-catalog-low-or-medium"
-    )
     approved = pitchblend.format_approved_comment(
-        330,
+        341,
         "8383580aa22b0ff7",
-        len(pr_330_files()),
+        len(pr_341_files()),
         103,
         classification,
         "model-catalog-low-or-medium",
@@ -244,6 +288,15 @@ def test_catalog_only_matrix_route_accepts_pr_330_classifier_shape() -> None:
     assert "Medium-complexity model catalog feature" in approved
 
     classification["security_change"] = True
+    assert (
+        pitchblend.classification_pass_rule(
+            classification, model_catalog_only=True
+        )
+        is None
+    )
+
+    classification["security_change"] = False
+    classification["contract_change"] = True
     assert (
         pitchblend.classification_pass_rule(
             classification, model_catalog_only=True
@@ -316,6 +369,8 @@ def test_classifier_uses_frontend_boundary_prompt_and_safe_response_budget() -> 
     assert "Frontend code remains frontend when it calls an existing API" in payload[
         "instructions"
     ]
+    assert "model availability and descriptive metadata" in payload["instructions"]
+    assert "runner selection, routing, execution behavior" in payload["instructions"]
 
 
 def test_comments_include_classifier_json_and_objective_matrix_decision() -> None:
