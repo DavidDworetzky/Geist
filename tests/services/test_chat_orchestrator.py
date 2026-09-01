@@ -13,6 +13,7 @@ from agents.models.tool_calling import (
     ToolExecutionOutput,
 )
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import ToolRegistry
 
 
@@ -39,6 +40,114 @@ class ScriptedBackend:
         if turn.text:
             yield ModelEvent.text_delta(turn.text)
         yield ModelEvent.turn_complete(turn)
+
+
+class FailingIntentRouter(ToolIntentRouter):
+    def classify(self, backend, messages):
+        del backend, messages
+        raise RuntimeError("classifier unavailable")
+
+
+def test_classifier_failure_falls_back_to_direct_answer_without_tools():
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="public.search",
+            description="Public search",
+            arguments_model=LookupArguments,
+            handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+            semantic_tags=frozenset({"public_retrieval"}),
+        )
+    )
+    backend = ScriptedBackend([ModelTurn(text="Fallback answer", finish_reason="stop")])
+    orchestrator = ChatOrchestrator(
+        registry,
+        intent_router=FailingIntentRouter(),
+        history_loader=lambda _chat_id: [],
+        history_writer=lambda **_kwargs: SimpleNamespace(chat_session_id=42),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Explain this",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Assistant prompt",
+        )
+    )
+
+    assert backend.requests[0]["tools"] == []
+    assert next(event.payload for event in events if event.event == "final").message == [
+        "Fallback answer"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("intent", "needs_retrieval", "expected_tools"),
+    [
+        ("answer", False, []),
+        ("answer", True, ["public.search", "local.search"]),
+        ("sensitive_answer", False, []),
+        ("sensitive_answer", True, ["local.search"]),
+        ("action", False, ["public.search", "local.search", "computer.use"]),
+        ("image_generation", False, ["image.generate"]),
+    ],
+)
+def test_intent_router_filters_catalog_before_assistant_turn(
+    intent, needs_retrieval, expected_tools
+):
+    registry = ToolRegistry()
+    for name, tags in [
+        ("public.search", frozenset({"public_retrieval"})),
+        ("local.search", frozenset({"local_retrieval"})),
+        ("computer.use", frozenset({"action"})),
+        ("image.generate", frozenset({"image_generation"})),
+    ]:
+        registry.register(
+            ToolDefinition(
+                name=name,
+                description=name,
+                arguments_model=LookupArguments,
+                handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+                semantic_tags=tags,
+            )
+        )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                text=(
+                    f'{{"intent":"{intent}",' f'"needs_retrieval":{str(needs_retrieval).lower()}}}'
+                ),
+                finish_reason="stop",
+            ),
+            ModelTurn(text="Direct response", finish_reason="stop"),
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        intent_router=ToolIntentRouter(),
+        history_loader=lambda _chat_id: [],
+        history_writer=lambda **_kwargs: SimpleNamespace(chat_session_id=42),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Handle this request",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Assistant prompt",
+        )
+    )
+
+    assert backend.requests[0]["tools"] == []
+    assert backend.requests[1]["tools"] == expected_tools
+    assert [event.payload["text"] for event in events if event.event == "delta"] == [
+        "Direct response"
+    ]
 
 
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///tmp/secret", "not-a-url"])

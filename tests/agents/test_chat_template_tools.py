@@ -108,6 +108,25 @@ def test_bare_tool_json_accepts_parameters_alias():
     assert turn.tool_calls[0].arguments == {"query": "celebrity news", "max_results": 3}
 
 
+def test_unknown_bare_json_descriptor_remains_text():
+    response = '{"name":"summarize","parameters":{"text":"hello"}}'
+
+    turn = parse_tool_response(response, provider_to_internal={"safe": "web.search"})
+
+    assert turn.finish_reason == "stop"
+    assert turn.text == response
+    assert turn.tool_calls == []
+
+
+def test_bare_tool_json_prefers_arguments_over_parameters():
+    turn = parse_tool_response(
+        '{"name":"safe","arguments":{"query":"new"},"parameters":{"query":"old"}}',
+        provider_to_internal={"safe": "web.search"},
+    )
+
+    assert turn.tool_calls[0].arguments == {"query": "new"}
+
+
 @pytest.mark.parametrize(
     "response,match",
     [

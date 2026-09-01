@@ -64,6 +64,7 @@ from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
 from app.services.tool_approvals import approval_registry as tool_approval_registry
+from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -116,6 +117,7 @@ install_plugin_support(_tool_registry)
 chat_orchestrator = ChatOrchestrator(
     _tool_registry,
     run_controls=run_controls,
+    intent_router=ToolIntentRouter(),
 )
 
 if enhanced_logging:
@@ -613,6 +615,7 @@ def create_app(
                     "requires_approval": tool.requires_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
+                    "semantic_tags": sorted(tool.semantic_tags),
                 }
                 for tool in catalog
             ]

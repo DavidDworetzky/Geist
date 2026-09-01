@@ -24,6 +24,13 @@ ToolCallStatus = Literal[
     "cancelled",
 ]
 ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"]
+ToolIntent = Literal["answer", "sensitive_answer", "action", "image_generation"]
+ToolSemanticTag = Literal[
+    "public_retrieval",
+    "local_retrieval",
+    "action",
+    "image_generation",
+]
 
 
 @dataclass(frozen=True)
@@ -149,6 +156,7 @@ class ToolDefinition:
     source_adapter: str | None = None
     source_revision: str | None = None
     availability: ToolAvailability | None = None
+    semantic_tags: frozenset[ToolSemanticTag] = field(default_factory=lambda: frozenset({"action"}))
     # Raw JSON-schema alternative to arguments_model for tools whose schemas
     # arrive at runtime (MCP servers, reflected adapters). Exactly one of the
     # two must be provided; handlers on this path receive a plain dict.
@@ -161,6 +169,8 @@ class ToolDefinition:
             raise ValueError(
                 f"Tool '{self.name}' requires exactly one of arguments_model or arguments_schema"
             )
+        if not self.semantic_tags:
+            raise ValueError(f"Tool '{self.name}' requires at least one semantic tag")
 
     def parameters_schema(self) -> dict[str, Any]:
         if self.arguments_model is not None:

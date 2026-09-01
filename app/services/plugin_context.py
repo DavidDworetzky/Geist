@@ -96,6 +96,7 @@ def install_plugin_support(
             handler=load_skill,
             max_result_chars=100_000,
             source_adapter="PluginRegistry.find_skill",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
 

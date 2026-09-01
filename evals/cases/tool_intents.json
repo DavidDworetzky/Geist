@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "cases": [
+    {"id": "moon_haiku", "prompt": "Write a haiku about the moon.", "expected_intent": "answer", "expected_needs_retrieval": false},
+    {"id": "celebrity_news", "prompt": "Find the top three latest celebrity news stories.", "expected_intent": "answer", "expected_needs_retrieval": true},
+    {"id": "general_explanation", "prompt": "Explain recursion simply.", "expected_intent": "answer", "expected_needs_retrieval": false},
+    {"id": "uploaded_tax_return", "prompt": "Find my latest tax return in my uploaded documents.", "expected_intent": "sensitive_answer", "expected_needs_retrieval": true},
+    {"id": "past_memory", "prompt": "What did I tell you about my daughter's school last week?", "expected_intent": "sensitive_answer", "expected_needs_retrieval": true},
+    {"id": "medical_question", "prompt": "What might my recent blood pressure readings mean?", "expected_intent": "sensitive_answer", "expected_needs_retrieval": false},
+    {"id": "legal_question", "prompt": "Summarize the obligations in my lease.", "expected_intent": "sensitive_answer", "expected_needs_retrieval": true},
+    {"id": "code_generation", "prompt": "Add pagination to this API and test it.", "expected_intent": "action", "expected_needs_retrieval": false},
+    {"id": "computer_use", "prompt": "Open the browser and submit this form.", "expected_intent": "action", "expected_needs_retrieval": false},
+    {"id": "send_email", "prompt": "Email the report to Alex.", "expected_intent": "action", "expected_needs_retrieval": false},
+    {"id": "generate_image", "prompt": "Generate an image of a moonlit lake.", "expected_intent": "image_generation", "expected_needs_retrieval": false},
+    {"id": "edit_image", "prompt": "Edit this photo to make the sky purple.", "expected_intent": "image_generation", "expected_needs_retrieval": false},
+    {"id": "poem_about_image", "prompt": "Write a poem about an image of a moonlit lake.", "expected_intent": "answer", "expected_needs_retrieval": false}
+  ]
+}
