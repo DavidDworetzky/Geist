@@ -20,6 +20,7 @@ Malformed classifier output and classifier failures fall back to `Action`. Dynam
 3. Filter the enabled, available tool list before the assistant generation pass.
 4. Add deterministic tests for parsing, tool filtering, and orchestration, plus a native live-model routing smoke pass.
 5. Address the related bare-JSON tool-call false positive by requiring a registered tool name on the heuristic unwrapped path.
+6. Add a General settings toggle, defaulted on, that bypasses classification and exposes the full enabled tool catalog when disabled.
 
 ## Validation
 

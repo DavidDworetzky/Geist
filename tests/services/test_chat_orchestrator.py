@@ -94,6 +94,49 @@ def test_classifier_failure_falls_back_to_action_tools_without_image_generation(
     ]
 
 
+def test_disabled_intent_router_exposes_full_catalog_without_classifying():
+    registry = ToolRegistry()
+    for name, tags in [
+        ("public.search", frozenset({"public_retrieval"})),
+        ("computer.use", frozenset({"action"})),
+        ("image.generate", frozenset({"image_generation"})),
+    ]:
+        registry.register(
+            ToolDefinition(
+                name=name,
+                description=name,
+                arguments_model=LookupArguments,
+                handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+                semantic_tags=tags,
+            )
+        )
+    backend = ScriptedBackend([ModelTurn(text="Unrouted answer", finish_reason="stop")])
+    orchestrator = ChatOrchestrator(
+        registry,
+        intent_router=FailingIntentRouter(),
+        history_loader=lambda _chat_id: [],
+        history_writer=lambda **_kwargs: SimpleNamespace(chat_session_id=42),
+    )
+
+    list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Use the full catalog",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Assistant prompt",
+            enable_intent_router=False,
+        )
+    )
+
+    assert backend.requests[0]["tools"] == [
+        "public.search",
+        "computer.use",
+        "image.generate",
+    ]
+
+
 @pytest.mark.parametrize(
     ("intent", "needs_retrieval", "expected_tools"),
     [

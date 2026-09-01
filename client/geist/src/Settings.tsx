@@ -7,6 +7,7 @@ import RAGSettingsSection from './Components/RAGSettingsSection';
 import McpServersSection from './Components/McpServersSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
+import SettingsToggle from './Components/SettingsToggle';
 import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import {
@@ -54,6 +55,13 @@ const Settings: React.FC = () => {
     }));
     setHasUnsavedChanges(true);
     setSaveStatus('idle');
+  };
+
+  const updateUiPreference = (key: string, value: any) => {
+    updateLocalSetting('ui_preferences', {
+      ...(localSettings?.ui_preferences || {}),
+      [key]: value
+    });
   };
 
   const handleSave = async () => {
@@ -211,6 +219,12 @@ const Settings: React.FC = () => {
                 options={agentTypeOptions}
                 onChange={(value) => updateLocalSetting('default_agent_type', value)}
                 description="Choose whether to use a local or online language model by default."
+              />
+              <SettingsToggle
+                label="Intent Router"
+                checked={localSettings.ui_preferences?.intentRouterEnabled !== false}
+                onChange={(value) => updateUiPreference('intentRouterEnabled', value)}
+                description="Select a focused tool catalog for each turn. Turn this off to expose the full enabled catalog."
               />
             </section>
           )}

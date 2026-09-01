@@ -312,6 +312,7 @@ class ChatOrchestrator:
         config: ModelRequestConfig,
         system_prompt: str | None,
         enable_tools: bool = True,
+        enable_intent_router: bool = True,
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,
@@ -394,7 +395,7 @@ class ChatOrchestrator:
             )
 
             if enable_tools and native_tools:
-                if self.intent_router is None:
+                if self.intent_router is None or not enable_intent_router:
                     tools = self.registry.definitions_for_context(context)
                 else:
                     try:

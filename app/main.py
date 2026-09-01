@@ -306,6 +306,11 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
     return "\n\n".join(sections)
 
 
+def intent_router_enabled(workspace_id: int) -> bool:
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+    return settings.ui_preferences.get("intentRouterEnabled") is not False
+
+
 def resolved_memory_settings(
     params: CompleteTextParams,
     chat_id: int | None,
@@ -379,6 +384,7 @@ def run_chat_completion(
         config=model_request_config(params),
         system_prompt=chat_system_prompt(params.enable_tools, memory_context),
         enable_tools=params.enable_tools,
+        enable_intent_router=intent_router_enabled(workspace_id),
         memory_enabled=memory_enabled,
         memory_mode=memory_mode,
         folder_id=folder_id,
@@ -409,6 +415,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 config=model_request_config(params),
                 system_prompt=chat_system_prompt(params.enable_tools, memory_context),
                 enable_tools=params.enable_tools,
+                enable_intent_router=intent_router_enabled(workspace_id),
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
