@@ -17,8 +17,8 @@ from app.services.tool_intent_router import (
         ('{"intent":"Sensitive_Answer"}', "sensitive_answer"),
         ("The intent is action.", "action"),
         ('```json\n{"intent":"image_generation"}\n```', "image_generation"),
-        ('{"intent":"unknown"}', "answer"),
-        ("It could be action or answer.", "answer"),
+        ('{"intent":"unknown"}', "action"),
+        ("It could be action or answer.", "action"),
     ],
 )
 def test_parse_tool_intent(response, expected):

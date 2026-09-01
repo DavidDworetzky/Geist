@@ -48,17 +48,23 @@ class FailingIntentRouter(ToolIntentRouter):
         raise RuntimeError("classifier unavailable")
 
 
-def test_classifier_failure_falls_back_to_direct_answer_without_tools():
+def test_classifier_failure_falls_back_to_action_tools_without_image_generation():
     registry = ToolRegistry()
-    registry.register(
-        ToolDefinition(
-            name="public.search",
-            description="Public search",
-            arguments_model=LookupArguments,
-            handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
-            semantic_tags=frozenset({"public_retrieval"}),
+    for name, tags in [
+        ("public.search", frozenset({"public_retrieval"})),
+        ("local.search", frozenset({"local_retrieval"})),
+        ("computer.use", frozenset({"action"})),
+        ("image.generate", frozenset({"image_generation"})),
+    ]:
+        registry.register(
+            ToolDefinition(
+                name=name,
+                description=name,
+                arguments_model=LookupArguments,
+                handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+                semantic_tags=tags,
+            )
         )
-    )
     backend = ScriptedBackend([ModelTurn(text="Fallback answer", finish_reason="stop")])
     orchestrator = ChatOrchestrator(
         registry,
@@ -78,7 +84,11 @@ def test_classifier_failure_falls_back_to_direct_answer_without_tools():
         )
     )
 
-    assert backend.requests[0]["tools"] == []
+    assert backend.requests[0]["tools"] == [
+        "public.search",
+        "local.search",
+        "computer.use",
+    ]
     assert next(event.payload for event in events if event.event == "final").message == [
         "Fallback answer"
     ]

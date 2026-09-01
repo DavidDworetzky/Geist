@@ -401,7 +401,7 @@ class ChatOrchestrator:
                         route_decision = self.intent_router.classify(backend, run.model_messages)
                     except Exception:
                         logger.exception(
-                            "Tool intent classification failed for run %s; using Answer",
+                            "Tool intent classification failed for run %s; using Action",
                             run.run_id,
                         )
                         route_decision = ToolIntentDecision()

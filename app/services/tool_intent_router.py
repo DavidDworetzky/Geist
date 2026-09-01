@@ -38,12 +38,12 @@ _INTENT_PATTERN = re.compile(
 
 @dataclass(frozen=True)
 class ToolIntentDecision:
-    intent: ToolIntent = "answer"
+    intent: ToolIntent = "action"
     needs_retrieval: bool = False
 
 
 def parse_tool_intent_decision(response: str) -> ToolIntentDecision:
-    """Parse a classifier response, defaulting ambiguous output to direct Answer."""
+    """Parse a classifier response, defaulting ambiguous output to Action."""
 
     normalized = response.strip()
     if normalized.startswith("```") and normalized.endswith("```"):

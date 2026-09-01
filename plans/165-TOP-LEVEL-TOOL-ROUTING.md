@@ -11,7 +11,7 @@ Prevent unrelated tools from biasing local model turns by classifying each user 
 - `Action`: code generation, computer use, state changes, and other tasks; exposes enabled tools except image generation.
 - `Image_Generation`: explicit image creation or editing; exposes only image-generation tools.
 
-Malformed classifier output falls back to `Answer`. Dynamic MCP and reflected adapter tools default to `Action` because their semantics are not trustworthy enough to classify as retrieval.
+Malformed classifier output and classifier failures fall back to `Action`. Dynamic MCP and reflected adapter tools default to `Action` because their semantics are not trustworthy enough to classify as retrieval.
 
 ## Implementation
 
