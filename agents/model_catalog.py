@@ -11,10 +11,8 @@ import platform
 import re
 from dataclasses import dataclass
 
-from agents.model_ids import META_LLAMA_31_8B_INSTRUCT_ID
 
-
-MLX_DEFAULT_LOCAL_MODEL = META_LLAMA_31_8B_INSTRUCT_ID
+MLX_DEFAULT_LOCAL_MODEL = "Qwen/Qwen3.8-27B"
 GGUF_DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B"
 
 

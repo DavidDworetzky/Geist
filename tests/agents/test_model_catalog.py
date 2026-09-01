@@ -18,12 +18,12 @@ from agents.model_catalog import (
 )
 
 
-def test_platform_default_preserves_apple_silicon_mlx_and_uses_gguf_on_windows():
+def test_platform_default_uses_qwen38_mlx_and_uses_gguf_on_windows():
     with (
         patch("agents.model_catalog.platform.system", return_value="Darwin"),
         patch("agents.model_catalog.platform.machine", return_value="arm64"),
     ):
-        assert default_local_model_id() == "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        assert default_local_model_id() == "Qwen/Qwen3.8-27B"
 
     with patch("agents.model_catalog.platform.system", return_value="Windows"):
         assert default_local_model_id() == "Qwen/Qwen3-4B"
