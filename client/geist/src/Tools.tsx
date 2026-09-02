@@ -63,6 +63,8 @@ const Tools: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [configurationTool, setConfigurationTool] = useState<ToolDefinition | null>(null);
   const closeConfigurationButton = useRef<HTMLButtonElement>(null);
+  const configurationDialog = useRef<HTMLDivElement>(null);
+  const configurationTrigger = useRef<HTMLButtonElement | null>(null);
 
   const loadTools = async () => {
     try {
@@ -91,12 +93,39 @@ const Tools: React.FC = () => {
 
   useEffect(() => {
     if (!configurationTool) return undefined;
+    const previouslyFocused = configurationTrigger.current
+      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     closeConfigurationButton.current?.focus();
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setConfigurationTool(null);
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setConfigurationTool(null);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = Array.from(
+        configurationDialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+      if (focusableElements.length === 0) return;
+
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleDialogKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
   }, [configurationTool]);
 
   return (
@@ -178,7 +207,10 @@ const Tools: React.FC = () => {
                           <button
                             className="button button-secondary button-small tool-configure-button"
                             type="button"
-                            onClick={() => setConfigurationTool(tool)}
+                            onClick={(event) => {
+                              configurationTrigger.current = event.currentTarget;
+                              setConfigurationTool(tool);
+                            }}
                           >
                             Configure
                           </button>
@@ -212,6 +244,7 @@ const Tools: React.FC = () => {
           }}
         >
           <div
+            ref={configurationDialog}
             className="modal-panel tool-configuration-modal"
             role="dialog"
             aria-modal="true"

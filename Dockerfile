@@ -47,7 +47,8 @@ COPY . .
 RUN chmod +x *.sh && \
     groupadd --system geist && \
     useradd --system --gid geist --home-dir /opt/geist --no-create-home geist && \
-    chown -R geist:geist /opt/geist /opt/venv
+    mkdir -p /var/lib/geist && \
+    chown -R geist:geist /opt/geist /opt/venv /var/lib/geist
 
 VOLUME /rest
 

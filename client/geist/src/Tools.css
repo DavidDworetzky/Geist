@@ -103,7 +103,8 @@
 
 .tool-status,
 .mcp-catalogue-count,
-.mcp-catalogue-publisher {
+.mcp-catalogue-publisher,
+.mcp-catalogue-configured {
   flex: 0 0 auto;
   padding: 4px 8px;
   color: var(--geist-color-text-muted);
@@ -115,6 +116,13 @@
 }
 
 .tool-status-ready {
+  color: var(--geist-color-success);
+  background: color-mix(in srgb, var(--geist-color-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-success) 35%, transparent);
+}
+
+.mcp-catalogue-configured {
+  margin-left: auto;
   color: var(--geist-color-success);
   background: color-mix(in srgb, var(--geist-color-success) 12%, transparent);
   border-color: color-mix(in srgb, var(--geist-color-success) 35%, transparent);

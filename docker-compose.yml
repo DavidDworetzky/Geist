@@ -26,7 +26,8 @@ services:
       dockerfile: Dockerfile
     environment:
       - GEIST_DATABASE_PROVIDER=sqlite
-      - GEIST_DATA_DIR=/opt/geist/data
+      - XDG_DATA_HOME=/var/lib/geist
+      - GEIST_MARKDOWN_ROOT=/opt/geist/data/workspace
       - SQLITE_DATABASE_PATH=data/geist.sqlite3
       - DEBUG=${DEBUG:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
@@ -39,6 +40,7 @@ services:
         required: false
     volumes:
       - ./:/opt/geist
+      - geist_runtime_data:/var/lib/geist
       - geist_operator_token:/run/geist-operator:ro
     depends_on:
       operator-token-init:
@@ -79,4 +81,5 @@ networks:
   test_net:
 
 volumes:
+  geist_runtime_data:
   geist_operator_token:

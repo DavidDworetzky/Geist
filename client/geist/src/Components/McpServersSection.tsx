@@ -132,9 +132,9 @@ const McpServersSection: React.FC = () => {
     setFormOpen(true);
   };
 
-  const openCatalogueForm = (entry: McpCatalogueEntry) => {
-    setForm(formFromCatalogue(entry));
-    setEditingId(null);
+  const openCatalogueForm = (entry: McpCatalogueEntry, server?: McpServer) => {
+    setForm(server ? formFromServer(server) : formFromCatalogue(entry));
+    setEditingId(server?.mcp_server_id ?? null);
     setSelectedCatalogueId(entry.id);
     setFormError(null);
     setFormOpen(true);
@@ -247,34 +247,40 @@ const McpServersSection: React.FC = () => {
           <span className="mcp-catalogue-count">{mcpCatalogue.length} profiles</span>
         </div>
         <div className="mcp-catalogue-grid" data-testid="mcp-catalogue">
-          {mcpCatalogue.map((entry) => (
-            <article className="mcp-catalogue-card" key={entry.id}>
-              <div className="mcp-catalogue-card-heading">
-                <div>
-                  <span className="mcp-catalogue-category">{entry.category}</span>
-                  <h4>{entry.name}</h4>
+          {mcpCatalogue.map((entry) => {
+            const configuredServer = servers.find((server) => server.name === entry.id);
+            return (
+              <article className="mcp-catalogue-card" key={entry.id}>
+                <div className="mcp-catalogue-card-heading">
+                  <div>
+                    <span className="mcp-catalogue-category">{entry.category}</span>
+                    <h4>{entry.name}</h4>
+                  </div>
+                  <span className="mcp-catalogue-publisher">{entry.publisher}</span>
                 </div>
-                <span className="mcp-catalogue-publisher">{entry.publisher}</span>
-              </div>
-              <p>{entry.description}</p>
-              {entry.accountScope && (
-                <p className="mcp-catalogue-scope">{entry.accountScope}</p>
-              )}
-              <div className="mcp-catalogue-actions">
-                <a href={entry.sourceUrl} target="_blank" rel="noreferrer">
-                  Source
-                </a>
-                <button
-                  className="button button-small"
-                  type="button"
-                  aria-label={`Configure ${entry.name}`}
-                  onClick={() => openCatalogueForm(entry)}
-                >
-                  Configure
-                </button>
-              </div>
-            </article>
-          ))}
+                <p>{entry.description}</p>
+                {entry.accountScope && (
+                  <p className="mcp-catalogue-scope">{entry.accountScope}</p>
+                )}
+                <div className="mcp-catalogue-actions">
+                  <a href={entry.sourceUrl} target="_blank" rel="noreferrer">
+                    Source
+                  </a>
+                  {configuredServer && (
+                    <span className="mcp-catalogue-configured">Configured</span>
+                  )}
+                  <button
+                    className="button button-small"
+                    type="button"
+                    aria-label={`${configuredServer ? 'Edit' : 'Configure'} ${entry.name}`}
+                    onClick={() => openCatalogueForm(entry, configuredServer)}
+                  >
+                    {configuredServer ? 'Edit' : 'Configure'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
 

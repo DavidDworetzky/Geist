@@ -32,7 +32,9 @@ The read-only Markdown list/read tools default to
 macOS, `~/.local/share/geist/workspace` on Linux, and `%LOCALAPPDATA%/Geist/workspace`
 on Windows). Operators can select a different directory with
 `GEIST_MARKDOWN_ROOT`. Reads accept only `.md`/`.markdown` paths contained under
-that root.
+that root. The development Docker Compose stack sets this override to
+`<repository>/data/workspace`; other application data, including models and
+plugins, stays outside the checkout in the `geist_runtime_data` Docker volume.
 
 Adapters not mapped into chat tools:
 

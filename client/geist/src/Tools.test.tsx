@@ -108,17 +108,26 @@ describe('Tools', () => {
     })) as any;
 
     render(<Tools />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Configure' }));
+    const configureButton = await screen.findByRole('button', { name: 'Configure' });
+    fireEvent.click(configureButton);
 
     expect(screen.getByRole('dialog', { name: 'Configure image.generate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
     expect(screen.getByDisplayValue('OpenAI-compatible image API')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Not configured')).toBeInTheDocument();
     expect(screen.getByDisplayValue('https://api.openai.com/v1')).toBeInTheDocument();
     expect(screen.getByDisplayValue('gpt-image-1')).toBeInTheDocument();
     expect(screen.getByText(/Set OPENAI_API_KEY before starting Geist/i)).toBeInTheDocument();
 
+    screen.getByDisplayValue('gpt-image-1').focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(screen.getByDisplayValue('gpt-image-1')).toHaveFocus();
+
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(configureButton).toHaveFocus();
   });
 
   it('opens MCP configuration from the top-level tab', async () => {

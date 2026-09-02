@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import McpServersSection from '../McpServersSection';
 
 const stdioServer = {
@@ -100,7 +100,9 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Add MCP Server'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'my-server' } });
     fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'npx' } });
-    fireEvent.click(screen.getByText('Add Server'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Add Server'));
+    });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -121,6 +123,49 @@ describe('McpServersSection', () => {
       transport: 'stdio',
       command: 'npx',
     });
+  });
+
+  it('edits an already configured catalogue server instead of creating a duplicate', async () => {
+    const gmailServer = {
+      ...stdioServer,
+      mcp_server_id: 2,
+      name: 'gmail',
+      transport: 'http' as const,
+      command: null,
+      args: [],
+      url: 'https://gmailmcp.googleapis.com/mcp/v1',
+      enabled: false,
+    };
+    const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url === '/api/v1/mcp/servers/2' && options?.method === 'PUT') {
+        return jsonResponse(gmailServer);
+      }
+      return jsonResponse([gmailServer]);
+    });
+    global.fetch = fetchMock as any;
+
+    render(<McpServersSection />);
+
+    const editButton = await screen.findByRole('button', { name: 'Edit Gmail' });
+    expect(screen.getByText('Configured')).toBeInTheDocument();
+    fireEvent.click(editButton);
+    expect(screen.getByRole('heading', { name: 'Edit MCP Server' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Google OAuth 2.0 delegated authorization'
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save Server'));
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/mcp/servers/2',
+        expect.objectContaining({ method: 'PUT' })
+      );
+    });
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   });
 
   it('requires a command before submitting a stdio server', async () => {

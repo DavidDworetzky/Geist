@@ -1,3 +1,4 @@
+import json
 import threading
 from unittest.mock import Mock
 
@@ -105,6 +106,31 @@ def test_markdown_tools_default_to_the_private_data_workspace(monkeypatch, tmp_p
     assert '"note.md"' in listed.content
     assert read.status == "succeeded"
     assert read.content == "# Private workspace note"
+
+
+def test_markdown_list_paths_can_be_passed_directly_to_read(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    notes = workspace / "notes"
+    notes.mkdir(parents=True)
+    (notes / "a.md").write_text("# Nested note", encoding="utf-8")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(workspace))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {"path": "notes"}),
+        _context(),
+    )
+    listed_path = json.loads(listed.content)["files"][0]
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": listed_path}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert listed_path == "notes/a.md"
+    assert read.status == "succeeded"
+    assert read.content == "# Nested note"
 
 
 def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
