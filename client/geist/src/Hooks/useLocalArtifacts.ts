@@ -23,22 +23,30 @@ export interface LocalArtifact {
 interface UseLocalArtifactsReturn {
   artifacts: LocalArtifact[];
   loading: boolean;
+  loaded: boolean;
   error: string | null;
   refreshLocalArtifacts: () => Promise<void>;
+  downloadArtifact: (artifact: LocalArtifact) => Promise<void>;
   activateArtifact: (artifact: LocalArtifact) => Promise<void>;
 }
 
 interface UseLocalArtifactsOptions {
   enabled?: boolean;
   pollWhileBusy?: boolean;
+  pollModelId?: string | null;
 }
 
 type ArtifactListener = (artifacts: LocalArtifact[]) => void;
 
 const artifactListeners = new Set<ArtifactListener>();
 let pendingArtifactRequest: Promise<LocalArtifact[]> | null = null;
+const pendingArtifactDownloads = new Map<string, Promise<void>>();
+let artifactCache: LocalArtifact[] = [];
+let artifactCatalogLoaded = false;
 
 function publishArtifacts(artifacts: LocalArtifact[]): void {
+  artifactCache = artifacts;
+  artifactCatalogLoaded = true;
   artifactListeners.forEach(listener => listener(artifacts));
 }
 
@@ -60,13 +68,41 @@ async function requestLocalArtifacts(): Promise<LocalArtifact[]> {
   return pendingArtifactRequest;
 }
 
+async function requestArtifactDownload(artifactId: string): Promise<void> {
+  const existingRequest = pendingArtifactDownloads.get(artifactId);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request = (async () => {
+    const response = await fetch(`/api/v1/models/local/artifacts/${artifactId}/download`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error(`Model download failed: ${response.statusText}`);
+    }
+
+    const updatedArtifact = await response.json();
+    publishArtifacts(artifactCache.map(artifact => (
+      artifact.id === artifactId ? { ...artifact, ...updatedArtifact } : artifact
+    )));
+  })().finally(() => {
+    pendingArtifactDownloads.delete(artifactId);
+  });
+
+  pendingArtifactDownloads.set(artifactId, request);
+  return request;
+}
+
 export default function useLocalArtifacts({
   enabled = true,
   pollWhileBusy = false,
+  pollModelId = null,
 }: UseLocalArtifactsOptions = {}): UseLocalArtifactsReturn {
   const { updateSettings } = useUserSettings();
-  const [artifacts, setArtifacts] = useState<LocalArtifact[]>([]);
-  const [loading, setLoading] = useState(enabled);
+  const [artifacts, setArtifacts] = useState<LocalArtifact[]>(artifactCache);
+  const [loading, setLoading] = useState(enabled && !artifactCatalogLoaded);
+  const [loaded, setLoaded] = useState(!enabled || artifactCatalogLoaded);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(false);
 
@@ -100,13 +136,16 @@ export default function useLocalArtifacts({
       setArtifacts(nextArtifacts);
       setError(null);
       setLoading(false);
+      setLoaded(true);
     };
     artifactListeners.add(handleArtifacts);
 
     if (enabled) {
+      setLoaded(artifactCatalogLoaded);
       void refreshLocalArtifacts();
     } else {
       setLoading(false);
+      setLoaded(true);
     }
 
     const handleFocus = () => {
@@ -123,12 +162,17 @@ export default function useLocalArtifacts({
   useEffect(() => {
     if (!enabled || !pollWhileBusy || !artifacts.some(artifact => (
       ['queued', 'downloading', 'cancelling'].includes(artifact.status)
+      && (!pollModelId || artifact.model_id === pollModelId)
     ))) {
       return undefined;
     }
     const interval = window.setInterval(() => void refreshLocalArtifacts(), 1000);
     return () => window.clearInterval(interval);
-  }, [artifacts, enabled, pollWhileBusy, refreshLocalArtifacts]);
+  }, [artifacts, enabled, pollModelId, pollWhileBusy, refreshLocalArtifacts]);
+
+  const downloadArtifact = useCallback(async (artifact: LocalArtifact) => {
+    await requestArtifactDownload(artifact.id);
+  }, []);
 
   const activateArtifact = useCallback(async (artifact: LocalArtifact) => {
     await updateSettings({
@@ -141,8 +185,10 @@ export default function useLocalArtifacts({
   return {
     artifacts,
     loading,
+    loaded,
     error,
     refreshLocalArtifacts,
+    downloadArtifact,
     activateArtifact,
   };
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AppShell from './AppShell';
 import useLocalArtifacts from './Hooks/useLocalArtifacts';
@@ -98,13 +98,80 @@ describe('AppShell runtime model selector', () => {
     }));
   });
 
+  it('shows a loading chip only until an empty model catalogue finishes loading', async () => {
+    mockSettings();
+    let resolveCatalog: ((response: unknown) => void) | undefined;
+    (global.fetch as jest.Mock).mockImplementation(() => new Promise(resolve => {
+      resolveCatalog = resolve;
+    }));
+    renderShell();
+
+    const selector = screen.getByRole('combobox', { name: 'Local model' });
+    expect(selector).toBeDisabled();
+    expect(selector).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading models');
+
+    await act(async () => {
+      resolveCatalog?.({
+        ok: true,
+        json: async () => ({ artifacts: [] }),
+      });
+    });
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(selector).toBeDisabled();
+    expect(selector).not.toHaveAttribute('aria-busy');
+    expect(within(selector).getByRole('option')).toHaveTextContent('No models available');
+  });
+
+  it('downloads the configured default and clears the loading chip when it is installed', async () => {
+    mockSettings({
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: null,
+    });
+    const missingArtifact = {
+      ...artifacts[0],
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      display_name: 'Qwen 3.8 27B 4-bit (MLX)',
+      status: 'not_installed',
+    };
+    availableArtifacts = [missingArtifact];
+    (global.fetch as jest.Mock).mockImplementation((url, options) => {
+      if (String(url).endsWith('/qwen3.8-27b-4bit-mlx/download')) {
+        const queuedArtifact = { ...missingArtifact, status: 'queued' };
+        availableArtifacts = [queuedArtifact];
+        return Promise.resolve({ ok: true, json: async () => queuedArtifact });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ artifacts: availableArtifacts }) });
+    });
+    renderShell(<ArtifactRefreshHarness />);
+
+    const selector = await screen.findByRole('combobox', { name: 'Local model' });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/models/local/artifacts/qwen3.8-27b-4bit-mlx/download',
+      { method: 'POST' },
+    ));
+    expect(selector).toHaveValue('qwen3.8-27b-4bit-mlx');
+    expect(selector).toBeDisabled();
+    expect(selector).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Downloading model');
+
+    availableArtifacts = [{ ...missingArtifact, status: 'installed' }];
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh artifacts' }));
+
+    await waitFor(() => expect(selector).toBeEnabled());
+    expect(selector).not.toHaveAttribute('aria-busy');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('lists installed local models without repeating a provider badge', async () => {
     mockSettings();
     renderShell();
 
     const summary = screen.getByLabelText('Current runtime');
     const selector = await within(summary).findByRole('combobox', { name: 'Local model' });
-    await waitFor(() => expect(selector).toBeEnabled());
+    await waitFor(() => expect(selector).toHaveValue('qwen3-4b-q4-k-m'));
 
     expect(within(summary).getAllByText('local')).toHaveLength(1);
     expect(selector).toHaveValue('qwen3-4b-q4-k-m');
