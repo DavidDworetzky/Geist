@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import SettingsSelect from './SettingsSelect';
 import SettingsToggle from './SettingsToggle';
 import { McpCatalogueEntry, mcpCatalogue } from '../mcpCatalogue';
@@ -111,6 +111,14 @@ const McpServersSection: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResults, setTestResults] = useState<Record<number, McpTestResult>>({});
+  const formRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    nameInputRef.current?.focus({ preventScroll: true });
+  }, [editingId, formOpen, selectedCatalogueId]);
 
   const updateForm = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -348,7 +356,7 @@ const McpServersSection: React.FC = () => {
       )}
 
       {formOpen ? (
-        <div className="mcp-server-form" data-testid="mcp-server-form">
+        <div className="mcp-server-form" data-testid="mcp-server-form" ref={formRef}>
           <header className="settings-section-header">
             <h3>{editingId !== null ? 'Edit MCP Server' : 'Add MCP Server'}</h3>
           </header>
@@ -385,6 +393,7 @@ const McpServersSection: React.FC = () => {
             </p>
             <input
               id="mcp-name"
+              ref={nameInputRef}
               className="form-control"
               type="text"
               value={form.name}

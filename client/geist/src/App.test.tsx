@@ -14,7 +14,7 @@ test('renders the requested sidebar navigation in order', () => {
   expect(navigationLinks[0]).toHaveAccessibleName(/Chat/);
   expect(navigationLinks[1]).toHaveAccessibleName(/Models/);
   expect(navigationLinks[2]).toHaveAccessibleName(/Settings/);
-  expect(navigationLinks[3]).toHaveAccessibleName(/Tools/);
+  expect(navigationLinks[3]).toHaveAccessibleName('Tools Tools and MCPs');
   expect(navigationLinks[4]).toHaveAccessibleName(/Files/);
   expect(within(navigation).queryByText(/Workflows/i)).not.toBeInTheDocument();
 });

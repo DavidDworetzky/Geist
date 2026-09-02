@@ -71,6 +71,7 @@ describe('McpServersSection', () => {
       'Google OAuth 2.0 delegated authorization'
     );
     expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+    expect(screen.getByLabelText('Name')).toHaveFocus();
     expect(screen.getByLabelText('Server URL')).toHaveValue(
       'https://gmailmcp.googleapis.com/mcp/v1'
     );

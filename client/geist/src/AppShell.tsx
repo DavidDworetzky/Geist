@@ -49,7 +49,7 @@ const navItems: NavItem[] = [
   {
     name: 'Tools',
     path: '/tools',
-    description: 'Capabilities and MCP',
+    description: 'Tools and MCPs',
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M8.5 3a3.5 3.5 0 1 0 0 7h1v4h-1a3.5 3.5 0 1 0 3.35 4.5h2.3A3.5 3.5 0 1 0 17.5 14h-1v-4h1A3.5 3.5 0 1 0 14.15 5.5h-2.3A3.5 3.5 0 0 0 8.5 3Zm0 2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 2.5h-3v9h3v-1h2a1.5 1.5 0 1 1-1.5 1.5v-1h-4v1a1.5 1.5 0 1 1-1.5-1.5h1v-9h-1v1A1.5 1.5 0 1 1 12 6h4v-1a1.5 1.5 0 1 1 1.5 1.5h-2v1Z" />

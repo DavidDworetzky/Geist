@@ -120,6 +120,41 @@
   border-color: color-mix(in srgb, var(--geist-color-success) 35%, transparent);
 }
 
+.tool-status-opt-in {
+  color: var(--geist-color-accent-strong);
+  background: color-mix(in srgb, var(--geist-color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-accent) 30%, transparent);
+}
+
+.tool-status-unavailable {
+  color: var(--geist-color-warning);
+  background: color-mix(in srgb, var(--geist-color-warning) 9%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-warning) 28%, transparent);
+}
+
+.tool-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.76rem;
+  background: var(--geist-color-surface);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.tool-status-legend strong {
+  color: var(--geist-color-text);
+}
+
+.tool-card .tool-status-note {
+  color: var(--geist-color-text-muted);
+  font-size: 0.76rem;
+  font-style: italic;
+}
+
 .tool-meta-row {
   justify-content: flex-start;
   flex-wrap: wrap;

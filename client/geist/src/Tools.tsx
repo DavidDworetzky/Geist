@@ -18,9 +18,28 @@ interface ToolDefinition {
 
 const toolCategory = (tool: ToolDefinition): string => {
   if (tool.name.startsWith('mcp.')) return 'MCP';
-  if (tool.semantic_tags?.includes('image')) return 'Image';
-  if (tool.semantic_tags?.includes('retrieval')) return 'Retrieval';
+  if (tool.semantic_tags?.includes('image_generation')) return 'Image';
+  if (tool.semantic_tags?.includes('public_retrieval')) return 'Public retrieval';
+  if (tool.semantic_tags?.includes('local_retrieval')) return 'Local retrieval';
   return 'Action';
+};
+
+const toolStatus = (tool: ToolDefinition): { label: string; className: string; note: string } => {
+  if (tool.enabled) {
+    return { label: 'Available', className: 'tool-status-ready', note: 'Callable now.' };
+  }
+  if (tool.enabled_by_default) {
+    return {
+      label: 'Unavailable',
+      className: 'tool-status-unavailable',
+      note: 'Enabled by default, but a provider or local prerequisite is not configured.',
+    };
+  }
+  return {
+    label: 'Opt-in',
+    className: 'tool-status-opt-in',
+    note: 'Disabled by default and must be explicitly enabled in Geist configuration.',
+  };
 };
 
 const Tools: React.FC = () => {
@@ -99,35 +118,45 @@ const Tools: React.FC = () => {
             ) : tools.length === 0 ? (
               <div className="empty-state">No tools are registered.</div>
             ) : (
-              <div className="tool-card-grid" data-testid="tool-catalogue">
-                {tools.map((tool) => (
-                  <article className="tool-card" key={tool.name}>
-                    <div className="tool-card-title-row">
-                      <div>
-                        <span className="tool-category">{toolCategory(tool)}</span>
-                        <h3>{tool.name}</h3>
-                      </div>
-                      <span className={`tool-status ${tool.enabled ? 'tool-status-ready' : ''}`}>
-                        {tool.enabled ? 'Available' : 'Disabled'}
-                      </span>
-                    </div>
-                    <p>{tool.description}</p>
-                    <div className="tool-meta-row">
-                      <span>{tool.name.startsWith('mcp.') ? 'MCP' : 'Built in'}</span>
-                      <span>{tool.side_effect.replace('_', ' ')}</span>
-                      {tool.requires_approval && <span>Approval required</span>}
-                      {!tool.enabled_by_default && <span>Opt-in</span>}
-                    </div>
-                    {tool.source_adapter && (
-                      <p className="tool-source">Source: {tool.source_adapter}</p>
-                    )}
-                    <details>
-                      <summary>Input schema</summary>
-                      <pre>{JSON.stringify(tool.input_schema, null, 2)}</pre>
-                    </details>
-                  </article>
-                ))}
-              </div>
+              <>
+                <div className="tool-status-legend" aria-label="Tool status guide">
+                  <span><strong>Available</strong> callable now</span>
+                  <span><strong>Opt-in</strong> disabled by default</span>
+                  <span><strong>Unavailable</strong> missing a provider or prerequisite</span>
+                </div>
+                <div className="tool-card-grid" data-testid="tool-catalogue">
+                  {tools.map((tool) => {
+                    const status = toolStatus(tool);
+                    return (
+                      <article className="tool-card" key={tool.name}>
+                        <div className="tool-card-title-row">
+                          <div>
+                            <span className="tool-category">{toolCategory(tool)}</span>
+                            <h3>{tool.name}</h3>
+                          </div>
+                          <span className={`tool-status ${status.className}`} title={status.note}>
+                            {status.label}
+                          </span>
+                        </div>
+                        <p>{tool.description}</p>
+                        {!tool.enabled && <p className="tool-status-note">{status.note}</p>}
+                        <div className="tool-meta-row">
+                          <span>{tool.name.startsWith('mcp.') ? 'MCP' : 'Built in'}</span>
+                          <span>{tool.side_effect.replace('_', ' ')}</span>
+                          {tool.requires_approval && <span>Approval required</span>}
+                        </div>
+                        {tool.source_adapter && (
+                          <p className="tool-source">Source: {tool.source_adapter}</p>
+                        )}
+                        <details>
+                          <summary>Input schema</summary>
+                          <pre>{JSON.stringify(tool.input_schema, null, 2)}</pre>
+                        </details>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         )}
