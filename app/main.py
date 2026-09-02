@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from adapters.image_generation_adapter import ImageGenerationAdapter
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
@@ -78,6 +79,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
 DEFAULT_LOCAL_MODEL = default_local_model_id()
+UI_HIDDEN_TOOL_NAMES = frozenset({"adapter.JobStatusAdapter.check_async_tool"})
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
@@ -610,6 +612,7 @@ def create_app(
             run_id="catalog",
         )
         catalog = await run_in_threadpool(chat_orchestrator.registry.catalog, context)
+        image_configuration = ImageGenerationAdapter()
         return {
             "tools": [
                 {
@@ -623,8 +626,25 @@ def create_app(
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                     "semantic_tags": sorted(tool.semantic_tags),
+                    "configuration": (
+                        {
+                            "kind": "environment",
+                            "provider": "OpenAI-compatible image API",
+                            "api_key_configured": bool(image_configuration.api_key),
+                            "base_url": image_configuration.base_url,
+                            "model": image_configuration.model,
+                            "environment_variables": {
+                                "api_key": "OPENAI_API_KEY",
+                                "base_url": "OPENAI_IMAGE_BASE_URL",
+                                "model": "OPENAI_IMAGE_MODEL",
+                            },
+                        }
+                        if tool.name == "image.generate"
+                        else None
+                    ),
                 }
                 for tool in catalog
+                if tool.name not in UI_HIDDEN_TOOL_NAMES
             ]
         }
 

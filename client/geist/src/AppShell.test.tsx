@@ -136,12 +136,22 @@ describe('AppShell runtime model selector', () => {
       display_name: 'Qwen 3.8 27B 4-bit (MLX)',
       status: 'not_installed',
     };
+    const queuedArtifact = { ...missingArtifact, status: 'queued' };
+    let resolveDownload!: (response: {
+      ok: boolean;
+      json: () => Promise<typeof queuedArtifact>;
+    }) => void;
+    const pendingDownload = new Promise<{
+      ok: boolean;
+      json: () => Promise<typeof queuedArtifact>;
+    }>((resolve) => {
+      resolveDownload = resolve;
+    });
     availableArtifacts = [missingArtifact];
     (global.fetch as jest.Mock).mockImplementation((url, options) => {
       if (String(url).endsWith('/qwen3.8-27b-4bit-mlx/download')) {
-        const queuedArtifact = { ...missingArtifact, status: 'queued' };
         availableArtifacts = [queuedArtifact];
-        return Promise.resolve({ ok: true, json: async () => queuedArtifact });
+        return pendingDownload;
       }
       return Promise.resolve({ ok: true, json: async () => ({ artifacts: availableArtifacts }) });
     });
@@ -152,10 +162,17 @@ describe('AppShell runtime model selector', () => {
       '/api/v1/models/local/artifacts/qwen3.8-27b-4bit-mlx/download',
       { method: 'POST' },
     ));
-    expect(selector).toHaveValue('qwen3.8-27b-4bit-mlx');
-    expect(selector).toBeDisabled();
-    expect(selector).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent('Downloading model');
+    await waitFor(() => {
+      expect(selector).toHaveValue('qwen3.8-27b-4bit-mlx');
+      expect(selector).toBeDisabled();
+      expect(selector).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByRole('status')).toHaveTextContent('Downloading model');
+    });
+
+    await act(async () => {
+      resolveDownload({ ok: true, json: async () => queuedArtifact });
+      await pendingDownload;
+    });
 
     availableArtifacts = [{ ...missingArtifact, status: 'installed' }];
     fireEvent.click(screen.getByRole('button', { name: 'Refresh artifacts' }));

@@ -24,16 +24,17 @@ The default registry is intentionally explicit:
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
 | `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current workspace's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
-| `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
-| `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
-| `workspace.write_markdown` | `MarkdownFileAdapter.write_file` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
-| `communication.email.send` | `SendGridAdapter.send_email` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
-| `communication.sms.send` | `SMSAdapter.send_text` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
+| `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | yes | Read-only paths contained under Geist's private workspace directory. |
+| `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | yes | Read-only paths contained under Geist's private workspace directory. |
 
-The optional read-only Markdown list/read tools can be selected by the operator
-with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. Reads and writes accept
-only `.md`/`.markdown` paths contained under the configured root. Side-effect
-mappings remain unavailable even when named in that setting.
+The read-only Markdown list/read tools default to
+`GEIST_DATA_DIR/workspace` (`~/Library/Application Support/Geist/workspace` on
+macOS, `~/.local/share/geist/workspace` on Linux, and `%LOCALAPPDATA%/Geist/workspace`
+on Windows). Operators can select a different directory with
+`GEIST_MARKDOWN_ROOT`. Reads accept only `.md`/`.markdown` paths contained under
+that root. The development Docker Compose stack sets this override to
+`<repository>/data/workspace`; other application data, including models and
+plugins, stays outside the checkout in the `geist_runtime_data` Docker volume.
 
 Adapters not mapped into chat tools:
 

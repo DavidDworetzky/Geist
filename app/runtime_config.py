@@ -49,6 +49,20 @@ def default_data_dir(
     return (base / "geist").resolve()
 
 
+def default_markdown_root(
+    *,
+    environ: Mapping[str, str] | None = None,
+    system: str | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Return the explicit Markdown root or Geist's private workspace directory."""
+    environment = os.environ if environ is None else environ
+    configured = environment.get("GEIST_MARKDOWN_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return default_data_dir(environ=environment, system=system, home=home) / "workspace"
+
+
 def discover_web_dir(
     configured: str | Path | None = None,
     *,

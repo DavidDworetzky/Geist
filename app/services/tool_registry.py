@@ -24,6 +24,7 @@ from agents.models.tool_calling import (
     ToolResult,
     ToolSemanticTag,
 )
+from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
 
 
@@ -59,24 +60,6 @@ class MarkdownPathArguments(StrictToolArguments):
 class MarkdownListArguments(StrictToolArguments):
     path: str | None = Field(default=None, max_length=1024)
     limit: int = Field(default=100, ge=1, le=500)
-
-
-class MarkdownWriteArguments(MarkdownPathArguments):
-    content: str = Field(max_length=100_000)
-
-
-class EmailSendArguments(StrictToolArguments):
-    to_email: str = Field(min_length=3, max_length=320)
-    subject: str = Field(min_length=1, max_length=998)
-    content: str = Field(min_length=1, max_length=100_000)
-    to_name: str | None = Field(default=None, max_length=200)
-    idempotency_key: str = Field(min_length=8, max_length=128)
-
-
-class SmsSendArguments(StrictToolArguments):
-    number: str = Field(pattern=r"^\+[1-9]\d{7,14}$")
-    message: str = Field(min_length=1, max_length=1600)
-    idempotency_key: str = Field(min_length=8, max_length=128)
 
 
 @runtime_checkable
@@ -352,7 +335,7 @@ def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry(explicitly_enabled=explicitly_enabled)
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
-    markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+    markdown_adapter = MarkdownFileAdapter(file_root=str(default_markdown_root()))
 
     def web_search(context: ToolContext, arguments: WebSearchArguments) -> ToolExecutionOutput:
         results = search_adapter.search(
@@ -407,49 +390,6 @@ def build_default_tool_registry() -> ToolRegistry:
         content = markdown_adapter.read_file(arguments.path)
         return ToolExecutionOutput(content=content, summary=f"Read {arguments.path}")
 
-    def markdown_write(
-        context: ToolContext, arguments: MarkdownWriteArguments
-    ) -> ToolExecutionOutput:
-        written = markdown_adapter.write_file(arguments.path, arguments.content)
-        if not written:
-            raise RuntimeError(f"Could not write {arguments.path}")
-        return ToolExecutionOutput(content="File written", summary=f"Wrote {arguments.path}")
-
-    def email_send(context: ToolContext, arguments: EmailSendArguments) -> ToolExecutionOutput:
-        from adapters.sendgrid_adapter import SendGridAdapter
-
-        api_key = os.getenv("SENDGRID_API_KEY")
-        from_email = os.getenv("SENDGRID_FROM_EMAIL")
-        if not api_key or not from_email:
-            raise RuntimeError("SendGrid is not configured")
-        adapter = SendGridAdapter(
-            sendgrid_api_key=api_key,
-            from_email=from_email,
-            from_name=os.getenv("SENDGRID_FROM_NAME"),
-        )
-        result = adapter.send_email(
-            to_email=arguments.to_email,
-            subject=arguments.subject,
-            content=arguments.content,
-            to_name=arguments.to_name,
-        )
-        return ToolExecutionOutput(content=result, summary=result)
-
-    def sms_send(context: ToolContext, arguments: SmsSendArguments) -> ToolExecutionOutput:
-        from adapters.sms_adapter import SMSAdapter
-
-        token = os.getenv("TWILIO_TOKEN")
-        sid = os.getenv("TWILIO_SID")
-        source = os.getenv("TWILIO_SOURCE")
-        if not token or not sid or not source:
-            raise RuntimeError("Twilio is not configured")
-        adapter = SMSAdapter(twilio_key=token, twilio_sid=sid, twilio_source=source)
-        message_id = adapter.send_text(message=arguments.message, number=arguments.number)
-        return ToolExecutionOutput(
-            content=json.dumps({"message_id": message_id}),
-            summary="SMS sent",
-        )
-
     registry.register(
         ToolDefinition(
             name="web.search",
@@ -491,15 +431,12 @@ def build_default_tool_registry() -> ToolRegistry:
         )
     )
 
-    # Reviewed mappings that are intentionally opt-in. They are in the catalog,
-    # but are not sent to models unless the server explicitly enables them.
     registry.register(
         ToolDefinition(
             name="workspace.list_markdown",
             description="List Markdown files under the configured workspace root.",
             arguments_model=MarkdownListArguments,
             handler=markdown_list,
-            enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.get_files",
             semantic_tags=frozenset({"local_retrieval"}),
         )
@@ -510,57 +447,10 @@ def build_default_tool_registry() -> ToolRegistry:
             description="Read a Markdown file under the configured workspace root.",
             arguments_model=MarkdownPathArguments,
             handler=markdown_read,
-            enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.read_file",
             semantic_tags=frozenset({"local_retrieval"}),
         )
     )
-    registry.register(
-        ToolDefinition(
-            name="workspace.write_markdown",
-            description="Write a Markdown file under the configured workspace root.",
-            arguments_model=MarkdownWriteArguments,
-            handler=markdown_write,
-            side_effect="filesystem_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="MarkdownFileAdapter.write_file",
-            # Approval/resume and durable idempotency are not implemented yet.
-            # Keep the reviewed mapping visible in the catalog but unavailable
-            # to model turns even if an operator enables its name.
-            availability=lambda context: False,
-            semantic_tags=frozenset({"action"}),
-        )
-    )
-    registry.register(
-        ToolDefinition(
-            name="communication.email.send",
-            description="Send an email through the configured SendGrid account.",
-            arguments_model=EmailSendArguments,
-            handler=email_send,
-            side_effect="external_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="SendGridAdapter.send_email",
-            availability=lambda context: False,
-            semantic_tags=frozenset({"action"}),
-        )
-    )
-    registry.register(
-        ToolDefinition(
-            name="communication.sms.send",
-            description="Send an SMS through the configured Twilio account.",
-            arguments_model=SmsSendArguments,
-            handler=sms_send,
-            side_effect="external_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="SMSAdapter.send_text",
-            availability=lambda context: False,
-            semantic_tags=frozenset({"action"}),
-        )
-    )
-
     # Reflected adapter actions ride through the same registry as the curated
     # tools above (one registry, several sources) but stay disabled until an
     # operator opts in by name via GEIST_ENABLED_CHAT_TOOLS, e.g.

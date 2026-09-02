@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import SettingsSelect from './SettingsSelect';
 import SettingsToggle from './SettingsToggle';
+import { McpCatalogueEntry, mcpCatalogue } from '../mcpCatalogue';
+import '../Tools.css';
 import {
   McpServer,
   McpServerInput,
@@ -68,6 +70,17 @@ const formFromServer = (server: McpServer): FormState => ({
   timeout_seconds: String(server.timeout_seconds),
 });
 
+const formFromCatalogue = (entry: McpCatalogueEntry): FormState => ({
+  name: entry.id,
+  transport: entry.transport,
+  command: entry.command ?? '',
+  args: (entry.args ?? []).join('\n'),
+  env: '',
+  url: entry.url ?? '',
+  headers: '',
+  timeout_seconds: '30',
+});
+
 const inputFromForm = (form: FormState): McpServerInput => ({
   name: form.name.trim(),
   transport: form.transport,
@@ -92,11 +105,20 @@ const McpServersSection: React.FC = () => {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedCatalogueId, setSelectedCatalogueId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResults, setTestResults] = useState<Record<number, McpTestResult>>({});
+  const formRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    nameInputRef.current?.focus({ preventScroll: true });
+  }, [editingId, formOpen, selectedCatalogueId]);
 
   const updateForm = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -105,6 +127,15 @@ const McpServersSection: React.FC = () => {
   const openCreateForm = () => {
     setForm(emptyForm);
     setEditingId(null);
+    setSelectedCatalogueId(null);
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const openCatalogueForm = (entry: McpCatalogueEntry, server?: McpServer) => {
+    setForm(server ? formFromServer(server) : formFromCatalogue(entry));
+    setEditingId(server?.mcp_server_id ?? null);
+    setSelectedCatalogueId(entry.id);
     setFormError(null);
     setFormOpen(true);
   };
@@ -112,6 +143,7 @@ const McpServersSection: React.FC = () => {
   const openEditForm = (server: McpServer) => {
     setForm(formFromServer(server));
     setEditingId(server.mcp_server_id);
+    setSelectedCatalogueId(null);
     setFormError(null);
     setFormOpen(true);
   };
@@ -119,6 +151,7 @@ const McpServersSection: React.FC = () => {
   const closeForm = () => {
     setFormOpen(false);
     setEditingId(null);
+    setSelectedCatalogueId(null);
     setForm(emptyForm);
     setFormError(null);
   };
@@ -188,6 +221,10 @@ const McpServersSection: React.FC = () => {
     }
   };
 
+  const selectedCatalogueEntry = mcpCatalogue.find(
+    (entry) => entry.id === selectedCatalogueId
+  );
+
   return (
     <section className="settings-section">
       <header className="settings-section-header">
@@ -197,6 +234,55 @@ const McpServersSection: React.FC = () => {
           enabled servers appear to the model as mcp.&lt;server&gt;.&lt;tool&gt;.
         </p>
       </header>
+
+      <div className="mcp-catalogue-block">
+        <div className="mcp-catalogue-heading">
+          <div>
+            <h4>Starter catalogue</h4>
+            <p className="settings-description">
+              Prefill a reviewed server profile, then inspect its endpoint, permissions, and
+              credentials before enabling it.
+            </p>
+          </div>
+          <span className="mcp-catalogue-count">{mcpCatalogue.length} profiles</span>
+        </div>
+        <div className="mcp-catalogue-grid" data-testid="mcp-catalogue">
+          {mcpCatalogue.map((entry) => {
+            const configuredServer = servers.find((server) => server.name === entry.id);
+            return (
+              <article className="mcp-catalogue-card" key={entry.id}>
+                <div className="mcp-catalogue-card-heading">
+                  <div>
+                    <span className="mcp-catalogue-category">{entry.category}</span>
+                    <h4>{entry.name}</h4>
+                  </div>
+                  <span className="mcp-catalogue-publisher">{entry.publisher}</span>
+                </div>
+                <p>{entry.description}</p>
+                {entry.accountScope && (
+                  <p className="mcp-catalogue-scope">{entry.accountScope}</p>
+                )}
+                <div className="mcp-catalogue-actions">
+                  <a href={entry.sourceUrl} target="_blank" rel="noreferrer">
+                    Source
+                  </a>
+                  {configuredServer && (
+                    <span className="mcp-catalogue-configured">Configured</span>
+                  )}
+                  <button
+                    className="button button-small"
+                    type="button"
+                    aria-label={`${configuredServer ? 'Edit' : 'Configure'} ${entry.name}`}
+                    onClick={() => openCatalogueForm(entry, configuredServer)}
+                  >
+                    {configuredServer ? 'Edit' : 'Configure'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
 
       {error && <div className="notice notice-error">{error}</div>}
       {formError && !formOpen && <div className="notice notice-error">{formError}</div>}
@@ -276,10 +362,33 @@ const McpServersSection: React.FC = () => {
       )}
 
       {formOpen ? (
-        <div className="mcp-server-form" data-testid="mcp-server-form">
+        <div className="mcp-server-form" data-testid="mcp-server-form" ref={formRef}>
           <header className="settings-section-header">
             <h3>{editingId !== null ? 'Edit MCP Server' : 'Add MCP Server'}</h3>
           </header>
+
+          {selectedCatalogueEntry && (
+            <div className="mcp-profile-summary" data-testid="mcp-profile-summary">
+              <span className="mcp-catalogue-category">Catalogue profile</span>
+              <h4>{selectedCatalogueEntry.name}</h4>
+              {selectedCatalogueEntry.accountScope && (
+                <p><strong>Account:</strong> {selectedCatalogueEntry.accountScope}</p>
+              )}
+              {selectedCatalogueEntry.authentication && (
+                <p><strong>Authentication:</strong> {selectedCatalogueEntry.authentication}</p>
+              )}
+              {selectedCatalogueEntry.requirements.length > 0 && (
+                <ul>
+                  {selectedCatalogueEntry.requirements.map((requirement) => (
+                    <li key={requirement}>{requirement}</li>
+                  ))}
+                </ul>
+              )}
+              {selectedCatalogueEntry.configurationNote && (
+                <p className="mcp-profile-warning">{selectedCatalogueEntry.configurationNote}</p>
+              )}
+            </div>
+          )}
 
           {formError && <div className="notice notice-error">{formError}</div>}
 
@@ -290,6 +399,7 @@ const McpServersSection: React.FC = () => {
             </p>
             <input
               id="mcp-name"
+              ref={nameInputRef}
               className="form-control"
               type="text"
               value={form.name}
