@@ -30,7 +30,11 @@ function formatBytes(value?: number | null): string {
 
 export default function Models(): JSX.Element {
   const { models, loading, error, refetch, providers } = useAvailableModels();
-  const { settings, updateSettings } = useUserSettings();
+  const {
+    settings,
+    loading: settingsLoading,
+    updateSettings,
+  } = useUserSettings();
   const {
     artifacts: localArtifacts,
     error: localArtifactsError,
@@ -47,7 +51,7 @@ export default function Models(): JSX.Element {
   const onlineProviders = providers.filter(provider => provider !== 'offline');
 
   useEffect(() => {
-    if (onlineProviders.length === 0) return;
+    if (onlineProviders.length === 0 || settingsLoading) return;
     setExpandedProviders(current => {
       if (current !== null) return current;
       const initialProvider = onlineProviders.includes(settings?.default_online_provider ?? '')
@@ -55,7 +59,7 @@ export default function Models(): JSX.Element {
         : onlineProviders[0];
       return new Set(initialProvider ? [initialProvider] : []);
     });
-  }, [onlineProviders, settings?.default_online_provider]);
+  }, [onlineProviders, settings?.default_online_provider, settingsLoading]);
 
   const runArtifactAction = async (
     artifactId: string,

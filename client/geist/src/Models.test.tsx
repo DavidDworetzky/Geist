@@ -5,6 +5,7 @@ import Models from './Models';
 
 const mockUpdateSettings = jest.fn().mockResolvedValue(undefined);
 const mockUseAvailableModels = jest.fn();
+const mockUseUserSettings = jest.fn();
 
 jest.mock('./Hooks/useAvailableModels', () => ({
   __esModule: true,
@@ -13,17 +14,20 @@ jest.mock('./Hooks/useAvailableModels', () => ({
 
 jest.mock('./Hooks/useUserSettings', () => ({
   __esModule: true,
-  default: () => ({
-    settings: {
-      default_agent_type: 'local',
-      default_local_model: 'legacy-model',
-      default_local_artifact_id: null,
-      default_online_model: 'gpt-4',
-      default_online_provider: 'openai',
-    },
-    updateSettings: mockUpdateSettings,
-  }),
+  default: () => mockUseUserSettings(),
 }));
+
+const defaultUserSettingsHook = () => ({
+  settings: {
+    default_agent_type: 'local',
+    default_local_model: 'legacy-model',
+    default_local_artifact_id: null,
+    default_online_model: 'gpt-4',
+    default_online_provider: 'openai',
+  },
+  loading: false,
+  updateSettings: mockUpdateSettings,
+});
 
 const artifact = {
   id: 'qwen3-4b-q4-k-m',
@@ -61,6 +65,7 @@ let availableArtifacts = [artifact];
 
 beforeEach(() => {
   mockUpdateSettings.mockClear();
+  mockUseUserSettings.mockReturnValue(defaultUserSettingsHook());
   mockUseAvailableModels.mockReturnValue({
     models: { providers: { offline: [] }, last_updated: null },
     loading: false,
@@ -165,6 +170,48 @@ it('collapses provider sections and selects a provider model', async () => {
     default_online_provider: 'openai',
     default_online_model: 'gpt-4o',
   }));
+});
+
+it('waits for settings before expanding the configured provider', async () => {
+  mockUseAvailableModels.mockReturnValue({
+    models: {
+      providers: { openai: [], anthropic: [], offline: [] },
+      last_updated: null,
+    },
+    loading: false,
+    error: null,
+    refetch: jest.fn(),
+    providers: ['openai', 'anthropic', 'offline'],
+  });
+  mockUseUserSettings.mockReturnValue({
+    ...defaultUserSettingsHook(),
+    settings: null,
+    loading: true,
+  });
+
+  const { rerender } = render(<Models />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Model Providers' }));
+  expect(screen.getByRole('button', { name: /openai 0 models/i }))
+    .toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: /anthropic 0 models/i }))
+    .toHaveAttribute('aria-expanded', 'false');
+
+  mockUseUserSettings.mockReturnValue({
+    ...defaultUserSettingsHook(),
+    settings: {
+      ...defaultUserSettingsHook().settings,
+      default_agent_type: 'online',
+      default_online_provider: 'anthropic',
+      default_online_model: 'claude-opus-4-5-20251101',
+    },
+    loading: false,
+  });
+  rerender(<Models />);
+
+  await waitFor(() => expect(screen.getByRole('button', { name: /anthropic 0 models/i }))
+    .toHaveAttribute('aria-expanded', 'true'));
+  expect(screen.getByRole('button', { name: /openai 0 models/i }))
+    .toHaveAttribute('aria-expanded', 'false');
 });
 
 it('starts the built-in GGUF download from the Models page', async () => {
