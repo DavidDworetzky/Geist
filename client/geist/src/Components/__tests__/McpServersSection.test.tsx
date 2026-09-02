@@ -53,6 +53,38 @@ describe('McpServersSection', () => {
     expect(await screen.findByText('No MCP servers configured yet.')).toBeInTheDocument();
   });
 
+  it('prefills Gmail and Proton Mail from the starter catalogue', async () => {
+    global.fetch = jest.fn(() => jsonResponse([])) as any;
+
+    render(<McpServersSection />);
+    await screen.findByText('No MCP servers configured yet.');
+
+    const catalogue = screen.getByTestId('mcp-catalogue');
+    expect(catalogue).toHaveTextContent('Gmail');
+    expect(catalogue).toHaveTextContent('Google Workspace Mail');
+    expect(catalogue).toHaveTextContent('Outlook / Microsoft 365');
+    expect(catalogue).toHaveTextContent('Proton Mail');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Gmail' }));
+
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Google OAuth 2.0 delegated authorization'
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+    expect(screen.getByLabelText('Name')).toHaveFocus();
+    expect(screen.getByLabelText('Server URL')).toHaveValue(
+      'https://gmailmcp.googleapis.com/mcp/v1'
+    );
+
+    fireEvent.click(screen.getByText('Cancel'));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Proton Mail' }));
+    expect(screen.getByLabelText('Name')).toHaveValue('proton-mail');
+    expect(screen.getByLabelText('Command')).toHaveValue('');
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Proton Mail Bridge'
+    );
+  });
+
   it('creates a server through the form', async () => {
     const fetchMock = jest.fn((url: string, options?: RequestInit) => {
       if (url === '/api/v1/mcp/servers' && options?.method === 'POST') {
@@ -91,6 +123,49 @@ describe('McpServersSection', () => {
       transport: 'stdio',
       command: 'npx',
     });
+  });
+
+  it('edits an already configured catalogue server instead of creating a duplicate', async () => {
+    const gmailServer = {
+      ...stdioServer,
+      mcp_server_id: 2,
+      name: 'gmail',
+      transport: 'http' as const,
+      command: null,
+      args: [],
+      url: 'https://gmailmcp.googleapis.com/mcp/v1',
+      enabled: false,
+    };
+    const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url === '/api/v1/mcp/servers/2' && options?.method === 'PUT') {
+        return jsonResponse(gmailServer);
+      }
+      return jsonResponse([gmailServer]);
+    });
+    global.fetch = fetchMock as any;
+
+    render(<McpServersSection />);
+
+    const editButton = await screen.findByRole('button', { name: 'Edit Gmail' });
+    expect(screen.getByText('Configured')).toBeInTheDocument();
+    fireEvent.click(editButton);
+    expect(screen.getByRole('heading', { name: 'Edit MCP Server' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
+      'Google OAuth 2.0 delegated authorization'
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save Server'));
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/mcp/servers/2',
+        expect.objectContaining({ method: 'PUT' })
+      );
+    });
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   });
 
   it('requires a command before submitting a stdio server', async () => {
