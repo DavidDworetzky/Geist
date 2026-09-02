@@ -189,6 +189,73 @@
   border-radius: var(--geist-radius-md);
 }
 
+.tool-configure-button {
+  justify-self: start;
+}
+
+.tool-configuration-modal {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+}
+
+.tool-configuration-modal > p,
+.tool-configuration-heading h3,
+.tool-configuration-heading p {
+  margin: 0;
+}
+
+.tool-configuration-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tool-configuration-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.tool-configuration-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tool-configuration-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--geist-color-text);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.tool-configuration-fields input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--geist-color-text);
+  background: var(--geist-color-surface-strong);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.tool-configuration-fields small {
+  color: var(--geist-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.tool-configuration-modal .tool-configuration-notice {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .tools-mcp-panel > .settings-section {
   box-shadow: none;
 }
@@ -244,6 +311,10 @@
 
   .tool-card-grid,
   .mcp-catalogue-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-configuration-fields {
     grid-template-columns: 1fr;
   }
 }

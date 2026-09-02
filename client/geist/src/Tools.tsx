@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import McpServersSection from './Components/McpServersSection';
 import './Tools.css';
 
@@ -14,6 +14,20 @@ interface ToolDefinition {
   side_effect: string;
   source_adapter?: string | null;
   semantic_tags?: string[];
+  configuration?: ToolConfiguration | null;
+}
+
+interface ToolConfiguration {
+  kind: 'environment';
+  provider: string;
+  api_key_configured: boolean;
+  base_url: string;
+  model: string;
+  environment_variables: {
+    api_key: string;
+    base_url: string;
+    model: string;
+  };
 }
 
 const toolCategory = (tool: ToolDefinition): string => {
@@ -47,6 +61,8 @@ const Tools: React.FC = () => {
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [configurationTool, setConfigurationTool] = useState<ToolDefinition | null>(null);
+  const closeConfigurationButton = useRef<HTMLButtonElement>(null);
 
   const loadTools = async () => {
     try {
@@ -72,6 +88,16 @@ const Tools: React.FC = () => {
   useEffect(() => {
     void loadTools();
   }, []);
+
+  useEffect(() => {
+    if (!configurationTool) return undefined;
+    closeConfigurationButton.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfigurationTool(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [configurationTool]);
 
   return (
     <section className="tools-page page-surface">
@@ -148,6 +174,15 @@ const Tools: React.FC = () => {
                         {tool.source_adapter && (
                           <p className="tool-source">Source: {tool.source_adapter}</p>
                         )}
+                        {tool.configuration && (
+                          <button
+                            className="button button-secondary button-small tool-configure-button"
+                            type="button"
+                            onClick={() => setConfigurationTool(tool)}
+                          >
+                            Configure
+                          </button>
+                        )}
                         <details>
                           <summary>Input schema</summary>
                           <pre>{JSON.stringify(tool.input_schema, null, 2)}</pre>
@@ -167,6 +202,83 @@ const Tools: React.FC = () => {
           </div>
         )}
       </div>
+
+      {configurationTool?.configuration && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setConfigurationTool(null);
+          }}
+        >
+          <div
+            className="modal-panel tool-configuration-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tool-configuration-title"
+          >
+            <div className="tool-configuration-heading">
+              <div>
+                <p className="section-eyebrow">Built-in tool</p>
+                <h3 id="tool-configuration-title">Configure {configurationTool.name}</h3>
+              </div>
+              <button
+                ref={closeConfigurationButton}
+                className="button button-secondary button-small"
+                type="button"
+                onClick={() => setConfigurationTool(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <p>
+              Image generation is configured through Geist&apos;s process environment.
+              Secret values are never returned to this page.
+            </p>
+
+            <div className="tool-configuration-fields">
+              <label>
+                <span>Provider</span>
+                <input readOnly value={configurationTool.configuration.provider} />
+              </label>
+              <label>
+                <span>API key</span>
+                <input
+                  readOnly
+                  value={
+                    configurationTool.configuration.api_key_configured
+                      ? 'Configured'
+                      : 'Not configured'
+                  }
+                />
+                <small>{configurationTool.configuration.environment_variables.api_key}</small>
+              </label>
+              <label>
+                <span>Base URL</span>
+                <input readOnly value={configurationTool.configuration.base_url} />
+                <small>
+                  Override with {configurationTool.configuration.environment_variables.base_url}
+                </small>
+              </label>
+              <label>
+                <span>Model</span>
+                <input readOnly value={configurationTool.configuration.model} />
+                <small>
+                  Override with {configurationTool.configuration.environment_variables.model}
+                </small>
+              </label>
+            </div>
+
+            {!configurationTool.configuration.api_key_configured && (
+              <div className="notice tool-configuration-notice">
+                Set {configurationTool.configuration.environment_variables.api_key} before
+                starting Geist, then restart the app and refresh this catalogue.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 };

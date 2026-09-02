@@ -58,30 +58,33 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "image.generate",
         "workspace.list_markdown",
         "workspace.read_markdown",
-        "workspace.write_markdown",
-        "communication.email.send",
-        "communication.sms.send",
         "adapter.JobStatusAdapter.check_async_tool",
     }
     assert catalog["web.search"].enabled_by_default is True
     assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
-    assert catalog["workspace.read_markdown"].enabled_by_default is False
-    assert catalog["workspace.write_markdown"].requires_approval is True
-    assert catalog["communication.email.send"].requires_approval is True
-    assert catalog["communication.sms.send"].requires_approval is True
+    assert catalog["workspace.list_markdown"].enabled_by_default is True
+    assert catalog["workspace.read_markdown"].enabled_by_default is True
+    assert registry.get("workspace.write_markdown") is None
+    assert registry.get("communication.email.send") is None
+    assert registry.get("communication.sms.send") is None
 
     available_names = {
         definition.name for definition in registry.definitions_for_context(_context())
     }
-    assert available_names == {"web.search", "documents.search"}
+    assert available_names == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
 
 
 def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
-        "workspace.list_markdown, workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
@@ -96,15 +99,12 @@ def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
         "documents.search",
         "workspace.list_markdown",
         "workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
     }
-    assert registry.is_enabled(registry.get("workspace.write_markdown")) is False
 
 
 def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "GEIST_ENABLED_CHAT_TOOLS",
-        "workspace.list_markdown,workspace.read_markdown",
-    )
+    monkeypatch.delenv("GEIST_ENABLED_CHAT_TOOLS", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "configured-for-catalog-only")
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
     registry = build_default_tool_registry()
@@ -143,7 +143,7 @@ def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monk
     assert registry.definitions_for_intent(_context(), "answer", include_retrieval=False) == []
 
 
-def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monkeypatch, tmp_path):
+def test_unfinished_side_effect_mappings_are_not_registered(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
         "workspace.write_markdown,communication.email.send,communication.sms.send",
@@ -151,13 +151,11 @@ def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monk
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
 
     registry = build_default_tool_registry()
-    available_names = {
-        definition.name for definition in registry.definitions_for_context(_context())
-    }
+    catalog_names = {definition.name for definition in registry.catalog()}
 
-    assert "workspace.write_markdown" not in available_names
-    assert "communication.email.send" not in available_names
-    assert "communication.sms.send" not in available_names
+    assert "workspace.write_markdown" not in catalog_names
+    assert "communication.email.send" not in catalog_names
+    assert "communication.sms.send" not in catalog_names
 
 
 @pytest.mark.parametrize(
