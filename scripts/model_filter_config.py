@@ -18,6 +18,8 @@ ALWAYS_INCLUDE: list[str] = [
     "o1-mini",
     "o3-mini",
     # Anthropic
+    "claude-fable-5-1",
+    "claude-mythos-5-1",
     "claude-3-opus-20240229",
     "claude-3-sonnet-20240229",
     "claude-3-haiku-20240307",
@@ -143,6 +145,24 @@ MODEL_METADATA: dict[str, dict] = {
         "family": "o3",
     },
     # Anthropic models
+    "claude-fable-5-1": {
+        "name": "Claude Fable 5.1",
+        "recommended": True,
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "family": "claude-fable",
+    },
+    "claude-mythos-5-1": {
+        "name": "Claude Mythos 5.1 (Invite Only)",
+        "recommended": False,
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "family": "claude-mythos",
+    },
     "claude-3-opus-20240229": {
         "name": "Claude 3 Opus",
         "recommended": True,

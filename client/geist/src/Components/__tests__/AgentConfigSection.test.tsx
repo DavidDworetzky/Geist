@@ -47,6 +47,8 @@ describe('AgentConfigSection', () => {
 
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
 
+      expect(optionValues).toContain('claude-fable-5-1');
+      expect(optionValues).toContain('claude-mythos-5-1');
       expect(optionValues).toContain('claude-3-opus-20240229');
       expect(optionValues).toContain('claude-3-sonnet-20240229');
       expect(optionValues).not.toContain('gpt-4');
@@ -88,7 +90,7 @@ describe('AgentConfigSection', () => {
       fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
 
       expect(onOnlineProviderChange).toHaveBeenCalledWith('anthropic');
-      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-3-opus-20240229');
+      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-fable-5-1');
     });
 
     it('resets model to first available when switching from Anthropic to OpenAI', () => {
