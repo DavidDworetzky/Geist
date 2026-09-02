@@ -8,6 +8,7 @@ outputs/*.json
 *.pyc
 .DS_Store
 /.env
+/data/workspace/
 
 # C extensions
 *.so

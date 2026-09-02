@@ -81,6 +81,32 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
     }
 
 
+def test_markdown_tools_default_to_the_private_data_workspace(monkeypatch, tmp_path):
+    data_dir = tmp_path / "geist-data"
+    monkeypatch.delenv("GEIST_MARKDOWN_ROOT", raising=False)
+    monkeypatch.setenv("GEIST_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    workspace = data_dir / "workspace"
+    assert workspace.is_dir()
+    (workspace / "note.md").write_text("# Private workspace note", encoding="utf-8")
+
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {}),
+        _context(),
+    )
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": "note.md"}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert '"note.md"' in listed.content
+    assert read.status == "succeeded"
+    assert read.content == "# Private workspace note"
+
+
 def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",

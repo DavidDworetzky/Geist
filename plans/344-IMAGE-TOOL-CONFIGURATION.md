@@ -13,6 +13,8 @@
   Markdown listing and reading by default.
 - Keep internal async-job polling registered for runtime use while omitting it
   from the user-facing catalogue.
+- Default Markdown access to `GEIST_DATA_DIR/workspace`, with
+  `GEIST_MARKDOWN_ROOT` retained as an explicit override.
 
 ## Verification
 

@@ -26,6 +26,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - GEIST_DATABASE_PROVIDER=sqlite
+      - GEIST_DATA_DIR=/opt/geist/data
       - SQLITE_DATABASE_PATH=data/geist.sqlite3
       - DEBUG=${DEBUG:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}

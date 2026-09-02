@@ -2,21 +2,52 @@ from pathlib import Path
 
 import pytest
 
-from app.runtime_config import RuntimePaths, default_data_dir, discover_web_dir
+from app.runtime_config import (
+    RuntimePaths,
+    default_data_dir,
+    default_markdown_root,
+    discover_web_dir,
+)
 
 
 def test_default_data_dir_is_platform_specific_and_not_cwd(tmp_path):
     windows_base = tmp_path / "local"
 
-    assert default_data_dir(
-        environ={"LOCALAPPDATA": str(windows_base)}, system="Windows", home=tmp_path
-    ) == (windows_base / "Geist").resolve()
-    assert default_data_dir(environ={}, system="Darwin", home=tmp_path) == (
-        tmp_path / "Library" / "Application Support" / "Geist"
-    ).resolve()
-    assert default_data_dir(environ={}, system="Linux", home=tmp_path) == (
-        tmp_path / ".local" / "share" / "geist"
-    ).resolve()
+    assert (
+        default_data_dir(
+            environ={"LOCALAPPDATA": str(windows_base)}, system="Windows", home=tmp_path
+        )
+        == (windows_base / "Geist").resolve()
+    )
+    assert (
+        default_data_dir(environ={}, system="Darwin", home=tmp_path)
+        == (tmp_path / "Library" / "Application Support" / "Geist").resolve()
+    )
+    assert (
+        default_data_dir(environ={}, system="Linux", home=tmp_path)
+        == (tmp_path / ".local" / "share" / "geist").resolve()
+    )
+
+
+def test_default_markdown_root_uses_private_workspace_directory(tmp_path):
+    assert (
+        default_markdown_root(environ={}, system="Darwin", home=tmp_path)
+        == (tmp_path / "Library" / "Application Support" / "Geist" / "workspace").resolve()
+    )
+
+
+def test_explicit_markdown_root_overrides_data_directory(tmp_path):
+    configured = tmp_path / "notes"
+
+    assert (
+        default_markdown_root(
+            environ={
+                "GEIST_DATA_DIR": str(tmp_path / "data"),
+                "GEIST_MARKDOWN_ROOT": str(configured),
+            }
+        )
+        == configured.resolve()
+    )
 
 
 def test_explicit_data_dir_owns_all_default_runtime_storage(tmp_path):

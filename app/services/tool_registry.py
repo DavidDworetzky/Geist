@@ -24,6 +24,7 @@ from agents.models.tool_calling import (
     ToolResult,
     ToolSemanticTag,
 )
+from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
 
 
@@ -334,7 +335,7 @@ def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry(explicitly_enabled=explicitly_enabled)
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
-    markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+    markdown_adapter = MarkdownFileAdapter(file_root=str(default_markdown_root()))
 
     def web_search(context: ToolContext, arguments: WebSearchArguments) -> ToolExecutionOutput:
         results = search_adapter.search(
