@@ -117,6 +117,21 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
             "*.safetensors",
         ),
     ),
+    LocalModelArtifact(
+        id="qwen3.8-27b-q4-k-m-gguf",
+        model_id="Qwen/Qwen3.8-27B",
+        display_name="Qwen 3.8 27B Q4_K_M (GGUF)",
+        format="gguf",
+        backend="llama_server",
+        repo_id="ggml-org/Qwen3.8-27B-GGUF",
+        revision="0669b98607d47046c7c2b3f801011d54a08cfccf",
+        filename="Qwen3.8-27B-Q4_K_M.gguf",
+        size_bytes=18_973_870_432,
+        sha256="31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34",
+        quantization="Q4_K_M",
+        license="Apache-2.0",
+        supports_tool_calling=True,
+    ),
 )
 
 
@@ -410,11 +425,17 @@ class LocalModelManager:
                     f"No managed local artifact is available for {model_or_artifact_id}. "
                     "Download a supported curated model first."
                 )
+            supported = [artifact for artifact in matches if self._artifact_support(artifact)]
             installed = [
                 artifact
                 for artifact in matches
                 if self._state_for_locked(artifact).get("status") == "installed"
             ]
+            installed_supported = [artifact for artifact in installed if artifact in supported]
+            if installed_supported:
+                return installed_supported[0]
+            if supported:
+                return supported[0]
             return (installed or matches)[0]
 
     def request_download(self, artifact_id: str) -> dict[str, Any]:

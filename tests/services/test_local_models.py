@@ -57,18 +57,48 @@ def _mlx_artifact(**overrides) -> LocalModelArtifact:
     return LocalModelArtifact(**values)
 
 
-def test_qwen3_8_uses_pinned_mlx_snapshot():
-    artifact = next(
-        item for item in CURATED_LOCAL_ARTIFACTS if item.model_id == "Qwen/Qwen3.8-27B"
-    )
+def test_qwen3_8_uses_pinned_platform_artifacts():
+    artifacts = {
+        item.backend: item
+        for item in CURATED_LOCAL_ARTIFACTS
+        if item.model_id == "Qwen/Qwen3.8-27B"
+    }
 
-    assert artifact.id == "qwen3.8-27b-4bit-mlx"
-    assert artifact.repo_id == "mlx-community/Qwen3.8-27B-4bit"
-    assert artifact.revision == "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
-    assert artifact.backend == "mlx_llama"
-    assert artifact.quantization == "4-bit"
-    assert local_artifact_supported(artifact, system="Darwin", machine="arm64") is True
-    assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
+    mlx = artifacts["mlx_llama"]
+    assert mlx.id == "qwen3.8-27b-4bit-mlx"
+    assert mlx.repo_id == "mlx-community/Qwen3.8-27B-4bit"
+    assert mlx.revision == "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
+    assert mlx.quantization == "4-bit"
+    assert local_artifact_supported(mlx, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(mlx, system="Linux", machine="x86_64") is False
+
+    gguf = artifacts["llama_server"]
+    assert gguf.id == "qwen3.8-27b-q4-k-m-gguf"
+    assert gguf.repo_id == "ggml-org/Qwen3.8-27B-GGUF"
+    assert gguf.revision == "0669b98607d47046c7c2b3f801011d54a08cfccf"
+    assert gguf.filename == "Qwen3.8-27B-Q4_K_M.gguf"
+    assert gguf.size_bytes == 18_973_870_432
+    assert gguf.sha256 == "31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34"
+    assert gguf.quantization == "Q4_K_M"
+    assert local_artifact_supported(gguf, system="Linux", machine="x86_64") is True
+    assert local_artifact_supported(gguf, system="Darwin", machine="arm64") is False
+
+
+def test_model_lookup_prefers_the_platform_supported_artifact(tmp_path, managers):
+    mlx = _mlx_artifact(model_id="Qwen/Qwen3.8-27B")
+    gguf = _artifact(
+        id="test-qwen-gguf",
+        model_id="Qwen/Qwen3.8-27B",
+        repo_id="test/qwen-gguf",
+    )
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(mlx, gguf),
+        artifact_support=lambda artifact: artifact.backend == "llama_server",
+    )
+    managers.append(manager)
+
+    assert manager.find_artifact("Qwen/Qwen3.8-27B") == gguf
 
 
 @pytest.fixture
