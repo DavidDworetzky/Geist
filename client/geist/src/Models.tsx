@@ -1,4 +1,4 @@
-import React, { ChangeEvent, useState } from 'react';
+import React, { ChangeEvent, useEffect, useState } from 'react';
 import useAvailableModels, { ModelInfo } from './Hooks/useAvailableModels';
 import useLocalArtifacts, { LocalArtifact } from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
@@ -30,7 +30,7 @@ function formatBytes(value?: number | null): string {
 
 export default function Models(): JSX.Element {
   const { models, loading, error, refetch, providers } = useAvailableModels();
-  const { settings } = useUserSettings();
+  const { settings, updateSettings } = useUserSettings();
   const {
     artifacts: localArtifacts,
     error: localArtifactsError,
@@ -39,7 +39,23 @@ export default function Models(): JSX.Element {
   } = useLocalArtifacts({ pollWhileBusy: true });
   const [localActionError, setLocalActionError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<string | null>(null);
+  const [providerActionError, setProviderActionError] = useState<string | null>(null);
+  const [providerAction, setProviderAction] = useState<string | null>(null);
+  const [expandedProviders, setExpandedProviders] = useState<Set<string> | null>(null);
   const [activeTab, setActiveTab] = useState<ModelsTab>('local');
+
+  const onlineProviders = providers.filter(provider => provider !== 'offline');
+
+  useEffect(() => {
+    if (onlineProviders.length === 0) return;
+    setExpandedProviders(current => {
+      if (current !== null) return current;
+      const initialProvider = onlineProviders.includes(settings?.default_online_provider ?? '')
+        ? settings?.default_online_provider
+        : onlineProviders[0];
+      return new Set(initialProvider ? [initialProvider] : []);
+    });
+  }, [onlineProviders, settings?.default_online_provider]);
 
   const runArtifactAction = async (
     artifactId: string,
@@ -94,15 +110,49 @@ export default function Models(): JSX.Element {
     }
   };
 
+  const selectProviderModel = async (provider: string, model: ModelInfo) => {
+    const actionId = `${provider}-${model.id}`;
+    setProviderAction(actionId);
+    setProviderActionError(null);
+    try {
+      await updateSettings({
+        default_agent_type: 'online',
+        default_online_provider: provider,
+        default_online_model: model.id,
+      });
+    } catch (requestError) {
+      setProviderActionError(
+        requestError instanceof Error ? requestError.message : 'Provider model selection failed',
+      );
+    } finally {
+      setProviderAction(null);
+    }
+  };
+
+  const toggleProvider = (provider: string) => {
+    setExpandedProviders(current => {
+      const next = new Set(current ?? []);
+      if (next.has(provider)) {
+        next.delete(provider);
+      } else {
+        next.add(provider);
+      }
+      return next;
+    });
+  };
+
   const activeModel = settings?.default_agent_type === 'online'
     ? settings.default_online_model
     : settings?.default_local_model;
   const activeProvider = settings?.default_agent_type === 'online'
     ? settings.default_online_provider
     : 'offline';
-  const visibleLocalArtifacts = localArtifacts.filter(artifact => artifact.supported !== false);
-  const ggufSupported = visibleLocalArtifacts.some(artifact => artifact.format === 'gguf');
-  const mlxSupported = visibleLocalArtifacts.some(artifact => artifact.backend === 'mlx_llama');
+  const ggufSupported = localArtifacts.some(
+    artifact => artifact.format === 'gguf' && artifact.supported !== false,
+  );
+  const mlxSupported = localArtifacts.some(
+    artifact => artifact.backend === 'mlx_llama' && artifact.supported !== false,
+  );
 
   return (
     <section className="models-page">
@@ -168,6 +218,8 @@ export default function Models(): JSX.Element {
               {mlxSupported
                 ? 'Download and select the managed MLX snapshot used on Apple silicon.'
                 : 'Download a curated GGUF or import one already on this computer.'}
+              {' '}Downloads are limited to pinned, verified artifacts; unsupported artifacts remain
+              visible for reference.
             </p>
           </div>
           {ggufSupported && (
@@ -194,13 +246,16 @@ export default function Models(): JSX.Element {
             <span>Status</span>
             <span>Actions</span>
           </div>
-          {visibleLocalArtifacts.map(artifact => {
+          {localArtifacts.map(artifact => {
             const active = settings?.default_local_artifact_id === artifact.id;
             const busy = ['queued', 'downloading', 'cancelling'].includes(artifact.status);
             const supported = artifact.supported !== false;
             const total = artifact.total_bytes ?? 0;
             return (
-              <div className="model-table-row" key={artifact.id}>
+              <div
+                className={`model-table-row ${supported ? '' : 'model-table-row-unavailable'}`}
+                key={artifact.id}
+              >
                 <span>
                   <strong>{artifact.display_name}</strong>
                   <small>{artifact.model_id}</small>
@@ -226,6 +281,7 @@ export default function Models(): JSX.Element {
                       <button
                         className="button button-secondary button-small"
                         disabled={!supported || active || localAction === artifact.id}
+                        title={!supported ? 'This model cannot run on the current platform.' : undefined}
                         onClick={() => void selectArtifact(artifact)}
                       >
                         {active ? 'Active' : 'Use'}
@@ -252,6 +308,7 @@ export default function Models(): JSX.Element {
                       <button
                         className="button button-secondary button-small"
                         disabled={!supported || localAction === artifact.id || artifact.source === 'imported'}
+                        title={!supported ? 'This artifact requires a backend unavailable on this platform.' : undefined}
                         onClick={() => void runArtifactAction(artifact.id, 'download')}
                       >
                         Download
@@ -289,6 +346,10 @@ export default function Models(): JSX.Element {
             </div>
           )}
 
+          {providerActionError && (
+            <div className="notice notice-error">{providerActionError}</div>
+          )}
+
           {loading && !models ? (
             <section className="page-surface page-surface-centered models-providers-loading">
               <h3>Loading model providers</h3>
@@ -307,46 +368,89 @@ export default function Models(): JSX.Element {
                 </article>
                 <article className="metric-card">
                   <span className="metric-label">Providers</span>
-                  <strong>{providers.length}</strong>
+                  <strong>{onlineProviders.length}</strong>
                 </article>
               </div>
 
               <div className="model-inventory-scroll" role="region" aria-label="Model providers">
                 <div className="provider-stack">
-                  {providers.map((provider) => {
+                  {onlineProviders.map((provider) => {
                     const providerModels = models?.providers[provider] ?? [];
+                    const expanded = expandedProviders?.has(provider) ?? false;
+                    const panelId = `provider-models-${provider.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                    const toggleId = `${panelId}-toggle`;
                     return (
-                      <section className="provider-panel" key={provider}>
-                        <div className="provider-panel-header">
-                          <div>
-                            <h3>{provider}</h3>
-                            <p>{providerModels.length} models</p>
-                          </div>
+                      <section
+                        className="provider-panel"
+                        key={provider}
+                        aria-labelledby={toggleId}
+                      >
+                        <div className="provider-panel-header provider-panel-disclosure-header">
+                          <h3 className="provider-panel-disclosure-title">
+                            <button
+                              id={toggleId}
+                              type="button"
+                              className="provider-panel-toggle"
+                              aria-expanded={expanded}
+                              aria-controls={panelId}
+                              onClick={() => toggleProvider(provider)}
+                            >
+                              <span>
+                                <span>{provider}</span>
+                                <small>{providerModels.length} models</small>
+                              </span>
+                              <span className="provider-panel-chevron" aria-hidden="true">
+                                {expanded ? '−' : '+'}
+                              </span>
+                            </button>
+                          </h3>
                         </div>
 
-                        <div className="model-table">
+                        {expanded && <div id={panelId} className="model-table provider-model-table">
                           <div className="model-table-row model-table-heading">
                             <span>Model</span>
                             <span>Context</span>
                             <span>Output</span>
                             <span>Capabilities</span>
+                            <span>Actions</span>
                           </div>
-                          {providerModels.map((model) => (
-                            <div className="model-table-row" key={`${provider}-${model.id}`}>
-                              <span>
-                                <strong>{model.name}</strong>
-                                <small>{model.id}</small>
-                              </span>
-                              <span>{formatNumber(model.context_window)}</span>
-                              <span>{formatNumber(model.max_output_tokens)}</span>
-                              <span className="capability-list">
-                                {capabilityLabels(model).map((label) => (
-                                  <span className="capability-pill" key={label}>{label}</span>
-                                ))}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                          {providerModels.map((model) => {
+                            const actionId = `${provider}-${model.id}`;
+                            const active = settings?.default_agent_type === 'online'
+                              && settings.default_online_provider === provider
+                              && settings.default_online_model === model.id;
+                            return (
+                              <div
+                                className={`model-table-row ${active ? 'model-table-row-active' : ''}`}
+                                key={actionId}
+                              >
+                                <span>
+                                  <strong>{model.name}</strong>
+                                  <small>{model.id}</small>
+                                </span>
+                                <span>{formatNumber(model.context_window)}</span>
+                                <span>{formatNumber(model.max_output_tokens)}</span>
+                                <span className="capability-list">
+                                  {capabilityLabels(model).map((label) => (
+                                    <span className="capability-pill" key={label}>{label}</span>
+                                  ))}
+                                </span>
+                                <span className="settings-inline-actions">
+                                  <button
+                                    type="button"
+                                    className="button button-secondary button-small"
+                                    disabled={active || providerAction !== null}
+                                    onClick={() => void selectProviderModel(provider, model)}
+                                  >
+                                    {active
+                                      ? 'Active'
+                                      : providerAction === actionId ? 'Selecting…' : 'Use'}
+                                  </button>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>}
                       </section>
                     );
                   })}

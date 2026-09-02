@@ -4,16 +4,11 @@ import Models from './Models';
 
 
 const mockUpdateSettings = jest.fn().mockResolvedValue(undefined);
+const mockUseAvailableModels = jest.fn();
 
 jest.mock('./Hooks/useAvailableModels', () => ({
   __esModule: true,
-  default: () => ({
-    models: { providers: { offline: [] }, last_updated: null },
-    loading: false,
-    error: null,
-    refetch: jest.fn(),
-    providers: ['offline'],
-  }),
+  default: () => mockUseAvailableModels(),
 }));
 
 jest.mock('./Hooks/useUserSettings', () => ({
@@ -66,6 +61,13 @@ let availableArtifacts = [artifact];
 
 beforeEach(() => {
   mockUpdateSettings.mockClear();
+  mockUseAvailableModels.mockReturnValue({
+    models: { providers: { offline: [] }, last_updated: null },
+    loading: false,
+    error: null,
+    refetch: jest.fn(),
+    providers: ['offline'],
+  });
   availableArtifacts = [artifact];
   global.fetch = jest.fn().mockImplementation((url: string, options?: RequestInit) => {
     if (url === '/api/v1/models/local/artifacts' && !options?.method) {
@@ -96,7 +98,7 @@ it('separates local models from model providers', async () => {
   expect(screen.getByRole('region', { name: 'Model providers' })).toBeInTheDocument();
 });
 
-it('shows, selects, and keeps GGUF controls out of the Apple silicon MLX view', async () => {
+it('shows unsupported curated artifacts while keeping their controls disabled', async () => {
   availableArtifacts = [
     { ...artifact, supported: false },
     mlxArtifact,
@@ -105,7 +107,10 @@ it('shows, selects, and keeps GGUF controls out of the Apple silicon MLX view', 
   render(<Models />);
 
   await screen.findByText(mlxArtifact.display_name);
-  expect(screen.queryByText(artifact.display_name)).not.toBeInTheDocument();
+  expect(screen.getByText(artifact.display_name).closest('.model-table-row'))
+    .toHaveClass('model-table-row-unavailable');
+  expect(screen.getByText('unavailable on this platform')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
   expect(screen.queryByLabelText('Import GGUF model')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Use' }));
 
@@ -113,6 +118,52 @@ it('shows, selects, and keeps GGUF controls out of the Apple silicon MLX view', 
     default_agent_type: 'local',
     default_local_model: mlxArtifact.model_id,
     default_local_artifact_id: mlxArtifact.id,
+  }));
+});
+
+it('collapses provider sections and selects a provider model', async () => {
+  const openAiModel = {
+    id: 'gpt-4o',
+    name: 'GPT-4o',
+    provider: 'openai',
+    context_window: 128000,
+    max_output_tokens: 16384,
+    supports_vision: true,
+    supports_function_calling: true,
+    supports_streaming: true,
+    recommended: true,
+    family: 'gpt-4o',
+  };
+  mockUseAvailableModels.mockReturnValue({
+    models: {
+      providers: { openai: [openAiModel], anthropic: [], offline: [] },
+      last_updated: null,
+    },
+    loading: false,
+    error: null,
+    refetch: jest.fn(),
+    providers: ['openai', 'anthropic', 'offline'],
+  });
+
+  render(<Models />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Model Providers' }));
+
+  const openAiToggle = screen.getByRole('button', { name: /openai 1 models/i });
+  const anthropicToggle = screen.getByRole('button', { name: /anthropic 0 models/i });
+  await waitFor(() => expect(openAiToggle).toHaveAttribute('aria-expanded', 'true'));
+  expect(anthropicToggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByText('GPT-4o')).toBeInTheDocument();
+
+  fireEvent.click(openAiToggle);
+  expect(openAiToggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('GPT-4o')).not.toBeInTheDocument();
+
+  fireEvent.click(openAiToggle);
+  fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+  await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalledWith({
+    default_agent_type: 'online',
+    default_online_provider: 'openai',
+    default_online_model: 'gpt-4o',
   }));
 });
 
