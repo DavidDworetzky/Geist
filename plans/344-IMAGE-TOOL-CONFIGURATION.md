@@ -11,6 +11,8 @@
   secret values.
 - Remove unfinished built-in tools from the catalogue and enable read-only
   Markdown listing and reading by default.
+- Keep internal async-job polling registered for runtime use while omitting it
+  from the user-facing catalogue.
 
 ## Verification
 

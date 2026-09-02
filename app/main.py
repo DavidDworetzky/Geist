@@ -79,6 +79,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
 DEFAULT_LOCAL_MODEL = default_local_model_id()
+UI_HIDDEN_TOOL_NAMES = frozenset({"adapter.JobStatusAdapter.check_async_tool"})
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
@@ -643,6 +644,7 @@ def create_app(
                     ),
                 }
                 for tool in catalog
+                if tool.name not in UI_HIDDEN_TOOL_NAMES
             ]
         }
 

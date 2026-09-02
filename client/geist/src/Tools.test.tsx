@@ -63,16 +63,6 @@ describe('Tools', () => {
           side_effect: 'read',
           semantic_tags: ['local_retrieval'],
         },
-        {
-          name: 'adapter.JobStatusAdapter.check_async_tool',
-          description: 'Check an asynchronous job.',
-          input_schema: { type: 'object', properties: {} },
-          enabled: false,
-          enabled_by_default: false,
-          requires_approval: false,
-          side_effect: 'read',
-          semantic_tags: ['action'],
-        },
       ],
     })) as any;
 
@@ -83,10 +73,8 @@ describe('Tools', () => {
     expect(screen.getByText('Public retrieval')).toBeInTheDocument();
     expect(screen.getByText('Image')).toBeInTheDocument();
     expect(screen.getByText('Local retrieval')).toBeInTheDocument();
-    expect(screen.getAllByText('Opt-in')).not.toHaveLength(0);
     expect(screen.getAllByText('Unavailable')).not.toHaveLength(0);
     expect(screen.getByText(/provider or local prerequisite is not configured/i)).toBeInTheDocument();
-    expect(screen.getByText(/must be explicitly enabled in Geist configuration/i)).toBeInTheDocument();
     fireEvent.click(screen.getAllByText('Input schema')[0]);
     expect(screen.getByText(/"query"/)).toBeInTheDocument();
   });
