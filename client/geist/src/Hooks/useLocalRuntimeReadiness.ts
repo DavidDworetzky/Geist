@@ -17,13 +17,14 @@ const failedStatus = (modelId: string, detail: string): ModelLoadStatus => ({
 
 export default function useLocalRuntimeReadiness(
   settings: UserSettings | null,
+  enabled = true,
 ): LocalRuntimeReadiness {
   const [status, setStatus] = useState<ModelLoadStatus | null>(null);
   const [retrySequence, setRetrySequence] = useState(0);
   const retry = useCallback(() => setRetrySequence(current => current + 1), []);
 
   useEffect(() => {
-    if (settings?.default_agent_type !== 'local' || !settings.default_local_model) {
+    if (!enabled || settings?.default_agent_type !== 'local' || !settings.default_local_model) {
       setStatus(null);
       return undefined;
     }
@@ -89,6 +90,7 @@ export default function useLocalRuntimeReadiness(
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
   }, [
+    enabled,
     retrySequence,
     settings?.default_agent_type,
     settings?.default_local_artifact_id,

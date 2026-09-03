@@ -63,7 +63,7 @@ const mlxArtifact = {
   requires_auth: true,
 };
 
-let availableArtifacts = [artifact];
+let availableArtifacts: any[] = [artifact];
 
 beforeEach(() => {
   mockUpdateSettings.mockClear();
@@ -94,13 +94,13 @@ it('separates local models from online models', async () => {
   const onlineModelsTab = screen.getByRole('tab', { name: 'Online' });
 
   expect(localModelsTab).toHaveAttribute('aria-selected', 'true');
-  expect(await screen.findByRole('region', { name: 'Local model files' })).toBeInTheDocument();
+  expect(await screen.findByRole('region', { name: 'Local models' })).toBeInTheDocument();
   expect(screen.queryByText('Inference mode')).not.toBeInTheDocument();
 
   fireEvent.click(onlineModelsTab);
 
   expect(onlineModelsTab).toHaveAttribute('aria-selected', 'true');
-  expect(screen.queryByRole('region', { name: 'Local model files' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Local models' })).not.toBeInTheDocument();
   expect(screen.getByText('Inference mode')).toBeInTheDocument();
   expect(screen.getByText('openai · gpt-4')).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Online models' })).toBeInTheDocument();
@@ -117,8 +117,7 @@ it('shows only local artifacts compatible with the current architecture', async 
   await screen.findByText(mlxArtifact.display_name);
   expect(screen.queryByText(artifact.display_name)).not.toBeInTheDocument();
   expect(screen.queryByText('unavailable on this platform')).not.toBeInTheDocument();
-  expect(screen.getByText('Downloaded')).toBeInTheDocument();
-  expect(screen.getByText('Source · meta-llama/Meta-Llama-3.1-8B-Instruct')).toBeInTheDocument();
+  expect(screen.getByText('Installed')).toBeInTheDocument();
   expect(screen.queryByLabelText('Import GGUF model')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Use' }));
 
@@ -141,9 +140,57 @@ it('does not label a stale selected artifact as downloaded', async () => {
 
   render(<Models />);
 
-  expect(await screen.findByText('Not downloaded')).toBeInTheDocument();
-  expect(screen.queryByText('Downloaded · Active')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Download to use' })).toBeInTheDocument();
+  expect(await screen.findByText('Not installed')).toBeInTheDocument();
+  expect(screen.queryByText('Installed · Active')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument();
+});
+
+it('shows install progress with a single cancel action', async () => {
+  availableArtifacts = [{
+    ...artifact,
+    status: 'downloading',
+    bytes_downloaded: 25,
+    total_bytes: 100,
+    progress_unit: 'bytes',
+    progress_completed: 25,
+    progress_total: 100,
+  }];
+
+  render(<Models />);
+
+  expect(await screen.findByText('Installing 25%')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+});
+
+it('shows no competing action while cancellation settles', async () => {
+  availableArtifacts = [{
+    ...artifact,
+    status: 'cancelling',
+    bytes_downloaded: 25,
+    total_bytes: 100,
+  }];
+
+  render(<Models />);
+
+  expect(await screen.findByText('Cancelling…')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+});
+
+it('shows a failed install with its retry action and error', async () => {
+  availableArtifacts = [{
+    ...artifact,
+    status: 'failed',
+    error: 'Not enough space to finish installing this model.',
+  }];
+
+  render(<Models />);
+
+  expect(await screen.findByText('Install failed')).toBeInTheDocument();
+  expect(screen.getByText('Not enough space to finish installing this model.'))
+    .toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
 });
 
 it('collapses provider sections and selects a provider model', async () => {
@@ -179,7 +226,7 @@ it('collapses provider sections and selects a provider model', async () => {
   render(<Models />);
   fireEvent.click(screen.getByRole('tab', { name: 'Online' }));
 
-  const openAiToggle = screen.getByRole('button', { name: /openai 1 models/i });
+  const openAiToggle = screen.getByRole('button', { name: /openai 1 model/i });
   const anthropicToggle = screen.getByRole('button', { name: /anthropic 0 models/i });
   await waitFor(() => expect(openAiToggle).toHaveAttribute('aria-expanded', 'true'));
   expect(anthropicToggle).toHaveAttribute('aria-expanded', 'false');
@@ -242,12 +289,12 @@ it('waits for settings before expanding the configured provider', async () => {
     .toHaveAttribute('aria-expanded', 'false');
 });
 
-it('starts the built-in GGUF download from the Models page', async () => {
+it('installs from the Models page without changing the active model', async () => {
   render(<Models />);
 
-  const localModelPanel = await screen.findByRole('region', { name: 'Local model files' });
+  const localModelPanel = await screen.findByRole('region', { name: 'Local models' });
   expect(localModelPanel).toHaveClass('local-model-panel');
-  const download = await screen.findByRole('button', { name: 'Download to use' });
+  const download = await screen.findByRole('button', { name: 'Install' });
   fireEvent.click(download);
   expect(download).toBeDisabled();
 
@@ -255,6 +302,7 @@ it('starts the built-in GGUF download from the Models page', async () => {
     '/api/v1/models/local/artifacts/qwen3-4b-q4-k-m/download',
     { method: 'POST' },
   ));
+  expect(mockUpdateSettings).not.toHaveBeenCalled();
   await waitFor(() => expect(download).not.toBeDisabled());
 });
 

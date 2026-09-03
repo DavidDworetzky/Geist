@@ -1,12 +1,21 @@
 import asyncio
+import io
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
+from agents.agent_type import AgentType
 from agents.model_load_status import ModelLoadStatusRegistry, model_load_status_registry
-from app.api.v1.endpoints.models import get_model_load_status, start_local_runtime
+from app.api.v1.endpoints.models import (
+    _initialize_configured_local_runtime,
+    download_local_artifact,
+    get_model_load_status,
+    import_local_artifact,
+    start_local_runtime,
+)
+from app.services.local_models import InsufficientStorageError
 
 
 def test_model_load_registry_tracks_lifecycle() -> None:
@@ -97,6 +106,13 @@ def test_start_local_runtime_preflights_artifact_before_background_load() -> Non
     assert len(background_tasks.tasks) == 1
 
 
+def test_background_readiness_uses_the_local_agent_enum() -> None:
+    with patch("app.main.get_active_agent") as get_active_agent:
+        _initialize_configured_local_runtime("test/model")
+
+    get_active_agent.assert_called_once_with(AgentType.LOCALAGENT)
+
+
 def test_start_local_runtime_surfaces_artifact_state_mismatch_immediately() -> None:
     manager = MagicMock()
     manager.find_artifact.return_value = SimpleNamespace(
@@ -132,5 +148,44 @@ def test_start_local_runtime_surfaces_artifact_state_mismatch_immediately() -> N
         status = start_local_runtime(background_tasks)
 
     assert status.state == "failed"
-    assert "not downloaded" in status.detail
+    assert status.detail == "Model not installed."
     assert background_tasks.tasks == []
+
+
+def test_download_endpoint_reports_insufficient_storage() -> None:
+    manager = MagicMock()
+    manager.request_download.side_effect = InsufficientStorageError(
+        "Not enough space to install Test Model. 16.2 GB needed; 512.0 MB available."
+    )
+
+    with (
+        patch(
+            "app.api.v1.endpoints.models.get_local_model_manager",
+            return_value=manager,
+        ),
+        pytest.raises(HTTPException) as raised,
+    ):
+        download_local_artifact("test-artifact")
+
+    assert raised.value.status_code == 507
+    assert "512.0 MB available" in raised.value.detail
+
+
+def test_import_endpoint_reports_insufficient_storage() -> None:
+    manager = MagicMock()
+    manager.import_stream.side_effect = InsufficientStorageError(
+        "Not enough space to import this model."
+    )
+    upload = SimpleNamespace(file=io.BytesIO(b"GGUFmodel"), filename="model.gguf")
+
+    with (
+        patch(
+            "app.api.v1.endpoints.models.get_local_model_manager",
+            return_value=manager,
+        ),
+        pytest.raises(HTTPException) as raised,
+    ):
+        import_local_artifact(upload)
+
+    assert raised.value.status_code == 507
+    assert raised.value.detail == "Not enough space to import this model."

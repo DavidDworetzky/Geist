@@ -1,6 +1,10 @@
 import React, { ReactNode, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import useLocalArtifacts from './Hooks/useLocalArtifacts';
+import useLocalArtifacts, {
+  installProgress,
+  isArtifactInstalling,
+  LocalArtifact,
+} from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 import { useBranding } from './branding';
 
@@ -103,41 +107,42 @@ function RuntimeSummary(): JSX.Element {
     error: artifactsError,
     refreshLocalArtifacts,
     activateArtifact,
+    downloadArtifact,
   } = useLocalArtifacts({
     enabled: mode === 'local',
     pollWhileBusy: true,
-    pollModelId: settings?.default_local_model,
   });
   const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
-  const installedArtifacts = artifacts.filter(
-    artifact => artifact.status === 'installed' && artifact.supported !== false,
-  );
+  const compatibleArtifacts = artifacts.filter(artifact => artifact.supported !== false);
 
   const model = mode === 'online'
     ? settings?.default_online_model
     : settings?.default_local_model;
   const configuredArtifact = settings
-    ? artifacts.find(
+    ? compatibleArtifacts.find(
       artifact => artifact.id === settings.default_local_artifact_id,
-    ) ?? artifacts.find(
+    ) ?? compatibleArtifacts.find(
       artifact => artifact.model_id === settings.default_local_model,
     )
     : undefined;
-  const activeArtifact = configuredArtifact?.status === 'installed'
-    && configuredArtifact.supported !== false
+  const pendingArtifact = compatibleArtifacts.find(artifact => artifact.id === pendingArtifactId);
+  const selectedArtifact = pendingArtifact ?? configuredArtifact;
+  const installingArtifact = isArtifactInstalling(configuredArtifact)
     ? configuredArtifact
-    : installedArtifacts.find(artifact => artifact.model_id === settings?.default_local_model);
-  const selectedArtifact = activeArtifact;
+    : undefined;
+  const installState = installProgress(installingArtifact);
+  const selectionStartsInstall = Boolean(
+    savingModel && pendingArtifact && pendingArtifact.status !== 'installed',
+  );
   const catalogLoading = mode === 'local' && artifactsLoading && !artifactsLoaded;
   const modelControlBusy = catalogLoading || savingModel;
   const selectedArtifactId = pendingArtifactId ?? selectedArtifact?.id ?? '';
-  const noDownloadedModels = artifactsLoaded && installedArtifacts.length === 0;
-  const selectedModelUnavailable = artifactsLoaded && !selectedArtifact;
+  const noCompatibleModels = artifactsLoaded && compatibleArtifacts.length === 0;
 
   if (loading) {
-    return <span className="runtime-chip">Runtime loading</span>;
+    return <span className="runtime-chip">Loading…</span>;
   }
 
   if (!settings) {
@@ -145,7 +150,7 @@ function RuntimeSummary(): JSX.Element {
   }
 
   const handleLocalModelChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextArtifact = installedArtifacts.find(artifact => artifact.id === event.target.value);
+    const nextArtifact = compatibleArtifacts.find(artifact => artifact.id === event.target.value);
     if (!nextArtifact) return;
 
     setPendingArtifactId(nextArtifact.id);
@@ -154,11 +159,23 @@ function RuntimeSummary(): JSX.Element {
 
     try {
       await activateArtifact(nextArtifact);
-    } catch {
-      setModelSaveError('Model switch failed');
+      if (nextArtifact.status !== 'installed' && !isArtifactInstalling(nextArtifact)) {
+        await downloadArtifact(nextArtifact);
+      }
+    } catch (error) {
+      setModelSaveError(error instanceof Error ? error.message : 'Could not select model.');
     } finally {
       setPendingArtifactId(null);
       setSavingModel(false);
+    }
+  };
+
+  const retryInstall = async (artifact: LocalArtifact) => {
+    setModelSaveError(null);
+    try {
+      await downloadArtifact(artifact);
+    } catch (error) {
+      setModelSaveError(error instanceof Error ? error.message : 'Could not install model.');
     }
   };
 
@@ -175,7 +192,7 @@ function RuntimeSummary(): JSX.Element {
             aria-label="Local model"
             aria-invalid={modelSaveError ? 'true' : undefined}
             className="runtime-model runtime-model-select"
-            disabled={modelControlBusy || noDownloadedModels}
+            disabled={modelControlBusy || noCompatibleModels}
             onChange={handleLocalModelChange}
             title={selectedArtifact?.display_name ?? model ?? 'No model selected'}
             value={selectedArtifactId}
@@ -184,10 +201,10 @@ function RuntimeSummary(): JSX.Element {
               <option value="" disabled>
                 {catalogLoading
                   ? 'Loading model catalogue…'
-                  : 'No downloaded models'}
+                  : noCompatibleModels ? 'No local models' : 'Select model'}
               </option>
             )}
-            {installedArtifacts.map((artifact) => (
+            {compatibleArtifacts.map((artifact) => (
               <option key={artifact.id} value={artifact.id}>
                 {artifact.display_name}
               </option>
@@ -196,28 +213,60 @@ function RuntimeSummary(): JSX.Element {
           {modelControlBusy && (
             <span className="runtime-model-loading-chip" role="status">
               <span className="runtime-model-spinner" aria-hidden="true" />
-              {catalogLoading ? 'Loading models' : 'Switching model'}
+              {catalogLoading ? 'Loading models' : selectionStartsInstall ? 'Installing…' : 'Selecting…'}
+            </span>
+          )}
+          {!modelControlBusy && installingArtifact && (
+            <span className="runtime-model-loading-chip" role="status">
+              <span className="runtime-model-spinner" aria-hidden="true" />
+              {installState.label}
+              {installState.percent !== null && (
+                <progress
+                  aria-label={`${installingArtifact.display_name} installation progress`}
+                  max="100"
+                  value={installState.percent}
+                />
+              )}
             </span>
           )}
         </div>
       ) : (
         <span className="runtime-model" title={model}>{model || 'No model selected'}</span>
       )}
-      {mode === 'local' && modelSaveError && (
+      {mode === 'local' && !modelControlBusy && selectedArtifact
+        && !installingArtifact && selectedArtifact.status !== 'installed' && (
+        <>
+          <span
+            className={selectedArtifact.status === 'failed'
+              ? 'runtime-model-error'
+              : 'runtime-model-state'}
+            role="status"
+          >
+            {selectedArtifact.status === 'failed' ? 'Install failed' : 'Not installed'}
+          </span>
+          {(selectedArtifact.status === 'failed' || modelSaveError) && (
+            <button
+              className="button button-secondary button-small"
+              onClick={() => void retryInstall(selectedArtifact)}
+              type="button"
+            >
+              Retry
+            </button>
+          )}
+        </>
+      )}
+      {mode === 'local' && (modelSaveError || selectedArtifact?.error) && (
         <span
           className="runtime-model-error"
           role="alert"
-          title={modelSaveError}
+          title={modelSaveError ?? selectedArtifact?.error ?? undefined}
         >
-          {modelSaveError}
+          {modelSaveError ?? selectedArtifact?.error}
         </span>
-      )}
-      {mode === 'local' && selectedModelUnavailable && (
-        <span className="runtime-model-error" role="status">Download a local model to use it</span>
       )}
       {mode === 'local' && artifactsError && (
         <>
-          <span className="runtime-model-error" role="alert">Installed models unavailable</span>
+          <span className="runtime-model-error" role="alert">Models unavailable</span>
           <button
             className="button button-secondary button-small"
             onClick={() => void refreshLocalArtifacts()}

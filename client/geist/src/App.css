@@ -347,6 +347,27 @@ textarea:focus-visible {
   animation: runtime-model-chip-pulse 1.4s ease-in-out infinite;
 }
 
+.runtime-model-loading-chip progress {
+  width: 42px;
+  height: 4px;
+  overflow: hidden;
+  appearance: none;
+  background: color-mix(in srgb, var(--geist-color-accent) 16%, transparent);
+  border: 0;
+  border-radius: 999px;
+}
+
+.runtime-model-loading-chip progress::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--geist-color-accent) 16%, transparent);
+  border-radius: 999px;
+}
+
+.runtime-model-loading-chip progress::-webkit-progress-value,
+.runtime-model-loading-chip progress::-moz-progress-bar {
+  background: var(--geist-color-accent);
+  border-radius: 999px;
+}
+
 .runtime-model-spinner {
   width: 10px;
   height: 10px;
@@ -376,11 +397,22 @@ textarea:focus-visible {
   }
 }
 
+.runtime-model-state,
 .runtime-model-error {
-  color: var(--geist-color-danger);
+  max-width: 320px;
+  overflow: hidden;
   font-size: 0.72rem;
   font-weight: 650;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.runtime-model-state {
+  color: var(--geist-color-text-muted);
+}
+
+.runtime-model-error {
+  color: var(--geist-color-danger);
 }
 
 .workspace-content {
@@ -1495,6 +1527,24 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chat-runtime-state {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  gap: 8px;
+  padding: 5px 9px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.78rem;
+  background: var(--geist-color-surface-strong);
+  border: 1px solid var(--geist-color-border);
+  border-radius: 999px;
+}
+
+.chat-runtime-state a {
+  color: var(--geist-color-accent-strong);
 }
 
 .chat-composer-dock::before {

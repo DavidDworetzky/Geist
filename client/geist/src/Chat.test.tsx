@@ -10,8 +10,10 @@ const mockSetChatFolder = jest.fn(async () => true);
 const mockRefreshChatSessions = jest.fn();
 const mockRefreshFolders = jest.fn();
 const mockRetryLocalRuntime = jest.fn();
+const mockDownloadLocalArtifact = jest.fn();
 let mockUserSettings: any = null;
 let mockLocalRuntimeStatus: any = null;
+let mockLocalArtifact: any = null;
 let mockCompletedTurn: {
   run_id: string;
   prompt: string;
@@ -84,6 +86,18 @@ jest.mock('./Hooks/useLocalRuntimeReadiness', () => ({
     status: mockLocalRuntimeStatus,
     retry: mockRetryLocalRuntime,
   })
+}));
+
+jest.mock('./Hooks/useLocalArtifacts', () => ({
+  __esModule: true,
+  default: () => ({
+    artifacts: mockLocalArtifact ? [mockLocalArtifact] : [],
+    loaded: true,
+    downloadArtifact: mockDownloadLocalArtifact,
+  }),
+  isArtifactInstalling: (artifact: { status?: string } | undefined) => Boolean(
+    artifact && ['queued', 'downloading', 'cancelling'].includes(artifact.status ?? ''),
+  ),
 }));
 
 jest.mock('./Hooks/useChatMemory', () => ({
@@ -165,6 +179,7 @@ describe('Chat history panel', () => {
     mockCompletedTurn = null;
     mockUserSettings = null;
     mockLocalRuntimeStatus = null;
+    mockLocalArtifact = null;
   });
 
   it('blocks chat and surfaces local runtime failures before submission', () => {
@@ -177,6 +192,12 @@ describe('Chat history panel', () => {
       state: 'failed',
       detail: 'Installed model files are missing.',
     };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'installed',
+      supported: true,
+    };
 
     render(
       <MemoryRouter initialEntries={['/chat']}>
@@ -184,14 +205,137 @@ describe('Chat history panel', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Local model unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Model failed to load');
     expect(screen.getByRole('alert')).toHaveTextContent('Installed model files are missing.');
     expect(screen.getByLabelText('Message')).toBeDisabled();
-    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Local model is not ready');
-    expect(screen.getByRole('link', { name: 'Manage local models' }))
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Model unavailable');
+    expect(screen.getByRole('link', { name: 'Models' }))
       .toHaveAttribute('href', '/models');
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(mockRetryLocalRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses concise language when the selected model is not installed', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: 'qwen3.8-27b-4bit-mlx',
+    };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'not_installed',
+      supported: true,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Model not installed');
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Model not installed');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not add a verbose chat notice while the install chip is active', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: 'qwen3.8-27b-4bit-mlx',
+    };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'downloading',
+      supported: true,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Installing model…');
+    expect(screen.queryByText(/local model is not ready/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps cancellation quiet while the selector chip finishes it', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: 'qwen3.8-27b-4bit-mlx',
+    };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'cancelling',
+      supported: true,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Cancelling…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows one actionable install error', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: 'qwen3.8-27b-4bit-mlx',
+    };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'failed',
+      error: 'Not enough space to finish installing this model.',
+      supported: true,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Install failed');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Not enough space to finish installing this model.',
+    );
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Install failed');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockDownloadLocalArtifact).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows loading immediately while an installed model starts', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+      default_local_artifact_id: 'qwen3.8-27b-4bit-mlx',
+    };
+    mockLocalArtifact = {
+      id: 'qwen3.8-27b-4bit-mlx',
+      model_id: 'Qwen/Qwen3.8-27B',
+      status: 'installed',
+      supported: true,
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('Loading model…')).toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Loading model…');
   });
 
   it('only reserves the external scrollbar rail while the transcript overflows', () => {

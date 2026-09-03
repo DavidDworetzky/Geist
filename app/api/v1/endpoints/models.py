@@ -20,7 +20,7 @@ from agents.architectures.registry import (
     provider_to_string,
 )
 from agents.model_load_status import model_load_status_registry
-from app.services.local_models import get_local_model_manager
+from app.services.local_models import InsufficientStorageError, get_local_model_manager
 
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,8 @@ def download_local_artifact(artifact_id: str):
         return get_local_model_manager().request_download(artifact_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except InsufficientStorageError as error:
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -249,21 +251,24 @@ def import_local_artifact(
             model_id=model_id,
             display_name=display_name,
         )
+    except InsufficientStorageError as error:
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 def _initialize_configured_local_runtime(model_id: str) -> None:
     try:
-        from app.main import get_active_agent, resolve_agent_type
+        from agents.agent_type import AgentType
+        from app.main import get_active_agent
 
-        get_active_agent(resolve_agent_type("local"))
+        get_active_agent(AgentType.LOCALAGENT)
     except Exception as error:
         status = model_load_status_registry.get(model_id)
         if status.state != "failed":
             model_load_status_registry.mark_failed(
                 model_id,
-                f"Model failed to load: {error}",
+                str(error),
             )
         logger.exception("Configured local model failed readiness initialization")
 
@@ -285,22 +290,20 @@ def start_local_runtime(background_tasks: BackgroundTasks):
         artifact = manager.find_artifact(artifact_reference)
         artifact_status = manager.status(artifact.id)
         if artifact_status.get("supported") is False:
-            raise RuntimeError(f"{artifact.display_name} is not supported on this computer.")
+            raise RuntimeError("Model not supported on this computer.")
         if artifact_status.get("status") != "installed" or not artifact_status.get("path"):
-            detail = artifact_status.get("error") or (
-                f"{artifact.display_name} is not downloaded. Download it from Models first."
-            )
+            detail = artifact_status.get("error") or "Model not installed."
             raise RuntimeError(str(detail))
     except (KeyError, RuntimeError, ValueError) as error:
         status = model_load_status_registry.mark_failed(
             model_id,
-            f"Local model is not ready: {error}",
+            str(error),
         )
         return ModelLoadStatusResponse(**status.to_dict())
 
     status = model_load_status_registry.mark_loading(
         model_id,
-        f"Starting the local runtime for {artifact.display_name}.",
+        f"Loading {artifact.display_name}.",
     )
     background_tasks.add_task(_initialize_configured_local_runtime, model_id)
     return ModelLoadStatusResponse(**status.to_dict())

@@ -56,4 +56,13 @@ describe('useLocalRuntimeReadiness', () => {
       { headers: { 'Content-Type': 'application/json' } },
     );
   });
+
+  it('does not start the runtime before the selected artifact is installed', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const { result } = renderHook(() => useLocalRuntimeReadiness(settings, false));
+
+    await waitFor(() => expect(result.current.status).toBeNull());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

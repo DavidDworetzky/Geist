@@ -8,6 +8,7 @@ an immutable upstream revision and, when available, an expected SHA-256.
 from __future__ import annotations
 
 import atexit
+import errno
 import hashlib
 import json
 import logging
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 GGUF_MAGIC = b"GGUF"
 COPY_CHUNK_SIZE = 4 * 1024 * 1024
+DOWNLOAD_DISK_RESERVE_BYTES = 256 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,20 @@ ArtifactSupportFunction = Callable[[LocalModelArtifact], bool]
 
 class ModelDownloadCancelledError(RuntimeError):
     """Raised inside a download worker after a user cancellation request."""
+
+
+class InsufficientStorageError(RuntimeError):
+    """Raised before a model download when its storage target is too small."""
+
+
+def _format_size(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            digits = 0 if unit == "B" else 1
+            return f"{value:.{digits}f} {unit}"
+        value /= 1024
+    return f"{size_bytes} B"
 
 
 def default_model_home(environment: dict[str, str] | None = None) -> Path:
@@ -251,7 +267,10 @@ class LocalModelManager:
             for state in self._states.values():
                 if state.get("status") in {"queued", "downloading", "importing"}:
                     state["status"] = "failed"
-                    state["error"] = "The previous model operation was interrupted."
+                    state["error"] = "Install was interrupted."
+                elif state.get("status") == "cancelling":
+                    state["status"] = "cancelled"
+                    state["error"] = None
 
     def _save_index_locked(self) -> None:
         self.model_home.mkdir(parents=True, exist_ok=True)
@@ -288,8 +307,40 @@ class LocalModelManager:
         return self.downloads_dir / f"{_safe_component(artifact.id)}.{suffix}"
 
     @staticmethod
+    def _existing_parent(path: Path) -> Path:
+        candidate = path
+        while not candidate.exists() and candidate != candidate.parent:
+            candidate = candidate.parent
+        return candidate
+
+    def _require_download_capacity(self, artifact: LocalModelArtifact) -> None:
+        if artifact.size_bytes is None:
+            return
+        partial = self._partial_path(artifact)
+        downloaded = self._payload_size(partial) if partial.exists() else 0
+        remaining = max(0, artifact.size_bytes - downloaded)
+        required = remaining + DOWNLOAD_DISK_RESERVE_BYTES
+        storage_root = self._existing_parent(self.model_home)
+        available = shutil.disk_usage(storage_root).free
+        if available < required:
+            raise InsufficientStorageError(
+                f"Not enough space to install {artifact.display_name}. "
+                f"{_format_size(required)} needed; {_format_size(available)} available."
+            )
+
+    @staticmethod
     def _artifact_exists(artifact: LocalModelArtifact, path: Path) -> bool:
         return path.is_dir() if artifact.format == "snapshot" else path.is_file()
+
+    def _remove_artifact_target(self, artifact: LocalModelArtifact) -> None:
+        target = self._artifact_path(artifact)
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
+        self._verified_files.pop(artifact.id, None)
+        with suppress(OSError):
+            target.parent.rmdir()
 
     def _installed_artifact_error(
         self,
@@ -314,6 +365,24 @@ class LocalModelManager:
             return str(error)
         return None
 
+    @staticmethod
+    def _mark_not_installed(
+        state: dict[str, Any],
+        artifact: LocalModelArtifact,
+    ) -> None:
+        progress_uses_bytes = artifact.size_bytes is not None
+        state.update(
+            status="not_installed",
+            bytes_downloaded=0,
+            total_bytes=artifact.size_bytes,
+            progress_unit="bytes" if progress_uses_bytes else "files",
+            progress_completed=0,
+            progress_total=artifact.size_bytes if progress_uses_bytes else None,
+            sha256=None,
+            path=None,
+            error=None,
+        )
+
     def _state_for_locked(self, artifact: LocalModelArtifact) -> dict[str, Any]:
         state = self._states.setdefault(
             artifact.id,
@@ -326,36 +395,23 @@ class LocalModelManager:
                 "path": None,
             },
         )
-        state.setdefault("progress_unit", "files" if artifact.format == "snapshot" else "bytes")
+        progress_uses_bytes = artifact.format != "snapshot" or artifact.size_bytes is not None
+        state.setdefault("progress_unit", "bytes" if progress_uses_bytes else "files")
         state.setdefault("progress_completed", state.get("bytes_downloaded", 0))
         state.setdefault("progress_total", state.get("total_bytes"))
         target = self._artifact_path(artifact)
         if state.get("status") == "installed":
             mismatch = self._installed_artifact_error(artifact, target)
             if mismatch:
-                if not self._artifact_exists(artifact, target):
-                    state.update(
-                        status="not_installed",
-                        bytes_downloaded=0,
-                        total_bytes=artifact.size_bytes,
-                        progress_completed=0,
-                        progress_total=(
-                            None if artifact.format == "snapshot" else artifact.size_bytes
-                        ),
-                        sha256=None,
-                        path=None,
-                        error=None,
-                    )
-                else:
-                    state.update(status="failed", path=None, error=mismatch)
+                self._mark_not_installed(state, artifact)
             else:
                 state.update(path=str(target), error=None)
             return state
         if self._artifact_exists(artifact, target) and state.get("status") != "installed":
             try:
                 checksum = self._verify_artifact_file(artifact, target)
-            except (OSError, ValueError) as error:
-                state.update(status="failed", path=None, error=str(error))
+            except (OSError, ValueError):
+                self._mark_not_installed(state, artifact)
             else:
                 installed_size = self._payload_size(target)
                 state.update(
@@ -510,10 +566,28 @@ class LocalModelManager:
             state = self._state_for_locked(artifact)
             if state.get("status") == "installed":
                 return {**asdict(artifact), **dict(state)}
+            target = self._artifact_path(artifact)
+            if self._artifact_exists(artifact, target):
+                try:
+                    self._remove_artifact_target(artifact)
+                except OSError as error:
+                    raise ValueError(
+                        f"Could not clear invalid model files: {error}"
+                    ) from error
+            self._require_download_capacity(artifact)
             future = self._futures.get(artifact_id)
             if future is None or future.done():
                 self._cancel_events.setdefault(artifact_id, threading.Event()).clear()
-                state.update(status="queued", error=None)
+                progress_uses_bytes = artifact.size_bytes is not None
+                state.update(
+                    status="queued",
+                    progress_unit="bytes" if progress_uses_bytes else "files",
+                    progress_completed=(
+                        state.get("bytes_downloaded", 0) if progress_uses_bytes else 0
+                    ),
+                    progress_total=artifact.size_bytes if progress_uses_bytes else None,
+                    error=None,
+                )
                 self._save_index_locked()
                 self._futures[artifact_id] = self._executor.submit(
                     self.download_artifact, artifact_id
@@ -587,6 +661,7 @@ class LocalModelManager:
                     self._save_index_locked()
 
         try:
+            self._require_download_capacity(artifact)
             progress(partial_size, artifact.size_bytes)
             if artifact.size_bytes is None or partial_size != artifact.size_bytes:
                 self._run_downloader(artifact, temporary, progress)
@@ -630,7 +705,7 @@ class LocalModelManager:
                 state.update(
                     status="cancelled" if cancelled else "failed",
                     bytes_downloaded=(temporary.stat().st_size if temporary.is_file() else 0),
-                    error=None if cancelled else str(error),
+                    error=None if cancelled else self._download_error_message(error),
                     path=None,
                 )
                 self._save_index_locked()
@@ -646,17 +721,18 @@ class LocalModelManager:
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
         temporary = self._partial_path(artifact)
         temporary.mkdir(parents=True, exist_ok=True)
+        partial_size = self._payload_size(temporary)
         with self._lock:
             state = self._state_for_locked(artifact)
             if state.get("status") == "installed" and target.is_dir():
                 return target
             state.update(
                 status="downloading",
-                bytes_downloaded=self._payload_size(temporary),
-                total_bytes=None,
-                progress_unit="files",
-                progress_completed=0,
-                progress_total=None,
+                bytes_downloaded=partial_size,
+                total_bytes=artifact.size_bytes,
+                progress_unit="bytes" if artifact.size_bytes is not None else "files",
+                progress_completed=partial_size if artifact.size_bytes is not None else 0,
+                progress_total=artifact.size_bytes,
                 error=None,
                 path=None,
             )
@@ -668,16 +744,27 @@ class LocalModelManager:
                 if cancel_event.is_set():
                     raise ModelDownloadCancelledError("Model download was cancelled")
                 state = self._state_for_locked(artifact)
-                state.update(
-                    bytes_downloaded=self._payload_size(temporary),
-                    progress_unit="files",
-                    progress_completed=completed,
-                    progress_total=total,
-                )
+                downloaded = self._payload_size(temporary)
+                if artifact.size_bytes is not None:
+                    state.update(
+                        bytes_downloaded=downloaded,
+                        total_bytes=artifact.size_bytes,
+                        progress_unit="bytes",
+                        progress_completed=downloaded,
+                        progress_total=artifact.size_bytes,
+                    )
+                else:
+                    state.update(
+                        bytes_downloaded=downloaded,
+                        progress_unit="files",
+                        progress_completed=completed,
+                        progress_total=total,
+                    )
                 self._save_index_locked()
 
         completed = False
         try:
+            self._require_download_capacity(artifact)
             progress(0, None)
             self._run_downloader(artifact, temporary, progress)
             if self._cancel_events.setdefault(artifact.id, threading.Event()).is_set():
@@ -693,13 +780,14 @@ class LocalModelManager:
             with self._lock:
                 state = self._states[artifact.id]
                 final_total = state.get("progress_total") or state.get("progress_completed") or 1
+                progress_uses_bytes = artifact.size_bytes is not None
                 state.update(
                     status="installed",
                     bytes_downloaded=installed_size,
                     total_bytes=installed_size,
-                    progress_unit="files",
-                    progress_completed=final_total,
-                    progress_total=final_total,
+                    progress_unit="bytes" if progress_uses_bytes else "files",
+                    progress_completed=installed_size if progress_uses_bytes else final_total,
+                    progress_total=installed_size if progress_uses_bytes else final_total,
                     sha256=None,
                     path=str(target),
                     error=None,
@@ -736,7 +824,7 @@ class LocalModelManager:
 
     @staticmethod
     def _snapshot_error_message(artifact: LocalModelArtifact, error: Exception) -> str:
-        message = str(error)
+        message = LocalModelManager._download_error_message(error)
         if artifact.requires_auth and any(
             marker in message.casefold()
             for marker in ("401", "403", "gated", "unauthorized", "forbidden")
@@ -746,6 +834,12 @@ class LocalModelManager:
                 "HUGGING_FACE_HUB_TOKEN. " + message
             )
         return message
+
+    @staticmethod
+    def _download_error_message(error: Exception) -> str:
+        if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+            return "Not enough space to finish installing this model."
+        return str(error)
 
     def remove_artifact(self, artifact_id: str) -> dict[str, Any]:
         """Remove managed weights without following paths outside the model store."""
@@ -759,14 +853,7 @@ class LocalModelManager:
             if future is not None and not future.done():
                 raise RuntimeError("Wait for the model download to finish cancelling")
 
-            target = self._artifact_path(artifact)
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink(missing_ok=True)
-            self._verified_files.pop(artifact.id, None)
-            with suppress(OSError):
-                target.parent.rmdir()
+            self._remove_artifact_target(artifact)
 
             partial = self._partial_path(artifact)
             if partial.is_dir():
@@ -781,17 +868,7 @@ class LocalModelManager:
                 self._states.pop(artifact.id, None)
                 result = {**asdict(artifact), "status": "removed"}
             else:
-                state.update(
-                    status="not_installed",
-                    bytes_downloaded=0,
-                    total_bytes=artifact.size_bytes,
-                    progress_unit=("files" if artifact.format == "snapshot" else "bytes"),
-                    progress_completed=0,
-                    progress_total=artifact.size_bytes,
-                    sha256=None,
-                    path=None,
-                    error=None,
-                )
+                self._mark_not_installed(state, artifact)
                 result = {**asdict(artifact), **dict(state)}
             self._save_index_locked()
             return result
@@ -824,11 +901,7 @@ class LocalModelManager:
         except (OSError, ValueError) as error:
             with self._lock:
                 state = self._state_for_locked(artifact)
-                state.update(
-                    status="failed",
-                    path=None,
-                    error=str(error),
-                )
+                self._mark_not_installed(state, artifact)
                 self._save_index_locked()
             raise RuntimeError(
                 f"Installed local model {artifact.display_name} failed verification: {error}"
@@ -937,8 +1010,12 @@ class LocalModelManager:
                 }
                 self._save_index_locked()
             return self.status(artifact.id)
-        except Exception:
+        except Exception as error:
             temporary.unlink(missing_ok=True)
+            if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+                raise InsufficientStorageError(
+                    "Not enough space to import this model."
+                ) from error
             raise
 
     def _require_supported(self, artifact: LocalModelArtifact) -> None:

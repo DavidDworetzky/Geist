@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from app.services.local_models import (
     CURATED_LOCAL_ARTIFACTS,
+    DOWNLOAD_DISK_RESERVE_BYTES,
+    InsufficientStorageError,
     LocalModelArtifact,
     LocalModelManager,
     default_model_home,
@@ -155,6 +159,42 @@ def test_download_is_verified_and_atomically_installed(tmp_path, managers):
     assert manager.status("test-q4")["sha256"] == hashlib.sha256(MODEL_BYTES).hexdigest()
 
 
+def test_download_fails_before_queueing_when_model_store_is_too_small(tmp_path, managers):
+    artifact = _artifact(size_bytes=16 * 1024**3)
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+
+    with (
+        patch(
+            "app.services.local_models.shutil.disk_usage",
+            return_value=SimpleNamespace(free=512 * 1024**2),
+        ),
+        pytest.raises(InsufficientStorageError, match="needed; 512.0 MB available"),
+    ):
+        manager.request_download(artifact.id)
+
+    status = manager.status(artifact.id)
+    assert status["status"] == "not_installed"
+    assert status["progress_unit"] == "bytes"
+    assert status["progress_total"] == artifact.size_bytes
+    assert artifact.id not in manager._futures
+
+
+def test_capacity_check_accounts_for_resumable_partial_download(tmp_path, managers):
+    artifact = _artifact(size_bytes=1024)
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    partial = manager._partial_path(artifact)
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"x" * 768)
+
+    with patch(
+        "app.services.local_models.shutil.disk_usage",
+        return_value=SimpleNamespace(free=DOWNLOAD_DISK_RESERVE_BYTES + 256),
+    ):
+        manager._require_download_capacity(artifact)
+
+
 def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):
     def downloader(_artifact, destination, callback):
         destination.write_bytes(MODEL_BYTES)
@@ -176,19 +216,38 @@ def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):
     assert not list((tmp_path / ".downloads").glob("*.partial.gguf"))
 
 
-def test_installed_artifact_is_reverified_before_inference(tmp_path, managers):
-    manager = LocalModelManager(tmp_path, artifacts=(_artifact(),))
+def test_invalid_managed_artifact_is_not_installed_and_can_be_repaired(tmp_path, managers):
+    invalid_target_seen = []
+
+    def downloader(_artifact, destination, callback):
+        invalid_target_seen.append(target.exists())
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
     managers.append(manager)
     target = tmp_path / "artifacts" / "test-q4" / "test-q4.gguf"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"GGUF" + b"tampered!!")
 
-    with pytest.raises(RuntimeError, match="failed verification"):
+    with pytest.raises(RuntimeError, match="not installed"):
         manager.require_installed("test-q4")
 
     status = manager.status("test-q4")
-    assert status["status"] == "failed"
+    assert status["status"] == "not_installed"
     assert status["path"] is None
+    assert status["error"] is None
+
+    manager.request_download("test-q4")
+    manager._futures["test-q4"].result(timeout=5)
+
+    assert invalid_target_seen == [False]
+    assert manager.status("test-q4")["status"] == "installed"
+    assert target.read_bytes() == MODEL_BYTES
 
 
 def test_status_reconciles_installed_state_when_files_are_missing(tmp_path, managers):
@@ -216,6 +275,41 @@ def test_status_reconciles_installed_state_when_files_are_missing(tmp_path, mana
     reloaded = LocalModelManager(tmp_path, artifacts=(artifact,))
     managers.append(reloaded)
     assert reloaded.status(artifact.id)["status"] == "not_installed"
+
+
+@pytest.mark.parametrize(
+    ("persisted_status", "expected_status", "expected_error"),
+    [
+        ("queued", "failed", "Install was interrupted."),
+        ("downloading", "failed", "Install was interrupted."),
+        ("cancelling", "cancelled", None),
+    ],
+)
+def test_restart_reconciles_incomplete_operations(
+    tmp_path,
+    managers,
+    persisted_status,
+    expected_status,
+    expected_error,
+):
+    artifact = _artifact()
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    manager._states[artifact.id] = {
+        "status": persisted_status,
+        "bytes_downloaded": 4,
+        "total_bytes": len(MODEL_BYTES),
+        "path": None,
+        "error": None,
+    }
+    manager._save_index_locked()
+
+    reloaded = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(reloaded)
+    status = reloaded.status(artifact.id)
+
+    assert status["status"] == expected_status
+    assert status["error"] == expected_error
 
 
 def test_require_installed_does_not_queue_or_start_download(tmp_path, managers):
@@ -257,6 +351,25 @@ def test_transient_failure_keeps_partial_for_resume(tmp_path, managers):
         manager.download_artifact("test-q4")
 
     assert list((tmp_path / ".downloads").glob("*.partial.gguf"))
+
+
+def test_out_of_space_download_failure_has_a_clear_message(tmp_path, managers):
+    def downloader(_artifact, _destination, _callback):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    with pytest.raises(OSError):
+        manager.download_artifact("test-q4")
+
+    status = manager.status("test-q4")
+    assert status["status"] == "failed"
+    assert status["error"] == "Not enough space to finish installing this model."
 
 
 def test_retry_reports_and_reuses_existing_partial(tmp_path, managers):
@@ -329,6 +442,17 @@ def test_import_copies_gguf_into_managed_store_and_persists(tmp_path, managers):
     assert not Path(imported["path"]).exists()
     with pytest.raises(KeyError, match="Unknown local model artifact"):
         reloaded.status(imported["id"])
+
+
+def test_import_reports_out_of_space_clearly(tmp_path, managers):
+    manager = LocalModelManager(tmp_path, artifacts=())
+    managers.append(manager)
+
+    with (
+        patch("pathlib.Path.open", side_effect=OSError(errno.ENOSPC, "No space left")),
+        pytest.raises(InsufficientStorageError, match="Not enough space to import"),
+    ):
+        manager.import_stream(io.BytesIO(MODEL_BYTES), "model.gguf")
 
 
 @pytest.mark.parametrize("filename", ["../escape.gguf", r"..\escape.gguf", "model.bin"])
@@ -439,8 +563,12 @@ def test_mlx_snapshot_requires_completion_manifest(tmp_path, managers):
     (target / "tokenizer.json").write_text("{}", encoding="utf-8")
     (target / "model.safetensors").write_bytes(b"weights")
 
-    with pytest.raises(RuntimeError, match="completion manifest"):
+    with pytest.raises(RuntimeError, match="not installed"):
         manager.require_installed(artifact.id)
+
+    status = manager.status(artifact.id)
+    assert status["status"] == "not_installed"
+    assert status["error"] is None
 
 
 def test_mlx_snapshot_background_download_can_be_cancelled(tmp_path, managers):

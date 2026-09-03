@@ -1,6 +1,11 @@
 import React, { ChangeEvent, useEffect, useState } from 'react';
 import useAvailableModels, { ModelInfo } from './Hooks/useAvailableModels';
-import useLocalArtifacts, { LocalArtifact } from './Hooks/useLocalArtifacts';
+import useLocalArtifacts, {
+  installProgress,
+  isArtifactInstalling,
+  LocalArtifact,
+  responseError,
+} from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 
 function formatNumber(value: number | null): string {
@@ -30,15 +35,11 @@ function formatBytes(value?: number | null): string {
   return `${(value / (1024 ** unit)).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-function artifactStatusLabel(status: string, active: boolean): string {
-  if (status === 'installed') return active ? 'Downloaded · Active' : 'Downloaded';
-  if (status === 'not_installed') return 'Not downloaded';
-  if (status === 'queued') return 'Download queued';
-  if (status === 'downloading') return 'Downloading';
-  if (status === 'cancelling') return 'Cancelling download';
-  if (status === 'cancelled') return 'Download cancelled';
-  if (status === 'failed') return 'Download failed';
-  return status;
+function artifactStatusLabel(artifact: LocalArtifact, active: boolean): string {
+  if (artifact.status === 'installed') return active ? 'Installed · Active' : 'Installed';
+  if (isArtifactInstalling(artifact)) return installProgress(artifact).label;
+  if (artifact.status === 'failed') return 'Install failed';
+  return 'Not installed';
 }
 
 export default function Models(): JSX.Element {
@@ -53,6 +54,7 @@ export default function Models(): JSX.Element {
     error: localArtifactsError,
     refreshLocalArtifacts,
     activateArtifact,
+    downloadArtifact,
   } = useLocalArtifacts({ pollWhileBusy: true });
   const [localActionError, setLocalActionError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<string | null>(null);
@@ -77,7 +79,7 @@ export default function Models(): JSX.Element {
 
   const runArtifactAction = async (
     artifactId: string,
-    action: 'download' | 'cancel' | 'remove',
+    action: 'cancel' | 'remove',
   ) => {
     setLocalAction(artifactId);
     setLocalActionError(null);
@@ -88,10 +90,24 @@ export default function Models(): JSX.Element {
       const response = await fetch(endpoint, {
         method: action === 'remove' ? 'DELETE' : 'POST',
       });
-      if (!response.ok) throw new Error(`Model ${action} failed: ${response.statusText}`);
+      if (!response.ok) throw await responseError(response, `Could not ${action} model.`);
       await refreshLocalArtifacts();
     } catch (requestError) {
       setLocalActionError(requestError instanceof Error ? requestError.message : `Model ${action} failed`);
+    } finally {
+      setLocalAction(null);
+    }
+  };
+
+  const installArtifact = async (artifact: LocalArtifact) => {
+    setLocalAction(artifact.id);
+    setLocalActionError(null);
+    try {
+      await downloadArtifact(artifact);
+    } catch (requestError) {
+      setLocalActionError(
+        requestError instanceof Error ? requestError.message : 'Could not install model.',
+      );
     } finally {
       setLocalAction(null);
     }
@@ -106,7 +122,7 @@ export default function Models(): JSX.Element {
       const body = new FormData();
       body.append('file', file);
       const response = await fetch('/api/v1/models/local/import', { method: 'POST', body });
-      if (!response.ok) throw new Error(`GGUF import failed: ${response.statusText}`);
+      if (!response.ok) throw await responseError(response, 'Could not import model.');
       await refreshLocalArtifacts();
     } catch (requestError) {
       setLocalActionError(requestError instanceof Error ? requestError.message : 'GGUF import failed');
@@ -166,9 +182,6 @@ export default function Models(): JSX.Element {
   const ggufSupported = localArtifacts.some(
     artifact => artifact.format === 'gguf' && artifact.supported !== false,
   );
-  const mlxSupported = localArtifacts.some(
-    artifact => artifact.backend === 'mlx_llama' && artifact.supported !== false,
-  );
 
   return (
     <section className="models-page">
@@ -176,9 +189,7 @@ export default function Models(): JSX.Element {
         <div>
           <p className="section-eyebrow">Inference</p>
           <h2>Models</h2>
-          <p>
-            Download a compatible model to run locally, or choose one from an online provider.
-          </p>
+          <p>Run models locally or use an online provider.</p>
         </div>
         <button
           className="button button-secondary"
@@ -229,14 +240,8 @@ export default function Models(): JSX.Element {
           >
         <div className="provider-panel-header">
           <div>
-            <h3 id="local-model-files-heading">Local model files</h3>
-            <p>
-              {mlxSupported
-                ? 'Download and select the managed MLX snapshot used on Apple silicon.'
-                : 'Download a curated GGUF or import one already on this computer.'}
-              {' '}Only models compatible with this computer are shown. Source labels identify
-              where weights come from; inference still runs locally.
-            </p>
+            <h3 id="local-model-files-heading">Local models</h3>
+            <p>Only models compatible with this computer are shown.</p>
           </div>
           {ggufSupported && (
             <label className="button button-secondary">
@@ -257,8 +262,8 @@ export default function Models(): JSX.Element {
         )}
         <div className="model-table">
           <div className="model-table-row model-table-heading">
-            <span>Artifact</span>
-            <span>Format</span>
+            <span>Model</span>
+            <span>Variant</span>
             <span>Status</span>
             <span>Actions</span>
           </div>
@@ -268,19 +273,21 @@ export default function Models(): JSX.Element {
               || (!settings.default_local_artifact_id
                 && settings.default_local_model === artifact.model_id)
             );
-            const busy = ['queued', 'downloading', 'cancelling'].includes(artifact.status);
+            const busy = isArtifactInstalling(artifact);
             const total = artifact.total_bytes ?? 0;
             return (
               <div className="model-table-row" key={artifact.id}>
                 <span>
                   <strong>{artifact.display_name}</strong>
                   <small>{artifact.model_id}</small>
-                  <small>Source · {artifact.repo_id || 'Imported file'}</small>
                 </span>
-                <span>{artifact.quantization || artifact.format.toUpperCase()}</span>
                 <span>
-                  {artifactStatusLabel(artifact.status, active)}
-                  {busy && (
+                  {artifact.quantization
+                    || (artifact.backend === 'mlx_llama' ? 'MLX' : artifact.format.toUpperCase())}
+                </span>
+                <span>
+                  {artifactStatusLabel(artifact, active)}
+                  {artifact.status === 'downloading' && (
                     <small>
                       {artifact.progress_unit === 'files'
                         ? `${artifact.progress_completed ?? 0} / ${artifact.progress_total ?? '?'} files`
@@ -288,7 +295,7 @@ export default function Models(): JSX.Element {
                     </small>
                   )}
                   {artifact.requires_auth && artifact.status !== 'installed' && (
-                    <small>Requires accepted Hugging Face access and an HF token.</small>
+                    <small>Requires Hugging Face access and a token.</small>
                   )}
                   {artifact.error && <small>{artifact.error}</small>}
                 </span>
@@ -311,7 +318,7 @@ export default function Models(): JSX.Element {
                         Remove
                       </button>
                     </>
-                  ) : busy ? (
+                  ) : artifact.status === 'cancelling' ? null : busy ? (
                     <button
                       className="button button-secondary button-small"
                       disabled={localAction === artifact.id}
@@ -324,9 +331,9 @@ export default function Models(): JSX.Element {
                       <button
                         className="button button-secondary button-small"
                         disabled={localAction === artifact.id || artifact.source === 'imported'}
-                        onClick={() => void runArtifactAction(artifact.id, 'download')}
+                        onClick={() => void installArtifact(artifact)}
                       >
-                        Download to use
+                        {artifact.status === 'failed' ? 'Retry' : 'Install'}
                       </button>
                       {artifact.bytes_downloaded > 0 && (
                         <button
@@ -370,8 +377,7 @@ export default function Models(): JSX.Element {
 
           {loading && !models ? (
             <section className="page-surface page-surface-centered models-providers-loading">
-              <h3>Loading model providers</h3>
-              <p>Gathering online provider options.</p>
+              <h3>Loading providers…</h3>
             </section>
           ) : (
             <>
@@ -415,7 +421,9 @@ export default function Models(): JSX.Element {
                             >
                               <span>
                                 <span>{provider}</span>
-                                <small>{providerModels.length} models</small>
+                                <small>
+                                  {providerModels.length} {providerModels.length === 1 ? 'model' : 'models'}
+                                </small>
                               </span>
                               <span className="provider-panel-chevron" aria-hidden="true">
                                 {expanded ? '−' : '+'}
