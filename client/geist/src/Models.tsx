@@ -31,8 +31,7 @@ function formatBytes(value?: number | null): string {
 }
 
 function artifactStatusLabel(status: string, active: boolean): string {
-  if (active) return 'Downloaded · Active';
-  if (status === 'installed') return 'Downloaded';
+  if (status === 'installed') return active ? 'Downloaded · Active' : 'Downloaded';
   if (status === 'not_installed') return 'Not downloaded';
   if (status === 'queued') return 'Download queued';
   if (status === 'downloading') return 'Downloading';

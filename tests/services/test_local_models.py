@@ -191,6 +191,33 @@ def test_installed_artifact_is_reverified_before_inference(tmp_path, managers):
     assert status["path"] is None
 
 
+def test_status_reconciles_installed_state_when_files_are_missing(tmp_path, managers):
+    artifact = _artifact()
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    manager._states[artifact.id] = {
+        "status": "installed",
+        "bytes_downloaded": len(MODEL_BYTES),
+        "total_bytes": len(MODEL_BYTES),
+        "path": str(tmp_path / "artifacts" / artifact.id / artifact.filename),
+        "error": None,
+    }
+    manager._save_index_locked()
+
+    status = manager.status(artifact.id)
+
+    assert status["status"] == "not_installed"
+    assert status["bytes_downloaded"] == 0
+    assert status["progress_completed"] == 0
+    assert status["path"] is None
+    assert status["error"] is None
+    assert manager.status(artifact.id) == status
+
+    reloaded = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(reloaded)
+    assert reloaded.status(artifact.id)["status"] == "not_installed"
+
+
 def test_require_installed_does_not_queue_or_start_download(tmp_path, managers):
     download_attempts = []
 

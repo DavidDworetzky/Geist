@@ -12,6 +12,7 @@ Expose only two model execution choices: Local models managed and run by Geist, 
 4. Keep Hugging Face repository IDs exclusively as source metadata for managed local artifacts.
 5. Hide architecture-incompatible local artifacts, use explicit download-state labels, and never start a model download just because it is configured as the default.
 6. Make the compatible local artifact inventory the single local-model selection path; Settings reports the configured model and links back to that inventory.
+7. Reconcile persisted installation state with disk, converging missing artifacts idempotently to `not_installed` while preserving corruption diagnostics, then preflight and initialize the configured local runner when Chat opens and block submission with an actionable fatal error until the runtime is ready.
 
 ## Validation
 

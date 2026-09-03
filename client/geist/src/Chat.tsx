@@ -3,6 +3,7 @@ import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
 import useUserSettings from './Hooks/useUserSettings';
+import useLocalRuntimeReadiness from './Hooks/useLocalRuntimeReadiness';
 import useChatMemory, { MemoryScope } from './Hooks/useChatMemory';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import ChatTextArea from './Components/ChatTextArea';
@@ -90,6 +91,10 @@ const Chat = () => {
   const [fileContextInfo, setFileContextInfo] = useState<string>('');
   const { settings: userSettings } = useUserSettings();
   const {
+    status: localRuntimeStatus,
+    retry: retryLocalRuntime,
+  } = useLocalRuntimeReadiness(userSettings);
+  const {
     completeText,
     cancelGeneration,
     resetChatSession,
@@ -99,6 +104,8 @@ const Chat = () => {
     activeTurn,
     state_chat_id,
   } = useCompleteText(userSettings);
+  const localRuntimeBlocking = userSettings?.default_agent_type === 'local'
+    && localRuntimeStatus?.state !== 'ready';
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
   const routeChatId = chatId ? parseInt(chatId, 10) : null;
   const selectedChatId = routeChatId ?? state_chat_id;
@@ -954,6 +961,34 @@ const Chat = () => {
           </aside>
 
           <div className="chat-composer-dock" aria-hidden={chatDrawerState === 'expanded'}>
+            {userSettings?.default_agent_type === 'local'
+              && localRuntimeStatus?.state === 'loading' && (
+                <div className="notice chat-runtime-notice" role="status">
+                  <strong>Starting local model</strong>
+                  <span>{localRuntimeStatus.detail}</span>
+                </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local'
+              && localRuntimeStatus?.state === 'failed' && (
+                <div className="notice notice-error chat-runtime-notice" role="alert">
+                  <strong>Local model unavailable</strong>
+                  <span>{localRuntimeStatus.detail}</span>
+                  <div>
+                    <NavLink className="button button-secondary button-small" to="/models">
+                      Manage local models
+                    </NavLink>
+                    <button
+                      className="button button-secondary button-small"
+                      type="button"
+                      onClick={retryLocalRuntime}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+            )}
+
             {fileContextInfo && (
               <div className="chat-context-info">
                 {fileContextInfo}
@@ -965,8 +1000,8 @@ const Chat = () => {
                 value={userInput}
                 onChange={setUserInput}
                 onSubmit={handleSubmit}
-                disabled={isLoading || isProcessingFiles || isMemoryLoading}
-                placeholder="Type your message..."
+                disabled={isLoading || isProcessingFiles || isMemoryLoading || localRuntimeBlocking}
+                placeholder={localRuntimeBlocking ? 'Local model is not ready' : 'Type your message...'}
                 handleKeyDown={handleKeyDown}
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}

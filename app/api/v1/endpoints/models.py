@@ -5,7 +5,7 @@ API endpoints for model discovery and listing.
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from agents.architectures.llama_server_process import get_llama_server_manager
@@ -251,6 +251,59 @@ def import_local_artifact(
         )
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _initialize_configured_local_runtime(model_id: str) -> None:
+    try:
+        from app.main import get_active_agent, resolve_agent_type
+
+        get_active_agent(resolve_agent_type("local"))
+    except Exception as error:
+        status = model_load_status_registry.get(model_id)
+        if status.state != "failed":
+            model_load_status_registry.mark_failed(
+                model_id,
+                f"Model failed to load: {error}",
+            )
+        logger.exception("Configured local model failed readiness initialization")
+
+
+@router.post("/local/runtime/start", response_model=ModelLoadStatusResponse)
+def start_local_runtime(background_tasks: BackgroundTasks):
+    """Validate the configured artifact and initialize its runner before chat submission."""
+
+    from app.models.user_settings import AgentFactoryConfig
+    from app.services.user_settings_service import UserSettingsService
+
+    settings = UserSettingsService.get_default_workspace_settings()
+    factory_config = AgentFactoryConfig.from_user_settings(settings)
+    model_id = factory_config.model
+    artifact_reference = factory_config.device_config.get("artifact_id") or model_id
+    manager = get_local_model_manager()
+
+    try:
+        artifact = manager.find_artifact(artifact_reference)
+        artifact_status = manager.status(artifact.id)
+        if artifact_status.get("supported") is False:
+            raise RuntimeError(f"{artifact.display_name} is not supported on this computer.")
+        if artifact_status.get("status") != "installed" or not artifact_status.get("path"):
+            detail = artifact_status.get("error") or (
+                f"{artifact.display_name} is not downloaded. Download it from Models first."
+            )
+            raise RuntimeError(str(detail))
+    except (KeyError, RuntimeError, ValueError) as error:
+        status = model_load_status_registry.mark_failed(
+            model_id,
+            f"Local model is not ready: {error}",
+        )
+        return ModelLoadStatusResponse(**status.to_dict())
+
+    status = model_load_status_registry.mark_loading(
+        model_id,
+        f"Starting the local runtime for {artifact.display_name}.",
+    )
+    background_tasks.add_task(_initialize_configured_local_runtime, model_id)
+    return ModelLoadStatusResponse(**status.to_dict())
 
 
 @router.get("/local/runtime")

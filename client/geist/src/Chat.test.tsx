@@ -9,6 +9,9 @@ const mockSetScope = jest.fn(async () => true);
 const mockSetChatFolder = jest.fn(async () => true);
 const mockRefreshChatSessions = jest.fn();
 const mockRefreshFolders = jest.fn();
+const mockRetryLocalRuntime = jest.fn();
+let mockUserSettings: any = null;
+let mockLocalRuntimeStatus: any = null;
 let mockCompletedTurn: {
   run_id: string;
   prompt: string;
@@ -72,7 +75,15 @@ jest.mock('./Hooks/useFileContext', () => ({
 
 jest.mock('./Hooks/useUserSettings', () => ({
   __esModule: true,
-  default: () => ({ settings: null })
+  default: () => ({ settings: mockUserSettings })
+}));
+
+jest.mock('./Hooks/useLocalRuntimeReadiness', () => ({
+  __esModule: true,
+  default: () => ({
+    status: mockLocalRuntimeStatus,
+    retry: mockRetryLocalRuntime,
+  })
 }));
 
 jest.mock('./Hooks/useChatMemory', () => ({
@@ -126,8 +137,19 @@ jest.mock('./Components/ChatTextArea', () => {
 
 jest.mock('./Components/EnhancedChatInput', () => ({
   __esModule: true,
-  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-    <textarea aria-label="Message" value={value} onChange={(event) => onChange(event.target.value)} />
+  default: ({ value, onChange, disabled, placeholder }: {
+    value: string;
+    onChange: (value: string) => void;
+    disabled?: boolean;
+    placeholder?: string;
+  }) => (
+    <textarea
+      aria-label="Message"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled}
+      placeholder={placeholder}
+    />
   )
 }));
 
@@ -141,6 +163,35 @@ describe('Chat history panel', () => {
     window.localStorage.clear();
     jest.clearAllMocks();
     mockCompletedTurn = null;
+    mockUserSettings = null;
+    mockLocalRuntimeStatus = null;
+  });
+
+  it('blocks chat and surfaces local runtime failures before submission', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+    };
+    mockLocalRuntimeStatus = {
+      model_id: 'Qwen/Qwen3.8-27B',
+      state: 'failed',
+      detail: 'Installed model files are missing.',
+    };
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Local model unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Installed model files are missing.');
+    expect(screen.getByLabelText('Message')).toBeDisabled();
+    expect(screen.getByLabelText('Message')).toHaveAttribute('placeholder', 'Local model is not ready');
+    expect(screen.getByRole('link', { name: 'Manage local models' }))
+      .toHaveAttribute('href', '/models');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockRetryLocalRuntime).toHaveBeenCalledTimes(1);
   });
 
   it('only reserves the external scrollbar rail while the transcript overflows', () => {

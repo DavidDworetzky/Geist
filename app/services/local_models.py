@@ -291,6 +291,29 @@ class LocalModelManager:
     def _artifact_exists(artifact: LocalModelArtifact, path: Path) -> bool:
         return path.is_dir() if artifact.format == "snapshot" else path.is_file()
 
+    def _installed_artifact_error(
+        self,
+        artifact: LocalModelArtifact,
+        target: Path,
+    ) -> str | None:
+        """Quickly detect persisted installation state that no longer matches disk."""
+
+        if not self._artifact_exists(artifact, target):
+            return f"Installed model files are missing from {target}."
+        try:
+            if artifact.format == "snapshot":
+                self._verify_snapshot(artifact, target)
+            else:
+                _validate_gguf(target)
+                if artifact.size_bytes is not None and target.stat().st_size != artifact.size_bytes:
+                    return (
+                        f"Local GGUF size {target.stat().st_size} does not match expected "
+                        f"{artifact.size_bytes}"
+                    )
+        except (OSError, ValueError) as error:
+            return str(error)
+        return None
+
     def _state_for_locked(self, artifact: LocalModelArtifact) -> dict[str, Any]:
         state = self._states.setdefault(
             artifact.id,
@@ -307,6 +330,27 @@ class LocalModelManager:
         state.setdefault("progress_completed", state.get("bytes_downloaded", 0))
         state.setdefault("progress_total", state.get("total_bytes"))
         target = self._artifact_path(artifact)
+        if state.get("status") == "installed":
+            mismatch = self._installed_artifact_error(artifact, target)
+            if mismatch:
+                if not self._artifact_exists(artifact, target):
+                    state.update(
+                        status="not_installed",
+                        bytes_downloaded=0,
+                        total_bytes=artifact.size_bytes,
+                        progress_completed=0,
+                        progress_total=(
+                            None if artifact.format == "snapshot" else artifact.size_bytes
+                        ),
+                        sha256=None,
+                        path=None,
+                        error=None,
+                    )
+                else:
+                    state.update(status="failed", path=None, error=mismatch)
+            else:
+                state.update(path=str(target), error=None)
+            return state
         if self._artifact_exists(artifact, target) and state.get("status") != "installed":
             try:
                 checksum = self._verify_artifact_file(artifact, target)
@@ -381,16 +425,28 @@ class LocalModelManager:
     def list_artifacts(self, model_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             result = []
+            state_changed = False
             for artifact in self._artifacts.values():
                 if model_id is not None and artifact.model_id != model_id:
                     continue
+                previous_state = dict(self._states.get(artifact.id, {}))
+                state = self._state_for_locked(artifact)
+                state_changed = state_changed or (
+                    state != previous_state
+                    and (bool(previous_state) or state.get("status") != "not_installed")
+                )
                 result.append(
                     {
                         **asdict(artifact),
-                        **dict(self._state_for_locked(artifact)),
+                        **dict(state),
                         "supported": self._artifact_support(artifact),
                     }
                 )
+            if state_changed:
+                try:
+                    self._save_index_locked()
+                except OSError:
+                    logger.warning("Could not persist reconciled local-model state", exc_info=True)
             return result
 
     def get_artifact(self, artifact_id: str) -> LocalModelArtifact:
@@ -402,9 +458,18 @@ class LocalModelManager:
     def status(self, artifact_id: str) -> dict[str, Any]:
         with self._lock:
             artifact = self.get_artifact(artifact_id)
+            previous_state = dict(self._states.get(artifact.id, {}))
+            state = self._state_for_locked(artifact)
+            if state != previous_state and (
+                previous_state or state.get("status") != "not_installed"
+            ):
+                try:
+                    self._save_index_locked()
+                except OSError:
+                    logger.warning("Could not persist reconciled local-model state", exc_info=True)
             return {
                 **asdict(artifact),
-                **dict(self._state_for_locked(artifact)),
+                **dict(state),
                 "supported": self._artifact_support(artifact),
             }
 
@@ -743,8 +808,7 @@ class LocalModelManager:
         status = self.status(artifact.id)
         path_value = status.get("path")
         if status.get("status") != "installed" or not path_value:
-            target = self._artifact_path(artifact)
-            if self._artifact_exists(artifact, target) and status.get("error"):
+            if status.get("error"):
                 raise RuntimeError(
                     f"Installed local model {artifact.display_name} failed verification: "
                     f"{status['error']}"

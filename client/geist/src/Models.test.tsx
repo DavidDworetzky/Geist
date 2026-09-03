@@ -129,6 +129,23 @@ it('shows only local artifacts compatible with the current architecture', async 
   }));
 });
 
+it('does not label a stale selected artifact as downloaded', async () => {
+  mockUseUserSettings.mockReturnValue({
+    ...defaultUserSettingsHook(),
+    settings: {
+      ...defaultUserSettingsHook().settings,
+      default_local_model: artifact.model_id,
+      default_local_artifact_id: artifact.id,
+    },
+  });
+
+  render(<Models />);
+
+  expect(await screen.findByText('Not downloaded')).toBeInTheDocument();
+  expect(screen.queryByText('Downloaded · Active')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Download to use' })).toBeInTheDocument();
+});
+
 it('collapses provider sections and selects a provider model', async () => {
   const openAiModel = {
     id: 'gpt-4o',

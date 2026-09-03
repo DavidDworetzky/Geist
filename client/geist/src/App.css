@@ -1485,6 +1485,18 @@ textarea:focus-visible {
     transform var(--geist-motion-standard) var(--geist-ease-emphasized);
 }
 
+.chat-runtime-notice {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chat-runtime-notice > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .chat-composer-dock::before {
   position: absolute;
   z-index: -1;

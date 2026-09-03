@@ -1,10 +1,12 @@
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from agents.model_load_status import ModelLoadStatusRegistry, model_load_status_registry
-from app.api.v1.endpoints.models import get_model_load_status
+from app.api.v1.endpoints.models import get_model_load_status, start_local_runtime
 
 
 def test_model_load_registry_tracks_lifecycle() -> None:
@@ -55,3 +57,80 @@ def test_remote_model_status_is_always_ready() -> None:
 
     assert status.state == "ready"
     assert status.started_at is None
+
+
+def test_start_local_runtime_preflights_artifact_before_background_load() -> None:
+    manager = MagicMock()
+    manager.find_artifact.return_value = SimpleNamespace(
+        id="test-artifact",
+        display_name="Test Model",
+    )
+    manager.status.return_value = {
+        "status": "installed",
+        "path": "/models/test-artifact",
+        "supported": True,
+    }
+    config = SimpleNamespace(
+        model="test/model",
+        device_config={"artifact_id": "test-artifact"},
+    )
+    background_tasks = BackgroundTasks()
+
+    with (
+        patch(
+            "app.services.user_settings_service.UserSettingsService.get_default_workspace_settings",
+            return_value=object(),
+        ),
+        patch(
+            "app.models.user_settings.AgentFactoryConfig.from_user_settings",
+            return_value=config,
+        ),
+        patch(
+            "app.api.v1.endpoints.models.get_local_model_manager",
+            return_value=manager,
+        ),
+    ):
+        status = start_local_runtime(background_tasks)
+
+    assert status.state == "loading"
+    assert status.model_id == "test/model"
+    assert len(background_tasks.tasks) == 1
+
+
+def test_start_local_runtime_surfaces_artifact_state_mismatch_immediately() -> None:
+    manager = MagicMock()
+    manager.find_artifact.return_value = SimpleNamespace(
+        id="test-artifact",
+        display_name="Test Model",
+    )
+    manager.status.return_value = {
+        "status": "not_installed",
+        "path": None,
+        "supported": True,
+        "error": None,
+    }
+    config = SimpleNamespace(
+        model="test/model",
+        device_config={"artifact_id": "test-artifact"},
+    )
+    background_tasks = BackgroundTasks()
+
+    with (
+        patch(
+            "app.services.user_settings_service.UserSettingsService.get_default_workspace_settings",
+            return_value=object(),
+        ),
+        patch(
+            "app.models.user_settings.AgentFactoryConfig.from_user_settings",
+            return_value=config,
+        ),
+        patch(
+            "app.api.v1.endpoints.models.get_local_model_manager",
+            return_value=manager,
+        ),
+    ):
+        status = start_local_runtime(background_tasks)
+
+    assert status.state == "failed"
+    assert "not downloaded" in status.detail
+    assert background_tasks.tasks == []
