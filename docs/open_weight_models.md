@@ -9,11 +9,12 @@ catalog lives in `agents/model_catalog.py`.
 
 Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
-Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
-8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8
-Flash routes are intentionally server-backed.
-Their total resident weights make an in-process laptop load impractical even
-when their mixture-of-experts active-parameter count is much smaller.
+Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
+Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
+intentionally server-backed. For models with published weights, their total
+resident weights make an in-process laptop load impractical even when their
+mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -37,6 +38,32 @@ into in-process loading.
 Catalog providers use string IDs, so adding one does not require extending the
 legacy `OnlineModelProviders` enum or changing the model API routes.
 
+## Google Gemini 3.8 Flash
+
+Set `GEMINI_API_KEY` and select provider `google` with model
+`gemini-3.8-flash`. The model has a 1,048,576-token context window and
+65,536-token output limit, and supports multimodal input, reasoning, streaming,
+function calling, and structured outputs. Geist currently sends text-only chat
+and function-call payloads through the compatibility endpoint.
+The existing `GEMINI_BASE_URL` override applies only to image generation;
+Gemini chat continues to use the cataloged compatibility endpoint.
+
+Geist routes it through Google's OpenAI-compatible endpoint. That compatibility
+API is still beta and covers Geist's chat and function-calling path, but
+Gemini-native server tools such as Google Search grounding require a future
+direct Gemini API integration. Geist follows Google's
+[Gemini 3.8 migration checklist](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)
+by omitting `n`, `temperature`, and `top_p` for this model.
+Sibling IDs such as `gemini-3.8-flash-lite` route to Google but keep their own
+sampling parameters. Add new pointer forms for the same model, such as dated
+snapshots, to the catalog's `aliases` tuple when they share this request contract.
+
+Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms) distinguish
+unpaid and paid usage. Unpaid-service prompts and responses may be used to
+improve Google products and may be processed by human reviewers; do not send
+confidential data through unpaid quota. Paid-service prompts and responses are
+not used for product improvement, though limited safety logging still applies.
+
 ## OpenRouter-hosted Grok 4.6
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
@@ -49,6 +76,21 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
+
+## Meta-hosted Muse Spark
+
+Set `MODEL_API_KEY` and select provider `meta`. Geist offers the direct Meta
+Model API IDs `muse-spark-1.1`, `muse-spark-1.2`, and the recommended
+`muse-spark-1.3`.
+Meta Model API exposes an OpenAI-compatible Chat Completions endpoint at
+`https://api.meta.ai/v1` with a 1,048,576-token context window, multimodal
+input, streaming, reasoning-capable responses, and native function calling.
+Geist currently uses Meta's default reasoning effort. Muse Spark is hosted-only;
+Meta describes open weights as future work.
+
+The Contributor tier remains under provider `openrouter`. Although Meta lists
+the tier, direct Chat Completions availability has not been reliable enough to
+make it a first-party provider option in Geist.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 

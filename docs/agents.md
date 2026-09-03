@@ -192,6 +192,7 @@ User settings control default agent behavior and can be configured via API:
 
 ### Online Providers
 - `OPENAI_API_KEY` - OpenAI API key
+- `GEMINI_API_KEY` - Google Gemini API key for Gemini models and image generation. Geist follows Google's Gemini 3.8 migration checklist by omitting configured `n`, `temperature`, and `top_p` values. `GEMINI_BASE_URL` overrides image generation only; Gemini chat uses the cataloged Google endpoint.
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `GROQ_API_KEY` - Groq API key
 - `GROK_API_KEY` - Grok (X.AI) API key
@@ -199,6 +200,7 @@ User settings control default agent behavior and can be configured via API:
 - `ZAI_API_KEY` - Z.AI API key for hosted GLM models
 - `DEEPSEEK_API_KEY` - DeepSeek API key
 - `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. GLM 5.3 Flash, Grok 4.6, Tencent Hy4 Preview, Muse Spark 1.2 Contributor, and Qwen 3.8 Max/Flash)
+- `MODEL_API_KEY` - Meta's official environment variable for a Model API key used by first-party hosted Muse models (e.g. Muse Spark 1.3)
 - `OPENAI_COMPATIBLE_BASE_URL` - Base `/v1` URL for a self-hosted inference server
 - `API_KEY` - Generic fallback API key
 

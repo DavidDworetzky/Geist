@@ -13,6 +13,7 @@ interface AgentConfigSectionProps {
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   openai: 'OpenAI',
+  google: 'Google Gemini',
   anthropic: 'Anthropic',
   xai: 'xAI (Grok)',
   groq: 'Groq',
@@ -20,6 +21,9 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   zai: 'Z.AI',
   deepseek: 'DeepSeek',
   openrouter: 'OpenRouter',
+  meta: 'Meta Model API',
+  'self-hosted': 'Self-hosted Server',
+  offline: 'Local/Offline',
   custom: 'Custom Provider'
 };
 
