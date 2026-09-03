@@ -265,7 +265,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Google's stable Gemini 3.8 Flash model via the beta OpenAI-compatible "
             "endpoint. Unpaid-tier data may be used for product improvement and human "
-            "review; use paid services for confidential workloads."
+            "review; use paid services for confidential workloads. Geist omits n, "
+            "temperature, and top_p for this model."
         ),
     ),
     ModelSpec(
@@ -410,6 +411,8 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         "models/gemini-3.8-flash",
         "google/gemini-3.8-flash",
     )
+    # Treat suffixed siblings as the same request-contract family so they route
+    # to Google instead of silently falling back to OpenAI.
     if any(
         value == candidate or value.startswith(f"{candidate}-")
         for candidate in gemini_ids

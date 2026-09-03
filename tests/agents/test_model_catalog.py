@@ -155,6 +155,8 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     assert flash.recommended is True
     assert flash.mandatory_reasoning_effort is None
     assert flash.unsupported_parameters == ("n", "temperature", "top_p")
+    assert flash.performance_note is not None
+    assert "Geist omits n, temperature, and top_p" in flash.performance_note
     assert get_provider_endpoint(flash.provider) == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )

@@ -466,6 +466,21 @@ class TestOnlineAgentAPIRequests:
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
 
+    def test_inferred_self_hosted_model_keeps_request_parameters_unchanged(self):
+        payload = {
+            "model": "myorg/qwen3.8-max-tuned",
+            "messages": [{"role": "user", "content": "Test prompt"}],
+            "n": 2,
+            "temperature": 0.2,
+            "top_p": 0.8,
+            "frequency_penalty": 0.1,
+            "presence_penalty": 0.1,
+        }
+
+        constrained = OnlineAgent._apply_model_request_requirements(payload)
+
+        assert constrained == payload
+
     @pytest.mark.parametrize(
         "model_id",
         [
@@ -473,6 +488,7 @@ class TestOnlineAgentAPIRequests:
             "models/gemini-3.8-flash",
             "google/gemini-3.8-flash",
             "models/gemini-3.8-flash-latest",
+            "google/gemini-3.8-flash-preview",
         ],
     )
     def test_gemini38_flash_omits_deprecated_sampling_parameters(self, model_id):
