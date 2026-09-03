@@ -257,6 +257,13 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Server-only baseline; the official repository is hundreds of GB.",
     ),
     ModelSpec(
+        "k3", "Kimi K3", "kimi", provider="moonshot",
+        backend="openai_compatible", context_window=1048576,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True, local=False,
+        performance_note="Hosted through Moonshot AI's OpenAI-compatible API.",
+    ),
+    ModelSpec(
         "glm-5.2", "GLM 5.2", "glm", provider="zai", backend="openai_compatible",
         context_window=1000000, max_output_tokens=131072,
         supports_function_calling=True, supports_reasoning=True, supports_streaming=True,

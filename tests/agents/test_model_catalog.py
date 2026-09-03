@@ -82,6 +82,16 @@ def test_heavyweight_models_are_server_backed():
     assert provider_from_string("moonshot") == "moonshot"
     assert "moonshot" in get_all_models()
 
+    kimi_k3 = get_model_spec("k3")
+    assert kimi_k3.provider == "moonshot"
+    assert kimi_k3.backend == "openai_compatible"
+    assert kimi_k3.local is False
+    assert kimi_k3.context_window == 1048576
+    assert kimi_k3.supports_vision is True
+    assert kimi_k3.supports_function_calling is True
+    assert kimi_k3.supports_reasoning is True
+    assert kimi_k3.supports_streaming is True
+
     hosted_glm = get_model_spec("glm-4.7-flash")
     assert hosted_glm.local is False
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
@@ -318,6 +328,7 @@ def test_existing_llama_id_preserves_optimized_runner():
 
 
 @pytest.mark.parametrize("model_id", [
+    "k3",
     "kimi-k2.5",
     "moonshotai/Kimi-K2.5",
     "glm-4.7-flash",
@@ -341,12 +352,13 @@ def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
         AgentFactory._infer_runner_type(model_id)
 
 
-@pytest.mark.parametrize("model_id", ["kimi-k2.5", "moonshotai/Kimi-K2.5"])
+@pytest.mark.parametrize("model_id", ["k3", "kimi-k2.5", "moonshotai/Kimi-K2.5"])
 def test_server_model_infers_openai_compatible_provider_endpoint(model_id):
     context = MagicMock()
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model=model_id)
     assert online_agent.call_args.kwargs["base_url"] == "https://api.moonshot.ai/v1"
+    assert online_agent.call_args.kwargs["model"] == model_id
 
 
 def test_hosted_glm_infers_zai_endpoint():
@@ -433,6 +445,12 @@ def test_model_api_metadata_contains_performance_fields():
 
     gpt_oss = get_model_by_id("openai/gpt-oss-20b")
     assert gpt_oss.optional_dependencies == ("kernels",)
+
+    kimi_k3 = get_model_by_id("k3")
+    assert kimi_k3.provider == "moonshot"
+    assert kimi_k3.context_window == 1048576
+    assert kimi_k3.supports_vision is True
+    assert kimi_k3.supports_reasoning is True
 
     # Mistral also exists in the legacy Hugging Face provider list. Direct
     # lookup should return the catalog-enriched local record.
