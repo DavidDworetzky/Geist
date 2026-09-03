@@ -481,6 +481,19 @@ class TestOnlineAgentAPIRequests:
 
         assert constrained == payload
 
+    def test_routing_only_gemini_sibling_keeps_request_parameters_unchanged(self):
+        payload = {
+            "model": "gemini-3.8-flash-lite",
+            "messages": [{"role": "user", "content": "Test prompt"}],
+            "n": 1,
+            "temperature": 0.2,
+            "top_p": 0.8,
+        }
+
+        constrained = OnlineAgent._apply_model_request_requirements(payload)
+
+        assert constrained == payload
+
     @pytest.mark.parametrize(
         "model_id",
         [

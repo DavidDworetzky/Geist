@@ -49,9 +49,9 @@ and function-call payloads through the compatibility endpoint.
 Geist routes it through Google's OpenAI-compatible endpoint. That compatibility
 API is still beta and covers Geist's chat and function-calling path, but
 Gemini-native server tools such as Google Search grounding require a future
-direct Gemini API integration. Geist omits `n`, `temperature`, and `top_p` for
-this model following Google's
-[Gemini 3.8 migration guidance](https://ai.google.dev/gemini-api/docs/generate-content/latest-model).
+direct Gemini API integration. Geist follows Google's
+[Gemini 3.8 migration checklist](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)
+by omitting `n`, `temperature`, and `top_p` for this model.
 
 Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms) distinguish
 unpaid and paid usage. Unpaid-service prompts and responses may be used to

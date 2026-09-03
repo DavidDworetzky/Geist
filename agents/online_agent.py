@@ -17,7 +17,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
-from agents.model_catalog import PROVIDERS, get_model_spec, infer_model_spec
+from agents.model_catalog import PROVIDERS, resolve_request_spec
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -148,13 +148,7 @@ class OnlineAgent(BaseAgent):
     def _apply_model_request_requirements(payload: dict[str, Any]) -> dict[str, Any]:
         """Apply cataloged request constraints before provider dispatch."""
         model_id = str(payload.get("model") or "")
-        spec = get_model_spec(model_id)
-        if spec is None:
-            inferred_spec = infer_model_spec(model_id)
-            # Gemini's provider-prefixed aliases share its request contract;
-            # heuristic family matches may refer to customized self-hosted models.
-            if inferred_spec and inferred_spec.id == "gemini-3.8-flash":
-                spec = inferred_spec
+        spec = resolve_request_spec(model_id)
         if spec is None:
             return payload
 

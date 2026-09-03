@@ -61,6 +61,7 @@ class ModelSpec:
     mandatory_reasoning_effort: str | None = None
     local: bool = True
     performance_note: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -265,8 +266,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Google's stable Gemini 3.8 Flash model via the beta OpenAI-compatible "
             "endpoint. Unpaid-tier data may be used for product improvement and human "
-            "review; use paid services for confidential workloads. Geist omits n, "
-            "temperature, and top_p for this model."
+            "review; use paid services for confidential workloads. Geist follows "
+            "Google's migration checklist by omitting n, temperature, and top_p."
+        ),
+        aliases=(
+            "models/gemini-3.8-flash",
+            "google/gemini-3.8-flash",
+            "gemini-3.8-flash-latest",
+            "models/gemini-3.8-flash-latest",
+            "google/gemini-3.8-flash-latest",
+            "gemini-3.8-flash-preview",
+            "models/gemini-3.8-flash-preview",
+            "google/gemini-3.8-flash-preview",
         ),
     ),
     ModelSpec(
@@ -392,6 +403,9 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
 
 
 _MODEL_INDEX = {spec.id.lower(): spec for spec in MODEL_SPECS}
+_MODEL_ALIAS_INDEX = {
+    alias.lower(): spec for spec in MODEL_SPECS for alias in spec.aliases
+}
 
 
 def get_model_spec(model_id: str) -> ModelSpec | None:
@@ -399,11 +413,16 @@ def get_model_spec(model_id: str) -> ModelSpec | None:
     return _MODEL_INDEX.get(model_id.lower())
 
 
+def resolve_request_spec(model_id: str) -> ModelSpec | None:
+    """Resolve exact IDs and aliases that share the same request contract."""
+    return get_model_spec(model_id) or _MODEL_ALIAS_INDEX.get(model_id.lower())
+
+
 def infer_model_spec(model_id: str) -> ModelSpec | None:
     """Resolve known fine-tunes/quantizations to a family-level catalog entry."""
-    exact = get_model_spec(model_id)
-    if exact:
-        return exact
+    request_spec = resolve_request_spec(model_id)
+    if request_spec:
+        return request_spec
 
     value = model_id.lower()
     gemini_ids = (
@@ -411,12 +430,9 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         "models/gemini-3.8-flash",
         "google/gemini-3.8-flash",
     )
-    # Treat suffixed siblings as the same request-contract family so they route
-    # to Google instead of silently falling back to OpenAI.
-    if any(
-        value == candidate or value.startswith(f"{candidate}-")
-        for candidate in gemini_ids
-    ):
+    # Broadly match suffixed siblings for routing only so they reach Google
+    # instead of silently falling back to OpenAI.
+    if any(value.startswith(f"{candidate}-") for candidate in gemini_ids):
         return get_model_spec("gemini-3.8-flash")
     # Map heavyweight Hugging Face repository IDs to their server-backed
     # catalog entries so they can never fall through to an accidental local

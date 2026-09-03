@@ -15,6 +15,7 @@ from agents.model_catalog import (
     get_model_spec,
     get_provider_endpoint,
     infer_model_spec,
+    resolve_request_spec,
 )
 
 
@@ -156,7 +157,9 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     assert flash.mandatory_reasoning_effort is None
     assert flash.unsupported_parameters == ("n", "temperature", "top_p")
     assert flash.performance_note is not None
-    assert "Geist omits n, temperature, and top_p" in flash.performance_note
+    assert "migration checklist by omitting n, temperature, and top_p" in (
+        flash.performance_note
+    )
     assert get_provider_endpoint(flash.provider) == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )
@@ -169,6 +172,7 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
         "google/gemini-3.8-flash",
         "models/gemini-3.8-flash-latest",
         "google/gemini-3.8-flash-preview",
+        "gemini-3.8-flash-lite",
     ],
 )
 def test_gemini38_id_variants_route_to_google(model_id):
@@ -177,6 +181,13 @@ def test_gemini38_id_variants_route_to_google(model_id):
     assert spec.id == "gemini-3.8-flash"
     assert spec.provider == "google"
     assert spec.local is False
+
+
+def test_gemini_request_aliases_share_the_canonical_request_contract():
+    flash = get_model_spec("gemini-3.8-flash")
+
+    assert flash.aliases
+    assert all(resolve_request_spec(alias) is flash for alias in flash.aliases)
 
 
 def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
