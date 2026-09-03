@@ -9,11 +9,12 @@ catalog lives in `agents/model_catalog.py`.
 
 Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
-Kimi K2.5, Gemini 3.8 Flash, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B,
-Qwen 72B, Mixtral 8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok
-4.6, and Qwen 3.8 Flash routes are intentionally server-backed.
-Their total resident weights make an in-process laptop load impractical even
-when their mixture-of-experts active-parameter count is much smaller.
+Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
+Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
+intentionally server-backed. For models with published weights, their total
+resident weights make an in-process laptop load impractical even when their
+mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -40,15 +41,23 @@ legacy `OnlineModelProviders` enum or changing the model API routes.
 ## Google Gemini 3.8 Flash
 
 Set `GEMINI_API_KEY` and select provider `google` with model
-`gemini-3.8-flash`. Google released the model as generally available on
-September 2, 2026. It accepts text, image, video, audio, and PDF input, has a
-1,048,576-token context window and 65,536-token output limit, and supports
-reasoning, streaming, native function calling, and structured outputs.
+`gemini-3.8-flash`. The model has a 1,048,576-token context window and
+65,536-token output limit, and supports multimodal input, reasoning, streaming,
+function calling, and structured outputs. Geist currently sends text-only chat
+and function-call payloads through the compatibility endpoint.
 
 Geist routes it through Google's OpenAI-compatible endpoint. That compatibility
 API is still beta and covers Geist's chat and function-calling path, but
 Gemini-native server tools such as Google Search grounding require a future
-direct Gemini API integration.
+direct Gemini API integration. Geist omits `n`, `temperature`, and `top_p` for
+this model as required by Google's
+[Gemini 3.8 migration guidance](https://ai.google.dev/gemini-api/docs/generate-content/latest-model).
+
+Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms) distinguish
+unpaid and paid usage. Unpaid-service prompts and responses may be used to
+improve Google products and may be processed by human reviewers; do not send
+confidential data through unpaid quota. Paid-service prompts and responses are
+not used for product improvement, though limited safety logging still applies.
 
 ## OpenRouter-hosted Grok 4.6
 

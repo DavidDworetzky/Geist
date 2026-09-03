@@ -261,9 +261,11 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         backend="openai_compatible", context_window=1048576, max_output_tokens=65536,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
         supports_streaming=True, recommended=True, local=False,
+        unsupported_parameters=("n", "temperature", "top_p"),
         performance_note=(
             "Google's stable Gemini 3.8 Flash model via the beta OpenAI-compatible "
-            "endpoint; Gemini-native server tools require direct API integration."
+            "endpoint. Unpaid-tier data may be used for product improvement and human "
+            "review; use paid services for confidential workloads."
         ),
     ),
     ModelSpec(
@@ -403,6 +405,8 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         return exact
 
     value = model_id.lower()
+    if value in {"models/gemini-3.8-flash", "google/gemini-3.8-flash"}:
+        return get_model_spec("gemini-3.8-flash")
     # Map heavyweight Hugging Face repository IDs to their server-backed
     # catalog entries so they can never fall through to an accidental local
     # trillion-parameter load.

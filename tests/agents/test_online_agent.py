@@ -291,6 +291,18 @@ class TestOnlineAgentInitialization:
             assert agent.headers["Authorization"] == "Bearer test-gemini-key"
             assert agent.supports_native_tool_calling is True
 
+    def test_native_gemini_endpoint_does_not_claim_openai_tool_support(self):
+        context = create_mock_agent_context()
+
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model="gemini-3.8-flash",
+            api_key="test-gemini-key",
+        )
+
+        assert agent.supports_native_tool_calling is False
+
     def test_backup_providers_configuration(self):
         """Test initialization with backup providers."""
         context = create_mock_agent_context()
@@ -453,6 +465,42 @@ class TestOnlineAgentAPIRequests:
                 assert "n" not in payload
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_gemini38_flash_omits_deprecated_sampling_parameters(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                model="gemini-3.8-flash",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "gemini-3.8-flash",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "temperature" not in payload
+                assert "top_p" not in payload
+                assert payload["frequency_penalty"] == 0.0
+                assert payload["presence_penalty"] == 0.0
+                assert payload["stop"] == "END"
 
     def test_hy4_preview_omits_unsupported_defaults_and_keeps_native_tools(self):
         context = create_mock_agent_context()

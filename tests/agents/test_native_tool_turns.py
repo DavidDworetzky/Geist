@@ -128,7 +128,13 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
                 "choices": [
                     {
                         "delta": {
-                            "tool_calls": [{"index": 0, "function": {"arguments": ' news"}'}}]
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"arguments": ' news"}'},
+                                }
+                            ]
                         },
                         "finish_reason": "tool_calls",
                     }

@@ -154,10 +154,22 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     assert flash.supports_streaming is True
     assert flash.recommended is True
     assert flash.mandatory_reasoning_effort is None
-    assert flash.unsupported_parameters == ()
+    assert flash.unsupported_parameters == ("n", "temperature", "top_p")
     assert get_provider_endpoint(flash.provider) == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["models/gemini-3.8-flash", "google/gemini-3.8-flash"],
+)
+def test_gemini38_id_variants_route_to_google(model_id):
+    spec = infer_model_spec(model_id)
+
+    assert spec.id == "gemini-3.8-flash"
+    assert spec.provider == "google"
+    assert spec.local is False
 
 
 def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
@@ -411,10 +423,14 @@ def test_hosted_glm_infers_zai_endpoint():
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
 
 
-def test_google_gemini_model_infers_compatible_endpoint():
+@pytest.mark.parametrize(
+    "model_id",
+    ["gemini-3.8-flash", "models/gemini-3.8-flash", "google/gemini-3.8-flash"],
+)
+def test_google_gemini_model_infers_compatible_endpoint(model_id):
     context = MagicMock()
     with patch("agents.online_agent.OnlineAgent") as online_agent:
-        AgentFactory.create_agent("online", context, model="gemini-3.8-flash")
+        AgentFactory.create_agent("online", context, model=model_id)
     assert online_agent.call_args.kwargs["base_url"] == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )

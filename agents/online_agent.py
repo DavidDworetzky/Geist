@@ -692,7 +692,11 @@ class OnlineAgent(BaseAgent):
                         int(index),
                         {"id": "", "name": "", "arguments": ""},
                     )
-                    current["id"] += tool_delta.get("id") or ""
+                    tool_call_id = tool_delta.get("id") or ""
+                    if tool_call_id.startswith(current["id"]):
+                        current["id"] = tool_call_id
+                    elif tool_call_id and tool_call_id != current["id"]:
+                        current["id"] += tool_call_id
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""
                     current["arguments"] += function.get("arguments") or ""
