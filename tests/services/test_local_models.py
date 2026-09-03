@@ -8,7 +8,7 @@ import io
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -193,6 +193,40 @@ def test_capacity_check_accounts_for_resumable_partial_download(tmp_path, manage
         return_value=SimpleNamespace(free=DOWNLOAD_DISK_RESERVE_BYTES + 256),
     ):
         manager._require_download_capacity(artifact)
+
+
+def test_stream_capacity_recheck_uses_model_store_filesystem(tmp_path, managers):
+    artifact = _artifact(size_bytes=len(MODEL_BYTES))
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    destination = manager._partial_path(artifact)
+    destination.parent.mkdir(parents=True)
+    response = MagicMock()
+    response.status_code = 200
+    response.headers = {"content-length": str(len(MODEL_BYTES))}
+    response.iter_bytes.return_value = [MODEL_BYTES]
+    stream = MagicMock()
+    stream.__enter__.return_value = response
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.stream.return_value = stream
+    checked_paths = []
+
+    def disk_usage(path):
+        checked_paths.append(Path(path))
+        return SimpleNamespace(free=1024**3)
+
+    with (
+        patch("app.services.local_models.httpx.Client", return_value=client),
+        patch("app.services.local_models.shutil.disk_usage", side_effect=disk_usage),
+    ):
+        manager._download_hugging_face_artifact(
+            artifact,
+            destination,
+            lambda _downloaded, _total: None,
+        )
+
+    assert checked_paths == [tmp_path]
 
 
 def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):

@@ -1131,7 +1131,8 @@ class LocalModelManager:
             response_bytes = int(content_length) if content_length else None
             total = offset + response_bytes if response_bytes is not None else artifact.size_bytes
             if total is not None:
-                free = shutil.disk_usage(self.model_home.parent).free
+                storage_root = self._existing_parent(self.model_home)
+                free = shutil.disk_usage(storage_root).free
                 remaining = max(0, total - offset)
                 if free < remaining + 64 * 1024 * 1024:
                     raise OSError("Not enough free disk space for the selected local model")
