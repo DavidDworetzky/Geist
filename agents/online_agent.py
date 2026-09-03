@@ -151,6 +151,8 @@ class OnlineAgent(BaseAgent):
         spec = get_model_spec(model_id)
         if spec is None:
             inferred_spec = infer_model_spec(model_id)
+            # Gemini's provider-prefixed aliases share its request contract;
+            # heuristic family matches may refer to customized self-hosted models.
             if inferred_spec and inferred_spec.id == "gemini-3.8-flash":
                 spec = inferred_spec
         if spec is None:
