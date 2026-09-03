@@ -150,8 +150,19 @@ class OnlineAgent(BaseAgent):
             return payload
 
         constrained = payload.copy()
+        removed_parameters = [
+            parameter
+            for parameter in spec.unsupported_parameters
+            if parameter in constrained
+        ]
         for parameter in spec.unsupported_parameters:
             constrained.pop(parameter, None)
+        if removed_parameters:
+            logger.debug(
+                "Removed unsupported request parameters for %s: %s",
+                spec.id,
+                ", ".join(removed_parameters),
+            )
         if spec.mandatory_reasoning_effort and "reasoning" not in constrained:
             constrained["reasoning"] = {"effort": spec.mandatory_reasoning_effort}
         return constrained

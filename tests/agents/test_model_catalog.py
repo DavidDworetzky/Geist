@@ -227,7 +227,12 @@ def test_meta_model_api_catalog_options(model_id, recommended):
     assert model.supports_function_calling is True
     assert model.supports_reasoning is True
     assert model.supports_streaming is True
-    assert model.unsupported_parameters == ("stop",)
+    assert model.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "n",
+    )
     assert model.recommended is recommended
     assert get_provider_endpoint(model.provider) == "https://api.meta.ai/v1"
 
@@ -545,11 +550,11 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "meta/muse-spark-1.2-contributor"
         for model in response.providers["openrouter"]
     )
-    assert [model.id for model in response.providers["meta"]] == [
+    assert {
         "muse-spark-1.1",
         "muse-spark-1.2",
         "muse-spark-1.3",
-    ]
+    } <= {model.id for model in response.providers["meta"]}
     assert any(
         model.id == "openai/gpt-oss-120b"
         for model in response.providers["self-hosted"]

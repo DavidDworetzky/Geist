@@ -344,7 +344,7 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["reasoning"] == {"effort": reasoning_effort}
 
-    def test_meta_model_api_removes_unsupported_stop_parameter(self):
+    def test_meta_model_api_removes_unsupported_parameters(self, caplog):
         context = create_mock_agent_context()
         agent = OnlineAgent(
             agent_context=context,
@@ -359,15 +359,25 @@ class TestOnlineAgentAPIRequests:
             mock_response.json.return_value = OPENAI_RESPONSE
             mock_post.return_value = mock_response
 
-            agent._make_request(
-                {
-                    "model": "muse-spark-1.3",
-                    "messages": [{"role": "user", "content": "Test prompt"}],
-                    "stop": "END",
-                }
-            )
+            with caplog.at_level("DEBUG", logger="agents.online_agent"):
+                agent._make_request(
+                    {
+                        "model": "muse-spark-1.3",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "n": 2,
+                    }
+                )
 
-            assert "stop" not in mock_post.call_args.kwargs["json"]
+            payload = mock_post.call_args.kwargs["json"]
+            assert "frequency_penalty" not in payload
+            assert "presence_penalty" not in payload
+            assert "stop" not in payload
+            assert "n" not in payload
+            assert "Removed unsupported request parameters" in caplog.text
+            assert "frequency_penalty, presence_penalty, stop, n" in caplog.text
 
     def test_glm53_flash_applies_reasoning_without_dropping_supported_parameters(self):
         context = create_mock_agent_context()

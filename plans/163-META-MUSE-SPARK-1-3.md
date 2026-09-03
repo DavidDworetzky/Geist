@@ -32,7 +32,8 @@ reasoning. The release is hosted-only; open weights are future work.
 2. Add Muse Spark 1.1, 1.2, and 1.3 as direct-provider options with verified
    hosted capabilities and no guessed output limit or parameter count. Keep
    the Contributor tier on OpenRouter because direct API availability is not
-   reliable enough to promise in the catalog.
+   reliable enough to promise in the catalog. Conservatively omit optional
+   request parameters not demonstrated by Meta's public cookbook.
 3. Treat Meta Model API as a native-tool-capable OpenAI-compatible endpoint.
 4. Expose the provider through the existing model API/UI path and document its
    credential.

@@ -336,14 +336,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "muse-spark-1.1", "Muse Spark 1.1", "muse", provider="meta",
         backend="openai_compatible", context_window=1048576,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
-        supports_streaming=True, unsupported_parameters=("stop",), local=False,
+        supports_streaming=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
         performance_note="Earlier Meta Model API release for agentic multimodal work.",
     ),
     ModelSpec(
         "muse-spark-1.2", "Muse Spark 1.2", "muse", provider="meta",
         backend="openai_compatible", context_window=1048576,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
-        supports_streaming=True, unsupported_parameters=("stop",), local=False,
+        supports_streaming=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
         performance_note="Meta-hosted coding-focused Muse Spark release.",
     ),
     ModelSpec(
@@ -351,7 +355,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         backend="openai_compatible", context_window=1048576,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
         supports_streaming=True, recommended=True,
-        unsupported_parameters=("stop",), local=False,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
         performance_note=(
             "Hosted by Meta Model API for long-horizon agentic and coding work; "
             "open weights have not been released."

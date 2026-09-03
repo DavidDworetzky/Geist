@@ -57,8 +57,9 @@ Model API IDs `muse-spark-1.1`, `muse-spark-1.2`, and the recommended
 `muse-spark-1.3`.
 Meta Model API exposes an OpenAI-compatible Chat Completions endpoint at
 `https://api.meta.ai/v1` with a 1,048,576-token context window, multimodal
-input, streaming, reasoning controls, and native function calling. Muse Spark
-is hosted-only; Meta describes open weights as future work.
+input, streaming, reasoning-capable responses, and native function calling.
+Geist currently uses Meta's default reasoning effort. Muse Spark is hosted-only;
+Meta describes open weights as future work.
 
 The Contributor tier remains under provider `openrouter`. Although Meta lists
 the tier, direct Chat Completions availability has not been reliable enough to
