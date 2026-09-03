@@ -10,7 +10,6 @@ describe('AgentConfigSection', () => {
     onlineProvider: 'openai',
     onlineModel: 'gpt-4',
     onAgentTypeChange: jest.fn(),
-    onLocalModelChange: jest.fn(),
     onOnlineProviderChange: jest.fn(),
     onOnlineModelChange: jest.fn(),
   };
@@ -143,27 +142,30 @@ describe('AgentConfigSection', () => {
   });
 
   describe('Agent type switching', () => {
-    it('shows local model options when agent type is local', () => {
+    it('directs local model management to the compatible artifact inventory', () => {
       render(<AgentConfigSection {...defaultProps} agentType="local" />);
 
-      expect(screen.getByLabelText('Local Model')).toBeInTheDocument();
+      expect(screen.getByText('Local model')).toBeInTheDocument();
       expect(screen.queryByLabelText('Online Provider')).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Online Model')).not.toBeInTheDocument();
-
-      const modelSelect = screen.getByLabelText('Local Model');
-      const options = modelSelect.querySelectorAll('option');
-      const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
-
-      // STATIC_MODELS.offline contains the canonical repository-qualified ID.
-      expect(optionValues).toContain('meta-llama/Meta-Llama-3.1-8B-Instruct');
+      expect(screen.queryByLabelText('Local Model')).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Manage local models' }))
+        .toHaveAttribute('href', '/models');
     });
 
-    it('shows online provider and model options when agent type is online', () => {
+    it('shows online provider and model options for the persisted online agent type', () => {
       render(<AgentConfigSection {...defaultProps} agentType="online" />);
 
       expect(screen.queryByLabelText('Local Model')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Online Provider')).toBeInTheDocument();
+      const providerSelect = screen.getByLabelText('Online Provider');
+      expect(providerSelect).toBeInTheDocument();
       expect(screen.getByLabelText('Online Model')).toBeInTheDocument();
+
+      const providerValues = Array.from(providerSelect.querySelectorAll('option'))
+        .map(option => option.getAttribute('value'));
+      expect(providerValues).not.toContain('offline');
+      expect(providerValues).not.toContain('huggingface');
+      expect(providerValues).not.toContain('self-hosted');
     });
   });
 
@@ -185,22 +187,6 @@ describe('AgentConfigSection', () => {
       expect(onOnlineModelChange).toHaveBeenCalledWith('gpt-4-turbo');
     });
 
-    it('calls onLocalModelChange when a local model is selected', () => {
-      const onLocalModelChange = jest.fn();
-
-      render(
-        <AgentConfigSection
-          {...defaultProps}
-          agentType="local"
-          onLocalModelChange={onLocalModelChange}
-        />
-      );
-
-      const modelSelect = screen.getByLabelText('Local Model');
-      fireEvent.change(modelSelect, { target: { value: 'meta-llama/Meta-Llama-3.1-8B-Instruct' } });
-
-      expect(onLocalModelChange).toHaveBeenCalledWith('meta-llama/Meta-Llama-3.1-8B-Instruct');
-    });
   });
 
   describe('Rendering', () => {
@@ -371,7 +357,7 @@ describe('AgentConfigSection', () => {
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 
-      expect(screen.getByText('Select your preferred online API provider.')).toBeInTheDocument();
+      expect(screen.getByText('Select the online API provider Geist should use.')).toBeInTheDocument();
       // Description may show "Loading models..." or the actual text depending on loading state
       expect(screen.getByText(/Choose which model from the provider to use|Loading models.../)).toBeInTheDocument();
     });
@@ -409,7 +395,9 @@ describe('AgentConfigSection', () => {
       );
 
       expect(await screen.findByText(performanceNote)).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Future Model 3B' })).toBeInTheDocument();
+      expect(screen.getByText('Future Model 3B')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Manage local models' }))
+        .toHaveAttribute('href', '/models');
     });
   });
 });

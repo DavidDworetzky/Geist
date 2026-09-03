@@ -65,6 +65,13 @@ class ModelSpec:
 
 PROVIDERS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec("openai", "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "anthropic": ProviderSpec(
+        "anthropic",
+        "Anthropic",
+        "https://api.anthropic.com/v1/messages",
+        "ANTHROPIC_API_KEY",
+        openai_compatible=False,
+    ),
     "groq": ProviderSpec("groq", "Groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
     "xai": ProviderSpec("xai", "xAI", "https://api.x.ai/v1", "GROK_API_KEY"),
     "moonshot": ProviderSpec(

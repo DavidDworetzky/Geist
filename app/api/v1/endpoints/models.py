@@ -15,6 +15,7 @@ from agents.architectures.registry import (
     get_model_by_id,
     get_models_for_provider,
     get_provider_ids,
+    is_user_selectable_provider,
     provider_from_string,
     provider_to_string,
 )
@@ -90,6 +91,8 @@ async def get_available_models():
 
         providers_dict = {}
         for provider, models in all_models.items():
+            if not is_user_selectable_provider(provider):
+                continue
             providers_dict[provider_to_string(provider)] = [
                 _model_response(model) for model in models
             ]
@@ -106,14 +109,14 @@ async def get_models_by_provider(provider: str):
     Get available models for a specific provider.
 
     Args:
-        provider: Provider name (openai, anthropic, groq, xai, huggingface, offline)
+        provider: Supported online provider name, or offline for local models
 
     Returns:
         List[ModelResponse]: Models for the specified provider
     """
     try:
         provider_enum = provider_from_string(provider)
-        if provider_enum is None:
+        if provider_enum is None or not is_user_selectable_provider(provider_enum):
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid provider: {provider}. Valid providers: {get_provider_ids()}",

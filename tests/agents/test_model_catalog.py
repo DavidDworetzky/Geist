@@ -475,6 +475,9 @@ def test_future_provider_does_not_require_enum_change(monkeypatch):
 
 
 def test_model_routes_serialize_string_backed_providers():
+    from fastapi import HTTPException
+
+    from agents.architectures.registry import get_all_models, provider_to_string
     from app.api.v1.endpoints.models import (
         get_available_models,
         get_models_by_provider,
@@ -482,13 +485,19 @@ def test_model_routes_serialize_string_backed_providers():
     )
 
     provider_ids = asyncio.run(get_providers())
-    assert "self-hosted" in provider_ids
+    assert "offline" in provider_ids
+    assert "anthropic" in provider_ids
     assert "moonshot" in provider_ids
     assert "openrouter" in provider_ids
+    assert "huggingface" not in provider_ids
+    assert "self-hosted" not in provider_ids
 
     response = asyncio.run(get_available_models())
-    assert "self-hosted" in response.providers
+    assert "offline" in response.providers
+    assert "anthropic" in response.providers
     assert "openrouter" in response.providers
+    assert "huggingface" not in response.providers
+    assert "self-hosted" not in response.providers
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
@@ -503,10 +512,12 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "meta/muse-spark-1.2-contributor"
         for model in response.providers["openrouter"]
     )
-    assert any(
-        model.id == "openai/gpt-oss-120b"
-        for model in response.providers["self-hosted"]
-    )
+    internal_models = get_all_models()
+    internal_provider_ids = {provider_to_string(provider) for provider in internal_models}
+    assert "huggingface" in internal_provider_ids
+    assert "self-hosted" in internal_provider_ids
 
-    hosted_models = asyncio.run(get_models_by_provider("self-hosted"))
-    assert all(model.provider == "self-hosted" for model in hosted_models)
+    for hidden_provider in ("huggingface", "self-hosted"):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_models_by_provider(hidden_provider))
+        assert exc_info.value.status_code == 400

@@ -12,6 +12,7 @@ export interface LocalArtifact {
   bytes_downloaded: number;
   total_bytes?: number | null;
   source: string;
+  repo_id?: string | null;
   error?: string | null;
   supported?: boolean;
   requires_auth?: boolean;

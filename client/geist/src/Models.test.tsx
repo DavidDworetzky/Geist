@@ -40,6 +40,7 @@ const artifact = {
   bytes_downloaded: 0,
   total_bytes: 2497280256,
   source: 'curated',
+  repo_id: 'Qwen/Qwen3-4B-GGUF',
   supported: true,
 };
 
@@ -57,6 +58,7 @@ const mlxArtifact = {
   progress_completed: 8,
   progress_total: 8,
   source: 'curated',
+  repo_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   supported: true,
   requires_auth: true,
 };
@@ -85,25 +87,26 @@ beforeEach(() => {
   }) as jest.Mock;
 });
 
-it('separates local models from model providers', async () => {
+it('separates local models from online models', async () => {
   render(<Models />);
 
-  const localModelsTab = screen.getByRole('tab', { name: 'Local Models' });
-  const modelProvidersTab = screen.getByRole('tab', { name: 'Model Providers' });
+  const localModelsTab = screen.getByRole('tab', { name: 'Local' });
+  const onlineModelsTab = screen.getByRole('tab', { name: 'Online' });
 
   expect(localModelsTab).toHaveAttribute('aria-selected', 'true');
   expect(await screen.findByRole('region', { name: 'Local model files' })).toBeInTheDocument();
-  expect(screen.queryByText('Active provider')).not.toBeInTheDocument();
+  expect(screen.queryByText('Inference mode')).not.toBeInTheDocument();
 
-  fireEvent.click(modelProvidersTab);
+  fireEvent.click(onlineModelsTab);
 
-  expect(modelProvidersTab).toHaveAttribute('aria-selected', 'true');
+  expect(onlineModelsTab).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByRole('region', { name: 'Local model files' })).not.toBeInTheDocument();
-  expect(screen.getByText('Active provider')).toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Model providers' })).toBeInTheDocument();
+  expect(screen.getByText('Inference mode')).toBeInTheDocument();
+  expect(screen.getByText('openai · gpt-4')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Online models' })).toBeInTheDocument();
 });
 
-it('shows unsupported curated artifacts while keeping their controls disabled', async () => {
+it('shows only local artifacts compatible with the current architecture', async () => {
   availableArtifacts = [
     { ...artifact, supported: false },
     mlxArtifact,
@@ -112,10 +115,10 @@ it('shows unsupported curated artifacts while keeping their controls disabled', 
   render(<Models />);
 
   await screen.findByText(mlxArtifact.display_name);
-  expect(screen.getByText(artifact.display_name).closest('.model-table-row'))
-    .toHaveClass('model-table-row-unavailable');
-  expect(screen.getByText('unavailable on this platform')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+  expect(screen.queryByText(artifact.display_name)).not.toBeInTheDocument();
+  expect(screen.queryByText('unavailable on this platform')).not.toBeInTheDocument();
+  expect(screen.getByText('Downloaded')).toBeInTheDocument();
+  expect(screen.getByText('Source · meta-llama/Meta-Llama-3.1-8B-Instruct')).toBeInTheDocument();
   expect(screen.queryByLabelText('Import GGUF model')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Use' }));
 
@@ -141,23 +144,31 @@ it('collapses provider sections and selects a provider model', async () => {
   };
   mockUseAvailableModels.mockReturnValue({
     models: {
-      providers: { openai: [openAiModel], anthropic: [], offline: [] },
+      providers: {
+        openai: [openAiModel],
+        anthropic: [],
+        huggingface: [openAiModel],
+        'self-hosted': [openAiModel],
+        offline: [],
+      },
       last_updated: null,
     },
     loading: false,
     error: null,
     refetch: jest.fn(),
-    providers: ['openai', 'anthropic', 'offline'],
+    providers: ['openai', 'anthropic', 'huggingface', 'self-hosted', 'offline'],
   });
 
   render(<Models />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Model Providers' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Online' }));
 
   const openAiToggle = screen.getByRole('button', { name: /openai 1 models/i });
   const anthropicToggle = screen.getByRole('button', { name: /anthropic 0 models/i });
   await waitFor(() => expect(openAiToggle).toHaveAttribute('aria-expanded', 'true'));
   expect(anthropicToggle).toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByText('GPT-4o')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /huggingface/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /self-hosted/i })).not.toBeInTheDocument();
 
   fireEvent.click(openAiToggle);
   expect(openAiToggle).toHaveAttribute('aria-expanded', 'false');
@@ -190,7 +201,7 @@ it('waits for settings before expanding the configured provider', async () => {
   });
 
   const { rerender } = render(<Models />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Model Providers' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Online' }));
   expect(screen.getByRole('button', { name: /openai 0 models/i }))
     .toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByRole('button', { name: /anthropic 0 models/i }))
@@ -219,7 +230,7 @@ it('starts the built-in GGUF download from the Models page', async () => {
 
   const localModelPanel = await screen.findByRole('region', { name: 'Local model files' });
   expect(localModelPanel).toHaveClass('local-model-panel');
-  const download = await screen.findByRole('button', { name: 'Download' });
+  const download = await screen.findByRole('button', { name: 'Download to use' });
   fireEvent.click(download);
   expect(download).toBeDisabled();
 

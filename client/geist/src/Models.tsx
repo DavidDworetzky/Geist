@@ -19,13 +19,27 @@ function capabilityLabels(model: ModelInfo): string[] {
   return labels;
 }
 
-type ModelsTab = 'local' | 'providers';
+type ModelsTab = 'local' | 'online';
+
+const NON_ONLINE_PROVIDER_IDS = new Set(['offline', 'huggingface', 'self-hosted']);
 
 function formatBytes(value?: number | null): string {
   if (!value) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
   const unit = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   return `${(value / (1024 ** unit)).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function artifactStatusLabel(status: string, active: boolean): string {
+  if (active) return 'Downloaded · Active';
+  if (status === 'installed') return 'Downloaded';
+  if (status === 'not_installed') return 'Not downloaded';
+  if (status === 'queued') return 'Download queued';
+  if (status === 'downloading') return 'Downloading';
+  if (status === 'cancelling') return 'Cancelling download';
+  if (status === 'cancelled') return 'Download cancelled';
+  if (status === 'failed') return 'Download failed';
+  return status;
 }
 
 export default function Models(): JSX.Element {
@@ -48,7 +62,8 @@ export default function Models(): JSX.Element {
   const [expandedProviders, setExpandedProviders] = useState<Set<string> | null>(null);
   const [activeTab, setActiveTab] = useState<ModelsTab>('local');
 
-  const onlineProviders = providers.filter(provider => provider !== 'offline');
+  const onlineProviders = providers.filter(provider => !NON_ONLINE_PROVIDER_IDS.has(provider));
+  const compatibleLocalArtifacts = localArtifacts.filter(artifact => artifact.supported !== false);
 
   useEffect(() => {
     if (onlineProviders.length === 0 || settingsLoading) return;
@@ -145,12 +160,10 @@ export default function Models(): JSX.Element {
     });
   };
 
-  const activeModel = settings?.default_agent_type === 'online'
-    ? settings.default_online_model
-    : settings?.default_local_model;
-  const activeProvider = settings?.default_agent_type === 'online'
-    ? settings.default_online_provider
-    : 'offline';
+  const inferenceMode = settings?.default_agent_type === 'online' ? 'Online' : 'Local';
+  const onlineDefault = settings
+    ? `${settings.default_online_provider} · ${settings.default_online_model}`
+    : 'Not selected';
   const ggufSupported = localArtifacts.some(
     artifact => artifact.format === 'gguf' && artifact.supported !== false,
   );
@@ -162,10 +175,10 @@ export default function Models(): JSX.Element {
     <section className="models-page">
       <div className="page-header">
         <div>
-          <p className="section-eyebrow">Providers</p>
+          <p className="section-eyebrow">Inference</p>
           <h2>Models</h2>
           <p>
-            Manage models installed on this computer or browse available providers.
+            Download a compatible model to run locally, or choose one from an online provider.
           </p>
         </div>
         <button
@@ -189,18 +202,18 @@ export default function Models(): JSX.Element {
           aria-controls="local-models-panel"
           onClick={() => setActiveTab('local')}
         >
-          Local Models
+          Local
         </button>
         <button
-          id="model-providers-tab"
+          id="online-models-tab"
           type="button"
-          className={`settings-tab ${activeTab === 'providers' ? 'active' : ''}`}
+          className={`settings-tab ${activeTab === 'online' ? 'active' : ''}`}
           role="tab"
-          aria-selected={activeTab === 'providers'}
-          aria-controls="model-providers-panel"
-          onClick={() => setActiveTab('providers')}
+          aria-selected={activeTab === 'online'}
+          aria-controls="online-models-panel"
+          onClick={() => setActiveTab('online')}
         >
-          Model Providers
+          Online
         </button>
       </div>
 
@@ -222,8 +235,8 @@ export default function Models(): JSX.Element {
               {mlxSupported
                 ? 'Download and select the managed MLX snapshot used on Apple silicon.'
                 : 'Download a curated GGUF or import one already on this computer.'}
-              {' '}Downloads are limited to pinned, verified artifacts; unsupported artifacts remain
-              visible for reference.
+              {' '}Only models compatible with this computer are shown. Source labels identify
+              where weights come from; inference still runs locally.
             </p>
           </div>
           {ggufSupported && (
@@ -250,23 +263,24 @@ export default function Models(): JSX.Element {
             <span>Status</span>
             <span>Actions</span>
           </div>
-          {localArtifacts.map(artifact => {
-            const active = settings?.default_local_artifact_id === artifact.id;
+          {compatibleLocalArtifacts.map(artifact => {
+            const active = settings?.default_agent_type === 'local' && (
+              settings.default_local_artifact_id === artifact.id
+              || (!settings.default_local_artifact_id
+                && settings.default_local_model === artifact.model_id)
+            );
             const busy = ['queued', 'downloading', 'cancelling'].includes(artifact.status);
-            const supported = artifact.supported !== false;
             const total = artifact.total_bytes ?? 0;
             return (
-              <div
-                className={`model-table-row ${supported ? '' : 'model-table-row-unavailable'}`}
-                key={artifact.id}
-              >
+              <div className="model-table-row" key={artifact.id}>
                 <span>
                   <strong>{artifact.display_name}</strong>
                   <small>{artifact.model_id}</small>
+                  <small>Source · {artifact.repo_id || 'Imported file'}</small>
                 </span>
                 <span>{artifact.quantization || artifact.format.toUpperCase()}</span>
                 <span>
-                  {supported ? artifact.status : 'unavailable on this platform'}
+                  {artifactStatusLabel(artifact.status, active)}
                   {busy && (
                     <small>
                       {artifact.progress_unit === 'files'
@@ -284,8 +298,7 @@ export default function Models(): JSX.Element {
                     <>
                       <button
                         className="button button-secondary button-small"
-                        disabled={!supported || active || localAction === artifact.id}
-                        title={!supported ? 'This model cannot run on the current platform.' : undefined}
+                        disabled={active || localAction === artifact.id}
                         onClick={() => void selectArtifact(artifact)}
                       >
                         {active ? 'Active' : 'Use'}
@@ -311,11 +324,10 @@ export default function Models(): JSX.Element {
                     <>
                       <button
                         className="button button-secondary button-small"
-                        disabled={!supported || localAction === artifact.id || artifact.source === 'imported'}
-                        title={!supported ? 'This artifact requires a backend unavailable on this platform.' : undefined}
+                        disabled={localAction === artifact.id || artifact.source === 'imported'}
                         onClick={() => void runArtifactAction(artifact.id, 'download')}
                       >
-                        Download
+                        Download to use
                       </button>
                       {artifact.bytes_downloaded > 0 && (
                         <button
@@ -332,17 +344,20 @@ export default function Models(): JSX.Element {
               </div>
             );
           })}
+          {compatibleLocalArtifacts.length === 0 && (
+            <div className="model-table-empty">No compatible local models are available.</div>
+          )}
         </div>
           </section>
         </div>
       )}
 
-      {activeTab === 'providers' && (
+      {activeTab === 'online' && (
         <div
-          id="model-providers-panel"
+          id="online-models-panel"
           className="models-tab-panel"
           role="tabpanel"
-          aria-labelledby="model-providers-tab"
+          aria-labelledby="online-models-tab"
         >
           {error && (
             <div className="notice notice-warning">
@@ -357,26 +372,26 @@ export default function Models(): JSX.Element {
           {loading && !models ? (
             <section className="page-surface page-surface-centered models-providers-loading">
               <h3>Loading model providers</h3>
-              <p>Gathering local and online provider options.</p>
+              <p>Gathering online provider options.</p>
             </section>
           ) : (
             <>
               <div className="model-summary-grid">
                 <article className="metric-card">
-                  <span className="metric-label">Active provider</span>
-                  <strong>{activeProvider || 'Not selected'}</strong>
+                  <span className="metric-label">Inference mode</span>
+                  <strong>{inferenceMode}</strong>
                 </article>
                 <article className="metric-card">
-                  <span className="metric-label">Active model</span>
-                  <strong>{activeModel || 'Not selected'}</strong>
+                  <span className="metric-label">Online default</span>
+                  <strong>{onlineDefault}</strong>
                 </article>
                 <article className="metric-card">
-                  <span className="metric-label">Providers</span>
+                  <span className="metric-label">Available providers</span>
                   <strong>{onlineProviders.length}</strong>
                 </article>
               </div>
 
-              <div className="model-inventory-scroll" role="region" aria-label="Model providers">
+              <div className="model-inventory-scroll" role="region" aria-label="Online models">
                 <div className="provider-stack">
                   {onlineProviders.map((provider) => {
                     const providerModels = models?.providers[provider] ?? [];
