@@ -162,7 +162,12 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
 
 @pytest.mark.parametrize(
     "model_id",
-    ["models/gemini-3.8-flash", "google/gemini-3.8-flash"],
+    [
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+    ],
 )
 def test_gemini38_id_variants_route_to_google(model_id):
     spec = infer_model_spec(model_id)
@@ -425,7 +430,13 @@ def test_hosted_glm_infers_zai_endpoint():
 
 @pytest.mark.parametrize(
     "model_id",
-    ["gemini-3.8-flash", "models/gemini-3.8-flash", "google/gemini-3.8-flash"],
+    [
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+    ],
 )
 def test_google_gemini_model_infers_compatible_endpoint(model_id):
     context = MagicMock()

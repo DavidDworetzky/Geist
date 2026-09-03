@@ -466,14 +466,23 @@ class TestOnlineAgentAPIRequests:
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
 
-    def test_gemini38_flash_omits_deprecated_sampling_parameters(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "gemini-3.8-flash",
+            "models/gemini-3.8-flash",
+            "google/gemini-3.8-flash",
+            "models/gemini-3.8-flash-latest",
+        ],
+    )
+    def test_gemini38_flash_omits_deprecated_sampling_parameters(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-                model="gemini-3.8-flash",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -483,7 +492,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "gemini-3.8-flash",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 1.0,

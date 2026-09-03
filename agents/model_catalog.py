@@ -405,7 +405,15 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         return exact
 
     value = model_id.lower()
-    if value in {"models/gemini-3.8-flash", "google/gemini-3.8-flash"}:
+    gemini_ids = (
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+    )
+    if any(
+        value == candidate or value.startswith(f"{candidate}-")
+        for candidate in gemini_ids
+    ):
         return get_model_spec("gemini-3.8-flash")
     # Map heavyweight Hugging Face repository IDs to their server-backed
     # catalog entries so they can never fall through to an accidental local

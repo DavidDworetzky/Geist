@@ -98,8 +98,14 @@ class SequencedOpenAIClient(OpenAIClient):
         return next(self.responses)
 
 
-def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
+def _run_streamed_tool_call(second_id=None):
     provider_name = OnlineAgent._provider_tool_name("web.search")
+    second_tool_call = {
+        "index": 0,
+        "function": {"arguments": ' news"}'},
+    }
+    if second_id is not None:
+        second_tool_call["id"] = second_id
     lines = [
         "data: "
         + json.dumps(
@@ -128,13 +134,7 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
                 "choices": [
                     {
                         "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": 0,
-                                    "id": "call_1",
-                                    "function": {"arguments": ' news"}'},
-                                }
-                            ]
+                            "tool_calls": [second_tool_call]
                         },
                         "finish_reason": "tool_calls",
                     }
@@ -154,8 +154,12 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
             ModelRequestConfig(max_tokens=256),
         )
     )
+    return events[-1].turn, agent, provider_name
 
-    turn = events[-1].turn
+
+def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
+    turn, agent, provider_name = _run_streamed_tool_call()
+
     assert turn.tool_calls[0].id == "call_1"
     assert turn.tool_calls[0].name == "web.search"
     assert turn.tool_calls[0].arguments == {"query": "today news"}
@@ -166,6 +170,20 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
     assert payload["tools"][0]["function"]["name"] == provider_name
     assert provider_name != "web.search"
     assert payload["tools"][0]["function"]["parameters"]["required"] == ["query"]
+
+
+def test_openai_stream_accepts_repeated_tool_call_id():
+    turn, _agent, _provider_name = _run_streamed_tool_call("call_1")
+
+    assert turn.tool_calls[0].id == "call_1"
+
+
+def test_openai_stream_keeps_first_conflicting_tool_call_id(caplog):
+    with caplog.at_level("WARNING", logger="agents.online_agent"):
+        turn, _agent, _provider_name = _run_streamed_tool_call("call_2")
+
+    assert turn.tool_calls[0].id == "call_1"
+    assert "Ignoring conflicting tool-call ID" in caplog.text
 
 
 def test_native_turn_retries_before_any_text_is_emitted():

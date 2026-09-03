@@ -17,7 +17,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
-from agents.model_catalog import PROVIDERS, get_model_spec
+from agents.model_catalog import PROVIDERS, infer_model_spec
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -147,7 +147,7 @@ class OnlineAgent(BaseAgent):
     @staticmethod
     def _apply_model_request_requirements(payload: dict[str, Any]) -> dict[str, Any]:
         """Apply cataloged request constraints before provider dispatch."""
-        spec = get_model_spec(str(payload.get("model") or ""))
+        spec = infer_model_spec(str(payload.get("model") or ""))
         if spec is None:
             return payload
 
@@ -693,10 +693,17 @@ class OnlineAgent(BaseAgent):
                         {"id": "", "name": "", "arguments": ""},
                     )
                     tool_call_id = tool_delta.get("id") or ""
-                    if tool_call_id.startswith(current["id"]):
+                    # OpenAI sends the ID once; compatible providers may repeat it.
+                    if tool_call_id and not current["id"]:
                         current["id"] = tool_call_id
                     elif tool_call_id and tool_call_id != current["id"]:
-                        current["id"] += tool_call_id
+                        self.logger.warning(
+                            "Ignoring conflicting tool-call ID for stream index %s: "
+                            "kept %s, received %s",
+                            index,
+                            current["id"],
+                            tool_call_id,
+                        )
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""
                     current["arguments"] += function.get("arguments") or ""
