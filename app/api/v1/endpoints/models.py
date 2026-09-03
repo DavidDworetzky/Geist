@@ -263,6 +263,10 @@ def _initialize_configured_local_runtime(model_id: str) -> None:
         from app.main import get_active_agent
 
         get_active_agent(AgentType.LOCALAGENT)
+        # A repeated readiness request can reuse an already-cached agent. In
+        # that case no LocalAgent constructor runs to update the registry, so
+        # complete the lifecycle explicitly after every successful lookup.
+        model_load_status_registry.mark_ready(model_id)
     except Exception as error:
         status = model_load_status_registry.get(model_id)
         if status.state != "failed":

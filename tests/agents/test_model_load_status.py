@@ -107,10 +107,12 @@ def test_start_local_runtime_preflights_artifact_before_background_load() -> Non
 
 
 def test_background_readiness_uses_the_local_agent_enum() -> None:
+    model_load_status_registry.mark_loading("test/model", "Loading test model.")
     with patch("app.main.get_active_agent") as get_active_agent:
         _initialize_configured_local_runtime("test/model")
 
     get_active_agent.assert_called_once_with(AgentType.LOCALAGENT)
+    assert model_load_status_registry.get("test/model").state == "ready"
 
 
 def test_start_local_runtime_surfaces_artifact_state_mismatch_immediately() -> None:
