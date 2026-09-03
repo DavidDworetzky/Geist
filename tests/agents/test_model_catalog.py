@@ -15,6 +15,7 @@ from agents.model_catalog import (
     get_model_spec,
     get_provider_endpoint,
     infer_model_spec,
+    resolve_request_spec,
 )
 
 
@@ -33,7 +34,7 @@ def test_catalog_covers_requested_families():
     families = {spec.family for spec in MODEL_SPECS}
     assert {
         "llama", "qwen", "mistral", "phi", "smollm", "gemma",
-        "granite", "olmo", "glm", "gpt-oss", "kimi", "deepseek",
+        "granite", "olmo", "glm", "gpt-oss", "kimi", "deepseek", "gemini",
     }.issubset(families)
 
 
@@ -138,6 +139,63 @@ def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
         spec = infer_model_spec(model_id)
         assert spec.provider == "openrouter"
         assert spec.local is False
+
+
+def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("gemini-3.8-flash")
+
+    assert flash.provider == "google"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.context_window == 1048576
+    assert flash.max_output_tokens == 65536
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.recommended is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n", "temperature", "top_p")
+    assert flash.performance_note is not None
+    assert "migration checklist by omitting n, temperature, and top_p" in (
+        flash.performance_note
+    )
+    assert get_provider_endpoint(flash.provider) == (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+        "gemini-3.8-flash-lite",
+    ],
+)
+def test_gemini38_id_variants_route_to_google(model_id):
+    spec = infer_model_spec(model_id)
+
+    assert spec.id == "gemini-3.8-flash"
+    assert spec.provider == "google"
+    assert spec.local is False
+
+
+def test_gemini_request_aliases_share_the_canonical_request_contract():
+    flash = get_model_spec("gemini-3.8-flash")
+
+    assert flash.aliases
+    assert all(resolve_request_spec(alias) is flash for alias in flash.aliases)
+
+
+def test_catalog_aliases_are_unique_and_do_not_shadow_canonical_ids():
+    canonical_ids = {spec.id.lower() for spec in MODEL_SPECS}
+    aliases = [alias.lower() for spec in MODEL_SPECS for alias in spec.aliases]
+
+    assert len(aliases) == len(set(aliases))
+    assert canonical_ids.isdisjoint(aliases)
 
 
 def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
@@ -369,6 +427,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "muse-spark-1.1",
     "muse-spark-1.2",
     "muse-spark-1.3",
+    "gemini-3.8-flash",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -388,6 +447,25 @@ def test_hosted_glm_infers_zai_endpoint():
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model="glm-4.7-flash")
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+    ],
+)
+def test_google_gemini_model_infers_compatible_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
 
 
 @pytest.mark.parametrize(
@@ -531,11 +609,14 @@ def test_model_routes_serialize_string_backed_providers():
     assert "moonshot" in provider_ids
     assert "openrouter" in provider_ids
     assert "meta" in provider_ids
+    assert "google" in provider_ids
 
     response = asyncio.run(get_available_models())
     assert "self-hosted" in response.providers
     assert "openrouter" in response.providers
     assert "meta" in response.providers
+    assert "google" in response.providers
+    assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]

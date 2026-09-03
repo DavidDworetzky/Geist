@@ -216,6 +216,16 @@ class TestUserSettingsIntegration:
         assert config.model == "muse-spark-1.3"
         assert config.endpoint == "https://api.meta.ai/v1"
 
+        settings.default_online_model = "gemini-3.8-flash"
+        settings.default_online_provider = "google"
+        config = AgentFactoryConfig.from_user_settings(settings)
+        assert config.model == "gemini-3.8-flash"
+        assert config.endpoint == (
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+
+        settings.default_online_provider = "meta"
+        settings.default_online_model = "muse-spark-1.3"
         overrides = AgentConfigRequest(temperature=0.0)
         config = AgentFactoryConfig.from_user_settings(settings, overrides)
         assert config.generation_config["temperature"] == 0.0

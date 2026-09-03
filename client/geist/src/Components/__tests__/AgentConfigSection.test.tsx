@@ -257,6 +257,41 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
     });
 
+    it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            google: [{
+              id: 'gemini-3.8-flash',
+              name: 'Gemini 3.8 Flash',
+              provider: 'google',
+              context_window: 1048576,
+              max_output_tokens: 65536,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'gemini',
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="google"
+          onlineModel="gemini-3.8-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Gemini 3.8 Flash' })).toBeInTheDocument();
+    });
+
     it('shows Muse Spark Contributor from live OpenRouter catalog data', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,

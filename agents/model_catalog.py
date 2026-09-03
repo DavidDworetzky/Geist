@@ -61,10 +61,17 @@ class ModelSpec:
     mandatory_reasoning_effort: str | None = None
     local: bool = True
     performance_note: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec("openai", "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "google": ProviderSpec(
+        "google",
+        "Google Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "GEMINI_API_KEY",
+    ),
     "groq": ProviderSpec("groq", "Groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
     "xai": ProviderSpec("xai", "xAI", "https://api.x.ai/v1", "GROK_API_KEY"),
     "moonshot": ProviderSpec(
@@ -251,6 +258,29 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="MXFP4 still targets roughly 80 GB of accelerator memory.",
     ),
     ModelSpec(
+        "gemini-3.8-flash", "Gemini 3.8 Flash", "gemini", provider="google",
+        backend="openai_compatible", context_window=1048576, max_output_tokens=65536,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True, local=False,
+        unsupported_parameters=("n", "temperature", "top_p"),
+        performance_note=(
+            "Google's stable Gemini 3.8 Flash model via the beta OpenAI-compatible "
+            "endpoint. Unpaid-tier data may be used for product improvement and human "
+            "review; use paid services for confidential workloads. Geist follows "
+            "Google's migration checklist by omitting n, temperature, and top_p."
+        ),
+        aliases=(
+            "models/gemini-3.8-flash",
+            "google/gemini-3.8-flash",
+            "gemini-3.8-flash-latest",
+            "models/gemini-3.8-flash-latest",
+            "google/gemini-3.8-flash-latest",
+            "gemini-3.8-flash-preview",
+            "models/gemini-3.8-flash-preview",
+            "google/gemini-3.8-flash-preview",
+        ),
+    ),
+    ModelSpec(
         "kimi-k2.5", "Kimi K2.5", "kimi", provider="moonshot",
         backend="openai_compatible", context_window=262144, max_output_tokens=65536,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
@@ -373,6 +403,9 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
 
 
 _MODEL_INDEX = {spec.id.lower(): spec for spec in MODEL_SPECS}
+_MODEL_ALIAS_INDEX = {
+    alias.lower(): spec for spec in MODEL_SPECS for alias in spec.aliases
+}
 
 
 def get_model_spec(model_id: str) -> ModelSpec | None:
@@ -380,13 +413,27 @@ def get_model_spec(model_id: str) -> ModelSpec | None:
     return _MODEL_INDEX.get(model_id.lower())
 
 
+def resolve_request_spec(model_id: str) -> ModelSpec | None:
+    """Resolve exact IDs and aliases that share the same request contract."""
+    return get_model_spec(model_id) or _MODEL_ALIAS_INDEX.get(model_id.lower())
+
+
 def infer_model_spec(model_id: str) -> ModelSpec | None:
     """Resolve known fine-tunes/quantizations to a family-level catalog entry."""
-    exact = get_model_spec(model_id)
-    if exact:
-        return exact
+    request_spec = resolve_request_spec(model_id)
+    if request_spec:
+        return request_spec
 
     value = model_id.lower()
+    gemini_ids = (
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+    )
+    # Broadly match suffixed siblings for routing only so they reach Google
+    # instead of silently falling back to OpenAI.
+    if any(value.startswith(f"{candidate}-") for candidate in gemini_ids):
+        return get_model_spec("gemini-3.8-flash")
     # Map heavyweight Hugging Face repository IDs to their server-backed
     # catalog entries so they can never fall through to an accidental local
     # trillion-parameter load.
