@@ -79,6 +79,9 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "openrouter": ProviderSpec(
         "openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"
     ),
+    "meta": ProviderSpec(
+        "meta", "Meta Model API", "https://api.meta.ai/v1", "MODEL_API_KEY"
+    ),
     "self-hosted": ProviderSpec(
         "self-hosted",
         "Self-hosted OpenAI-compatible",
@@ -327,6 +330,36 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Low-cost Meta contributor tier with mandatory reasoning. Meta retains "
             "requests for 30 days; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "muse-spark-1.1", "Muse Spark 1.1", "muse", provider="meta",
+        backend="openai_compatible", context_window=1048576,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
+        performance_note="Earlier Meta Model API release for agentic multimodal work.",
+    ),
+    ModelSpec(
+        "muse-spark-1.2", "Muse Spark 1.2", "muse", provider="meta",
+        backend="openai_compatible", context_window=1048576,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
+        performance_note="Meta-hosted coding-focused Muse Spark release.",
+    ),
+    ModelSpec(
+        "muse-spark-1.3", "Muse Spark 1.3", "muse", provider="meta",
+        backend="openai_compatible", context_window=1048576,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True,
+        unsupported_parameters=("frequency_penalty", "presence_penalty", "stop", "n"),
+        local=False,
+        performance_note=(
+            "Hosted by Meta Model API for long-horizon agentic and coding work; "
+            "open weights have not been released."
         ),
     ),
     ModelSpec(

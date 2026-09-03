@@ -294,6 +294,71 @@ describe('AgentConfigSection', () => {
       })).toBeInTheDocument();
     });
 
+    it('shows direct Muse Spark options from Meta Model API catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            meta: [
+              {
+                id: 'muse-spark-1.1',
+                name: 'Muse Spark 1.1',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'muse-spark-1.2',
+                name: 'Muse Spark 1.2',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'muse-spark-1.3',
+                name: 'Muse Spark 1.3',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="meta"
+          onlineModel="muse-spark-1.3"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Meta Model API' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.1' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.2' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.3' })).toBeInTheDocument();
+    });
+
     it('shows Qwen3.8 Flash privacy guidance from live catalog data', async () => {
       const performanceNote = 'The current endpoint is not OpenRouter ZDR; do not use it for confidential workloads.';
       global.fetch = jest.fn().mockResolvedValue({

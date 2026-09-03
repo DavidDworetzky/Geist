@@ -206,6 +206,37 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
 
 
+@pytest.mark.parametrize(
+    ("model_id", "recommended"),
+    [
+        ("muse-spark-1.1", False),
+        ("muse-spark-1.2", False),
+        ("muse-spark-1.3", True),
+    ],
+)
+def test_meta_model_api_catalog_options(model_id, recommended):
+    model = get_model_spec(model_id)
+
+    assert model.provider == "meta"
+    assert model.backend == "openai_compatible"
+    assert model.local is False
+    assert model.context_window == 1048576
+    assert model.max_output_tokens is None
+    assert model.parameter_count is None
+    assert model.supports_vision is True
+    assert model.supports_function_calling is True
+    assert model.supports_reasoning is True
+    assert model.supports_streaming is True
+    assert model.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "n",
+    )
+    assert model.recommended is recommended
+    assert get_provider_endpoint(model.provider) == "https://api.meta.ai/v1"
+
+
 @pytest.mark.parametrize("model_id", [
     "Qwen/Qwen2.5-3B-Instruct",
     "Qwen/Qwen3-4B",
@@ -335,6 +366,9 @@ def test_existing_llama_id_preserves_optimized_runner():
     "tencent/hy4-preview",
     "z-ai/glm-5.3-flash",
     "meta/muse-spark-1.2-contributor",
+    "muse-spark-1.1",
+    "muse-spark-1.2",
+    "muse-spark-1.3",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -373,6 +407,17 @@ def test_openrouter_model_infers_openrouter_endpoint(model_id):
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model=model_id)
     assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["muse-spark-1.1", "muse-spark-1.2", "muse-spark-1.3"],
+)
+def test_meta_model_infers_first_party_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == "https://api.meta.ai/v1"
 
 
 def test_self_hosted_model_requires_endpoint_or_environment():
@@ -485,10 +530,12 @@ def test_model_routes_serialize_string_backed_providers():
     assert "self-hosted" in provider_ids
     assert "moonshot" in provider_ids
     assert "openrouter" in provider_ids
+    assert "meta" in provider_ids
 
     response = asyncio.run(get_available_models())
     assert "self-hosted" in response.providers
     assert "openrouter" in response.providers
+    assert "meta" in response.providers
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
@@ -503,6 +550,11 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "meta/muse-spark-1.2-contributor"
         for model in response.providers["openrouter"]
     )
+    assert {
+        "muse-spark-1.1",
+        "muse-spark-1.2",
+        "muse-spark-1.3",
+    } <= {model.id for model in response.providers["meta"]}
     assert any(
         model.id == "openai/gpt-oss-120b"
         for model in response.providers["self-hosted"]

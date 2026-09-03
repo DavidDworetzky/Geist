@@ -22,6 +22,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   zai: 'Z.AI',
   deepseek: 'DeepSeek',
   openrouter: 'OpenRouter',
+  meta: 'Meta Model API',
   'self-hosted': 'Self-hosted Server',
   offline: 'Local/Offline',
   custom: 'Custom Provider'

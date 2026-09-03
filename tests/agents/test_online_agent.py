@@ -249,6 +249,20 @@ class TestOnlineAgentInitialization:
             assert agent.headers["Authorization"] == "Bearer test-openrouter-key"
             assert agent.supports_native_tool_calling is True
 
+    def test_meta_model_api_initialization(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"MODEL_API_KEY": "test-meta-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.meta.ai/v1",
+                model="muse-spark-1.3",
+            )
+
+            assert agent.api_key == "test-meta-key"
+            assert agent.headers["Authorization"] == "Bearer test-meta-key"
+            assert agent.supports_native_tool_calling is True
+
     def test_explicit_api_key(self):
         """Test initialization with explicitly provided API key."""
         context = create_mock_agent_context()
@@ -329,6 +343,41 @@ class TestOnlineAgentAPIRequests:
                 assert "stop" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["reasoning"] == {"effort": reasoning_effort}
+
+    def test_meta_model_api_removes_unsupported_parameters(self, caplog):
+        context = create_mock_agent_context()
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://api.meta.ai/v1",
+            model="muse-spark-1.3",
+            api_key="test-meta-key",
+        )
+
+        with patch.object(agent.client, "post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = mock_response
+
+            with caplog.at_level("DEBUG", logger="agents.online_agent"):
+                agent._make_request(
+                    {
+                        "model": "muse-spark-1.3",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "n": 2,
+                    }
+                )
+
+            payload = mock_post.call_args.kwargs["json"]
+            assert "frequency_penalty" not in payload
+            assert "presence_penalty" not in payload
+            assert "stop" not in payload
+            assert "n" not in payload
+            assert "Removed unsupported request parameters" in caplog.text
+            assert "frequency_penalty, presence_penalty, stop, n" in caplog.text
 
     def test_glm53_flash_applies_reasoning_without_dropping_supported_parameters(self):
         context = create_mock_agent_context()
@@ -1019,6 +1068,18 @@ class TestOnlineAgentAPIKeyRetrieval:
             )
 
             assert agent.api_key == "env-grok-key"
+
+    def test_meta_model_api_key_from_env(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"MODEL_API_KEY": "env-meta-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.meta.ai/v1",
+                model="muse-spark-1.3",
+            )
+
+            assert agent.api_key == "env-meta-key"
 
     def test_custom_provider_requires_explicit_api_key(self):
         """Test custom endpoints do not use a generic API_KEY fallback."""

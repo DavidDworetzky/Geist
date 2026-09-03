@@ -50,6 +50,21 @@ explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
 
+## Meta-hosted Muse Spark
+
+Set `MODEL_API_KEY` and select provider `meta`. Geist offers the direct Meta
+Model API IDs `muse-spark-1.1`, `muse-spark-1.2`, and the recommended
+`muse-spark-1.3`.
+Meta Model API exposes an OpenAI-compatible Chat Completions endpoint at
+`https://api.meta.ai/v1` with a 1,048,576-token context window, multimodal
+input, streaming, reasoning-capable responses, and native function calling.
+Geist currently uses Meta's default reasoning effort. Muse Spark is hosted-only;
+Meta describes open weights as future work.
+
+The Contributor tier remains under provider `openrouter`. Although Meta lists
+the tier, direct Chat Completions availability has not been reliable enough to
+make it a first-party provider option in Geist.
+
 ## OpenRouter-hosted Qwen3.8 Flash
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
