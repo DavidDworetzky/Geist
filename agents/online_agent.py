@@ -115,6 +115,8 @@ class OnlineAgent(BaseAgent):
 
     def _known_native_tool_provider(self) -> bool:
         normalized_url = self.base_url.lower()
+        if "generativelanguage.googleapis.com" in normalized_url:
+            return "/v1beta/openai" in normalized_url
         return any(
             provider_host in normalized_url
             for provider_host in (

@@ -276,6 +276,21 @@ class TestOnlineAgentInitialization:
 
         assert agent.api_key == "explicit-api-key"
 
+    def test_google_gemini_initialization(self):
+        """Test Gemini key discovery and native tool support."""
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                model="gemini-3.8-flash",
+            )
+
+            assert agent.api_key == "test-gemini-key"
+            assert agent.headers["Authorization"] == "Bearer test-gemini-key"
+            assert agent.supports_native_tool_calling is True
+
     def test_backup_providers_configuration(self):
         """Test initialization with backup providers."""
         context = create_mock_agent_context()

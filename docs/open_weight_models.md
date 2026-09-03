@@ -9,9 +9,9 @@ catalog lives in `agents/model_catalog.py`.
 
 Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
-Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
-8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8
-Flash routes are intentionally server-backed.
+Kimi K2.5, Gemini 3.8 Flash, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B,
+Qwen 72B, Mixtral 8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok
+4.6, and Qwen 3.8 Flash routes are intentionally server-backed.
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -36,6 +36,19 @@ provider. An explicit local `runner_type` override opts capable machines back
 into in-process loading.
 Catalog providers use string IDs, so adding one does not require extending the
 legacy `OnlineModelProviders` enum or changing the model API routes.
+
+## Google Gemini 3.8 Flash
+
+Set `GEMINI_API_KEY` and select provider `google` with model
+`gemini-3.8-flash`. Google released the model as generally available on
+September 2, 2026. It accepts text, image, video, audio, and PDF input, has a
+1,048,576-token context window and 65,536-token output limit, and supports
+reasoning, streaming, native function calling, and structured outputs.
+
+Geist routes it through Google's OpenAI-compatible endpoint. That compatibility
+API is still beta and covers Geist's chat and function-calling path, but
+Gemini-native server tools such as Google Search grounding require a future
+direct Gemini API integration.
 
 ## OpenRouter-hosted Grok 4.6
 

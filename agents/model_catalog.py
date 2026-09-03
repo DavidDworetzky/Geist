@@ -65,6 +65,12 @@ class ModelSpec:
 
 PROVIDERS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec("openai", "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "google": ProviderSpec(
+        "google",
+        "Google Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "GEMINI_API_KEY",
+    ),
     "groq": ProviderSpec("groq", "Groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
     "xai": ProviderSpec("xai", "xAI", "https://api.x.ai/v1", "GROK_API_KEY"),
     "moonshot": ProviderSpec(
@@ -249,6 +255,16 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_streaming=True, min_transformers_version="4.55.0",
         parameter_count="117B", activated_parameters="5.1B", local=False,
         performance_note="MXFP4 still targets roughly 80 GB of accelerator memory.",
+    ),
+    ModelSpec(
+        "gemini-3.8-flash", "Gemini 3.8 Flash", "gemini", provider="google",
+        backend="openai_compatible", context_window=1048576, max_output_tokens=65536,
+        supports_vision=True, supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=True, local=False,
+        performance_note=(
+            "Google's stable Gemini 3.8 Flash model via the beta OpenAI-compatible "
+            "endpoint; Gemini-native server tools require direct API integration."
+        ),
     ),
     ModelSpec(
         "kimi-k2.5", "Kimi K2.5", "kimi", provider="moonshot",

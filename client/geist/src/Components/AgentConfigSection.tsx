@@ -14,6 +14,7 @@ interface AgentConfigSectionProps {
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   openai: 'OpenAI',
+  google: 'Google Gemini',
   anthropic: 'Anthropic',
   xai: 'xAI (Grok)',
   groq: 'Groq',

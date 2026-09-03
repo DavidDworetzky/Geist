@@ -192,6 +192,7 @@ User settings control default agent behavior and can be configured via API:
 
 ### Online Providers
 - `OPENAI_API_KEY` - OpenAI API key
+- `GEMINI_API_KEY` - Google Gemini API key for Gemini models and image generation
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `GROQ_API_KEY` - Groq API key
 - `GROK_API_KEY` - Grok (X.AI) API key
