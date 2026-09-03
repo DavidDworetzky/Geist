@@ -184,6 +184,27 @@ def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_granite42_8b_metadata_is_explicit_and_server_backed():
+    granite = get_model_spec("ibm-granite/granite-4.2-8b")
+
+    assert granite.provider == "openrouter"
+    assert granite.backend == "openai_compatible"
+    assert granite.local is False
+    assert granite.family == "granite"
+    assert granite.context_window == 131072
+    assert granite.max_output_tokens == 117964
+    assert granite.parameter_count == "8B"
+    assert granite.activated_parameters is None
+    assert granite.supports_vision is False
+    assert granite.supports_function_calling is True
+    assert granite.supports_reasoning is True
+    assert granite.supports_streaming is True
+    assert granite.recommended is True
+    assert granite.mandatory_reasoning_effort is None
+    assert granite.unsupported_parameters == ("n",)
+    assert get_provider_endpoint(granite.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     grok = get_model_spec("x-ai/grok-4.6")
 
@@ -332,6 +353,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "qwen/qwen3.8-max",
     "qwen3.8-max",
     "qwen/qwen3.8-flash",
+    "ibm-granite/granite-4.2-8b",
     "tencent/hy4-preview",
     "z-ai/glm-5.3-flash",
     "meta/muse-spark-1.2-contributor",
@@ -363,6 +385,7 @@ def test_hosted_glm_infers_zai_endpoint():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "ibm-granite/granite-4.2-8b",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -492,6 +515,10 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "ibm-granite/granite-4.2-8b"
+        for model in response.providers["openrouter"]
     )
     assert any(
         model.id == "tencent/hy4-preview" for model in response.providers["openrouter"]

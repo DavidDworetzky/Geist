@@ -292,6 +292,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "ibm-granite/granite-4.2-8b", "IBM Granite 4.2 8B", "granite",
+        provider="openrouter", backend="openai_compatible", context_window=131072,
+        max_output_tokens=117964, supports_function_calling=True,
+        supports_reasoning=True, supports_streaming=True, recommended=True,
+        parameter_count="8B", unsupported_parameters=("n",), local=False,
+        performance_note=(
+            "Low-cost IBM reasoning model with native tools and structured outputs. "
+            "The current OpenRouter service has one CoreWeave BF16 endpoint; enforce "
+            "ZDR routing and monitor route availability."
+        ),
+    ),
+    ModelSpec(
         "tencent/hy4-preview", "Tencent Hy4 Preview", "hy", provider="openrouter",
         backend="openai_compatible", context_window=1048576, max_output_tokens=64000,
         supports_function_calling=True, supports_reasoning=True,

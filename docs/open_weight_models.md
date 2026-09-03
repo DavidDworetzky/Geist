@@ -11,7 +11,8 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Kimi K2.5, GLM 4.7 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral
 8x7B, gpt-oss 120B, and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8
-Flash routes are intentionally server-backed.
+Flash routes are intentionally server-backed. OpenRouter's IBM Granite 4.2 8B
+route is also hosted-only even though IBM publishes separate open weights.
 Their total resident weights make an in-process laptop load impractical even
 when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -69,6 +70,32 @@ OpenRouter's ZDR endpoint list as of August 27, 2026. Do not send confidential
 workloads to this model. The hosted production model is based on the open-weight
 Qwen3.8-Flash-Next release, but Geist does not assume that their parameter
 metadata is identical.
+
+## OpenRouter-hosted IBM Granite 4.2 8B
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`ibm-granite/granite-4.2-8b`. OpenRouter added this stable model ID on August
+31, 2026. It accepts text input, has a 131,072-token context window and
+117,964-token output limit, and supports optional reasoning, streaming, native
+function calling, and JSON-schema structured outputs. Geist omits the
+unsupported `n` parameter. OpenRouter listed the September 1, 2026 price as
+$0.10 per million input tokens, $0.15 per million output tokens, and $0.05 per
+million cached input tokens.
+
+IBM identifies Granite 4.2 8B as an Apache-2.0 dense reasoning model with full,
+low-effort, and non-thinking modes. IBM's published benchmark table reports
+47.67 SWE-bench Verified, 20.56 TerminalBench 2.1, 68.05 tau3-bench, and 50.29
+BFCL v4. Independently, Artificial Analysis scored the model 20 on its
+Intelligence Index, versus a median of 9 for comparable open-weight models, but
+also measured above-median output verbosity. These results describe the model;
+OpenRouter currently exposes one CoreWeave BF16 route, so hosted reliability may
+differ. That endpoint was on OpenRouter's ZDR list on September 1, 2026. Enforce
+ZDR routing and re-check the endpoint policy before confidential workloads.
+
+Sources: https://openrouter.ai/ibm-granite/granite-4.2-8b,
+https://huggingface.co/ibm-granite/granite-4.2-8b,
+https://www.ibm.com/granite, and
+https://artificialanalysis.ai/models/granite-4-2-8b.
 
 ## OpenRouter-hosted Tencent Hy4 Preview
 
