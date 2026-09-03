@@ -52,6 +52,9 @@ Gemini-native server tools such as Google Search grounding require a future
 direct Gemini API integration. Geist follows Google's
 [Gemini 3.8 migration checklist](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)
 by omitting `n`, `temperature`, and `top_p` for this model.
+Sibling IDs such as `gemini-3.8-flash-lite` route to Google but keep their own
+sampling parameters. Add new pointer forms for the same model, such as dated
+snapshots, to the catalog's `aliases` tuple when they share this request contract.
 
 Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms) distinguish
 unpaid and paid usage. Unpaid-service prompts and responses may be used to

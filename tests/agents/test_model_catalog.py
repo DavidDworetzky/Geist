@@ -190,6 +190,14 @@ def test_gemini_request_aliases_share_the_canonical_request_contract():
     assert all(resolve_request_spec(alias) is flash for alias in flash.aliases)
 
 
+def test_catalog_aliases_are_unique_and_do_not_shadow_canonical_ids():
+    canonical_ids = {spec.id.lower() for spec in MODEL_SPECS}
+    aliases = [alias.lower() for spec in MODEL_SPECS for alias in spec.aliases]
+
+    assert len(aliases) == len(set(aliases))
+    assert canonical_ids.isdisjoint(aliases)
+
+
 def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("qwen/qwen3.8-flash")
 
