@@ -45,6 +45,8 @@ Set `GEMINI_API_KEY` and select provider `google` with model
 65,536-token output limit, and supports multimodal input, reasoning, streaming,
 function calling, and structured outputs. Geist currently sends text-only chat
 and function-call payloads through the compatibility endpoint.
+The existing `GEMINI_BASE_URL` override applies only to image generation;
+Gemini chat continues to use the cataloged compatibility endpoint.
 
 Geist routes it through Google's OpenAI-compatible endpoint. That compatibility
 API is still beta and covers Geist's chat and function-calling path, but
