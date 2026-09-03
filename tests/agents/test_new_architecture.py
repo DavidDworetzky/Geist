@@ -210,6 +210,12 @@ class TestUserSettingsIntegration:
         assert config.endpoint == "https://api.openai.com/v1"
         assert config.runner_type is None
 
+        settings.default_online_provider = "meta"
+        settings.default_online_model = "muse-spark-1.3"
+        config = AgentFactoryConfig.from_user_settings(settings)
+        assert config.model == "muse-spark-1.3"
+        assert config.endpoint == "https://api.meta.ai/v1"
+
         overrides = AgentConfigRequest(temperature=0.0)
         config = AgentFactoryConfig.from_user_settings(settings, overrides)
         assert config.generation_config["temperature"] == 0.0

@@ -123,6 +123,7 @@ class OnlineAgent(BaseAgent):
                 "groq.com",
                 "api.x.ai",
                 "openrouter.ai",
+                "api.meta.ai",
             )
         )
 
