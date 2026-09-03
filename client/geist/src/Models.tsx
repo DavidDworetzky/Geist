@@ -65,6 +65,7 @@ export default function Models(): JSX.Element {
 
   const onlineProviders = providers.filter(provider => !NON_ONLINE_PROVIDER_IDS.has(provider));
   const compatibleLocalArtifacts = localArtifacts.filter(artifact => artifact.supported !== false);
+  const installingLocalArtifact = compatibleLocalArtifacts.find(isArtifactInstalling);
 
   useEffect(() => {
     if (onlineProviders.length === 0 || settingsLoading) return;
@@ -274,6 +275,9 @@ export default function Models(): JSX.Element {
                 && settings.default_local_model === artifact.model_id)
             );
             const busy = isArtifactInstalling(artifact);
+            const anotherArtifactInstalling = Boolean(
+              installingLocalArtifact && installingLocalArtifact.id !== artifact.id,
+            );
             const total = artifact.total_bytes ?? 0;
             return (
               <div className="model-table-row" key={artifact.id}>
@@ -330,7 +334,9 @@ export default function Models(): JSX.Element {
                     <>
                       <button
                         className="button button-secondary button-small"
-                        disabled={localAction === artifact.id || artifact.source === 'imported'}
+                        disabled={localAction === artifact.id
+                          || artifact.source === 'imported'
+                          || anotherArtifactInstalling}
                         onClick={() => void installArtifact(artifact)}
                       >
                         {artifact.status === 'failed' ? 'Retry' : 'Install'}

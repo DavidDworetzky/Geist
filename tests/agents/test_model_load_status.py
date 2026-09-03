@@ -173,6 +173,23 @@ def test_download_endpoint_reports_insufficient_storage() -> None:
     assert "512.0 MB available" in raised.value.detail
 
 
+def test_download_endpoint_rejects_a_competing_install() -> None:
+    manager = MagicMock()
+    manager.request_download.side_effect = RuntimeError("Another model is already installing.")
+
+    with (
+        patch(
+            "app.api.v1.endpoints.models.get_local_model_manager",
+            return_value=manager,
+        ),
+        pytest.raises(HTTPException) as raised,
+    ):
+        download_local_artifact("test-artifact")
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail == "Another model is already installing."
+
+
 def test_import_endpoint_reports_insufficient_storage() -> None:
     manager = MagicMock()
     manager.import_stream.side_effect = InsufficientStorageError(

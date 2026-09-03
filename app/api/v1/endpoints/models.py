@@ -206,6 +206,8 @@ def download_local_artifact(artifact_id: str):
         raise HTTPException(status_code=404, detail=str(error)) from error
     except InsufficientStorageError as error:
         raise HTTPException(status_code=507, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

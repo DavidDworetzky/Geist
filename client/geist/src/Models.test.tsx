@@ -178,6 +178,25 @@ it('shows no competing action while cancellation settles', async () => {
   expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
 });
 
+it('does not start a second model install while one is active', async () => {
+  availableArtifacts = [
+    { ...artifact, status: 'downloading', bytes_downloaded: 25, total_bytes: 100 },
+    {
+      ...artifact,
+      id: 'second-model',
+      model_id: 'Qwen/Second',
+      display_name: 'Second model',
+      status: 'not_installed',
+    },
+  ];
+
+  render(<Models />);
+
+  expect(await screen.findByText('Installing 25%')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled();
+});
+
 it('shows a failed install with its retry action and error', async () => {
   availableArtifacts = [{
     ...artifact,

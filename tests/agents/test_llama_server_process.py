@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from pathlib import Path
 
-from agents.architectures.llama_server_process import LlamaServerManager
+from agents.architectures.llama_server_process import (
+    LlamaServerManager,
+    default_llama_runtime_root,
+    llama_server_runtime_available,
+)
 from agents.architectures.llama_server_process_posix import process_options as posix_options
 from agents.architectures.llama_server_process_windows import process_options as windows_options
 
@@ -40,8 +45,95 @@ def _runtime_tree(tmp_path: Path) -> Path:
     for backend in ("cpu", "vulkan"):
         directory = root / backend
         directory.mkdir(parents=True)
-        (directory / executable).write_bytes(b"binary")
+        server = directory / executable
+        server.write_bytes(b"binary")
+        server.chmod(0o755)
     return root
+
+
+def test_default_runtime_root_uses_geist_home_sibling(tmp_path: Path) -> None:
+    assert default_llama_runtime_root({"GEIST_HOME": str(tmp_path / "geist")}) == (
+        tmp_path / "geist-runtime" / "llama.cpp"
+    )
+
+
+def test_explicit_runtime_root_overrides_packaged_default(tmp_path: Path) -> None:
+    configured = tmp_path / "operator-runtime"
+
+    assert (
+        default_llama_runtime_root(
+            {
+                "GEIST_HOME": str(tmp_path / "geist"),
+                "GEIST_LLAMA_RUNTIME_ROOT": str(configured),
+            }
+        )
+        == configured
+    )
+
+
+def test_frozen_runtime_defaults_beside_the_application(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "geist" / "geist"))
+
+    assert default_llama_runtime_root({"GEIST_HOME": "/ignored"}) == (
+        tmp_path / "geist" / "runtimes" / "llama.cpp"
+    )
+
+
+def test_runtime_availability_requires_an_executable_server(tmp_path: Path) -> None:
+    runtime = _runtime_tree(tmp_path)
+    server = runtime / "cpu" / ("llama-server.exe" if os.name == "nt" else "llama-server")
+
+    assert llama_server_runtime_available(
+        {
+            "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+            "GEIST_LLAMA_ACCELERATION": "cpu",
+        }
+    )
+
+    if os.name != "nt":
+        server.chmod(0o644)
+        assert not llama_server_runtime_available(
+            {
+                "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+                "GEIST_LLAMA_ACCELERATION": "cpu",
+            }
+        )
+
+
+def test_manager_uses_packaged_default_runtime(tmp_path: Path) -> None:
+    packaged_root = tmp_path / "geist-runtime" / "llama.cpp"
+    runtime = _runtime_tree(tmp_path)
+    packaged_root.parent.mkdir()
+    runtime.rename(packaged_root)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={
+            "GEIST_HOME": str(tmp_path / "geist"),
+            "GEIST_LLAMA_ACCELERATION": "cpu",
+        },
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+    )
+
+    connection = manager.start(model, "test/model")
+
+    executable = "llama-server.exe" if os.name == "nt" else "llama-server"
+    assert connection.backend == "cpu"
+    assert calls[0].args[0] == str(packaged_root / "cpu" / executable)
+    manager.stop()
 
 
 def test_platform_process_options_are_isolated() -> None:

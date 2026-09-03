@@ -61,7 +61,7 @@ def _mlx_artifact(**overrides) -> LocalModelArtifact:
     return LocalModelArtifact(**values)
 
 
-def test_qwen3_8_uses_pinned_platform_artifacts():
+def test_qwen3_8_uses_pinned_platform_artifacts(tmp_path: Path):
     artifacts = {
         item.backend: item
         for item in CURATED_LOCAL_ARTIFACTS
@@ -84,8 +84,40 @@ def test_qwen3_8_uses_pinned_platform_artifacts():
     assert gguf.size_bytes == 18_973_870_432
     assert gguf.sha256 == "31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34"
     assert gguf.quantization == "Q4_K_M"
-    assert local_artifact_supported(gguf, system="Linux", machine="x86_64") is True
+    runtime = tmp_path / "runtime"
+    server = runtime / "cpu" / "llama-server"
+    server.parent.mkdir(parents=True)
+    server.write_bytes(b"binary")
+    server.chmod(0o755)
+    assert (
+        local_artifact_supported(
+            gguf,
+            system="Linux",
+            machine="x86_64",
+            environment={
+                "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+                "GEIST_LLAMA_ACCELERATION": "cpu",
+            },
+        )
+        is True
+    )
     assert local_artifact_supported(gguf, system="Darwin", machine="arm64") is False
+
+
+def test_linux_gguf_is_unsupported_without_a_llama_runtime(tmp_path: Path):
+    gguf = next(
+        artifact for artifact in CURATED_LOCAL_ARTIFACTS if artifact.backend == "llama_server"
+    )
+
+    assert (
+        local_artifact_supported(
+            gguf,
+            system="Linux",
+            machine="x86_64",
+            environment={"GEIST_LLAMA_RUNTIME_ROOT": str(tmp_path / "missing")},
+        )
+        is False
+    )
 
 
 def test_model_lookup_prefers_the_platform_supported_artifact(tmp_path, managers):
@@ -227,6 +259,38 @@ def test_stream_capacity_recheck_uses_model_store_filesystem(tmp_path, managers)
         )
 
     assert checked_paths == [tmp_path]
+
+
+def test_only_one_model_download_can_be_active(tmp_path, managers):
+    started = threading.Event()
+    release = threading.Event()
+
+    def downloader(_artifact, destination, callback):
+        started.set()
+        release.wait(timeout=2)
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    first = _artifact(id="first", model_id="test/first", filename="first.gguf")
+    second = _artifact(id="second", model_id="test/second", filename="second.gguf")
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(first, second),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    manager.request_download(first.id)
+    assert started.wait(timeout=2)
+    try:
+        with pytest.raises(RuntimeError, match="Another model is already installing"):
+            manager.request_download(second.id)
+    finally:
+        release.set()
+
+    manager._futures[first.id].result(timeout=2)
+    assert manager.status(second.id)["status"] == "not_installed"
+    assert second.id not in manager._futures
 
 
 def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):
@@ -531,9 +595,9 @@ def test_llama_artifacts_are_not_offered_as_runnable_on_macos_arm64(tmp_path, ma
     managers.append(manager)
 
     assert manager.status(artifact.id)["supported"] is False
-    with pytest.raises(ValueError, match="Select an MLX model"):
+    with pytest.raises(ValueError, match="not supported by an available local runtime"):
         manager.request_download(artifact.id)
-    with pytest.raises(ValueError, match="Select an MLX model"):
+    with pytest.raises(ValueError, match="not supported by an available local runtime"):
         manager.import_stream(io.BytesIO(MODEL_BYTES), "model.gguf")
 
 

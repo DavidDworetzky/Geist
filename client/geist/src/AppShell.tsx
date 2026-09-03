@@ -132,6 +132,7 @@ function RuntimeSummary(): JSX.Element {
   const installingArtifact = isArtifactInstalling(configuredArtifact)
     ? configuredArtifact
     : undefined;
+  const anyArtifactInstalling = compatibleArtifacts.some(isArtifactInstalling);
   const installState = installProgress(installingArtifact);
   const selectionStartsInstall = Boolean(
     savingModel && pendingArtifact && pendingArtifact.status !== 'installed',
@@ -188,11 +189,11 @@ function RuntimeSummary(): JSX.Element {
       {mode === 'local' ? (
         <div className="runtime-model-control">
           <select
-            aria-busy={modelControlBusy || undefined}
+            aria-busy={modelControlBusy || anyArtifactInstalling || undefined}
             aria-label="Local model"
             aria-invalid={modelSaveError ? 'true' : undefined}
             className="runtime-model runtime-model-select"
-            disabled={modelControlBusy || noCompatibleModels}
+            disabled={modelControlBusy || anyArtifactInstalling || noCompatibleModels}
             onChange={handleLocalModelChange}
             title={selectedArtifact?.display_name ?? model ?? 'No model selected'}
             value={selectedArtifactId}

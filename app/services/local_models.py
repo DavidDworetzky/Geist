@@ -18,7 +18,7 @@ import re
 import shutil
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -28,6 +28,7 @@ from typing import Any, BinaryIO
 import httpx
 from huggingface_hub import hf_hub_url
 
+from agents.architectures.llama_server_process import llama_server_runtime_available
 from app.runtime_config import default_data_dir
 
 
@@ -202,18 +203,23 @@ def local_artifact_supported(
     *,
     system: str | None = None,
     machine: str | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> bool:
     """Return whether this distribution has a runnable backend for an artifact."""
 
     platform_name = (system or platform.system()).lower()
     architecture = (machine or platform.machine()).lower()
     if artifact.backend == "llama_server":
-        return (platform_name, architecture) in {
+        platform_supported = (platform_name, architecture) in {
             ("windows", "amd64"),
             ("windows", "x86_64"),
             ("linux", "amd64"),
             ("linux", "x86_64"),
         }
+        return platform_supported and llama_server_runtime_available(
+            environment,
+            system=platform_name,
+        )
     if artifact.backend == "mlx_llama":
         return platform_name == "darwin" and architecture in {"arm64", "aarch64"}
     return True
@@ -566,14 +572,22 @@ class LocalModelManager:
             state = self._state_for_locked(artifact)
             if state.get("status") == "installed":
                 return {**asdict(artifact), **dict(state)}
+            another_download = next(
+                (
+                    active_artifact_id
+                    for active_artifact_id, future in self._futures.items()
+                    if active_artifact_id != artifact_id and not future.done()
+                ),
+                None,
+            )
+            if another_download is not None:
+                raise RuntimeError("Another model is already installing.")
             target = self._artifact_path(artifact)
             if self._artifact_exists(artifact, target):
                 try:
                     self._remove_artifact_target(artifact)
                 except OSError as error:
-                    raise ValueError(
-                        f"Could not clear invalid model files: {error}"
-                    ) from error
+                    raise ValueError(f"Could not clear invalid model files: {error}") from error
             self._require_download_capacity(artifact)
             future = self._futures.get(artifact_id)
             if future is None or future.done():
@@ -1013,16 +1027,13 @@ class LocalModelManager:
         except Exception as error:
             temporary.unlink(missing_ok=True)
             if isinstance(error, OSError) and error.errno == errno.ENOSPC:
-                raise InsufficientStorageError(
-                    "Not enough space to import this model."
-                ) from error
+                raise InsufficientStorageError("Not enough space to import this model.") from error
             raise
 
     def _require_supported(self, artifact: LocalModelArtifact) -> None:
         if not self._artifact_support(artifact):
             raise ValueError(
-                f"{artifact.display_name} requires llama-server, which is not included for "
-                "this platform. Select an MLX model on macOS ARM64."
+                f"{artifact.display_name} is not supported by an available local runtime."
             )
 
     def ensure_hugging_face_snapshot(

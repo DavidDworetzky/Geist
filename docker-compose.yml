@@ -31,9 +31,10 @@ services:
       - SQLITE_DATABASE_PATH=data/geist.sqlite3
       - DEBUG=${DEBUG:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
-      # MLX is a native macOS runtime. Linux containers use Transformers unless
-      # an operator deliberately selects another registered runner.
-      - GEIST_LOCAL_RUNNER=${GEIST_LOCAL_RUNNER:-transformers}
+      # Leave the runner unset by default so Geist can select the packaged
+      # llama.cpp runtime on Linux, MLX on Apple silicon, and Transformers as
+      # the generic fallback. Operators may still force a registered runner.
+      - GEIST_LOCAL_RUNNER=${GEIST_LOCAL_RUNNER:-}
       - GEIST_OPERATOR_TOKEN_FILE=/run/geist-operator/token
     env_file:
       - path: .env

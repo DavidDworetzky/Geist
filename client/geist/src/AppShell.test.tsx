@@ -49,7 +49,7 @@ const artifacts: any[] = [
     id: 'qwen3-8b-downloading',
     model_id: 'Qwen/Qwen3-8B',
     display_name: 'Qwen 3 8B',
-    status: 'downloading',
+    status: 'not_installed',
     supported: true,
   },
   {
@@ -280,6 +280,7 @@ describe('AppShell runtime model selector', () => {
     });
     availableArtifacts = [{
       ...artifacts[2],
+      status: 'downloading',
       bytes_downloaded: 25,
       total_bytes: 100,
       progress_unit: 'bytes',
@@ -289,6 +290,7 @@ describe('AppShell runtime model selector', () => {
     renderShell();
 
     expect(await screen.findByText('Installing 25%')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Local model' })).toBeDisabled();
     expect(screen.getByRole('progressbar')).toHaveValue(25);
     expect(screen.queryByText(/download a local model/i)).not.toBeInTheDocument();
   });
