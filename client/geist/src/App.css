@@ -121,28 +121,10 @@ textarea:focus-visible {
   border-radius: var(--geist-radius-lg);
 }
 
-.brand-mark-svg,
 .brand-mark-image {
   width: 38px;
   height: 38px;
   flex: 0 0 38px;
-}
-
-.brand-mark-svg path:first-child {
-  fill: var(--geist-color-surface-strong);
-  stroke: var(--geist-color-border-strong);
-  stroke-width: 1.5;
-}
-
-.brand-mark-svg path:nth-child(2) {
-  fill: color-mix(in srgb, var(--geist-color-accent) 24%, transparent);
-  stroke: var(--geist-color-accent);
-  stroke-width: 1.2;
-}
-
-.brand-mark-svg path:nth-child(3) {
-  fill: var(--geist-color-accent-strong);
-  opacity: 0.88;
 }
 
 .brand-text {

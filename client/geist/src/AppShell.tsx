@@ -74,18 +74,9 @@ const navItems: NavItem[] = [
 
 function BrandMark(): JSX.Element {
   const branding = useBranding();
+  const logoUrl = branding.logoUrl || `${process.env.PUBLIC_URL}/logo192.png`;
 
-  if (branding.logoUrl) {
-    return <img src={branding.logoUrl} alt="" className="brand-mark-image" />;
-  }
-
-  return (
-    <svg className="brand-mark-svg" viewBox="0 0 48 48" aria-hidden="true">
-      <path d="M24 3.5 41.75 13.75v20.5L24 44.5 6.25 34.25v-20.5L24 3.5Z" />
-      <path d="M24 12.5 34 18.25v11.5L24 35.5l-10-5.75v-11.5L24 12.5Z" />
-      <path d="M24 18.5 29 21.35v5.3l-5 2.85-5-2.85v-5.3L24 18.5Z" />
-    </svg>
-  );
+  return <img src={logoUrl} alt="" className="brand-mark-image" />;
 }
 
 function pageTitle(pathname: string): string {
@@ -293,7 +284,7 @@ export default function AppShell({ children }: ShellProps): JSX.Element {
           <BrandMark />
           <span className="brand-text">
             <span className="brand-name">{productName}</span>
-            <span className="brand-subtitle">Private Local AI workbench</span>
+            <span className="brand-subtitle">Private Local AI harness</span>
           </span>
         </NavLink>
 
