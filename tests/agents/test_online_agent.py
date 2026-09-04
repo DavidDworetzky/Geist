@@ -213,6 +213,7 @@ class TestOnlineAgentInitialization:
             "qwen/qwen3.8-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
+            "meta/muse-spark-1.3-contributor",
         ],
     )
     def test_openrouter_initialization(self, model_id):
@@ -316,6 +317,7 @@ class TestOnlineAgentAPIRequests:
         [
             ("x-ai/grok-4.6", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-spark-1.3-contributor", "medium"),
         ],
     )
     def test_openrouter_models_apply_request_constraints(self, model_id, reasoning_effort):
@@ -351,6 +353,34 @@ class TestOnlineAgentAPIRequests:
                 assert "stop" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["reasoning"] == {"effort": reasoning_effort}
+
+    def test_muse_spark_13_contributor_omits_unsupported_n_and_keeps_tools(self):
+        context = create_mock_agent_context()
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://openrouter.ai/api/v1",
+            model="meta/muse-spark-1.3-contributor",
+            api_key="test-openrouter-key",
+        )
+
+        with patch.object(agent.client, "post") as mock_post:
+            mock_response = Mock(status_code=200)
+            mock_response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = mock_response
+
+            agent._make_request(
+                {
+                    "model": "meta/muse-spark-1.3-contributor",
+                    "messages": [{"role": "user", "content": "Test prompt"}],
+                    "n": 2,
+                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                }
+            )
+
+            payload = mock_post.call_args.kwargs["json"]
+            assert "n" not in payload
+            assert payload["tools"][0]["function"]["name"] == "lookup"
+            assert payload["reasoning"] == {"effort": "medium"}
 
     def test_meta_model_api_removes_unsupported_parameters(self, caplog):
         context = create_mock_agent_context()
@@ -847,6 +877,7 @@ class TestOnlineAgentRetryLogic:
         [
             ("x-ai/grok-4.6", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-spark-1.3-contributor", "medium"),
         ],
     )
     def test_openrouter_constraints_do_not_leak_to_backup_provider(

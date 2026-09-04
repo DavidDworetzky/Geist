@@ -140,6 +140,28 @@ def test_heavyweight_models_are_server_backed():
         "stop",
     )
 
+    muse_13 = get_model_spec("meta/muse-spark-1.3-contributor")
+    assert muse_13.backend == "openai_compatible"
+    assert muse_13.provider == "openrouter"
+    assert muse_13.local is False
+    assert muse_13.context_window == 1048576
+    assert muse_13.max_output_tokens == 943718
+    assert muse_13.parameter_count is None
+    assert muse_13.activated_parameters is None
+    assert muse_13.supports_vision is True
+    assert muse_13.supports_function_calling is True
+    assert muse_13.supports_reasoning is True
+    assert muse_13.supports_streaming is True
+    assert muse_13.recommended is False
+    assert muse_13.mandatory_reasoning_effort == "medium"
+    assert muse_13.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert get_provider_endpoint(muse_13.provider) == "https://openrouter.ai/api/v1"
+
 
 def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
     from agents.architectures.registry import get_all_models, provider_from_string
@@ -437,6 +459,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
+        "meta/muse-spark-1.3-contributor",
         "muse-spark-1.1",
         "muse-spark-1.2",
         "muse-spark-1.3",
@@ -492,6 +515,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
+        "meta/muse-spark-1.3-contributor",
     ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
@@ -644,6 +668,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "meta/muse-spark-1.3-contributor" for model in response.providers["openrouter"]
     )
     assert {
         "muse-spark-1.1",
