@@ -17,9 +17,9 @@ resident weights make an in-process laptop load impractical even when their
 mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
-Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
-its parameter count or a fixed maximum output limit, so the catalog leaves
-both fields unset.
+Muse Spark Contributor routes are likewise hosted-only. Meta does not disclose
+their parameter counts. OpenRouter does not publish a fixed maximum output for
+1.2, while its 1.3 endpoint currently reports a 943,718-token completion limit.
 
 ## Adding a model or provider
 
@@ -144,19 +144,29 @@ supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
 
-## OpenRouter-hosted Muse Spark 1.2 Contributor
+## OpenRouter-hosted Muse Spark Contributor
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
-`meta/muse-spark-1.2-contributor`. The stable OpenRouter route supports a
-1,048,576-token context, multimodal input, streaming, structured output, and
-native function calling. Muse Spark always reasons; Geist supplies its
-documented default `medium` effort and omits unsupported frequency penalty,
-presence penalty, and stop parameters.
+`meta/muse-spark-1.3-contributor` (or the earlier
+`meta/muse-spark-1.2-contributor`). The stable 1.3 route supports a
+1,048,576-token context and a 943,718-token maximum completion, accepts text,
+image, video, file, and audio input, and supports streaming, structured output,
+and native function calling. OpenRouter warns that audio understanding is not
+yet fully supported. Muse Spark always reasons; Geist supplies its documented
+default `medium` effort and omits unsupported `n`, frequency penalty, presence
+penalty, and stop parameters for 1.3.
+
+OpenRouter listed 1.3 Contributor on September 2, 2026 at $0.10 per million
+input tokens, $0.20 per million output tokens, and $0.002 per million cached
+input tokens. The route currently has one Meta endpoint. OpenRouter reported
+99.32% three-day availability and 99.65% 24-hour availability when checked on
+September 4, 2026.
 
 OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled. The sole upstream Meta endpoint, however, has a documented
-30-day retention policy and is not on OpenRouter's ZDR endpoint list. Do not
-send confidential workloads to this model.
+30-day retention policy and is not on OpenRouter's ZDR endpoint list. The
+Contributor terms also permit prompts and outputs to improve Meta products. Do
+not send confidential workloads to these models.
 
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and
