@@ -196,10 +196,7 @@ describe('AppShell runtime model selector', () => {
   });
 
   it('selects and starts installing a model from the runtime selector', async () => {
-    let resolveSettings: (() => void) | undefined;
-    const updateSettings = jest.fn(() => new Promise<void>((resolve) => {
-      resolveSettings = resolve;
-    }));
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
     mockSettings({}, updateSettings);
     availableArtifacts = [
       ...artifacts,
@@ -219,25 +216,21 @@ describe('AppShell runtime model selector', () => {
     fireEvent.change(selector, { target: { value: 'qwen3-8b-not-installed' } });
 
     expect(await screen.findByText('Installing…')).toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalledWith(
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/v1/models/local/artifacts/qwen3-8b-not-installed/download',
       { method: 'POST' },
-    );
+    ));
 
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({
       default_agent_type: 'local',
       default_local_model: 'Qwen/Qwen3-8B',
       default_local_artifact_id: 'qwen3-8b-not-installed',
     }));
-    await act(async () => resolveSettings?.());
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
-      '/api/v1/models/local/artifacts/qwen3-8b-not-installed/download',
-      { method: 'POST' },
-    ));
   });
 
   it('shows the specific capacity error when a selected install cannot start', async () => {
-    mockSettings();
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    mockSettings({}, updateSettings);
     const missingArtifact = {
       ...artifacts[2],
       id: 'capacity-test-model',
@@ -271,6 +264,7 @@ describe('AppShell runtime model selector', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '15.2 GB needed; 512.0 MB available.',
     );
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it('shows one install chip with percentage progress', async () => {

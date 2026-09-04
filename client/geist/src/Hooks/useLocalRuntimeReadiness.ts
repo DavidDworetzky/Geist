@@ -7,6 +7,9 @@ interface LocalRuntimeReadiness {
   retry: () => void;
 }
 
+const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+const POLL_DELAY_MS = 750;
+
 const failedStatus = (modelId: string, detail: string): ModelLoadStatus => ({
   model_id: modelId,
   state: 'failed',
@@ -32,6 +35,7 @@ export default function useLocalRuntimeReadiness(
     const modelId = settings.default_local_model;
     let stopped = false;
     let pollTimer: number | undefined;
+    let consecutivePollFailures = 0;
 
     const updateStatus = (nextStatus: ModelLoadStatus) => {
       if (!stopped) setStatus(nextStatus);
@@ -45,15 +49,21 @@ export default function useLocalRuntimeReadiness(
         );
         if (!response.ok) throw new Error(`status ${response.status}`);
         const nextStatus = await response.json() as ModelLoadStatus;
+        consecutivePollFailures = 0;
         updateStatus(nextStatus);
         if (!stopped && nextStatus.state === 'loading') {
-          pollTimer = window.setTimeout(poll, 750);
+          pollTimer = window.setTimeout(poll, POLL_DELAY_MS);
         }
       } catch (error) {
-        updateStatus(failedStatus(
-          modelId,
-          `Could not check local model readiness: ${error instanceof Error ? error.message : error}`,
-        ));
+        consecutivePollFailures += 1;
+        if (!stopped && consecutivePollFailures < MAX_CONSECUTIVE_POLL_FAILURES) {
+          pollTimer = window.setTimeout(poll, POLL_DELAY_MS * consecutivePollFailures);
+        } else {
+          updateStatus(failedStatus(
+            modelId,
+            `Could not check local model readiness: ${error instanceof Error ? error.message : error}`,
+          ));
+        }
       }
     };
 

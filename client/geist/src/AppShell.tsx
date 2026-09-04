@@ -159,10 +159,10 @@ function RuntimeSummary(): JSX.Element {
     setModelSaveError(null);
 
     try {
-      await activateArtifact(nextArtifact);
       if (nextArtifact.status !== 'installed' && !isArtifactInstalling(nextArtifact)) {
         await downloadArtifact(nextArtifact);
       }
+      await activateArtifact(nextArtifact);
     } catch (error) {
       setModelSaveError(error instanceof Error ? error.message : 'Could not select model.');
     } finally {

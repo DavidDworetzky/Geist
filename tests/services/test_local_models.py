@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import io
+import os
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -189,6 +190,78 @@ def test_download_is_verified_and_atomically_installed(tmp_path, managers):
     assert progress[0].name.endswith(".partial.gguf")
     assert manager.status("test-q4")["status"] == "installed"
     assert manager.status("test-q4")["sha256"] == hashlib.sha256(MODEL_BYTES).hexdigest()
+
+
+def test_download_hashes_gguf_once_and_caches_verified_target(tmp_path, managers):
+    def downloader(_artifact, destination, callback):
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    with patch(
+        "app.services.local_models._sha256_file",
+        wraps=lambda path: hashlib.sha256(path.read_bytes()).hexdigest(),
+    ) as hash_file:
+        installed = manager.download_artifact("test-q4")
+        assert manager.status("test-q4")["status"] == "installed"
+
+    assert hash_file.call_count == 1
+    stats = installed.stat()
+    assert manager._verified_files["test-q4"] == (
+        stats.st_mtime_ns,
+        stats.st_size,
+        hashlib.sha256(MODEL_BYTES).hexdigest(),
+    )
+
+
+def test_download_rename_and_installed_state_are_atomic(tmp_path, managers):
+    def downloader(_artifact, destination, callback):
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+    target = manager._artifact_path(manager.get_artifact("test-q4"))
+    target_renamed = threading.Event()
+    finish_rename = threading.Event()
+    second_request_started = threading.Event()
+    second_request_result = []
+    real_replace = os.replace
+
+    def controlled_replace(source, destination):
+        real_replace(source, destination)
+        if Path(destination) == target:
+            target_renamed.set()
+            finish_rename.wait(timeout=2)
+
+    def request_again():
+        second_request_started.set()
+        second_request_result.append(manager.request_download("test-q4"))
+
+    with patch("app.services.local_models.os.replace", side_effect=controlled_replace):
+        manager.request_download("test-q4")
+        assert target_renamed.wait(timeout=2)
+        requester = threading.Thread(target=request_again)
+        requester.start()
+        assert second_request_started.wait(timeout=2)
+        requester.join(timeout=0.05)
+        assert requester.is_alive()
+        finish_rename.set()
+        manager._futures["test-q4"].result(timeout=2)
+        requester.join(timeout=2)
+
+    assert second_request_result[0]["status"] == "installed"
+    assert target.read_bytes() == MODEL_BYTES
 
 
 def test_download_fails_before_queueing_when_model_store_is_too_small(tmp_path, managers):

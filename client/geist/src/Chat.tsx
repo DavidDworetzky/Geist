@@ -96,6 +96,7 @@ const Chat = () => {
     artifacts: localArtifacts,
     loaded: localArtifactsLoaded,
     error: localArtifactsError,
+    refreshLocalArtifacts,
     downloadArtifact,
   } = useLocalArtifacts({
     enabled: userSettings?.default_agent_type === 'local',
@@ -1019,8 +1020,22 @@ const Chat = () => {
               </div>
             )}
 
+            {userSettings?.default_agent_type === 'local' && localArtifactsError && (
+              <div className="notice notice-error chat-runtime-notice" role="alert">
+                <strong>Models unavailable</strong>
+                <span>{localArtifactsError}</span>
+                <button
+                  className="button button-secondary button-small"
+                  type="button"
+                  onClick={() => void refreshLocalArtifacts()}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
             {userSettings?.default_agent_type === 'local' && localArtifactsLoaded
-              && !configuredLocalArtifact && (
+              && !localArtifactsError && !configuredLocalArtifact && (
               <div className="chat-runtime-state" role="status">
                 <strong>Model not installed</strong>
                 <NavLink to="/models">Models</NavLink>

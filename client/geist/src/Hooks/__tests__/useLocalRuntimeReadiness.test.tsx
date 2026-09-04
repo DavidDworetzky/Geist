@@ -57,6 +57,39 @@ describe('useLocalRuntimeReadiness', () => {
     );
   });
 
+  it('recovers when one readiness poll fails transiently', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => status('loading', 'Starting local runtime.'),
+      } as Response)
+      .mockRejectedValueOnce(new Error('Temporary network failure'))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => status('ready', 'Model is loaded and ready.'),
+      } as Response);
+
+    const { result } = renderHook(() => useLocalRuntimeReadiness(settings));
+
+    await waitFor(() => expect(result.current.status?.state).toBe('ready'), { timeout: 3000 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports a readiness failure after three consecutive poll errors', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => status('loading', 'Starting local runtime.'),
+      } as Response)
+      .mockRejectedValue(new Error('Backend unavailable'));
+
+    const { result } = renderHook(() => useLocalRuntimeReadiness(settings));
+
+    await waitFor(() => expect(result.current.status?.state).toBe('failed'), { timeout: 4000 });
+    expect(result.current.status?.detail).toContain('Backend unavailable');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('does not start the runtime before the selected artifact is installed', async () => {
     const fetchMock = jest.spyOn(global, 'fetch');
 

@@ -695,10 +695,16 @@ class LocalModelManager:
             ):
                 raise ValueError("Downloaded GGUF SHA-256 does not match the curated artifact")
 
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(temporary, target)
             with self._lock:
-                state = self._state_for_locked(artifact)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(temporary, target)
+                target_stats = target.stat()
+                self._verified_files[artifact.id] = (
+                    target_stats.st_mtime_ns,
+                    target_stats.st_size,
+                    actual_sha256,
+                )
+                state = self._states[artifact.id]
                 state.update(
                     status="installed",
                     bytes_downloaded=actual_size,

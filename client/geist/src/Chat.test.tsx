@@ -11,9 +11,11 @@ const mockRefreshChatSessions = jest.fn();
 const mockRefreshFolders = jest.fn();
 const mockRetryLocalRuntime = jest.fn();
 const mockDownloadLocalArtifact = jest.fn();
+const mockRefreshLocalArtifacts = jest.fn();
 let mockUserSettings: any = null;
 let mockLocalRuntimeStatus: any = null;
 let mockLocalArtifact: any = null;
+let mockLocalArtifactsError: string | null = null;
 let mockCompletedTurn: {
   run_id: string;
   prompt: string;
@@ -93,6 +95,8 @@ jest.mock('./Hooks/useLocalArtifacts', () => ({
   default: () => ({
     artifacts: mockLocalArtifact ? [mockLocalArtifact] : [],
     loaded: true,
+    error: mockLocalArtifactsError,
+    refreshLocalArtifacts: mockRefreshLocalArtifacts,
     downloadArtifact: mockDownloadLocalArtifact,
   }),
   isArtifactInstalling: (artifact: { status?: string } | undefined) => Boolean(
@@ -180,6 +184,26 @@ describe('Chat history panel', () => {
     mockUserSettings = null;
     mockLocalRuntimeStatus = null;
     mockLocalArtifact = null;
+    mockLocalArtifactsError = null;
+  });
+
+  it('offers a retry when the local model catalogue cannot be loaded', () => {
+    mockUserSettings = {
+      default_agent_type: 'local',
+      default_local_model: 'Qwen/Qwen3.8-27B',
+    };
+    mockLocalArtifactsError = 'Local model status failed';
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <Chat />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Models unavailable');
+    expect(screen.getByLabelText('Message')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockRefreshLocalArtifacts).toHaveBeenCalledTimes(1);
   });
 
   it('blocks chat and surfaces local runtime failures before submission', () => {
