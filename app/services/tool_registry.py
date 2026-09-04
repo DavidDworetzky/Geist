@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from adapters.image_generation_adapter import ImageGenerationAdapter
 from adapters.markdown_file_adapter import MarkdownFileAdapter
 from adapters.search_adapter import SearchAdapter
+from adapters.workspace_file_adapter import WorkspaceFileAdapter
 from agents.models.tool_calling import (
     ToolCall,
     ToolContext,
@@ -80,6 +81,39 @@ class TerminalRunArguments(StrictToolArguments):
         ge=1,
         le=MAX_COMMAND_TIMEOUT_SECONDS,
     )
+
+
+class WorkspaceListArguments(StrictToolArguments):
+    path: str = Field(default="", max_length=1024)
+    pattern: str = Field(default="*", min_length=1, max_length=256)
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
+class WorkspaceReadArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    start_line: int = Field(default=1, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+    max_chars: int = Field(default=100_000, ge=1, le=200_000)
+
+
+class WorkspaceSearchArguments(StrictToolArguments):
+    query: str = Field(min_length=1, max_length=1000)
+    path: str = Field(default="", max_length=1024)
+    pattern: str = Field(default="*", min_length=1, max_length=256)
+    case_sensitive: bool = False
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class WorkspaceWriteArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(max_length=200_000)
+
+
+class WorkspaceEditArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    old_text: str = Field(min_length=1, max_length=100_000)
+    new_text: str = Field(max_length=100_000)
+    expected_replacements: int = Field(default=1, ge=1, le=100)
 
 
 class EmailSendArguments(StrictToolArguments):
@@ -231,6 +265,7 @@ def build_default_tool_registry(
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
     markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+    workspace_adapter = WorkspaceFileAdapter(file_root=os.getenv("GEIST_WORKSPACE_ROOT", "."))
 
     if orchestration_runs is not None:
 
@@ -355,6 +390,51 @@ def build_default_tool_registry(
             raise RuntimeError(f"Could not write {arguments.path}")
         return ToolExecutionOutput(content="File written", summary=f"Wrote {arguments.path}")
 
+    def workspace_list(
+        context: ToolContext, arguments: WorkspaceListArguments
+    ) -> ToolExecutionOutput:
+        files = workspace_adapter.list_files(**arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps({"files": files}, ensure_ascii=False),
+            summary=f"Found {len(files)} workspace files",
+        )
+
+    def workspace_read(
+        context: ToolContext, arguments: WorkspaceReadArguments
+    ) -> ToolExecutionOutput:
+        result = workspace_adapter.read_file(**arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=(f"Read {result['path']} lines {result['start_line']}-{result['end_line']}"),
+        )
+
+    def workspace_search(
+        context: ToolContext, arguments: WorkspaceSearchArguments
+    ) -> ToolExecutionOutput:
+        matches = workspace_adapter.search_text(**arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps({"matches": matches}, ensure_ascii=False),
+            summary=f"Found {len(matches)} matching lines",
+        )
+
+    def workspace_write(
+        context: ToolContext, arguments: WorkspaceWriteArguments
+    ) -> ToolExecutionOutput:
+        result = workspace_adapter.write_file(**arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=f"Wrote {result['path']}",
+        )
+
+    def workspace_edit(
+        context: ToolContext, arguments: WorkspaceEditArguments
+    ) -> ToolExecutionOutput:
+        result = workspace_adapter.edit_file(**arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=f"Edited {result['path']} ({result['replacements']} replacement(s))",
+        )
+
     def email_send(context: ToolContext, arguments: EmailSendArguments) -> ToolExecutionOutput:
         from adapters.sendgrid_adapter import SendGridAdapter
 
@@ -425,6 +505,72 @@ def build_default_tool_registry(
             timeout_seconds=120,
             source_adapter="ImageGenerationAdapter.generate_image",
             availability=lambda context: bool(image_adapter.api_key),
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="workspace.list_files",
+            description=(
+                "List source and text files beneath the coding workspace. Supports "
+                "a relative directory, glob pattern, and bounded result count."
+            ),
+            arguments_model=WorkspaceListArguments,
+            handler=workspace_list,
+            source_adapter="WorkspaceFileAdapter.list_files",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.read_file",
+            description=(
+                "Read a bounded line range from a UTF-8 source or text file beneath "
+                "the coding workspace."
+            ),
+            arguments_model=WorkspaceReadArguments,
+            handler=workspace_read,
+            source_adapter="WorkspaceFileAdapter.read_file",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.search",
+            description=(
+                "Search source and text files beneath the coding workspace, like a "
+                "bounded rg/grep using a literal query."
+            ),
+            arguments_model=WorkspaceSearchArguments,
+            handler=workspace_search,
+            source_adapter="WorkspaceFileAdapter.search_text",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.write_file",
+            description=(
+                "Create or replace a UTF-8 source or text file beneath the coding "
+                "workspace. Requires user approval."
+            ),
+            arguments_model=WorkspaceWriteArguments,
+            handler=workspace_write,
+            side_effect="filesystem_write",
+            requires_approval=True,
+            source_adapter="WorkspaceFileAdapter.write_file",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.edit_file",
+            description=(
+                "Replace an exact text block in a workspace file. The edit fails "
+                "without changing the file unless the expected match count is exact. "
+                "Requires user approval."
+            ),
+            arguments_model=WorkspaceEditArguments,
+            handler=workspace_edit,
+            side_effect="filesystem_write",
+            requires_approval=True,
+            source_adapter="WorkspaceFileAdapter.edit_file",
         )
     )
 
@@ -536,7 +682,7 @@ def build_default_tool_registry(
                 handler=terminal_run,
                 side_effect="process",
                 requires_approval=not execution_environment.is_sandboxed,
-                enabled_by_default=False,
+                enabled_by_default=True,
                 timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
                 source_adapter=f"execution.{execution_environment.name}",
                 availability=_execution_available,

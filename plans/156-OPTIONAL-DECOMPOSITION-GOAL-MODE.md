@@ -97,6 +97,10 @@ to gate every side-effecting tool call during every continuation turn.
 - Goal continuation is capped at twenty turns by schema and defaults to eight.
 - Existing per-turn model-round and tool-call limits remain in force.
 - Decomposition has a twelve-task cap and bounded title/criteria/evidence text.
+- The default coding tool set includes contained file listing, bounded reads,
+  text search, exact edits, writes, and the configured terminal backend.
+- Workspace paths cannot escape the configured root; common credential files
+  are unavailable, and file writes/edits still require user approval.
 - Plan and goal bookkeeping tools never require approval; they cannot produce
   user-impacting side effects.
 - Orchestration tools are read/control-plane operations and never bypass the

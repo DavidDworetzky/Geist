@@ -260,7 +260,7 @@ def test_registry_sandboxed_docker_tool_needs_no_approval(monkeypatch, tmp_path)
     definition = registry.get("terminal.run")
     assert definition is not None
     assert definition.requires_approval is False
-    assert definition.enabled_by_default is False
+    assert definition.enabled_by_default is True
     assert definition.side_effect == "process"
 
 
