@@ -367,7 +367,7 @@ const Settings: React.FC = () => {
                 label="Agentic Mode"
                 checked={localSettings.agentic_mode_enabled !== false}
                 onChange={(value) => updateLocalSetting('agentic_mode_enabled', value)}
-                description="Break each request into a visible plan and keep working until the goal is explicitly completed."
+                description="With a tool-capable model, break each request into a visible plan and keep working until the goal is explicitly completed."
               />
               <SettingsSelect
                 label="Default Agent Type"

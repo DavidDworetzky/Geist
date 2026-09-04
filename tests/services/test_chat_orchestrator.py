@@ -415,7 +415,7 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     assert not controls.cancel(run_id)
 
 
-def test_backend_without_native_tools_receives_empty_registry():
+def test_backend_without_native_tools_uses_one_direct_turn_when_agentic_is_requested():
     backend = ScriptedBackend([ModelTurn(text="local answer")])
     backend.supports_native_tool_calling = False
     registry = ToolRegistry()
@@ -432,7 +432,7 @@ def test_backend_without_native_tools_receives_empty_registry():
         history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=4),
     )
 
-    list(
+    events = list(
         orchestrator.stream(
             backend=backend,
             prompt="news",
@@ -440,10 +440,16 @@ def test_backend_without_native_tools_receives_empty_registry():
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt=None,
+            agentic_mode=True,
         )
     )
 
     assert backend.requests[0]["tools"] == []
+    assert len(backend.requests) == 1
+    assert not any(event.event in {"plan", "goal"} for event in events)
+    assert next(event.payload for event in events if event.event == "final").message == [
+        "local answer"
+    ]
 
 
 def test_aggregate_tool_result_budget_truncates_model_context():

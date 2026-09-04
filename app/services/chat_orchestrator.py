@@ -361,16 +361,23 @@ class ChatOrchestrator:
         run = conversation.begin_run(prompt)
         permissions = self.permissions_loader(user_id)
         approved_call_ids: set[str] = set()
+        native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
+        goal_loop_enabled = agentic_mode and native_tools
+        if agentic_mode and not native_tools:
+            logger.info(
+                "Agentic goal loop disabled for run %s because the backend does not "
+                "support native tool calling",
+                run.run_id,
+            )
         context = ToolContext(
             user_id=user_id,
             chat_id=chat_id,
             run_id=run.run_id,
             permission_mode=permissions.mode,
             always_allow_tools=frozenset(permissions.always_allow),
-            agentic_mode=agentic_mode,
+            agentic_mode=goal_loop_enabled,
         )
         runtime: GoalRuntime | None = None
-        native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         available_tools = self.registry.definitions_for_context(context) if native_tools else []
         tools = [
             definition
@@ -441,7 +448,7 @@ class ChatOrchestrator:
                 "run_started",
                 {"run_id": run.run_id, "chat_id": conversation.chat_id},
             )
-            if agentic_mode:
+            if goal_loop_enabled:
                 tasks, decomposition_warning = self.decomposer.decompose(backend, prompt, config)
                 if cancellation.is_set():
                     yield ChatStreamEvent("cancelled", cancelled_payload())

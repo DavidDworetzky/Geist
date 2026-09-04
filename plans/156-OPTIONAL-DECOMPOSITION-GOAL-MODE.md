@@ -2,7 +2,8 @@
 
 ## Goal
 
-Add one **Agentic mode** control to native Geist chat. When enabled it always:
+Add one **Agentic mode** control to native Geist chat. When enabled with a
+native tool-call-capable backend it always:
 
 1. asks the selected model for a small structured task plan before execution;
 2. keeps the same agent session working across multiple completed model/tool
@@ -42,6 +43,10 @@ Malformed decomposition output falls back to one task representing the original
 request, so enabling decomposition cannot prevent the real agent turn from
 starting. The model receives the normalized plan in its execution context and an
 `agent.plan.update` tool for recording progress.
+
+Backends without native tool calling keep the existing single-turn behavior.
+They cannot reliably emit the explicit plan and goal control tools, so the
+harness must not spin until its budget or infer success from ordinary prose.
 
 ### Goal
 
