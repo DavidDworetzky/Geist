@@ -365,4 +365,14 @@ describe('AppShell runtime model selector', () => {
     expect(within(summary).getByText('gpt-4o')).toBeInTheDocument();
     expect(within(summary).queryByRole('combobox', { name: 'Local model' })).not.toBeInTheDocument();
   });
+
+  it('uses the packaged Geist profile as the default brand mark', () => {
+    mockSettings();
+    renderShell();
+
+    const homeLink = screen.getByRole('link', { name: 'Geist home' });
+    expect(homeLink.querySelector('.brand-mark-image')).toHaveAttribute('src', '/logo192.png');
+    expect(homeLink.querySelector('.brand-mark-svg')).not.toBeInTheDocument();
+    expect(within(homeLink).getByText('Private Local AI harness')).toBeInTheDocument();
+  });
 });
