@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
+import subprocess  # nosec B404 - argv-only calls to the configured container runtime
 import threading
 import time
 
@@ -93,6 +93,15 @@ class DockerSessionManager:
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
+        hardline = self.environment.command_rejection_reason(command)
+        if hardline is not None:
+            return ExecutionResult(
+                exit_code=126,
+                stdout="",
+                stderr=f"BLOCKED: refusing unrecoverable command ({hardline})",
+                duration_seconds=0.0,
+                timed_out=False,
+            )
         runtime = self.environment.runtime()
         if runtime is None:
             return ExecutionResult(
@@ -118,7 +127,7 @@ class DockerSessionManager:
             )
 
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # nosec B603 - argv invokes the resolved runtime
                 [
                     runtime,
                     *build_session_exec_args(name=name, command=command, timeout=timeout),
@@ -152,7 +161,7 @@ class DockerSessionManager:
 
     def _ensure_container(self, runtime: str, name: str) -> str | None:
         """Start the session container if it isn't already running."""
-        inspect = subprocess.run(
+        inspect = subprocess.run(  # nosec B603 - argv invokes the resolved runtime
             [runtime, "inspect", "--format", "{{.State.Running}}", name],
             capture_output=True,
             text=True,
@@ -161,9 +170,11 @@ class DockerSessionManager:
             return None
         if inspect.returncode == 0:
             # Exists but stopped (host restart, OOM-kill): replace it.
-            subprocess.run([runtime, "rm", "-f", name], capture_output=True, text=True)
+            subprocess.run(  # nosec B603 - argv invokes the resolved runtime
+                [runtime, "rm", "-f", name], capture_output=True, text=True
+            )
 
-        created = subprocess.run(
+        created = subprocess.run(  # nosec B603 - argv invokes the resolved runtime
             [
                 runtime,
                 *build_session_create_args(
@@ -196,7 +207,9 @@ class DockerSessionManager:
     def _remove(self, runtime: str, scope_key: str) -> None:
         name = session_container_name(scope_key)
         try:
-            subprocess.run([runtime, "rm", "-f", name], capture_output=True, text=True)
+            subprocess.run(  # nosec B603 - argv invokes the resolved runtime
+                [runtime, "rm", "-f", name], capture_output=True, text=True
+            )
             logger.info("Reaped idle sandbox session %s", name)
         except Exception:
             logger.warning("Could not remove sandbox session %s", name, exc_info=True)

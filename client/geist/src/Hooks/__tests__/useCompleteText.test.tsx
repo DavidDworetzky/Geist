@@ -142,6 +142,7 @@ describe('chatStreamReducer', () => {
         name: 'search',
         arguments: { query: 'pi' },
         status: 'proposed',
+        requires_per_call_approval: true,
       },
     });
     state = chatStreamReducer(state, {
@@ -164,6 +165,7 @@ describe('chatStreamReducer', () => {
       arguments: { query: 'pi' },
       status: 'succeeded',
       result_summary: 'Found it',
+      requires_per_call_approval: true,
     });
   });
 

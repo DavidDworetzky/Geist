@@ -31,6 +31,7 @@ class PendingApproval:
     run_id: str
     call_id: str
     tool_name: str
+    allow_persistent: bool = True
     event: threading.Event = field(default_factory=threading.Event)
     decision: str | None = None
 
@@ -42,8 +43,20 @@ class ToolApprovalRegistry:
         self._lock = threading.Lock()
         self._pending: dict[tuple[str, str], PendingApproval] = {}
 
-    def request(self, run_id: str, call_id: str, tool_name: str) -> PendingApproval:
-        pending = PendingApproval(run_id=run_id, call_id=call_id, tool_name=tool_name)
+    def request(
+        self,
+        run_id: str,
+        call_id: str,
+        tool_name: str,
+        *,
+        allow_persistent: bool = True,
+    ) -> PendingApproval:
+        pending = PendingApproval(
+            run_id=run_id,
+            call_id=call_id,
+            tool_name=tool_name,
+            allow_persistent=allow_persistent,
+        )
         with self._lock:
             self._pending[(run_id, call_id)] = pending
         return pending
@@ -51,10 +64,15 @@ class ToolApprovalRegistry:
     def resolve(self, run_id: str, call_id: str, decision: str) -> bool:
         """Record a decision; False when nothing is waiting for this call."""
         if decision not in APPROVAL_DECISIONS:
-            raise ValueError(
-                f"decision must be one of {sorted(APPROVAL_DECISIONS)}"
-            )
+            raise ValueError(f"decision must be one of {sorted(APPROVAL_DECISIONS)}")
         with self._lock:
+            pending = self._pending.get((run_id, call_id))
+            if (
+                pending is not None
+                and not pending.allow_persistent
+                and decision in {"session", "always"}
+            ):
+                raise ValueError(f"{pending.tool_name} requires an approve-once or deny decision")
             pending = self._pending.pop((run_id, call_id), None)
         if pending is None:
             return False
@@ -85,8 +103,7 @@ class ToolApprovalRegistry:
         """Deny everything still pending for a finished/cancelled run."""
         with self._lock:
             entries = [
-                self._pending.pop(key)
-                for key in [key for key in self._pending if key[0] == run_id]
+                self._pending.pop(key) for key in [key for key in self._pending if key[0] == run_id]
             ]
         for pending in entries:
             pending.decision = "deny"
@@ -134,9 +151,7 @@ def persist_always_allow(user_id: int, tool_name: str) -> None:
 
     settings = get_user_settings(user_id)
     if settings is None:
-        logger.warning(
-            "Cannot persist always-allow for unknown user %s", user_id
-        )
+        logger.warning("Cannot persist always-allow for unknown user %s", user_id)
         return
     try:
         current = normalize_agent_permissions(settings.agent_permissions or {})

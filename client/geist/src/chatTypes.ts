@@ -12,6 +12,7 @@ export interface ToolCallResult {
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   requires_approval?: boolean;
+  requires_per_call_approval?: boolean;
   result_summary?: string;
   artifact_ids?: string[];
   error?: string;

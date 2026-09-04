@@ -101,6 +101,10 @@ to gate every side-effecting tool call during every continuation turn.
   text search, exact edits, writes, and the configured terminal backend.
 - Workspace paths cannot escape the configured root; common credential files
   are unavailable, and file writes/edits still require user approval.
+- Terminal commands require a fresh approval when they can reach a host
+  workspace or network. Auto-approve and standing grants cannot waive this
+  gate, and the destructive-command hardline applies to every host-reaching
+  execution backend.
 - Plan and goal bookkeeping tools never require approval; they cannot produce
   user-impacting side effects.
 - Orchestration tools are read/control-plane operations and never bypass the

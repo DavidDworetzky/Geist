@@ -154,7 +154,13 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                     aria-label={`Approve ${toolCall.name}`}
                     style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}
                   >
-                    {approvalChoices.map((choice) => (
+                    {approvalChoices
+                      .filter((choice) => (
+                        !toolCall.requires_per_call_approval
+                        || choice.decision === 'approve'
+                        || choice.decision === 'deny'
+                      ))
+                      .map((choice) => (
                       <button
                         key={choice.decision}
                         type="button"
@@ -164,7 +170,10 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                       >
                         {choice.label}
                       </button>
-                    ))}
+                      ))}
+                    {toolCall.requires_per_call_approval && (
+                      <span className="input-help">Approval applies to this command only.</span>
+                    )}
                   </div>
                 )}
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}

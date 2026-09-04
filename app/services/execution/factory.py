@@ -12,10 +12,10 @@ Environment variables (all optional; unset backend disables execution):
   execution is unavailable rather than silently using another runtime.
 - ``GEIST_EXEC_DOCKER_IMAGE``: sandbox image (default ``python:3.11-slim``).
 - ``GEIST_EXEC_DOCKER_NETWORK``: ``1``/``true`` to give the sandbox network
-  access (default: no network).
+  access (default: no network). Networked commands require per-call approval.
 - ``GEIST_EXEC_WORKSPACE``: host directory. For the docker backend this is
   bind-mounted at /workspace and makes the environment host-reaching (the
-  tool then requires approval); for the local backend it is the working
+  tool then requires per-call approval); for the local backend it is the working
   directory.
 - ``GEIST_EXEC_PERSISTENT``: ``1``/``true`` to keep one long-lived sandbox
   container per chat session (docker backend only), so filesystem state
@@ -76,8 +76,7 @@ def create_session_manager(environment: ExecutionEnvironment | None):
     if not isinstance(environment, DockerExecutionEnvironment):
         if environment is not None:
             logger.warning(
-                "GEIST_EXEC_PERSISTENT requires the docker backend; "
-                "persistent sessions disabled"
+                "GEIST_EXEC_PERSISTENT requires the docker backend; " "persistent sessions disabled"
             )
         return None
     from app.services.execution.session import (

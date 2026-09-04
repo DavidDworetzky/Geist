@@ -197,4 +197,20 @@ describe('ChatTextArea approval decisions', () => {
     render(<ChatTextArea chatHistory={[awaitingTurn()]} />);
     expect(screen.queryByRole('button', { name: 'Approve once' })).not.toBeInTheDocument();
   });
+
+  it('offers only one-time approval or denial for protected terminal commands', () => {
+    const turn = awaitingTurn();
+    turn.tool_calls![0] = {
+      ...turn.tool_calls![0],
+      name: 'terminal.run',
+      requires_per_call_approval: true,
+    };
+    render(<ChatTextArea chatHistory={[turn]} onToolApproval={() => {}} />);
+
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow for session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.getByText('Approval applies to this command only.')).toBeInTheDocument();
+  });
 });

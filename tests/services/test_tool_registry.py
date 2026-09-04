@@ -76,6 +76,7 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
     assert catalog["workspace.search"].requires_approval is False
     assert catalog["workspace.write_file"].requires_approval is True
     assert catalog["workspace.edit_file"].requires_approval is True
+    assert catalog["workspace.edit_file"].requires_per_call_approval is False
     assert catalog["communication.email.send"].requires_approval is True
     assert catalog["communication.sms.send"].requires_approval is True
 

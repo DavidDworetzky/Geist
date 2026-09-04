@@ -821,6 +821,63 @@ def test_approval_approve_resumes_and_executes():
     assert decisions == [("documents.search", "approve")]
 
 
+def test_per_call_terminal_approval_ignores_standing_grant():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    grants = SessionGrantRegistry()
+    grants.grant("chat:7", "terminal.run")
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="terminal.run",
+            description="Run a protected host command",
+            arguments_model=LookupArguments,
+            handler=lambda context, arguments: (
+                calls.append(arguments.query),
+                ToolExecutionOutput(content="ran"),
+            )[1],
+            requires_approval=True,
+            requires_per_call_approval=True,
+        )
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall(id="call_1", name="terminal.run", arguments={"query": "pwd"})],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Done.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(
+        registry,
+        approvals=approvals,
+        grants=grants,
+    )
+    _resolver(approvals, "approve", [])
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="run it",
+            user_id=1,
+            chat_id=7,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == [
+        "proposed",
+        "awaiting_approval",
+        "running",
+        "succeeded",
+    ]
+    assert all(state.requires_per_call_approval is True for state in tool_states)
+    assert calls == ["pwd"]
+
+
 def test_approval_deny_blocks_and_tells_model():
     calls = []
     approvals = ToolApprovalRegistry()

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - this module is the explicitly enabled host runner
 import time
 
 from app.services.execution.base import (
@@ -61,12 +61,15 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
     def is_sandboxed(self) -> bool:
         return False
 
+    def command_rejection_reason(self, command: str) -> str | None:
+        return detect_hardline_command(command)
+
     def run(
         self,
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
-        hardline = detect_hardline_command(command)
+        hardline = self.command_rejection_reason(command)
         if hardline is not None:
             return ExecutionResult(
                 exit_code=126,
@@ -79,7 +82,7 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
         timeout = clamp_timeout(timeout_seconds)
         started = time.monotonic()
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # nosec B603 B607 - intentional bounded bash runner
                 ["bash", "-c", command],
                 capture_output=True,
                 text=True,

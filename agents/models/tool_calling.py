@@ -162,6 +162,7 @@ class ToolDefinition:
     handler: ToolHandler
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
     approval_exempt: bool = False
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
@@ -197,11 +198,14 @@ def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> 
 
     The user's always-allow list is a standing grant, so it wins over both the
     per-tool flag and require_approval mode; internal bookkeeping never asks;
-    auto_approve waives everything else; require_approval asks for every
-    remaining tool; default falls back to the tool's own requires_approval flag.
+    per-call protected tools always ask; auto_approve waives everything else;
+    require_approval asks for every remaining tool; default falls back to the
+    tool's own requires_approval flag.
     """
     if definition.approval_exempt:
         return False
+    if definition.requires_per_call_approval:
+        return True
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
     if definition.name in context.always_allow_tools:

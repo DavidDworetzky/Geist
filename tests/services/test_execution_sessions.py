@@ -37,12 +37,24 @@ def test_session_exec_args_bound_the_command():
     assert args[-1].startswith("timeout 10 bash -c ")
 
 
+def test_host_mounted_session_blocks_hardline_before_runtime():
+    environment = DockerExecutionEnvironment(
+        workspace="/home/user/project",
+        runtime_path="/usr/bin/docker",
+    )
+    manager = DockerSessionManager(environment)
+    with patch("subprocess.run") as mock_run:
+        result = manager.run_in_session("chat-7", "rm -rf /workspace")
+
+    assert result.exit_code == 126
+    assert "BLOCKED" in result.stderr
+    mock_run.assert_not_called()
+
+
 def _manager(clock=None):
     env = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
     ticks = iter(range(0, 10_000))
-    return DockerSessionManager(
-        env, ttl_seconds=100.0, clock=clock or (lambda: next(ticks))
-    )
+    return DockerSessionManager(env, ttl_seconds=100.0, clock=clock or (lambda: next(ticks)))
 
 
 def test_run_in_session_reuses_running_container():
@@ -135,10 +147,13 @@ def test_idle_sessions_are_reaped_on_next_run():
 
 def test_shutdown_removes_all_tracked_sessions():
     manager = _manager()
-    with patch("subprocess.run", side_effect=[
-        _completed(0, stdout="true\n"),
-        _completed(0, stdout="a\n"),
-    ]):
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            _completed(0, stdout="true\n"),
+            _completed(0, stdout="a\n"),
+        ],
+    ):
         manager.run_in_session("chat-1", "echo a")
 
     with patch("subprocess.run", return_value=_completed(0)) as mock_run:

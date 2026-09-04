@@ -523,9 +523,7 @@ def run_routine(routine) -> None:
         )
         return
     user_id = int(routine.user_id)
-    params = CompleteTextParams(
-        prompt=routine.prompt, max_tokens=1024, enable_tools=True
-    )
+    params = CompleteTextParams(prompt=routine.prompt, max_tokens=1024, enable_tools=True)
     for _ in chat_orchestrator.stream(
         backend=agent,
         prompt=routine.prompt,
@@ -629,9 +627,7 @@ def create_app(
     @agent_router.post("/runs/{run_id}/tool_approval")
     def resolve_tool_approval(run_id: str, params: ToolApprovalParams):
         try:
-            resolved = tool_approval_registry.resolve(
-                run_id, params.call_id, params.decision
-            )
+            resolved = tool_approval_registry.resolve(run_id, params.call_id, params.decision)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         if not resolved:
@@ -678,6 +674,7 @@ def create_app(
                     "enabled": tool.name in enabled_names,
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
+                    "requires_per_call_approval": tool.requires_per_call_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }
@@ -1020,6 +1017,6 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 - container entrypoint must accept external traffic
         port=8000,  # 1MB (1024 * 1024 bytes)
     )

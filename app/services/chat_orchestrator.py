@@ -297,6 +297,7 @@ class ChatOrchestrator:
         artifact_ids: list[str] | None = None,
         error: str | None = None,
         requires_approval: bool = False,
+        requires_per_call_approval: bool = False,
     ) -> ToolCallResult:
         return ToolCallResult.create(
             id=call.id,
@@ -307,6 +308,7 @@ class ChatOrchestrator:
             artifact_ids=artifact_ids,
             error=error,
             requires_approval=requires_approval,
+            requires_per_call_approval=requires_per_call_approval,
         )
 
     @staticmethod
@@ -525,6 +527,9 @@ class ChatOrchestrator:
 
                     for call in completed_turn.tool_calls:
                         definition = self.registry.get(call.name)
+                        requires_per_call_approval = bool(
+                            definition and definition.requires_per_call_approval
+                        )
                         grant_scope = (
                             f"chat:{conversation.chat_id}"
                             if conversation.chat_id is not None
@@ -533,13 +538,17 @@ class ChatOrchestrator:
                         requires_approval = bool(
                             definition
                             and tool_requires_approval(definition, context)
-                            and call.name not in self.grants.granted(grant_scope)
+                            and (
+                                requires_per_call_approval
+                                or call.name not in self.grants.granted(grant_scope)
+                            )
                             and call.id not in approved_call_ids
                         )
                         proposed = self._tool_state(
                             call,
                             "proposed",
                             requires_approval=requires_approval,
+                            requires_per_call_approval=requires_per_call_approval,
                         )
                         yield ChatStreamEvent("tool_call", proposed)
 
@@ -558,10 +567,18 @@ class ChatOrchestrator:
                                 yield ChatStreamEvent(
                                     "tool_call",
                                     self._tool_state(
-                                        call, "awaiting_approval", requires_approval=True
+                                        call,
+                                        "awaiting_approval",
+                                        requires_approval=True,
+                                        requires_per_call_approval=(requires_per_call_approval),
                                     ),
                                 )
-                                pending = self.approvals.request(run.run_id, call.id, call.name)
+                                pending = self.approvals.request(
+                                    run.run_id,
+                                    call.id,
+                                    call.name,
+                                    allow_persistent=not requires_per_call_approval,
+                                )
                                 decision = self.approvals.wait(
                                     pending,
                                     self.approval_timeout_seconds,
@@ -581,9 +598,9 @@ class ChatOrchestrator:
                                     )
                                 else:
                                     approved_call_ids.add(call.id)
-                                    if decision == "session":
+                                    if decision == "session" and not requires_per_call_approval:
                                         self.grants.grant(grant_scope, call.name)
-                                    elif decision == "always":
+                                    elif decision == "always" and not requires_per_call_approval:
                                         try:
                                             self.always_allow_persister(user_id, call.name)
                                         except Exception:
@@ -601,7 +618,14 @@ class ChatOrchestrator:
                                 error="approval_denied",
                             )
                         else:
-                            yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                            yield ChatStreamEvent(
+                                "tool_call",
+                                self._tool_state(
+                                    call,
+                                    "running",
+                                    requires_per_call_approval=(requires_per_call_approval),
+                                ),
+                            )
                             result = self.registry.execute(
                                 call,
                                 replace(
@@ -641,6 +665,7 @@ class ChatOrchestrator:
                             artifact_ids=[artifact.id for artifact in result.artifacts],
                             error=result.error,
                             requires_approval=requires_approval,
+                            requires_per_call_approval=requires_per_call_approval,
                         )
                         run.record_tool_call(state)
                         run.record_artifacts(result.artifacts)

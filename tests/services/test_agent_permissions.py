@@ -35,13 +35,20 @@ def _context(
     )
 
 
-def _definition(name: str, handler: Mock, *, requires_approval: bool = False) -> ToolDefinition:
+def _definition(
+    name: str,
+    handler: Mock,
+    *,
+    requires_approval: bool = False,
+    requires_per_call_approval: bool = False,
+) -> ToolDefinition:
     return ToolDefinition(
         name=name,
         description=f"Test definition for {name}",
         arguments_model=WebSearchArguments,
         handler=handler,
         requires_approval=requires_approval,
+        requires_per_call_approval=requires_per_call_approval,
         timeout_seconds=1.0,
     )
 
@@ -116,6 +123,30 @@ def test_registry_always_allow_bypasses_per_tool_flag():
     handler.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        PERMISSION_MODE_DEFAULT,
+        PERMISSION_MODE_AUTO_APPROVE,
+        PERMISSION_MODE_REQUIRE_APPROVAL,
+    ],
+)
+def test_per_call_approval_cannot_be_bypassed(mode):
+    handler = Mock(return_value=ToolExecutionOutput(content="ran"))
+    definition = _definition(
+        "terminal.run",
+        handler,
+        requires_approval=True,
+        requires_per_call_approval=True,
+    )
+    context = _context(
+        mode=mode,
+        always_allow=frozenset({"terminal.run"}),
+    )
+
+    assert tool_requires_approval(definition, context) is True
+
+
 def test_normalize_agent_permissions_canonicalizes():
     normalized = normalize_agent_permissions(
         {"mode": "require_approval", "always_allow": [" b.tool", "a.tool", "a.tool"], "junk": 1}
@@ -138,9 +169,7 @@ def test_normalize_agent_permissions_defaults_and_errors():
 
 def test_load_agent_permissions_reads_stored_settings():
     stored = Mock(agent_permissions={"mode": "auto_approve", "always_allow": ["web.search"]})
-    with patch(
-        "app.models.database.user_settings.get_user_settings", return_value=stored
-    ):
+    with patch("app.models.database.user_settings.get_user_settings", return_value=stored):
         permissions = load_agent_permissions(1)
     assert permissions == AgentPermissions(
         mode="auto_approve", always_allow=frozenset({"web.search"})
@@ -152,9 +181,7 @@ def test_load_agent_permissions_falls_back_on_missing_or_malformed():
         assert load_agent_permissions(1) == AgentPermissions()
 
     stored = Mock(agent_permissions={"mode": "bogus"})
-    with patch(
-        "app.models.database.user_settings.get_user_settings", return_value=stored
-    ):
+    with patch("app.models.database.user_settings.get_user_settings", return_value=stored):
         assert load_agent_permissions(1) == AgentPermissions()
 
     with patch(

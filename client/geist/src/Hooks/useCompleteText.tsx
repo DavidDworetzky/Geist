@@ -96,6 +96,8 @@ const mergeToolCall = (
   arguments: update.arguments ?? current?.arguments ?? {},
   status: update.status ?? current?.status ?? 'proposed',
   requires_approval: update.requires_approval ?? current?.requires_approval,
+  requires_per_call_approval:
+    update.requires_per_call_approval ?? current?.requires_per_call_approval,
   result_summary: update.result_summary ?? current?.result_summary,
   artifact_ids: update.artifact_ids ?? current?.artifact_ids,
   error: update.error ?? current?.error,

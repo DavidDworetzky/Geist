@@ -7,10 +7,9 @@ path, no network by default, and PID/memory/CPU ceilings. The container
 receives an empty environment, so host credentials cannot leak by
 construction.
 
-The sandbox claim only holds while nothing is bind-mounted: configuring a
-host ``workspace`` flips ``is_sandboxed`` to False, which in turn makes the
-terminal tool register with ``requires_approval=True`` (the Hermes
-"host access" rule).
+Approval-free execution only applies while nothing is bind-mounted and the
+network is disabled. A host workspace or network access makes every terminal
+command require a fresh approval (the Hermes "external access" rule).
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - argv-only calls to the configured container runtime
 import time
 
 from app.services.execution.base import (
@@ -28,6 +27,7 @@ from app.services.execution.base import (
     clamp_timeout,
     truncate_output,
 )
+from app.services.execution.hardline import detect_hardline_command
 
 
 DEFAULT_IMAGE = "python:3.11-slim"
@@ -42,13 +42,23 @@ _DOCKER_OVERHEAD_SECONDS = 20
 _SANDBOX_USER = "65534:65534"
 
 _BASE_SECURITY_ARGS = [
-    "--cap-drop", "ALL",
-    "--security-opt", "no-new-privileges",
-    "--user", _SANDBOX_USER,
-    "--pids-limit", "256",
-    "--memory", "512m",
-    "--cpus", "1",
-    "--tmpfs", "/tmp:rw,nosuid,size=256m",
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--user",
+    _SANDBOX_USER,
+    "--pids-limit",
+    "256",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--tmpfs",
+    "/tmp:rw,nosuid,size=256m",  # nosec B108 - path exists only inside the container
+    "--env",
+    "HOME=/tmp",
 ]
 
 
@@ -135,6 +145,15 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
     def is_sandboxed(self) -> bool:
         return not self.has_host_access
 
+    @property
+    def requires_per_call_approval(self) -> bool:
+        return self.has_host_access or self.network
+
+    def command_rejection_reason(self, command: str) -> str | None:
+        if not self.has_host_access:
+            return None
+        return detect_hardline_command(command)
+
     def runtime(self) -> str | None:
         if self._runtime_path is None:
             self._runtime_path = find_container_runtime(self.runtime_preference)
@@ -148,6 +167,15 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
+        hardline = self.command_rejection_reason(command)
+        if hardline is not None:
+            return ExecutionResult(
+                exit_code=126,
+                stdout="",
+                stderr=f"BLOCKED: refusing unrecoverable command ({hardline})",
+                duration_seconds=0.0,
+                timed_out=False,
+            )
         runtime = self.runtime()
         if runtime is None:
             return ExecutionResult(
@@ -170,7 +198,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
 
         started = time.monotonic()
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # nosec B603 - argv invokes the resolved runtime
                 [runtime, *args],
                 capture_output=True,
                 text=True,
