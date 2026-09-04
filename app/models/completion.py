@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from agents.agent_type import AgentType
 
@@ -21,8 +21,7 @@ class CompleteTextParams(BaseModel):
     # Existing non-streaming API clients retain text-only behavior unless they
     # explicitly opt into the native model/tool loop.
     enable_tools: bool = False
-    # Agentic mode is intentionally default-on: decompose first, then continue
-    # until the executor explicitly completes the goal or reaches its budget.
+    # Agentic mode lets the executor plan, act, wait for input, and complete.
     agentic_mode: bool = True
     memory_enabled: bool = True
     memory_mode: str = "public"
@@ -40,3 +39,15 @@ class ToolApprovalParams(BaseModel):
     call_id: str
     # 'approve' (once) | 'session' (this chat) | 'always' (persist) | 'deny'
     decision: str
+
+
+class RunInstructionParams(BaseModel):
+    instruction_id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=20_000)
+
+    @field_validator("text")
+    @classmethod
+    def nonempty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Instruction must not be blank")
+        return value.strip()

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -134,10 +136,31 @@ class ToolContext:
     user_id: int
     chat_id: int | None
     run_id: str
-    approved_call_ids: frozenset[str] = frozenset()
     permission_mode: str = PERMISSION_MODE_DEFAULT
     always_allow_tools: frozenset[str] = frozenset()
     agentic_mode: bool = False
+    workspace_id: str | None = None
+    invocation_approval: InvocationApproval | None = None
+
+
+class InvocationApproval:
+    """One-use authorization bound to one server-issued call and validated payload."""
+
+    def __init__(self, call: ToolCall) -> None:
+        self._lock = threading.Lock()
+        self._fingerprint = self._digest(call)
+        self._used = False
+
+    @staticmethod
+    def _digest(call: ToolCall) -> str:
+        return hashlib.sha256(json.dumps(call.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def consume(self, call: ToolCall) -> bool:
+        with self._lock:
+            if self._used or self._fingerprint != self._digest(call):
+                return False
+            self._used = True
+            return True
 
 
 @dataclass

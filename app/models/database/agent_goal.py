@@ -27,9 +27,10 @@ class AgentGoal(Base):
     status = Column(String(32), nullable=False, default="active")
     plan_json = Column(Text, nullable=False, default="[]")
     turns_used = Column(Integer, nullable=False, default=0)
-    max_turns = Column(Integer, nullable=False, default=8)
+    max_turns = Column(Integer, nullable=False, default=48)
     completion_summary = Column(Text, nullable=True)
     completion_evidence_json = Column(Text, nullable=False, default="[]")
+    checkpoint_json = Column(Text, nullable=False, default="{}")
     create_date = Column(DateTime, default=datetime.datetime.utcnow)
     update_date = Column(
         DateTime,
@@ -51,6 +52,7 @@ def create_goal(snapshot: dict[str, Any], user_id: int, run_id: str) -> None:
             max_turns=int(snapshot["max_turns"]),
             completion_summary=snapshot.get("completion_summary"),
             completion_evidence_json=json.dumps(snapshot.get("completion_evidence", [])),
+            checkpoint_json=json.dumps(snapshot),
         )
         session.add(goal)
         session.commit()
@@ -65,6 +67,7 @@ def update_goal(snapshot: dict[str, Any]) -> None:
         if goal is None:
             return
         goal.status = snapshot["goal_status"]
+        goal.checkpoint_json = json.dumps(snapshot)
         goal.plan_json = json.dumps(snapshot["tasks"])
         goal.turns_used = int(snapshot["turns_used"])
         goal.max_turns = int(snapshot["max_turns"])
@@ -72,6 +75,20 @@ def update_goal(snapshot: dict[str, Any]) -> None:
         goal.completion_evidence_json = json.dumps(snapshot.get("completion_evidence", []))
         goal.update_date = datetime.datetime.utcnow()
         session.commit()
+
+
+def load_latest_goal(user_id: int, chat_id: int) -> dict[str, Any] | None:
+    with SessionLocal() as session:
+        goal = (
+            session.query(AgentGoal)
+            .filter_by(user_id=user_id, chat_id=chat_id)
+            .order_by(AgentGoal.create_date.desc(), AgentGoal.goal_id.desc())
+            .first()
+        )
+        if goal is None:
+            return None
+        snapshot = json.loads(goal.checkpoint_json or "{}")
+        return snapshot or None
 
 
 def attach_goal_to_chat(goal_id: str, chat_id: int) -> None:

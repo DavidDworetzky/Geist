@@ -82,7 +82,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                   && typeof element.orchestration.max_turns === 'number'
                   && (
                     <span className="input-help">
-                      Turn {element.orchestration.turns_used}/{element.orchestration.max_turns}
+                      Model calls {element.orchestration.turns_used}/{element.orchestration.max_turns}
                     </span>
                   )}
               </div>
@@ -98,10 +98,14 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                     <span>
                       <strong>{task.title}</strong>
                       {task.evidence && <small>{task.evidence}</small>}
+                      {task.skip_reason && <small>Skipped: {task.skip_reason}</small>}
                     </span>
                   </li>
                 ))}
               </ol>
+              {element.orchestration.instructions?.map((instruction) => (
+                <p key={instruction.id}>Your instruction ({instruction.status}): {instruction.text}</p>
+              ))}
             </section>
           )}
 

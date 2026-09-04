@@ -1,78 +1,96 @@
 from agents.models.orchestration import PlanTask
-from agents.models.tool_calling import ModelEvent, ModelRequestConfig, ModelTurn
-from app.services.goal_runtime import GoalRuntime, TaskDecomposer
+from app.services.goal_runtime import GoalRuntime
 
 
-class PlanningBackend:
-    def __init__(self, text: str):
-        self.text = text
-        self.tools = None
-
-    def stream_model_turn(self, messages, tools, config):
-        self.tools = tools
-        yield ModelEvent.turn_complete(ModelTurn(text=self.text))
+def runtime():
+    return GoalRuntime(objective="Implement voice notes", tasks=[], max_turns=10)
 
 
-def test_decomposer_normalizes_tool_free_json_plan():
-    backend = PlanningBackend(
-        '{"tasks":[{"title":"Build UI","acceptance_criteria":["UI test passes"]},'
-        '{"title":"Verify audio","acceptance_criteria":["Audio smoke passes"]}]}'
+def test_executor_can_create_and_revise_plan_after_discovery():
+    goal = runtime()
+    assert goal.update_plan([{"task_id": "audio", "title": "Add diarization"}])["accepted"]
+    assert goal.update_plan(
+        [
+            {
+                "task_id": "audio",
+                "title": "Reuse existing diarization",
+                "acceptance_criteria": ["Integration passes"],
+                "status": "in_progress",
+            }
+        ]
+    )["accepted"]
+    assert goal.state.tasks[0].title == "Reuse existing diarization"
+    assert goal.state.tasks[0].acceptance_criteria == ["Integration passes"]
+
+
+def test_completion_rejects_skipping_every_deliverable_and_blank_evidence():
+    goal = runtime()
+    goal.update_plan(
+        [{"task_id": "audio", "title": "Implement", "status": "skipped", "skip_reason": "Too hard"}]
     )
+    assert not goal.complete("Done", ["Skipped it"])["accepted"]
+    assert not runtime().complete("Done", [" "])["accepted"]
 
-    tasks, warning = TaskDecomposer().decompose(
-        backend,
-        "Add voice notes",
-        ModelRequestConfig(max_tokens=4096),
+
+def test_completion_requires_real_observation_references():
+    goal = runtime()
+    goal.observe("result-1", "terminal.run", "succeeded", "exit 0")
+    goal.update_plan(
+        [
+            {
+                "task_id": "audio",
+                "title": "Implement",
+                "status": "completed",
+                "evidence": "Tests passed",
+            }
+        ]
     )
-
-    assert backend.tools == []
-    assert warning is None
-    assert [task.id for task in tasks] == ["task-1", "task-2"]
-    assert tasks[0].acceptance_criteria == ["UI test passes"]
-
-
-def test_decomposer_falls_back_when_plan_is_invalid():
-    tasks, warning = TaskDecomposer().decompose(
-        PlanningBackend("not json"),
-        "Do the exact request",
-        ModelRequestConfig(),
-    )
-
-    assert warning == "The model returned an invalid task plan."
-    assert len(tasks) == 1
-    assert tasks[0].title == "Do the exact request"
+    assert not goal.complete("Done", ["Tests passed"], ["invented"])["accepted"]
+    assert not goal.complete("Done", ["Tests passed"], ["result-1"])["accepted"]
+    goal.update_plan([{"task_id": "audio", "evidence_refs": ["result-1"]}])
+    assert goal.complete("Done", ["Tests passed"], ["result-1"])["accepted"]
 
 
-def test_goal_completion_requires_closed_tasks_with_evidence():
-    runtime = GoalRuntime(
-        objective="Ship it",
-        tasks=[PlanTask(id="task-1", title="Implement")],
-        max_turns=3,
-    )
-
-    open_result = runtime.complete("Done", ["tests"])
-    assert open_result["accepted"] is False
-    assert open_result["open_task_ids"] == ["task-1"]
-
-    runtime.update_plan([{"task_id": "task-1", "status": "completed"}])
-    unverified_result = runtime.complete("Done", ["tests"])
-    assert unverified_result["accepted"] is False
-    assert unverified_result["unverified_task_ids"] == ["task-1"]
-
-    runtime.update_plan([{"task_id": "task-1", "status": "completed", "evidence": "pytest passed"}])
-    accepted = runtime.complete("Done", ["pytest passed"])
-    assert accepted["accepted"] is True
-    assert runtime.finish_turn() == "complete"
-    assert runtime.snapshot()["turns_used"] == 1
+def test_text_only_answers_need_no_plan_or_tool_observations():
+    assert runtime().complete("The answer is 42.", ["Derived from the user's question"])["accepted"]
 
 
-def test_goal_stops_at_bounded_turn_budget():
-    runtime = GoalRuntime(
-        objective="Ship it",
-        tasks=[PlanTask(id="task-1", title="Implement")],
-        max_turns=2,
-    )
+def test_skipped_tasks_require_explanations():
+    goal = runtime()
+    goal.state.tasks = [
+        PlanTask(id="a", title="Required", status="completed", evidence="Answered"),
+        PlanTask(id="b", title="Optional", status="skipped"),
+    ]
+    assert not goal.complete("Answered", ["Answered"])["accepted"]
+    goal.update_plan([{"task_id": "b", "skip_reason": "User explicitly removed this requirement"}])
+    assert goal.complete("Answered", ["Answered"])["accepted"]
 
-    assert runtime.finish_turn() == "active"
-    assert runtime.finish_turn() == "budget_limited"
-    assert runtime.snapshot()["turns_used"] == 2
+
+def test_wait_resume_preserves_state_and_extends_budget():
+    goal = runtime()
+    goal.state.workspace_id = "workspace-1"
+    goal.update_plan([{"task_id": "audio", "title": "Build voice notes"}])
+    goal.observe("obs-1", "workspace.read_file", "succeeded", "Existing audio found")
+    goal.finish_turn()
+    assert goal.wait_for_user("Which provider?")["accepted"]
+    saved = goal.checkpoint([{"role": "user", "content": "Implement voice notes"}])
+    resumed = GoalRuntime(objective="Use local", tasks=[], max_turns=5, saved=saved)
+    assert resumed.state.goal_id == goal.state.goal_id
+    assert resumed.state.objective == "Implement voice notes"
+    assert resumed.state.workspace_id == "workspace-1"
+    assert resumed.state.max_turns == 6
+    assert resumed.state.goal_status == "active"
+    assert resumed.transcript == saved["transcript"]
+    assert resumed.state.observations == goal.state.observations
+
+
+def test_budget_pauses_instead_of_claiming_completion():
+    goal = GoalRuntime(objective="Build", tasks=[], max_turns=1)
+    assert goal.finish_turn() == "budget_limited"
+
+
+def test_new_instruction_invalidates_a_stale_completion():
+    goal = runtime()
+    goal.complete("Done", ["Answer"])
+    goal.add_instruction({"id": "i1", "text": "Also add tests", "status": "queued"})
+    assert goal.state.goal_status == "active"

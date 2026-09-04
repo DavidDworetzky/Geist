@@ -14,6 +14,7 @@ interface EnhancedChatInputProps {
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   sessionId?: number;
   enableVoice?: boolean;
+  submitLabel?: string;
 }
 
 interface FileSuggestion extends FileItem {
@@ -29,7 +30,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   rows = 3,
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
-  enableVoice = true
+  enableVoice = true,
+  submitLabel = 'Send'
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
@@ -214,7 +216,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             disabled={disabled || !value.trim()}
             className="send-button"
           >
-            Send
+            {submitLabel}
           </button>
         </div>
       </div>

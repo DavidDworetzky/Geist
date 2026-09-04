@@ -1,132 +1,85 @@
-# Agentic Mode Decomposition and Goal Loop
+# Adaptive Agentic Harness
 
-## Goal
+## Scope
 
-Add one **Agentic mode** control to native Geist chat. When enabled with a
-native tool-call-capable backend it always:
+One default-on Agentic Mode setting enables a model-directed, budgeted tool loop.
+There is no intent router, mandatory preplanner, independent judge, or worker queue.
+Backends without native tool calling retain their single-turn behavior.
 
-1. asks the selected model for a small structured task plan before execution;
-2. keeps the same agent session working across multiple completed model/tool
-   turns until the agent explicitly marks the objective complete or a bounded
-   turn budget is reached.
+## Model and harness responsibilities
 
-The implementation follows Oh My Pi's core separation: todos describe the route,
-the goal preserves the destination, and normal tool execution remains inside the
-existing chat orchestrator. It deliberately does not add an independent LLM
-judge or a multi-agent work queue in this slice.
+The executor sees the conversation and available tools immediately. It can inspect
+the workspace, create or revise a visible plan with `agent.plan.update`, and proceed
+without a plan for simple answers. Plans are working state, not a prescribed queue.
 
-## Contracts
+One loop makes at most 48 model calls per run (configurable internally up to 200),
+with at most 10 tools in one model response. Every model call spends budget,
+including consecutive tool-use responses. The existing direct-mode limits remain.
+Tool output has a rolling context budget that prioritizes new observations while
+retaining call/result IDs and complete protocol sequences.
 
-### Setting and request
+The executor stops with `agent.goal.complete` or yields with `agent.goal.wait`.
+Ordinary prose is not completion. Exhaustion yields `budget_limited`; cancellation
+yields `paused`. Neither claims success. Resuming extends the model-call budget
+while preserving the goal ID, objective, plan, observations, and workspace identity.
 
-Add `user_settings.agentic_mode_enabled`, defaulting to `true`, and expose one
-toggle at the top of General settings. Extend `CompleteTextParams` with:
+Completion requires nonblank evidence, no open tasks, explanations for skipped
+tasks, and recorded observation references after tool work. All-skipped plans and
+invented references are rejected. References make the model's claim traceable;
+they are not semantic proof that the requested feature is correct.
 
-- `agentic_mode: bool = True`
+## Persistence and live instructions
 
-There is no intent router. The persisted setting is copied into each browser
-request, while API callers get agentic execution by default unless they
-explicitly opt out. The continuation budget is an internal bounded default.
+`GoalRuntime` owns synchronized working state. `GoalStore` persists a checkpoint
+containing the transcript, plan, observations, instruction inbox, and workspace ID.
+The database migration adds `AgentGoal.checkpoint_json`. User/chat-scoped lookup
+resumes unfinished goals when the user sends another message.
 
-### Plan
+`ChatOrchestrator` owns model/tool sequencing, permissions, SSE, cancellation, and
+terminal chat history persistence. Checkpoints retain complete tool-result blocks;
+a mid-tool interruption must be reconciled against the workspace before retrying.
+This is not an exactly-once side-effect transaction. A new chat is attached when
+its first terminal history record is saved; crash recovery before that attachment
+is not supported by chat lookup.
 
-A decomposition pass always runs when Agentic mode is enabled. It uses the same selected backend without tools and requests
-strict JSON containing at most twelve tasks. Each normalized task has:
+`POST /agent/runs/{run_id}/instructions` accepts owner-scoped, idempotent instruction
+IDs with bounded text and queue size. The active composer submits here without
+aborting the stream. Accepted instructions are checkpointed before acknowledgment.
+They interrupt approval waits and supersede unstarted calls from stale output.
+Already-running tools are not rolled back. Delivery occurs only between complete
+assistant/tool-result blocks, never in the middle of a provider tool sequence.
+The inbox closes atomically at terminal/budget boundaries; late accepted input
+at the budget remains queued for the next run. Duplicate active runs for an
+existing chat are rejected within the current process.
 
-- stable ID;
-- concise title;
-- acceptance criteria;
-- status (`pending`, `in_progress`, `completed`, `blocked`, or `skipped`);
-- optional evidence.
+## Tool boundaries
 
-Malformed decomposition output falls back to one task representing the original
-request, so enabling decomposition cannot prevent the real agent turn from
-starting. The model receives the normalized plan in its execution context and an
-`agent.plan.update` tool for recording progress.
+Each model tool call becomes a fresh server-issued invocation with normalized
+arguments. Approval is bound to its identity, tool name, and exact arguments,
+and consumed once. Duplicate provider call IDs are rejected. Existing per-call
+terminal gates, unattended denial, tool validation, and sandbox hardening remain.
 
-Backends without native tool calling keep the existing single-turn behavior.
-They cannot reliably emit the explicit plan and goal control tools, so the
-harness must not spin until its budget or infer success from ordinary prose.
+`CodingWorkspace` routes file and terminal operations to the same configured
+root or Docker/Podman session, including new chats. Conflicting explicit roots
+fail closed. File path containment, secret-file restrictions, and write approvals
+remain. Host-reaching/networked terminal calls still require fresh approval.
 
-### Goal
+Chat coding tools always share a container session; `GEIST_EXEC_PERSISTENT`
+remains an opt-in for legacy clients. The existing session TTL setting applies.
+Unconfigured container files live in tmpfs for that container's lifetime, not in
+durable storage. An explicit workspace mount is required to retain files across
+container expiry/recreation. A resumed agent should inspect before trusting old
+observations. Native local execution retains its existing platform-dependent
+isolation; this refactor does not make an unsandboxed platform sandboxed.
 
-One `AgentGoal` row records the objective, run/chat ownership, status, current
-plan, turn budget, and turns used. The statuses are:
+## Verification
 
-- `active`
-- `complete`
-- `paused`
-- `budget_limited`
-- `failed`
-
-The model receives an `agent.goal.complete` tool whenever Agentic mode is active. Completion is
-rejected while decomposed tasks remain pending, in progress, or blocked. The tool
-therefore expresses the executor's completion claim while deterministic state
-guards the claim.
-
-After an ordinary assistant final response:
-
-- non-agentic mode ends as today;
-- Agentic mode continues with a hidden continuation message unless the completion
-  tool succeeded;
-- reaching `goal_max_turns` persists `budget_limited` and returns control to the
-  user without claiming success;
-- cancellation or an execution failure persists a resumable/diagnostic terminal
-  status rather than completion.
-
-### Streaming/UI
-
-Add `plan` and `goal` SSE events. General settings exposes one default-on
-**Agentic mode** toggle, and the active transcript renders the task checklist,
-goal turn count, and terminal goal status. Existing tool approval UI continues
-to gate every side-effecting tool call during every continuation turn.
-
-## Service Boundaries
-
-- `GoalRuntime` owns in-run synchronized goal/plan mutation and completion
-  guards.
-- `GoalStore` owns SQLAlchemy persistence and chat attachment.
-- `TaskDecomposer` owns the bounded model pre-pass and normalization.
-- `ChatOrchestrator` owns lifecycle composition, SSE ordering, continuation, and
-  exactly-once chat persistence.
-- The tool registry exposes orchestration tools only when the `ToolContext`
-  enables Agentic mode.
-
-## Safety and Bounds
-
-- Goal continuation is capped at twenty turns by schema and defaults to eight.
-- Existing per-turn model-round and tool-call limits remain in force.
-- Decomposition has a twelve-task cap and bounded title/criteria/evidence text.
-- The default coding tool set includes contained file listing, bounded reads,
-  text search, exact edits, writes, and the configured terminal backend.
-- Workspace paths cannot escape the configured root; common credential files
-  are unavailable, and file writes/edits still require user approval.
-- Terminal commands require a fresh approval when they can reach a host
-  workspace or network. Auto-approve and standing grants cannot waive this
-  gate, and the destructive-command hardline applies to every host-reaching
-  execution backend.
-- Plan and goal bookkeeping tools never require approval; they cannot produce
-  user-impacting side effects.
-- Orchestration tools are read/control-plane operations and never bypass the
-  permission decision for actual side effects.
-- Unattended routine runs keep their current deny posture for approval-gated
-  tools.
-
-## Non-goals
-
-- No subagent spawning or durable Kanban-style worker queue.
-- No intent classifier or automatic per-request mode selection.
-- No separate completion-judge model.
-- No plan-approval gate; tool approvals remain the authorization boundary.
-- No migration of the legacy `BaseAgent.tick()` OODA endpoint.
-
-## Tests
-
-- Decomposer JSON normalization and single-task fallback.
-- Goal store lifecycle and ownership.
-- Orchestration tool availability, plan updates, and guarded completion.
-- Direct mode behavior remains unchanged.
-- Agentic mode automatically continues, completes explicitly, and stops at budget.
-- Approval/deny/cancel behavior remains correct inside goal continuation.
-- SSE reducer and UI tests cover toggles, plan progress, and goal status.
-- Docker/backend and frontend smoke checks per the Geist test loop.
+- Long consecutive tool sequences and exact model-call budget accounting.
+- Explicit completion, wait/resume, cancellation, and direct-mode contracts.
+- Durable checkpoint round trips and user/chat ownership.
+- Steering during generation, approvals, pre-dispatch, and completion; budget-edge
+  instruction retention, idempotence, and provider-valid transcripts.
+- Single-use approval and mismatched/repeated invocation rejection.
+- File/terminal interoperability in an actual isolated container.
+- Focused frontend hook, transcript, settings tests and production build.
+- Containerized backend tests and Docker/browser smoke per the Geist test loop.

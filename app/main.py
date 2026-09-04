@@ -39,6 +39,7 @@ from app.loopback_security import install_loopback_security
 from app.models.completion import (
     CompleteTextParams,
     InitializeAgentParams,
+    RunInstructionParams,
     ToolApprovalParams,
 )
 from app.models.database.agent_preset import AgentPreset
@@ -636,6 +637,22 @@ def create_app(
                 detail="No pending approval for this run and call",
             )
         return {"run_id": run_id, "call_id": params.call_id, "decision": params.decision}
+
+    @agent_router.post("/runs/{run_id}/instructions")
+    def add_run_instruction(run_id: str, params: RunInstructionParams):
+        user = get_default_user()
+        try:
+            instruction = run_controls.enqueue(
+                run_id, user.user_id, params.instruction_id, params.text
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if instruction is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This run is no longer accepting instructions. Send a new chat message to resume.",
+            )
+        return {"run_id": run_id, "instruction": instruction}
 
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):

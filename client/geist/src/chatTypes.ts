@@ -37,6 +37,7 @@ export type PlanTaskStatus =
 
 export type GoalStatus =
   | 'active'
+  | 'waiting_for_user'
   | 'complete'
   | 'paused'
   | 'budget_limited'
@@ -48,6 +49,8 @@ export interface PlanTask {
   acceptance_criteria: string[];
   status: PlanTaskStatus;
   evidence?: string | null;
+  evidence_refs?: string[];
+  skip_reason?: string | null;
 }
 
 export interface OrchestrationState {
@@ -61,6 +64,8 @@ export interface OrchestrationState {
   completion_summary?: string | null;
   completion_evidence?: string[];
   decomposition_warning?: string | null;
+  waiting_question?: string | null;
+  instructions?: Array<{ id: string; text: string; status: string }>;
 }
 
 export interface CompleteTextResponse {

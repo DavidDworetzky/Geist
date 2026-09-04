@@ -388,6 +388,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   const [state_chat_id, setStateChatId] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const [steeringError, setSteeringError] = useState<string | null>(null);
+  const [steeringStatus, setSteeringStatus] = useState<string | null>(null);
+  const [isSteering, setIsSteering] = useState(false);
+  const instructionSequenceRef = useRef(0);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
@@ -537,6 +541,8 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     activeRunIdRef.current = null;
 
     const currentChatId = chat_id === undefined ? state_chat_id : chat_id;
+    setSteeringError(null);
+    setSteeringStatus(null);
     const prompt = inputText;
     const params = getDefaultParams(userSettings);
     dispatch({ type: 'START', prompt, chatId: currentChatId });
@@ -634,6 +640,29 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     }
   };
 
+  const steerRun = async (text: string): Promise<boolean> => {
+    const runId = activeRunIdRef.current;
+    if (!runId || !streamState.loading) return false;
+    setIsSteering(true);
+    setSteeringError(null);
+    setSteeringStatus(null);
+    try {
+      const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/instructions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction_id: globalThis.crypto?.randomUUID?.() ?? `${runId}:${Date.now()}:${++instructionSequenceRef.current}`, text }),
+      });
+      if (!response.ok) throw new Error('Instructions were not accepted. Keep your message and send it again when the run finishes.');
+      setSteeringStatus('Instructions queued. The agent will read them before its next step.');
+      return true;
+    } catch (error) {
+      setSteeringError(error instanceof Error ? error.message : 'Could not send instructions.');
+      return false;
+    } finally {
+      setIsSteering(false);
+    }
+  };
+
   const cancelGeneration = async () => {
     const runId = activeRunIdRef.current;
     if (!runId) {
@@ -696,6 +725,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   return {
     prompt,
     completeText,
+    steerRun,
+    steeringError,
+    steeringStatus,
+    isSteering,
     cancelGeneration,
     resetChatSession,
     loading: streamState.loading,

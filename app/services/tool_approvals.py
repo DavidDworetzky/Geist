@@ -85,11 +85,16 @@ class ToolApprovalRegistry:
         pending: PendingApproval,
         timeout_seconds: float,
         cancellation: threading.Event | None = None,
+        interruption: threading.Event | None = None,
     ) -> str:
         """Block until a decision, cancellation, or timeout (both deny)."""
         remaining = timeout_seconds
         interval = 0.25
         while remaining > 0:
+            if interruption is not None and interruption.is_set():
+                with self._lock:
+                    self._pending.pop((pending.run_id, pending.call_id), None)
+                return "interrupted"
             if pending.event.wait(min(interval, remaining)):
                 return pending.decision or "deny"
             if cancellation is not None and cancellation.is_set():

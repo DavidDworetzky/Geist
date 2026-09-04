@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 
 PlanTaskStatus = Literal["pending", "in_progress", "completed", "blocked", "skipped"]
-GoalStatus = Literal["active", "complete", "paused", "budget_limited", "failed"]
+GoalStatus = Literal["active", "waiting_for_user", "complete", "paused", "budget_limited", "failed"]
 
 
 @dataclass
@@ -17,6 +17,8 @@ class PlanTask:
     acceptance_criteria: list[str] = field(default_factory=list)
     status: PlanTaskStatus = "pending"
     evidence: str | None = None
+    evidence_refs: list[str] = field(default_factory=list)
+    skip_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -34,6 +36,11 @@ class OrchestrationSnapshot:
     completion_summary: str | None = None
     completion_evidence: list[str] = field(default_factory=list)
     decomposition_warning: str | None = None
+    workspace_id: str | None = None
+    waiting_question: str | None = None
+    instructions: list[dict[str, str]] = field(default_factory=list)
+    observations: list[dict[str, Any]] = field(default_factory=list)
+    completion_refs: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {

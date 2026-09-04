@@ -156,7 +156,7 @@ describe('ChatTextArea agentic progress', () => {
     const progress = screen.getByRole('region', { name: 'Agentic progress' });
     expect(progress).toHaveTextContent('Agentic plan');
     expect(progress).toHaveTextContent('complete');
-    expect(progress).toHaveTextContent('Turn 2/8');
+    expect(progress).toHaveTextContent('Model calls 2/8');
     expect(progress).toHaveTextContent('Implement the UI');
     expect(progress).toHaveTextContent('UI test passes');
   });

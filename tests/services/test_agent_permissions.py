@@ -6,6 +6,7 @@ from agents.models.tool_calling import (
     PERMISSION_MODE_AUTO_APPROVE,
     PERMISSION_MODE_DEFAULT,
     PERMISSION_MODE_REQUIRE_APPROVAL,
+    InvocationApproval,
     ToolCall,
     ToolContext,
     ToolDefinition,
@@ -23,13 +24,13 @@ from app.services.tool_registry import ToolRegistry, WebSearchArguments
 def _context(
     mode: str = PERMISSION_MODE_DEFAULT,
     always_allow: frozenset[str] = frozenset(),
-    approved_call_ids: frozenset[str] = frozenset(),
+    approved_call: ToolCall | None = None,
 ) -> ToolContext:
     return ToolContext(
         user_id=42,
         chat_id=7,
         run_id="run-test",
-        approved_call_ids=approved_call_ids,
+        invocation_approval=InvocationApproval(approved_call) if approved_call else None,
         permission_mode=mode,
         always_allow_tools=always_allow,
     )
@@ -102,7 +103,7 @@ def test_registry_require_approval_gates_read_only_tool():
         call,
         _context(
             mode=PERMISSION_MODE_REQUIRE_APPROVAL,
-            approved_call_ids=frozenset({call.id}),
+            approved_call=call,
         ),
     )
     assert approved.status == "succeeded"
