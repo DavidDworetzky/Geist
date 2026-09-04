@@ -42,6 +42,15 @@ def run_server() -> None:
     initialize_database()
 
     import app.main as geist_main
+    from app.models.user_settings import UserSettingsUpdate
+    from app.services.user_settings_service import UserSettingsService
+
+    settings = UserSettingsService.get_default_workspace_settings()
+    if UserSettingsService.update_workspace_settings_by_id(
+        settings.user_id,
+        UserSettingsUpdate(default_agent_type="online"),
+    ) is None:
+        raise RuntimeError("browser E2E workspace settings were not initialized")
 
     def get_e2e_agent(_agent_type: Any) -> BrowserE2EAgent:
         return BrowserE2EAgent()

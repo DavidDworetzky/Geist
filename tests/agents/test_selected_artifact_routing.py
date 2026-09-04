@@ -70,6 +70,29 @@ def test_qwen_gguf_artifact_routes_to_llama_server_on_apple_silicon():
     assert local_agent.call_args.kwargs["device_config"] == {"artifact_id": "qwen-gguf"}
 
 
+def test_qwen3_8_gguf_artifact_routes_to_llama_server_on_linux():
+    manager = MagicMock()
+    manager.get_artifact.return_value = _artifact(
+        "qwen3.8-gguf", "Qwen/Qwen3.8-27B", "llama_server"
+    )
+
+    with (
+        patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": ""}),
+        patch("agents.factory.sys.platform", "linux"),
+        patch("app.services.local_models.get_local_model_manager", return_value=manager),
+        patch("agents.local_agent.LocalAgent") as local_agent,
+    ):
+        AgentFactory.create_agent(
+            "local",
+            MagicMock(),
+            model="Qwen/Qwen3.8-27B",
+            device_config={"artifact_id": "qwen3.8-gguf"},
+        )
+
+    assert local_agent.call_args.kwargs["runner_type"] == "llama_server"
+    assert local_agent.call_args.kwargs["device_config"] == {"artifact_id": "qwen3.8-gguf"}
+
+
 def test_mlx_artifact_routes_to_mlx_even_when_platform_inference_prefers_server():
     manager = MagicMock()
     manager.get_artifact.return_value = _artifact("qwen-mlx", "Qwen/Qwen3.8-27B", "mlx_llama")
@@ -179,6 +202,45 @@ def test_settings_preserve_selected_artifact_for_factory_resolution():
 
     assert create_agent.call_args.kwargs["runner_type"] is None
     assert create_agent.call_args.kwargs["device_config"] == {"artifact_id": "qwen-gguf"}
+
+
+def test_model_only_settings_bind_the_installed_compatible_artifact():
+    settings = _settings(
+        default_local_model="Qwen/Qwen3.8-27B",
+        default_local_artifact_id=None,
+    )
+    artifact = _artifact("qwen-mlx", "Qwen/Qwen3.8-27B", "mlx_llama")
+    manager = MagicMock()
+    manager.find_artifact.return_value = artifact
+    manager.status.return_value = {"status": "installed", "supported": True}
+
+    with patch("app.services.local_models.get_local_model_manager", return_value=manager):
+        config = AgentFactoryConfig.from_user_settings(settings)
+
+    assert config.device_config == {"artifact_id": "qwen-mlx"}
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"status": "not_installed", "supported": True},
+        {"status": "installed", "supported": False},
+    ],
+)
+def test_model_only_settings_do_not_bind_an_unavailable_artifact(status):
+    settings = _settings(
+        default_local_model="Qwen/Qwen3.8-27B",
+        default_local_artifact_id=None,
+    )
+    artifact = _artifact("qwen-mlx", "Qwen/Qwen3.8-27B", "mlx_llama")
+    manager = MagicMock()
+    manager.find_artifact.return_value = artifact
+    manager.status.return_value = status
+
+    with patch("app.services.local_models.get_local_model_manager", return_value=manager):
+        config = AgentFactoryConfig.from_user_settings(settings)
+
+    assert config.device_config == {}
 
 
 @pytest.mark.parametrize(

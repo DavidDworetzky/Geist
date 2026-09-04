@@ -148,8 +148,6 @@ class UserSettingsService:
             artifact_status = manager.status(artifact.id)
             if artifact_status.get("supported") is False:
                 raise ValueError(f"Artifact {artifact.id} is unavailable on this platform")
-            if artifact_status.get("status") != "installed":
-                raise ValueError(f"Artifact {artifact.id} must be installed before selection")
 
         # Backend validation: auto-infer agent_type based on model/provider changes
         # This acts as a safety net if the frontend doesn't set agent_type correctly

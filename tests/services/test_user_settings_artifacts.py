@@ -65,7 +65,7 @@ def test_changing_local_model_clears_stale_artifact_selection():
     )
 
 
-def test_artifact_selection_must_match_model_and_be_installed():
+def test_artifact_selection_must_match_model():
     current = _settings(default_local_artifact_id=None)
     artifact = MagicMock(id="new-artifact", model_id="other/model")
     manager = MagicMock()
@@ -83,17 +83,33 @@ def test_artifact_selection_must_match_model_and_be_installed():
             ),
         )
 
-    artifact.model_id = "new/model"
+
+
+def test_artifact_can_be_selected_before_installation():
+    current = _settings(default_local_artifact_id=None)
+    updated = _settings(
+        default_local_model="new/model",
+        default_local_artifact_id="new-artifact",
+    )
+    artifact = MagicMock(id="new-artifact", model_id="new/model")
+    manager = MagicMock()
+    manager.get_artifact.return_value = artifact
     manager.status.return_value = {"status": "not_installed", "supported": True}
     with (
         patch("app.services.user_settings_service.get_user_settings", return_value=current),
         patch("app.services.local_models.get_local_model_manager", return_value=manager),
-        pytest.raises(ValueError, match="must be installed"),
+        patch(
+            "app.services.user_settings_service.update_user_settings",
+            return_value=updated,
+        ),
     ):
-        UserSettingsService.update_workspace_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 default_local_model="new/model",
                 default_local_artifact_id="new-artifact",
             ),
         )
+
+    assert result is not None
+    assert result.default_local_artifact_id == "new-artifact"

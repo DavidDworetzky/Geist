@@ -5,7 +5,7 @@ API endpoints for model discovery and listing.
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from agents.architectures.llama_server_process import get_llama_server_manager
@@ -15,11 +15,12 @@ from agents.architectures.registry import (
     get_model_by_id,
     get_models_for_provider,
     get_provider_ids,
+    is_user_selectable_provider,
     provider_from_string,
     provider_to_string,
 )
 from agents.model_load_status import model_load_status_registry
-from app.services.local_models import get_local_model_manager
+from app.services.local_models import InsufficientStorageError, get_local_model_manager
 
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,8 @@ async def get_available_models():
 
         providers_dict = {}
         for provider, models in all_models.items():
+            if not is_user_selectable_provider(provider):
+                continue
             providers_dict[provider_to_string(provider)] = [
                 _model_response(model) for model in models
             ]
@@ -106,14 +109,14 @@ async def get_models_by_provider(provider: str):
     Get available models for a specific provider.
 
     Args:
-        provider: Provider name (openai, anthropic, groq, xai, huggingface, offline)
+        provider: Supported online provider name, or offline for local models
 
     Returns:
         List[ModelResponse]: Models for the specified provider
     """
     try:
         provider_enum = provider_from_string(provider)
-        if provider_enum is None:
+        if provider_enum is None or not is_user_selectable_provider(provider_enum):
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid provider: {provider}. Valid providers: {get_provider_ids()}",
@@ -201,6 +204,10 @@ def download_local_artifact(artifact_id: str):
         return get_local_model_manager().request_download(artifact_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except InsufficientStorageError as error:
+        raise HTTPException(status_code=507, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -246,8 +253,66 @@ def import_local_artifact(
             model_id=model_id,
             display_name=display_name,
         )
+    except InsufficientStorageError as error:
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _initialize_configured_local_runtime(model_id: str) -> None:
+    try:
+        from agents.agent_type import AgentType
+        from app.main import get_active_agent
+
+        get_active_agent(AgentType.LOCALAGENT)
+        # A repeated readiness request can reuse an already-cached agent. In
+        # that case no LocalAgent constructor runs to update the registry, so
+        # complete the lifecycle explicitly after every successful lookup.
+        model_load_status_registry.mark_ready(model_id)
+    except Exception as error:
+        status = model_load_status_registry.get(model_id)
+        if status.state != "failed":
+            model_load_status_registry.mark_failed(
+                model_id,
+                str(error),
+            )
+        logger.exception("Configured local model failed readiness initialization")
+
+
+@router.post("/local/runtime/start", response_model=ModelLoadStatusResponse)
+def start_local_runtime(background_tasks: BackgroundTasks):
+    """Validate the configured artifact and initialize its runner before chat submission."""
+
+    from app.models.user_settings import AgentFactoryConfig
+    from app.services.user_settings_service import UserSettingsService
+
+    settings = UserSettingsService.get_default_workspace_settings()
+    factory_config = AgentFactoryConfig.from_user_settings(settings)
+    model_id = factory_config.model
+    artifact_reference = factory_config.device_config.get("artifact_id") or model_id
+    manager = get_local_model_manager()
+
+    try:
+        artifact = manager.find_artifact(artifact_reference)
+        artifact_status = manager.status(artifact.id)
+        if artifact_status.get("supported") is False:
+            raise RuntimeError("Model not supported on this computer.")
+        if artifact_status.get("status") != "installed" or not artifact_status.get("path"):
+            detail = artifact_status.get("error") or "Model not installed."
+            raise RuntimeError(str(detail))
+    except (KeyError, RuntimeError, ValueError) as error:
+        status = model_load_status_registry.mark_failed(
+            model_id,
+            str(error),
+        )
+        return ModelLoadStatusResponse(**status.to_dict())
+
+    status = model_load_status_registry.mark_loading(
+        model_id,
+        f"Loading {artifact.display_name}.",
+    )
+    background_tasks.add_task(_initialize_configured_local_runtime, model_id)
+    return ModelLoadStatusResponse(**status.to_dict())
 
 
 @router.get("/local/runtime")

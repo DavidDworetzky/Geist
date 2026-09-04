@@ -3,6 +3,8 @@ import useCompleteText from './Hooks/useCompleteText';
 import useGetChatSessions from './Hooks/useGetChatSessions';
 import useFileContext from './Hooks/useFileContext';
 import useUserSettings from './Hooks/useUserSettings';
+import useLocalRuntimeReadiness from './Hooks/useLocalRuntimeReadiness';
+import useLocalArtifacts, { isArtifactInstalling } from './Hooks/useLocalArtifacts';
 import useChatMemory, { MemoryScope } from './Hooks/useChatMemory';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import ChatTextArea from './Components/ChatTextArea';
@@ -88,7 +90,33 @@ const Chat = () => {
   const { chatSessions, loading: isChatSessionLoading, error: chatSessionError, loadMore: loadMoreSessions, hasMore: hasMoreSessions, refreshChatSessions } = useGetChatSessions();
   const [userInput, setUserInput] = useState('');
   const [fileContextInfo, setFileContextInfo] = useState<string>('');
+  const [localInstallRetryError, setLocalInstallRetryError] = useState<string | null>(null);
   const { settings: userSettings } = useUserSettings();
+  const {
+    artifacts: localArtifacts,
+    loaded: localArtifactsLoaded,
+    error: localArtifactsError,
+    refreshLocalArtifacts,
+    downloadArtifact,
+  } = useLocalArtifacts({
+    enabled: userSettings?.default_agent_type === 'local',
+    pollWhileBusy: true,
+  });
+  const configuredLocalArtifact = userSettings ? localArtifacts.find(artifact => (
+    artifact.id === userSettings.default_local_artifact_id
+    || (!userSettings.default_local_artifact_id
+      && artifact.model_id === userSettings.default_local_model)
+  )) : undefined;
+  const localArtifactInstalled = configuredLocalArtifact?.status === 'installed'
+    && configuredLocalArtifact.supported !== false;
+  const localArtifactInstalling = isArtifactInstalling(configuredLocalArtifact);
+  const localArtifactCancelling = configuredLocalArtifact?.status === 'cancelling';
+  const localArtifactFailed = configuredLocalArtifact?.status === 'failed';
+  const localArtifactUnsupported = configuredLocalArtifact?.supported === false;
+  const {
+    status: localRuntimeStatus,
+    retry: retryLocalRuntime,
+  } = useLocalRuntimeReadiness(userSettings, localArtifactInstalled);
   const {
     completeText,
     cancelGeneration,
@@ -99,6 +127,37 @@ const Chat = () => {
     activeTurn,
     state_chat_id,
   } = useCompleteText(userSettings);
+  const localRuntimeBlocking = userSettings?.default_agent_type === 'local'
+    && (!localArtifactInstalled || localRuntimeStatus?.state !== 'ready');
+  const localRuntimeLoading = localArtifactInstalled
+    && localRuntimeStatus?.state !== 'ready'
+    && localRuntimeStatus?.state !== 'failed';
+  let localModelPlaceholder = 'Type your message...';
+  if (userSettings?.default_agent_type === 'local') {
+    if (!localArtifactsLoaded && !localArtifactsError) localModelPlaceholder = 'Checking model…';
+    else if (localArtifactsError || localArtifactUnsupported) localModelPlaceholder = 'Model unavailable';
+    else if (localArtifactCancelling) localModelPlaceholder = 'Cancelling…';
+    else if (localArtifactInstalling) localModelPlaceholder = 'Installing model…';
+    else if (localArtifactFailed) localModelPlaceholder = 'Install failed';
+    else if (!localArtifactInstalled) localModelPlaceholder = 'Model not installed';
+    else if (localRuntimeStatus?.state === 'failed') localModelPlaceholder = 'Model unavailable';
+    else if (localRuntimeLoading) localModelPlaceholder = 'Loading model…';
+  }
+  const localRuntimeErrorDetail = localRuntimeStatus?.detail.replace(
+    /^Model failed to load:\s*/i,
+    '',
+  );
+  const retryLocalInstall = async () => {
+    if (!configuredLocalArtifact) return;
+    setLocalInstallRetryError(null);
+    try {
+      await downloadArtifact(configuredLocalArtifact);
+    } catch (installError) {
+      setLocalInstallRetryError(
+        installError instanceof Error ? installError.message : 'Could not install model.',
+      );
+    }
+  };
   const { processMessage, isProcessing: isProcessingFiles, error: fileError } = useFileContext();
   const routeChatId = chatId ? parseInt(chatId, 10) : null;
   const selectedChatId = routeChatId ?? state_chat_id;
@@ -954,6 +1013,86 @@ const Chat = () => {
           </aside>
 
           <div className="chat-composer-dock" aria-hidden={chatDrawerState === 'expanded'}>
+            {userSettings?.default_agent_type === 'local' && localRuntimeLoading && (
+              <div className="chat-runtime-state" role="status">
+                <span className="runtime-model-spinner" aria-hidden="true" />
+                Loading model…
+              </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local' && localArtifactsError && (
+              <div className="notice notice-error chat-runtime-notice" role="alert">
+                <strong>Models unavailable</strong>
+                <span>{localArtifactsError}</span>
+                <button
+                  className="button button-secondary button-small"
+                  type="button"
+                  onClick={() => void refreshLocalArtifacts()}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local' && localArtifactsLoaded
+              && !localArtifactsError && !configuredLocalArtifact && (
+              <div className="chat-runtime-state" role="status">
+                <strong>Model not installed</strong>
+                <NavLink to="/models">Models</NavLink>
+              </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local' && configuredLocalArtifact
+              && !localArtifactInstalling && configuredLocalArtifact.status !== 'installed'
+              && !localArtifactFailed && !localArtifactUnsupported && (
+              <div className="chat-runtime-state" role="status">
+                <strong>Model not installed</strong>
+                <NavLink to="/models">Models</NavLink>
+              </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local'
+              && localArtifactFailed && (
+              <div className="notice notice-error chat-runtime-notice" role="alert">
+                <strong>Install failed</strong>
+                {(localInstallRetryError || configuredLocalArtifact.error) && (
+                  <span>{localInstallRetryError ?? configuredLocalArtifact.error}</span>
+                )}
+                <div>
+                  <button
+                    className="button button-secondary button-small"
+                    type="button"
+                    onClick={() => void retryLocalInstall()}
+                  >
+                    Retry
+                  </button>
+                  <NavLink className="button button-secondary button-small" to="/models">
+                    Models
+                  </NavLink>
+                </div>
+              </div>
+            )}
+
+            {userSettings?.default_agent_type === 'local' && localArtifactInstalled
+              && localRuntimeStatus?.state === 'failed' && (
+                <div className="notice notice-error chat-runtime-notice" role="alert">
+                  <strong>Model failed to load</strong>
+                  {localRuntimeErrorDetail && <span>{localRuntimeErrorDetail}</span>}
+                  <div>
+                    <button
+                      className="button button-secondary button-small"
+                      type="button"
+                      onClick={retryLocalRuntime}
+                    >
+                      Retry
+                    </button>
+                    <NavLink className="button button-secondary button-small" to="/models">
+                      Models
+                    </NavLink>
+                  </div>
+                </div>
+            )}
+
             {fileContextInfo && (
               <div className="chat-context-info">
                 {fileContextInfo}
@@ -965,8 +1104,8 @@ const Chat = () => {
                 value={userInput}
                 onChange={setUserInput}
                 onSubmit={handleSubmit}
-                disabled={isLoading || isProcessingFiles || isMemoryLoading}
-                placeholder="Type your message..."
+                disabled={isLoading || isProcessingFiles || isMemoryLoading || localRuntimeBlocking}
+                placeholder={localModelPlaceholder}
                 handleKeyDown={handleKeyDown}
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}

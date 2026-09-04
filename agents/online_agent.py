@@ -154,9 +154,7 @@ class OnlineAgent(BaseAgent):
 
         constrained = payload.copy()
         removed_parameters = [
-            parameter
-            for parameter in spec.unsupported_parameters
-            if parameter in constrained
+            parameter for parameter in spec.unsupported_parameters if parameter in constrained
         ]
         for parameter in spec.unsupported_parameters:
             constrained.pop(parameter, None)

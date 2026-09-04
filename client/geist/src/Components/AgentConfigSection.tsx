@@ -7,7 +7,6 @@ interface AgentConfigSectionProps {
   localModel: string;
   onlineProvider: string;
   onlineModel: string;
-  onLocalModelChange: (value: string) => void;
   onOnlineProviderChange: (value: string) => void;
   onOnlineModelChange: (value: string) => void;
 }
@@ -18,7 +17,6 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',
   xai: 'xAI (Grok)',
   groq: 'Groq',
-  huggingface: 'Hugging Face',
   moonshot: 'Moonshot AI',
   zai: 'Z.AI',
   deepseek: 'DeepSeek',
@@ -29,12 +27,13 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   custom: 'Custom Provider'
 };
 
+const NON_ONLINE_PROVIDER_IDS = new Set(['offline', 'huggingface', 'self-hosted']);
+
 const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   agentType,
   localModel,
   onlineProvider,
   onlineModel,
-  onLocalModelChange,
   onOnlineProviderChange,
   onOnlineModelChange
 }) => {
@@ -45,21 +44,8 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
     providers,
   } = useAvailableModels();
 
-  const localModelOptions = useMemo(() => {
-    const offlineModels = getModelsForProvider('offline');
-    if (offlineModels.length > 0) {
-      return offlineModels.map(m => ({ value: m.id, label: m.name }));
-    }
-
-    return [
-      { value: 'meta-llama/Meta-Llama-3.1-8B-Instruct', label: 'Meta-Llama-3.1-8B-Instruct' },
-      { value: 'meta-llama/Meta-Llama-3.1-8B', label: 'Meta-Llama-3.1-8B' },
-      { value: 'meta-llama/Meta-Llama-3-8B-Instruct', label: 'Meta-Llama-3-8B-Instruct' }
-    ];
-  }, [getModelsForProvider]);
-
   const onlineProviderOptions = useMemo(() => {
-    const onlineProviders = providers.filter(p => p !== 'offline');
+    const onlineProviders = providers.filter(p => !NON_ONLINE_PROVIDER_IDS.has(p));
 
     return onlineProviders.map(p => ({
       value: p,
@@ -96,16 +82,21 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
       </header>
 
       {agentType === 'local' ? (
-        <SettingsSelect
-          label="Local Model"
-          value={localModel}
-          options={localModelOptions}
-          onChange={onLocalModelChange}
-          description={
-            getModelById(localModel)?.performance_note ||
-            'Select which local model to use for generation'
-          }
-        />
+        <div className="settings-field">
+          <span className="settings-label">Local model</span>
+          <p className="settings-description">
+            {getModelById(localModel)?.performance_note ||
+              'Download and select a compatible local model from the Models page.'}
+          </p>
+          <div className="settings-readonly-item">
+            <span className="settings-value-pill">
+              {getModelById(localModel)?.name || localModel || 'No local model selected'}
+            </span>
+            <a className="button button-secondary button-small" href="/models">
+              Manage local models
+            </a>
+          </div>
+        </div>
       ) : (
         <>
           <SettingsSelect
@@ -113,7 +104,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             value={onlineProvider}
             options={onlineProviderOptions}
             onChange={handleProviderChange}
-            description="Select your preferred online API provider."
+            description="Select the online API provider Geist should use."
           />
 
           <SettingsSelect

@@ -49,8 +49,9 @@ uv run --frozen --no-dev --extra packaged python scripts/build_native_sidecar.py
 
 The complete directory to give a consuming application's stager is
 `/build/geist/geist` in that example. Windows and Linux consumers stage their
-CPU and Vulkan llama.cpp runtimes separately and configure their locations with
-`GEIST_LLAMA_SERVER_PATH` or `GEIST_LLAMA_RUNTIME_ROOT`.
+CPU and Vulkan llama.cpp runtimes under `runtimes/llama.cpp` beside the Geist
+executable. Geist discovers that packaged root automatically. Operators can
+override it with `GEIST_LLAMA_SERVER_PATH` or `GEIST_LLAMA_RUNTIME_ROOT`.
 
 ## Included runtime data
 
@@ -61,7 +62,12 @@ Every onedir bundle contains:
 - Geist package metadata and the dynamic database/adapter modules;
 - the MLX runner plus MLX native files on macOS ARM64; or
 - the `llama-server` runner on Windows/Linux (the llama.cpp runtime remains a
-  separately staged sibling directory).
+  separately staged sibling directory discovered at `runtimes/llama.cpp`).
+
+The Linux x86_64 Docker image includes the pinned CPU llama.cpp runtime at
+`/opt/geist-runtime/llama.cpp/cpu`. Its release archive is SHA-256 verified
+during the image build, and managed GGUF models are advertised only when the
+server executable is available.
 
 `geist-runtime.json` records the target, backend, tool versions, and SHA-256 of
 both dependency lockfiles. It deliberately contains no build timestamp so two

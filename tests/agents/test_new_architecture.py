@@ -1,6 +1,7 @@
 """
 Tests for the new agent architecture (LocalAgent and OnlineAgent).
 """
+
 from unittest.mock import Mock, patch
 
 import pytest
@@ -23,18 +24,16 @@ class MockRunner(BaseRunner):
         self.model_id = model_id
 
     def generate(self, prompt: str, generation_config: GenerationConfig):
-        return {
-            "generated_text": f"Generated: {prompt}",
-            "model": self.model_id
-        }
+        return {"generated_text": f"Generated: {prompt}", "model": self.model_id}
 
     def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
         return {
             "messages": [
                 {"role": "user", "content": user_prompt},
-                {"role": "assistant", "content": f"Response to: {user_prompt}"}
+                {"role": "assistant", "content": f"Response to: {user_prompt}"},
             ]
         }
+
 
 class TestRunnerRegistry:
     """Test the runner registry functionality."""
@@ -70,6 +69,7 @@ class TestRunnerRegistry:
         result = runner.generate("Hello", config)
         assert "Generated: Hello" in result["generated_text"]
 
+
 class TestAgentFactory:
     """Test the agent factory functionality."""
 
@@ -95,18 +95,15 @@ class TestAgentFactory:
         context.task_context = []
         context.execution_context = []
 
-        with patch('agents.local_agent.LocalAgent') as MockLocalAgent:
+        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
             AgentFactory.create_agent(
-                agent_type="local",
-                agent_context=context,
-                model="test-model",
-                runner_type="mock"
+                agent_type="local", agent_context=context, model="test-model", runner_type="mock"
             )
 
             MockLocalAgent.assert_called_once()
             args, kwargs = MockLocalAgent.call_args
-            assert kwargs['model_id'] == "test-model"
-            assert kwargs['runner_type'] == "mock"
+            assert kwargs["model_id"] == "test-model"
+            assert kwargs["runner_type"] == "mock"
 
     def test_create_online_agent(self):
         """Test creating an online agent."""
@@ -114,30 +111,27 @@ class TestAgentFactory:
         context = Mock()
         context.settings = settings
 
-        with patch('agents.online_agent.OnlineAgent') as MockOnlineAgent:
+        with patch("agents.online_agent.OnlineAgent") as MockOnlineAgent:
             AgentFactory.create_agent(
                 agent_type="online",
                 agent_context=context,
                 model="gpt-4",
                 endpoint="https://api.openai.com/v1/chat/completions",
-                api_key="test-key"
+                api_key="test-key",
             )
 
             MockOnlineAgent.assert_called_once()
             args, kwargs = MockOnlineAgent.call_args
-            assert kwargs['model'] == "gpt-4"
-            assert kwargs['base_url'] == "https://api.openai.com/v1/chat/completions"
-            assert kwargs['api_key'] == "test-key"
+            assert kwargs["model"] == "gpt-4"
+            assert kwargs["base_url"] == "https://api.openai.com/v1/chat/completions"
+            assert kwargs["api_key"] == "test-key"
 
     def test_invalid_agent_type(self):
         """Test that invalid agent types raise an error."""
         context = Mock()
 
         with pytest.raises(ValueError, match="Unknown agent type"):
-            AgentFactory.create_agent(
-                agent_type="invalid",
-                agent_context=context
-            )
+            AgentFactory.create_agent(agent_type="invalid", agent_context=context)
 
 
 def test_local_generation_config_preserves_zero_temperature():
@@ -155,6 +149,7 @@ def test_local_generation_config_preserves_zero_temperature():
 
     config = agent._create_generation_config()
     assert config.temperature == 0.4
+
 
 class TestUserSettingsIntegration:
     """Test integration with user settings."""
@@ -187,7 +182,7 @@ class TestUserSettingsIntegration:
             backup_providers=[],
             ui_preferences={},
             create_date=datetime.now(),
-            update_date=datetime.now()
+            update_date=datetime.now(),
         )
 
         # Test local agent config
@@ -220,15 +215,14 @@ class TestUserSettingsIntegration:
         settings.default_online_provider = "google"
         config = AgentFactoryConfig.from_user_settings(settings)
         assert config.model == "gemini-3.8-flash"
-        assert config.endpoint == (
-            "https://generativelanguage.googleapis.com/v1beta/openai"
-        )
+        assert config.endpoint == ("https://generativelanguage.googleapis.com/v1beta/openai")
 
         settings.default_online_provider = "meta"
         settings.default_online_model = "muse-spark-1.3"
         overrides = AgentConfigRequest(temperature=0.0)
         config = AgentFactoryConfig.from_user_settings(settings, overrides)
         assert config.generation_config["temperature"] == 0.0
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

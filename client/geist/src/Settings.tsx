@@ -17,8 +17,8 @@ import {
 type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
-  { value: 'local', label: 'Local Model' },
-  { value: 'online', label: 'Online Model' }
+  { value: 'local', label: 'Local' },
+  { value: 'online', label: 'Online' }
 ];
 
 const Settings: React.FC = () => {
@@ -216,7 +216,7 @@ const Settings: React.FC = () => {
                 value={localSettings.default_agent_type}
                 options={agentTypeOptions}
                 onChange={(value) => updateLocalSetting('default_agent_type', value)}
-                description="Choose whether to use a local or online language model by default."
+                description="Choose whether Geist runs inference locally or through an online API."
               />
               <SettingsToggle
                 label="Intent Router"
@@ -233,13 +233,6 @@ const Settings: React.FC = () => {
               localModel={localSettings.default_local_model}
               onlineProvider={localSettings.default_online_provider}
               onlineModel={localSettings.default_online_model}
-              onLocalModelChange={(value) => {
-                updateLocalSetting('default_local_model', value);
-                updateLocalSetting('default_local_artifact_id', null);
-                if (localSettings.default_agent_type !== 'local') {
-                  updateLocalSetting('default_agent_type', 'local');
-                }
-              }}
               onOnlineProviderChange={(value) => {
                 updateLocalSetting('default_online_provider', value);
                 if (localSettings.default_agent_type !== 'online') {

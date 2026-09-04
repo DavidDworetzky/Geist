@@ -1579,18 +1579,24 @@ def get_last_model_sync_time() -> datetime | None:
     return _last_model_sync
 
 
+def is_user_selectable_provider(provider: OnlineModelProviders | str) -> bool:
+    """Expose local models or providers backed by a supported online API."""
+
+    provider_id = provider_to_string(provider)
+    if provider_id == OnlineModelProviders.OFFLINE.value:
+        return True
+    provider_spec = PROVIDERS.get(provider_id)
+    return provider_spec is not None and bool(provider_spec.base_url)
+
+
 def get_provider_ids() -> list[str]:
-    """List legacy, catalog, static, and discovered provider IDs once."""
-    provider_ids = [provider.value for provider in OnlineModelProviders]
-    for provider in PROVIDERS:
-        if provider not in provider_ids:
-            provider_ids.append(provider)
-    _provider_key: OnlineModelProviders | str
-    for _provider_key in (*STATIC_MODELS, *DISCOVERED_MODELS):
-        provider_id = provider_to_string(_provider_key)
-        if provider_id not in provider_ids:
-            provider_ids.append(provider_id)
-    return provider_ids
+    """List user-selectable local and online provider IDs once."""
+
+    return [
+        provider_to_string(provider)
+        for provider in get_all_models()
+        if is_user_selectable_provider(provider)
+    ]
 
 
 def provider_from_string(
