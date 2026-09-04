@@ -823,6 +823,26 @@ for _spec in MODEL_SPECS:
 DISCOVERED_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
         ModelInfo(
+            id="gpt-6-astra",
+            name="GPT-6 Astra",
+            provider=OnlineModelProviders.OPENAI,
+            context_window=1050000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="gpt-6",
+            backend="openai_compatible",
+            supports_reasoning=True,
+            local=False,
+            performance_note=(
+                "Rolling out first through OpenAI Trusted Access; broader API access "
+                "is not yet generally available. Tool calling requires the Responses "
+                "API, which Geist's current Chat Completions transport does not expose."
+            ),
+        ),
+        ModelInfo(
             id="gpt-4-0613",
             name="GPT 4 0613",
             provider=OnlineModelProviders.OPENAI,
