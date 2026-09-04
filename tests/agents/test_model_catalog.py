@@ -165,6 +165,33 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     )
 
 
+def test_openai_gpt6_astra_metadata_is_explicit_and_rollout_aware():
+    astra = get_model_spec("gpt-6-astra")
+
+    assert astra.provider == "openai"
+    assert astra.backend == "openai_compatible"
+    assert astra.local is False
+    assert astra.family == "gpt-6"
+    assert astra.context_window == 1050000
+    assert astra.max_output_tokens == 128000
+    assert astra.supports_vision is True
+    assert astra.supports_function_calling is True
+    assert astra.supports_reasoning is True
+    assert astra.supports_streaming is True
+    assert astra.recommended is False
+    assert astra.mandatory_reasoning_effort is None
+    assert astra.unsupported_parameters == (
+        "temperature",
+        "top_p",
+        "top_logprobs",
+        "logprobs",
+    )
+    assert astra.performance_note is not None
+    assert "not yet generally available" in astra.performance_note
+    assert "Responses API" in astra.performance_note
+    assert get_provider_endpoint(astra.provider) == "https://api.openai.com/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -428,6 +455,7 @@ def test_existing_llama_id_preserves_optimized_runner():
     "muse-spark-1.2",
     "muse-spark-1.3",
     "gemini-3.8-flash",
+    "gpt-6-astra",
 ])
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
@@ -496,6 +524,13 @@ def test_meta_model_infers_first_party_endpoint(model_id):
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model=model_id)
     assert online_agent.call_args.kwargs["base_url"] == "https://api.meta.ai/v1"
+
+
+def test_openai_astra_infers_first_party_endpoint():
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model="gpt-6-astra")
+    assert online_agent.call_args.kwargs["base_url"] == "https://api.openai.com/v1"
 
 
 def test_self_hosted_model_requires_endpoint_or_environment():
@@ -616,6 +651,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert "openrouter" in response.providers
     assert "meta" in response.providers
     assert "google" in response.providers
+    assert any(model.id == "gpt-6-astra" for model in response.providers["openai"])
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(

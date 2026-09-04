@@ -258,6 +258,19 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="MXFP4 still targets roughly 80 GB of accelerator memory.",
     ),
     ModelSpec(
+        "gpt-6-astra", "GPT-6 Astra", "gpt-6", provider="openai",
+        backend="openai_compatible", context_window=1050000,
+        max_output_tokens=128000, supports_vision=True,
+        supports_function_calling=True, supports_reasoning=True,
+        supports_streaming=True, recommended=False, local=False,
+        unsupported_parameters=("temperature", "top_p", "top_logprobs", "logprobs"),
+        performance_note=(
+            "Rolling out first through OpenAI Trusted Access; broader API access is "
+            "not yet generally available. Tool calling requires the Responses API, "
+            "which Geist's current Chat Completions transport does not expose."
+        ),
+    ),
+    ModelSpec(
         "gemini-3.8-flash", "Gemini 3.8 Flash", "gemini", provider="google",
         backend="openai_compatible", context_window=1048576, max_output_tokens=65536,
         supports_vision=True, supports_function_calling=True, supports_reasoning=True,
