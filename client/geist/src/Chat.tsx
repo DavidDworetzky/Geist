@@ -181,6 +181,7 @@ const Chat = () => {
         status: h.status,
         tool_calls: h.tool_calls,
         artifacts: h.artifacts,
+        orchestration: h.orchestration,
       }));
 
       setChatHistory(prev => {
@@ -333,6 +334,7 @@ const Chat = () => {
       ai: completedTurn.message,
       tool_calls: completedTurn.tool_calls,
       artifacts: completedTurn.artifacts,
+      orchestration: completedTurn.orchestration,
     };
     setChatHistory(previous => {
       const existingHistory = previous?.chatHistory ?? [];
@@ -583,6 +585,7 @@ const Chat = () => {
             model_load: activeTurn!.model_load,
             tool_calls: activeTurn!.tool_calls,
             artifacts: activeTurn!.artifacts,
+            orchestration: activeTurn!.orchestration,
           },
         ]
       : (chatHistory?.chatHistory ?? []),

@@ -1800,6 +1800,49 @@ textarea:focus-visible {
   border-color: color-mix(in srgb, var(--geist-color-accent) 45%, var(--geist-color-border));
 }
 
+.agentic-progress {
+  max-width: min(820px, 92%);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--geist-color-accent) 7%, var(--geist-color-surface-strong));
+  border: 1px solid color-mix(in srgb, var(--geist-color-accent) 35%, var(--geist-color-border));
+  border-radius: var(--geist-radius-lg);
+}
+
+.agentic-progress-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.agentic-task-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agentic-task {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px;
+  color: var(--geist-color-text-muted);
+}
+
+.agentic-task small {
+  display: block;
+  margin-top: 2px;
+}
+
+.agentic-task-completed {
+  color: var(--geist-color-success);
+}
+
+.agentic-task-blocked {
+  color: var(--geist-color-danger);
+}
+
 .chat-speaker {
   display: block;
   margin-bottom: 4px;

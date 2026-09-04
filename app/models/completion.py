@@ -21,6 +21,9 @@ class CompleteTextParams(BaseModel):
     # Existing non-streaming API clients retain text-only behavior unless they
     # explicitly opt into the native model/tool loop.
     enable_tools: bool = False
+    # Agentic mode is intentionally default-on: decompose first, then continue
+    # until the executor explicitly completes the goal or reaches its budget.
+    agentic_mode: bool = True
     memory_enabled: bool = True
     memory_mode: str = "public"
     folder_id: int | None = None

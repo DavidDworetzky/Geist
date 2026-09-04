@@ -204,6 +204,50 @@ describe('chatStreamReducer', () => {
       }),
     ]);
   });
+
+  it('keeps streamed plan progress through the final response', () => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Build a feature',
+      chatId: null,
+    });
+    state = chatStreamReducer(state, {
+      type: 'PLAN_UPDATE',
+      tasks: [{
+        id: 'task-1',
+        title: 'Implement it',
+        acceptance_criteria: ['Test passes'],
+        status: 'pending',
+      }],
+    });
+    state = chatStreamReducer(state, {
+      type: 'GOAL_UPDATE',
+      orchestration: {
+        agentic_mode: true,
+        goal_status: 'complete',
+        turns_used: 1,
+        max_turns: 8,
+        tasks: [{
+          id: 'task-1',
+          title: 'Implement it',
+          acceptance_criteria: ['Test passes'],
+          status: 'completed',
+          evidence: 'Test passes',
+        }],
+      },
+    });
+    state = chatStreamReducer(state, {
+      type: 'FINAL',
+      prompt: 'Build a feature',
+      data: { message: ['Done'], chat_id: 2 },
+    });
+
+    expect(state.completedTurn?.orchestration).toMatchObject({
+      goal_status: 'complete',
+      turns_used: 1,
+      tasks: [expect.objectContaining({ status: 'completed' })],
+    });
+  });
 });
 
 describe('useCompleteText', () => {
@@ -340,7 +384,11 @@ describe('useCompleteText', () => {
       expect.objectContaining({ signal: expect.objectContaining({ aborted: false }) }),
     );
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
-    expect(requestBody).toMatchObject({ prompt: 'Say hello', enable_tools: true });
+    expect(requestBody).toMatchObject({
+      prompt: 'Say hello',
+      enable_tools: true,
+      agentic_mode: true,
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.state_chat_id).toBe(7);

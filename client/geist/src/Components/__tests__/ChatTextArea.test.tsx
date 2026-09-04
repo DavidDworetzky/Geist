@@ -132,6 +132,36 @@ describe('ChatTextArea tool activity', () => {
   });
 });
 
+describe('ChatTextArea agentic progress', () => {
+  it('renders goal turns, task status, and evidence', () => {
+    render(<ChatTextArea chatHistory={[{
+      run_id: 'run_agentic',
+      user: 'Build a feature',
+      ai: 'Done',
+      orchestration: {
+        agentic_mode: true,
+        goal_status: 'complete',
+        turns_used: 2,
+        max_turns: 8,
+        tasks: [{
+          id: 'task-1',
+          title: 'Implement the UI',
+          acceptance_criteria: ['UI test passes'],
+          status: 'completed',
+          evidence: 'UI test passes',
+        }],
+      },
+    }]} />);
+
+    const progress = screen.getByRole('region', { name: 'Agentic progress' });
+    expect(progress).toHaveTextContent('Agentic plan');
+    expect(progress).toHaveTextContent('complete');
+    expect(progress).toHaveTextContent('Turn 2/8');
+    expect(progress).toHaveTextContent('Implement the UI');
+    expect(progress).toHaveTextContent('UI test passes');
+  });
+});
+
 describe('ChatTextArea approval decisions', () => {
   const awaitingTurn = (): ChatPair => ({
     run_id: 'run_9',

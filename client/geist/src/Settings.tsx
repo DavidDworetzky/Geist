@@ -9,6 +9,7 @@ import AgentPermissionsSection from './Components/AgentPermissionsSection';
 import RoutinesSection from './Components/RoutinesSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
+import SettingsToggle from './Components/SettingsToggle';
 import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import {
@@ -212,6 +213,7 @@ const Settings: React.FC = () => {
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
         enable_rag_by_default: localSettings.enable_rag_by_default,
+        agentic_mode_enabled: localSettings.agentic_mode_enabled,
         default_max_tokens: localSettings.default_max_tokens,
         default_temperature: localSettings.default_temperature,
         default_top_p: localSettings.default_top_p,
@@ -361,6 +363,12 @@ const Settings: React.FC = () => {
                 <h3>General</h3>
                 <p>Choose the default runtime mode for new conversations.</p>
               </header>
+              <SettingsToggle
+                label="Agentic Mode"
+                checked={localSettings.agentic_mode_enabled !== false}
+                onChange={(value) => updateLocalSetting('agentic_mode_enabled', value)}
+                description="Break each request into a visible plan and keep working until the goal is explicitly completed."
+              />
               <SettingsSelect
                 label="Default Agent Type"
                 value={localSettings.default_agent_type}

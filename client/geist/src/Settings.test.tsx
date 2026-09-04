@@ -22,6 +22,7 @@ const baseSettings = {
   default_online_provider: 'openai',
   default_file_archives: [],
   enable_rag_by_default: false,
+  agentic_mode_enabled: true,
   default_max_tokens: 256,
   default_temperature: 0.7,
   default_top_p: 0.9,
@@ -144,6 +145,21 @@ describe('Settings page', () => {
       expect(screen.queryByRole('tab', { name: 'Developer' })).not.toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
     });
+  });
+
+  it('shows one default-on Agentic Mode control at the top of General settings', async () => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
+
+    renderSettings();
+    await waitForSettingsRefresh();
+
+    const agenticMode = screen.getByRole('button', { name: 'Agentic Mode' });
+    const agentType = screen.getByLabelText('Default Agent Type');
+    expect(agenticMode).toHaveAttribute('aria-pressed', 'true');
+    expect(agenticMode.compareDocumentPosition(agentType) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Agentic Mode' })).toHaveLength(1);
   });
 
   it('shows active plugins only after an explicit host-development update', async () => {

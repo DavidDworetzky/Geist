@@ -146,6 +146,7 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_online_provider="openai",
             default_file_archives=[],
             enable_rag_by_default=True,
+            agentic_mode_enabled=True,
             default_max_tokens=16,
             default_temperature=1.0,
             default_top_p=1.0,

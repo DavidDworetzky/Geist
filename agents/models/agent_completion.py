@@ -1,6 +1,7 @@
 import logging
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from agents.models.chat_result import ToolCallResult, WorkArtifact
 from agents.models.generic_completion import GenericCompletion
@@ -19,6 +20,7 @@ class AgentCompletion:
     run_id: str | None = None
     tool_calls: list[ToolCallResult] = field(default_factory=list)
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    orchestration: dict[str, Any] | None = None
 
     @classmethod
     def from_completion(cls, completion: LlamaCompletion | GenericCompletion) -> "AgentCompletion":
@@ -33,6 +35,7 @@ class AgentCompletion:
                 run_id=getattr(completion, "run_id", None),
                 tool_calls=getattr(completion, "tool_calls", []),
                 artifacts=getattr(completion, "artifacts", []),
+                orchestration=getattr(completion, "orchestration", None),
             )
         elif isinstance(completion, LlamaCompletion):
             content = completion.get_assistant_content()
@@ -45,6 +48,7 @@ class AgentCompletion:
                 run_id=getattr(completion, "run_id", None),
                 tool_calls=getattr(completion, "tool_calls", []),
                 artifacts=getattr(completion, "artifacts", []),
+                orchestration=getattr(completion, "orchestration", None),
             )
         else:
             raise ValueError(f"Unsupported completion type: {type(completion).__name__}")

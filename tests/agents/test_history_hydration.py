@@ -30,14 +30,22 @@ def test_server_side_history_hydration_in_completion(stream_model_turn, online_a
     # First turn
     r1 = client.post(
         f"/agent/complete_text/{session_id}",
-        json={"prompt": "First message", "agent_type": "GPT4AGENT"},
+        json={
+            "prompt": "First message",
+            "agent_type": "GPT4AGENT",
+            "agentic_mode": False,
+        },
     )
     assert r1.status_code == 200
 
     # Second turn
     r2 = client.post(
         f"/agent/complete_text/{session_id}",
-        json={"prompt": "Second message", "agent_type": "GPT4AGENT"},
+        json={
+            "prompt": "Second message",
+            "agent_type": "GPT4AGENT",
+            "agentic_mode": False,
+        },
     )
     assert r2.status_code == 200
 

@@ -14,8 +14,9 @@ from agents.models.tool_calling import (
 )
 from app.services.agent_permissions import AgentPermissions
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.goal_runtime import GoalRuntimeRegistry
 from app.services.tool_approvals import SessionGrantRegistry, ToolApprovalRegistry
-from app.services.tool_registry import ToolRegistry
+from app.services.tool_registry import ToolRegistry, build_default_tool_registry
 
 
 class LookupArguments(BaseModel):
@@ -41,6 +42,22 @@ class ScriptedBackend:
         if turn.text:
             yield ModelEvent.text_delta(turn.text)
         yield ModelEvent.turn_complete(turn)
+
+
+class RecordingGoalStore:
+    def __init__(self):
+        self.created = []
+        self.updated = []
+        self.attached = []
+
+    def create(self, snapshot, user_id, run_id):
+        self.created.append((snapshot, user_id, run_id))
+
+    def update(self, snapshot):
+        self.updated.append(snapshot)
+
+    def attach_chat(self, goal_id, chat_id):
+        self.attached.append((goal_id, chat_id))
 
 
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///tmp/secret", "not-a-url"])
@@ -121,6 +138,128 @@ def test_tool_result_reenters_model_context_and_turn_persists_once():
     assert completion.chat_id == 42
     assert completion.tool_calls[0].id == "call_1"
     assert completion.message == ["I found 2023-tax-return.pdf."]
+
+
+def test_agentic_mode_decomposes_and_continues_until_explicit_completion():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                text=(
+                    '{"tasks":[{"title":"Implement feature",'
+                    '"acceptance_criteria":["Focused test passes"]}]}'
+                )
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_1",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "task-1",
+                                    "status": "completed",
+                                    "evidence": "Focused test passes",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="goal_1",
+                        name="agent.goal.complete",
+                        arguments={
+                            "summary": "Feature implemented",
+                            "evidence": ["Focused test passes"],
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(text="Implemented and verified."),
+        ]
+    )
+    writes = []
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        history_writer=lambda **kwargs: writes.append(kwargs)
+        or SimpleNamespace(chat_session_id=41),
+        permissions_loader=lambda user_id: AgentPermissions(mode="require_approval"),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Add a feature",
+            user_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Use tools.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    assert backend.requests[0]["tools"] == []
+    assert backend.requests[1]["tools"] == ["agent.plan.update", "agent.goal.complete"]
+    assert [event.event for event in events].count("plan") == 2
+    assert not any(
+        event.event == "tool_call" and event.payload.status == "awaiting_approval"
+        for event in events
+    )
+    completion = next(event.payload for event in events if event.event == "final")
+    assert completion.message == ["Implemented and verified."]
+    assert completion.orchestration["goal_status"] == "complete"
+    assert completion.orchestration["turns_used"] == 1
+    assert writes[0]["orchestration"]["tasks"][0]["status"] == "completed"
+    assert len(goal_store.created) == 1
+    assert goal_store.attached == [(completion.orchestration["goal_id"], 41)]
+
+
+def test_agentic_mode_stops_without_success_claim_at_budget():
+    runtime_registry = GoalRuntimeRegistry()
+    registry = build_default_tool_registry(runtime_registry)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(text='{"tasks":[{"title":"Finish work"}]}'),
+            ModelTurn(text="Still working."),
+            ModelTurn(text="More remains."),
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_max_turns=2,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+    )
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Do a large task",
+            user_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+            agentic_mode=True,
+        )
+    )
+
+    completion = next(event.payload for event in events if event.event == "final")
+    assert completion.orchestration["goal_status"] == "budget_limited"
+    assert completion.orchestration["turns_used"] == 2
+    assert "without claiming completion" in completion.message[0]
+    assert any(
+        message["role"] == "user" and "Continue autonomously" in message["content"]
+        for message in backend.requests[-1]["messages"]
+    )
 
 
 def test_artifact_bytes_are_live_but_not_persisted_inline():
@@ -456,7 +595,9 @@ def test_auto_approve_permissions_execute_approval_gated_tool():
         [
             ModelTurn(
                 tool_calls=[
-                    ToolCall(id="call_1", name="communication.email.send", arguments={"query": "hi"})
+                    ToolCall(
+                        id="call_1", name="communication.email.send", arguments={"query": "hi"}
+                    )
                 ],
                 finish_reason="tool_calls",
             ),

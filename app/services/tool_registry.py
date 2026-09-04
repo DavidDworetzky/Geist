@@ -32,6 +32,7 @@ from app.services.execution.base import (
     MAX_COMMAND_TIMEOUT_SECONDS,
 )
 from app.services.execution.docker import DockerExecutionEnvironment
+from app.services.goal_runtime import GoalRuntimeRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,21 @@ class SmsSendArguments(StrictToolArguments):
     number: str = Field(pattern=r"^\+[1-9]\d{7,14}$")
     message: str = Field(min_length=1, max_length=1600)
     idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class PlanTaskUpdate(StrictToolArguments):
+    task_id: str = Field(min_length=1, max_length=64)
+    status: Literal["pending", "in_progress", "completed", "blocked", "skipped"]
+    evidence: str | None = Field(default=None, max_length=2000)
+
+
+class PlanUpdateArguments(StrictToolArguments):
+    updates: list[PlanTaskUpdate] = Field(min_length=1, max_length=12)
+
+
+class GoalCompleteArguments(StrictToolArguments):
+    summary: str = Field(min_length=1, max_length=4000)
+    evidence: list[str] = Field(min_length=1, max_length=20)
 
 
 class ToolRegistry:
@@ -203,7 +219,9 @@ class ToolRegistry:
         )
 
 
-def build_default_tool_registry() -> ToolRegistry:
+def build_default_tool_registry(
+    orchestration_runs: GoalRuntimeRegistry | None = None,
+) -> ToolRegistry:
     explicitly_enabled = {
         name.strip()
         for name in os.getenv("GEIST_ENABLED_CHAT_TOOLS", "").split(",")
@@ -213,6 +231,68 @@ def build_default_tool_registry() -> ToolRegistry:
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
     markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+
+    if orchestration_runs is not None:
+
+        def plan_update(
+            context: ToolContext, arguments: PlanUpdateArguments
+        ) -> ToolExecutionOutput:
+            result = orchestration_runs.update_plan(
+                context.run_id,
+                [update.model_dump(exclude_none=True) for update in arguments.updates],
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(result, ensure_ascii=False),
+                summary=(
+                    "Updated agentic plan"
+                    if result.get("accepted")
+                    else str(result.get("error", "Plan update rejected"))
+                ),
+            )
+
+        def goal_complete(
+            context: ToolContext, arguments: GoalCompleteArguments
+        ) -> ToolExecutionOutput:
+            result = orchestration_runs.complete_goal(
+                context.run_id,
+                arguments.summary,
+                arguments.evidence,
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(result, ensure_ascii=False),
+                summary=(
+                    "Goal completion accepted"
+                    if result.get("accepted")
+                    else str(result.get("error", "Goal completion rejected"))
+                ),
+            )
+
+        registry.register(
+            ToolDefinition(
+                name="agent.plan.update",
+                description=(
+                    "Update one or more tasks in the active agentic plan. Mark a task "
+                    "completed only after its acceptance criteria have direct evidence."
+                ),
+                arguments_model=PlanUpdateArguments,
+                handler=plan_update,
+                approval_exempt=True,
+                availability=lambda context: context.agentic_mode,
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                name="agent.goal.complete",
+                description=(
+                    "Claim that the active goal is fully complete after auditing every "
+                    "deliverable. Completion is rejected while plan tasks remain open."
+                ),
+                arguments_model=GoalCompleteArguments,
+                handler=goal_complete,
+                approval_exempt=True,
+                availability=lambda context: context.agentic_mode,
+            )
+        )
 
     def web_search(context: ToolContext, arguments: WebSearchArguments) -> ToolExecutionOutput:
         results = search_adapter.search(

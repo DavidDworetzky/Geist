@@ -24,6 +24,13 @@ from agents.models.tool_calling import (
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
 from app.services.agent_permissions import AgentPermissions, load_agent_permissions
+from app.services.goal_runtime import (
+    GoalRuntime,
+    GoalRuntimeRegistry,
+    GoalStore,
+    NullGoalStore,
+    TaskDecomposer,
+)
 from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     SessionGrantRegistry,
@@ -144,6 +151,10 @@ class ChatOrchestrator:
         grants: SessionGrantRegistry = session_grants,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         always_allow_persister: Callable[[int, str], None] = persist_always_allow,
+        orchestration_runs: GoalRuntimeRegistry | None = None,
+        goal_store: GoalStore | None = None,
+        decomposer: TaskDecomposer | None = None,
+        goal_max_turns: int = 8,
     ) -> None:
         self.registry = registry
         self.permissions_loader = permissions_loader
@@ -159,6 +170,10 @@ class ChatOrchestrator:
         self.max_tool_result_chars_total = max_tool_result_chars_total
         self.history_loader = history_loader
         self.history_writer = history_writer
+        self.orchestration_runs = orchestration_runs or GoalRuntimeRegistry()
+        self.goal_store = goal_store or NullGoalStore()
+        self.decomposer = decomposer or TaskDecomposer()
+        self.goal_max_turns = max(1, min(goal_max_turns, 20))
 
     @staticmethod
     def _entry_messages(entry: Any) -> list[ChatMessage]:
@@ -334,6 +349,7 @@ class ChatOrchestrator:
         memory_mode: str = "public",
         folder_id: int | None = None,
         interactive: bool = True,
+        agentic_mode: bool = False,
     ) -> Iterator[ChatStreamEvent]:
         conversation = ConversationState(chat_id=chat_id, user_id=user_id)
         conversation.add_system_prompt(system_prompt)
@@ -351,11 +367,16 @@ class ChatOrchestrator:
             run_id=run.run_id,
             permission_mode=permissions.mode,
             always_allow_tools=frozenset(permissions.always_allow),
+            agentic_mode=agentic_mode,
         )
+        runtime: GoalRuntime | None = None
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
-        tools = (
-            self.registry.definitions_for_context(context) if enable_tools and native_tools else []
-        )
+        available_tools = self.registry.definitions_for_context(context) if native_tools else []
+        tools = [
+            definition
+            for definition in available_tools
+            if enable_tools or definition.approval_exempt
+        ]
 
         def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
             with run.persistence_lock:
@@ -370,6 +391,7 @@ class ChatOrchestrator:
                 snapshot["memory_enabled"] = memory_enabled
                 snapshot["memory_mode"] = memory_mode
                 snapshot["folder_id"] = folder_id
+                snapshot["orchestration"] = runtime.snapshot() if runtime is not None else None
                 snapshot["artifacts"] = [
                     self._artifact_for_history(artifact) for artifact in list(run.artifacts)
                 ]
@@ -385,6 +407,12 @@ class ChatOrchestrator:
                     return conversation.chat_id
                 persisted_chat_id = getattr(history, "chat_session_id", conversation.chat_id)
                 run.mark_persisted(persisted_chat_id)
+                if (
+                    runtime is not None
+                    and runtime.state.goal_id is not None
+                    and persisted_chat_id is not None
+                ):
+                    self.goal_store.attach_chat(runtime.state.goal_id, persisted_chat_id)
                 return conversation.chat_id
 
         def cancelled_payload() -> dict[str, Any]:
@@ -395,6 +423,8 @@ class ChatOrchestrator:
             return {"run_id": run.run_id, "chat_id": persisted_chat_id}
 
         def persist_cancelled_state() -> bool:
+            if runtime is not None:
+                runtime.pause()
             cancelled_payload()
             return run.persisted_status == "cancelled"
 
@@ -411,180 +441,255 @@ class ChatOrchestrator:
                 "run_started",
                 {"run_id": run.run_id, "chat_id": conversation.chat_id},
             )
-
-            for _round_number in range(self.max_rounds):
+            if agentic_mode:
+                tasks, decomposition_warning = self.decomposer.decompose(backend, prompt, config)
                 if cancellation.is_set():
                     yield ChatStreamEvent("cancelled", cancelled_payload())
                     return
+                runtime = GoalRuntime(
+                    objective=prompt,
+                    tasks=tasks,
+                    max_turns=self.goal_max_turns,
+                    decomposition_warning=decomposition_warning,
+                    on_change=self.goal_store.update,
+                )
+                self.orchestration_runs.start(run.run_id, runtime)
+                self.goal_store.create(runtime.snapshot(), user_id, run.run_id)
+                orchestration_prompt = runtime.execution_prompt()
+                if conversation.messages and conversation.messages[0].role == "system":
+                    current_prompt = conversation.messages[0].content or ""
+                    conversation.messages[
+                        0
+                    ].content = f"{current_prompt}\n\n{orchestration_prompt}".strip()
+                else:
+                    conversation.messages.insert(
+                        0, ChatMessage(role="system", content=orchestration_prompt)
+                    )
+                snapshot = runtime.snapshot()
+                yield ChatStreamEvent(
+                    "plan",
+                    {
+                        "tasks": snapshot["tasks"],
+                        "warning": snapshot["decomposition_warning"],
+                    },
+                )
+                yield ChatStreamEvent("goal", snapshot)
 
-                completed_turn = None
-                for event in backend.stream_model_turn(run.model_messages, tools, config):
+            goal_turn_limit = self.goal_max_turns if runtime is not None else 1
+            for _goal_turn in range(goal_turn_limit):
+                model_turn_completed = False
+                turn_tool_calls = 0
+
+                for _round_number in range(self.max_rounds):
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
-                    if not isinstance(event, ModelEvent):
-                        raise TypeError("Model backend returned an invalid event")
-                    if event.kind == "text_delta" and event.text:
-                        yield ChatStreamEvent("delta", {"text": event.text})
-                    elif event.kind == "turn_complete":
-                        completed_turn = event.turn
 
-                if completed_turn is None:
-                    raise RuntimeError("Model backend did not complete its turn")
+                    completed_turn = None
+                    for event in backend.stream_model_turn(run.model_messages, tools, config):
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+                        if not isinstance(event, ModelEvent):
+                            raise TypeError("Model backend returned an invalid event")
+                        if event.kind == "text_delta" and event.text:
+                            yield ChatStreamEvent("delta", {"text": event.text})
+                        elif event.kind == "turn_complete":
+                            completed_turn = event.turn
 
-                assistant_message = ChatMessage(
-                    role="assistant",
-                    content=completed_turn.text or None,
-                    tool_calls=completed_turn.tool_calls,
-                )
-                run.record_assistant(assistant_message)
+                    if completed_turn is None:
+                        raise RuntimeError("Model backend did not complete its turn")
 
-                if not completed_turn.tool_calls:
+                    assistant_message = ChatMessage(
+                        role="assistant",
+                        content=completed_turn.text or None,
+                        tool_calls=completed_turn.tool_calls,
+                    )
+                    run.record_assistant(assistant_message)
+
+                    if not completed_turn.tool_calls:
+                        model_turn_completed = True
+                        break
+
+                    turn_tool_calls += len(completed_turn.tool_calls)
+                    run.total_tool_calls += len(completed_turn.tool_calls)
+                    if turn_tool_calls > self.max_tool_calls:
+                        raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
+
+                    for call in completed_turn.tool_calls:
+                        definition = self.registry.get(call.name)
+                        grant_scope = (
+                            f"chat:{conversation.chat_id}"
+                            if conversation.chat_id is not None
+                            else f"run:{run.run_id}"
+                        )
+                        requires_approval = bool(
+                            definition
+                            and tool_requires_approval(definition, context)
+                            and call.name not in self.grants.granted(grant_scope)
+                            and call.id not in approved_call_ids
+                        )
+                        proposed = self._tool_state(
+                            call,
+                            "proposed",
+                            requires_approval=requires_approval,
+                        )
+                        yield ChatStreamEvent("tool_call", proposed)
+
+                        if cancellation.is_set():
+                            cancelled = self._tool_state(call, "cancelled")
+                            run.record_tool_call(cancelled)
+                            yield ChatStreamEvent("tool_call", cancelled)
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+
+                        denial_message: str | None = None
+                        if requires_approval:
+                            if not interactive:
+                                denial_message = UNATTENDED_DENY_MESSAGE
+                            else:
+                                yield ChatStreamEvent(
+                                    "tool_call",
+                                    self._tool_state(
+                                        call, "awaiting_approval", requires_approval=True
+                                    ),
+                                )
+                                pending = self.approvals.request(run.run_id, call.id, call.name)
+                                decision = self.approvals.wait(
+                                    pending,
+                                    self.approval_timeout_seconds,
+                                    cancellation=cancellation,
+                                )
+                                if cancellation.is_set():
+                                    cancelled = self._tool_state(call, "cancelled")
+                                    run.record_tool_call(cancelled)
+                                    yield ChatStreamEvent("tool_call", cancelled)
+                                    yield ChatStreamEvent("cancelled", cancelled_payload())
+                                    return
+                                if decision == "deny":
+                                    denial_message = (
+                                        DENIED_MESSAGE
+                                        if pending.decision is not None
+                                        else TIMEOUT_MESSAGE
+                                    )
+                                else:
+                                    approved_call_ids.add(call.id)
+                                    if decision == "session":
+                                        self.grants.grant(grant_scope, call.name)
+                                    elif decision == "always":
+                                        try:
+                                            self.always_allow_persister(user_id, call.name)
+                                        except Exception:
+                                            logger.exception(
+                                                "Could not persist always-allow for %s",
+                                                call.name,
+                                            )
+
+                        if denial_message is not None:
+                            result = ToolResult(
+                                call=call,
+                                status="failed",
+                                content=denial_message,
+                                summary="Tool call denied",
+                                error="approval_denied",
+                            )
+                        else:
+                            yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                            result = self.registry.execute(
+                                call,
+                                replace(
+                                    context,
+                                    approved_call_ids=frozenset(approved_call_ids),
+                                    always_allow_tools=context.always_allow_tools
+                                    | self.grants.granted(grant_scope),
+                                ),
+                            )
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+                        remaining_result_chars = (
+                            self.max_tool_result_chars_total - run.tool_result_chars
+                        )
+                        if remaining_result_chars <= 0:
+                            result.content = ""
+                        elif len(result.content) > remaining_result_chars:
+                            truncation_marker = (
+                                "\n[tool result omitted: aggregate budget exhausted]"
+                            )
+                            if remaining_result_chars <= len(truncation_marker):
+                                result.content = truncation_marker[:remaining_result_chars]
+                            else:
+                                retained_chars = remaining_result_chars - len(truncation_marker)
+                                result.content = (
+                                    f"{result.content[:retained_chars]}{truncation_marker}"
+                                )
+                        run.tool_result_chars += min(
+                            len(result.content),
+                            max(0, remaining_result_chars),
+                        )
+                        state = self._tool_state(
+                            call,
+                            result.status,
+                            result_summary=result.summary,
+                            artifact_ids=[artifact.id for artifact in result.artifacts],
+                            error=result.error,
+                            requires_approval=requires_approval,
+                        )
+                        run.record_tool_call(state)
+                        run.record_artifacts(result.artifacts)
+                        for artifact in result.artifacts:
+                            yield ChatStreamEvent("artifact", artifact)
+                        yield ChatStreamEvent("tool_call", state)
+
+                        tool_message = result.to_message()
+                        run.record_tool_message(tool_message)
+
+                        if runtime is not None and call.name == "agent.plan.update":
+                            yield ChatStreamEvent(
+                                "plan",
+                                {
+                                    "tasks": runtime.snapshot()["tasks"],
+                                    "warning": runtime.snapshot()["decomposition_warning"],
+                                },
+                            )
+                        if runtime is not None and call.name == "agent.goal.complete":
+                            yield ChatStreamEvent("goal", runtime.snapshot())
+
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+
+                if not model_turn_completed:
+                    raise RuntimeError(f"Model/tool round limit exceeded ({self.max_rounds})")
+
+                if runtime is None:
                     run.mark_model_completed()
                     break
 
-                run.total_tool_calls += len(completed_turn.tool_calls)
-                if run.total_tool_calls > self.max_tool_calls:
-                    raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
+                goal_status = runtime.finish_turn()
+                yield ChatStreamEvent("goal", runtime.snapshot())
+                if goal_status in {"complete", "budget_limited"}:
+                    run.mark_model_completed()
+                    break
 
-                for call in completed_turn.tool_calls:
-                    definition = self.registry.get(call.name)
-                    grant_scope = (
-                        f"chat:{conversation.chat_id}"
-                        if conversation.chat_id is not None
-                        else f"run:{run.run_id}"
-                    )
-                    requires_approval = bool(
-                        definition
-                        and tool_requires_approval(definition, context)
-                        and call.name not in self.grants.granted(grant_scope)
-                        and call.id not in approved_call_ids
-                    )
-                    proposed = self._tool_state(
-                        call,
-                        "proposed",
-                        requires_approval=requires_approval,
-                    )
-                    yield ChatStreamEvent("tool_call", proposed)
-
-                    if cancellation.is_set():
-                        cancelled = self._tool_state(call, "cancelled")
-                        run.record_tool_call(cancelled)
-                        yield ChatStreamEvent("tool_call", cancelled)
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
-
-                    denial_message: str | None = None
-                    if requires_approval:
-                        if not interactive:
-                            denial_message = UNATTENDED_DENY_MESSAGE
-                        else:
-                            yield ChatStreamEvent(
-                                "tool_call",
-                                self._tool_state(
-                                    call, "awaiting_approval", requires_approval=True
-                                ),
-                            )
-                            pending = self.approvals.request(
-                                run.run_id, call.id, call.name
-                            )
-                            decision = self.approvals.wait(
-                                pending,
-                                self.approval_timeout_seconds,
-                                cancellation=cancellation,
-                            )
-                            if cancellation.is_set():
-                                cancelled = self._tool_state(call, "cancelled")
-                                run.record_tool_call(cancelled)
-                                yield ChatStreamEvent("tool_call", cancelled)
-                                yield ChatStreamEvent("cancelled", cancelled_payload())
-                                return
-                            if decision == "deny":
-                                denial_message = (
-                                    DENIED_MESSAGE
-                                    if pending.decision is not None
-                                    else TIMEOUT_MESSAGE
-                                )
-                            else:
-                                approved_call_ids.add(call.id)
-                                if decision == "session":
-                                    self.grants.grant(grant_scope, call.name)
-                                elif decision == "always":
-                                    try:
-                                        self.always_allow_persister(user_id, call.name)
-                                    except Exception:
-                                        logger.exception(
-                                            "Could not persist always-allow for %s",
-                                            call.name,
-                                        )
-
-                    if denial_message is not None:
-                        result = ToolResult(
-                            call=call,
-                            status="failed",
-                            content=denial_message,
-                            summary="Tool call denied",
-                            error="approval_denied",
-                        )
-                    else:
-                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
-                        result = self.registry.execute(
-                            call,
-                            replace(
-                                context,
-                                approved_call_ids=frozenset(approved_call_ids),
-                                always_allow_tools=context.always_allow_tools
-                                | self.grants.granted(grant_scope),
-                            ),
-                        )
-                    if cancellation.is_set():
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
-                    remaining_result_chars = (
-                        self.max_tool_result_chars_total - run.tool_result_chars
-                    )
-                    if remaining_result_chars <= 0:
-                        result.content = ""
-                    elif len(result.content) > remaining_result_chars:
-                        truncation_marker = "\n[tool result omitted: aggregate budget exhausted]"
-                        if remaining_result_chars <= len(truncation_marker):
-                            result.content = truncation_marker[:remaining_result_chars]
-                        else:
-                            retained_chars = remaining_result_chars - len(truncation_marker)
-                            result.content = f"{result.content[:retained_chars]}{truncation_marker}"
-                    run.tool_result_chars += min(
-                        len(result.content),
-                        max(0, remaining_result_chars),
-                    )
-                    state = self._tool_state(
-                        call,
-                        result.status,
-                        result_summary=result.summary,
-                        artifact_ids=[artifact.id for artifact in result.artifacts],
-                        error=result.error,
-                        requires_approval=requires_approval,
-                    )
-                    run.record_tool_call(state)
-                    run.record_artifacts(result.artifacts)
-                    for artifact in result.artifacts:
-                        yield ChatStreamEvent("artifact", artifact)
-                    yield ChatStreamEvent("tool_call", state)
-
-                    tool_message = result.to_message()
-                    run.record_tool_message(tool_message)
-
-                    if cancellation.is_set():
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
+                run.transcript.append(
+                    ChatMessage(role="user", content=runtime.continuation_prompt())
+                )
+                yield ChatStreamEvent("delta", {"text": "\n\n"})
 
             if not run.model_completed:
-                raise RuntimeError(f"Model/tool round limit exceeded ({self.max_rounds})")
+                raise RuntimeError("Agentic goal did not reach a terminal state")
 
             if cancellation.is_set():
                 yield ChatStreamEvent("cancelled", cancelled_payload())
                 return
 
             final_text = run.assistant_text
+            if runtime is not None and runtime.state.goal_status == "budget_limited":
+                final_text = (
+                    f"{final_text}\n\nAgentic mode paused after "
+                    f"{runtime.state.turns_used} turns without claiming completion."
+                ).strip()
             persisted_chat_id = persist_turn("completed", final_text)
             if run.persisted_status == "cancelled":
                 yield ChatStreamEvent("cancelled", cancelled_payload())
@@ -596,6 +701,7 @@ class ChatOrchestrator:
                 run_id=run.run_id,
                 tool_calls=run.tool_calls,
                 artifacts=run.artifacts,
+                orchestration=runtime.snapshot() if runtime is not None else None,
             )
             yield ChatStreamEvent("final", completion)
             yield ChatStreamEvent(
@@ -604,6 +710,8 @@ class ChatOrchestrator:
             )
         except Exception as error:
             logger.exception("Chat run %s failed", run.run_id)
+            if runtime is not None:
+                runtime.fail()
             persisted_chat_id = persist_turn(
                 "failed",
                 run.assistant_text or None,
@@ -622,6 +730,7 @@ class ChatOrchestrator:
             )
         finally:
             self.approvals.cancel_run(run.run_id)
+            self.orchestration_runs.finish(run.run_id)
             self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:

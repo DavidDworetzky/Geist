@@ -55,6 +55,10 @@ class UserSettingsBase(BaseModel):
         default=[], description="Default file archives for RAG"
     )
     enable_rag_by_default: bool = Field(default=True, description="Enable RAG by default")
+    agentic_mode_enabled: bool = Field(
+        default=True,
+        description="Always decompose requests and continue until explicit goal completion",
+    )
     default_max_tokens: int = Field(default=4096, description="Default max tokens")
     default_temperature: float = Field(default=1.0, description="Default temperature")
     default_top_p: float = Field(default=1.0, description="Default top_p")
@@ -88,6 +92,7 @@ class UserSettingsUpdate(BaseModel):
     default_online_provider: str | None = None
     default_file_archives: list[int] | None = None
     enable_rag_by_default: bool | None = None
+    agentic_mode_enabled: bool | None = None
     default_max_tokens: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
