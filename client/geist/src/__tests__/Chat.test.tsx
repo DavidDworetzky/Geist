@@ -1,9 +1,12 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Chat, { turnBelongsToChatSelection } from '../Chat';
 
 
 const mockCancelGeneration = jest.fn();
+const mockSteerRun = jest.fn(async (_text: string) => true);
+const mockCompleteText = jest.fn();
+let mockLoading = true;
 const mockResetChatSession = jest.fn();
 const mockPrepareNewChat = jest.fn();
 const mockChatSessions: never[] = [];
@@ -13,10 +16,12 @@ const mockNavigate = jest.fn();
 jest.mock('../Hooks/useCompleteText', () => ({
   __esModule: true,
   default: () => ({
-    completeText: jest.fn(),
+    completeText: mockCompleteText,
+    steerRun: mockSteerRun,
+    isSteering: false,
     cancelGeneration: mockCancelGeneration,
     resetChatSession: mockResetChatSession,
-    loading: true,
+    loading: mockLoading,
     error: null,
     completedTurn: null,
     activeTurn: {
@@ -47,7 +52,9 @@ jest.mock('../Hooks/useGetChatSessions', () => ({
 jest.mock('../Hooks/useFileContext', () => ({
   __esModule: true,
   default: () => ({
-    processMessage: jest.fn(),
+    processMessage: async (message: string) => ({
+      enhancedMessage: message, references: [], contexts: [], hasUnresolvedReferences: false,
+    }),
     isProcessing: false,
     error: null,
   }),
@@ -99,11 +106,27 @@ jest.mock('react-router-dom', () => ({
 }));
 
 jest.mock('../Components/LinkList', () => () => null);
-jest.mock('../Components/EnhancedChatInput', () => () => null);
+jest.mock('../Components/EnhancedChatInput', () => ({
+  __esModule: true,
+  default: ({ value, onChange, onSubmit, disabled, submitLabel }: {
+    value: string;
+    onChange: (value: string) => void;
+    onSubmit: (value: string) => void;
+    disabled: boolean;
+    submitLabel: string;
+  }) => (
+    <div>
+      <textarea aria-label="Message" value={value} onChange={e => onChange(e.target.value)} disabled={disabled} />
+      <button disabled={disabled} onClick={() => onSubmit(value)}>{submitLabel}</button>
+    </div>
+  ),
+}));
 
 describe('Chat live run controls', () => {
   beforeEach(() => {
     mockCancelGeneration.mockClear();
+    mockSteerRun.mockResolvedValue(true);
+    mockLoading = true;
     mockResetChatSession.mockClear();
     mockPrepareNewChat.mockClear();
   });
@@ -114,6 +137,34 @@ describe('Chat live run controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }));
 
     expect(mockCancelGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the composer enabled and sends steering without cancelling', async () => {
+    render(<Chat />);
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: 'Use local only' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add instructions' }));
+    await waitFor(() => expect(mockSteerRun).toHaveBeenCalledWith('Use local only'));
+    await waitFor(() => expect(input).toHaveValue(''));
+    expect(mockCancelGeneration).not.toHaveBeenCalled();
+  });
+
+  it('does not clear an instruction draft when the original stream finishes', async () => {
+    let finish: () => void = () => {};
+    mockCompleteText.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    mockLoading = false;
+    const view = render(<Chat />);
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'Build voice notes' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(input).toHaveValue('');
+    await waitFor(() => expect(mockCompleteText).toHaveBeenCalled());
+    mockLoading = true;
+    view.rerender(<Chat />);
+    fireEvent.change(input, { target: { value: 'Also add tests' } });
+    await act(async () => { finish(); });
+    expect(input).toHaveValue('Also add tests');
   });
 
   it('resets the hook session before starting a New Chat', () => {

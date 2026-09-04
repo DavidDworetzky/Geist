@@ -11,6 +11,7 @@ interface ChatTool {
   name: string;
   description: string;
   requires_approval: boolean;
+  requires_per_call_approval?: boolean;
   side_effect: string;
 }
 
@@ -19,16 +20,16 @@ const DEFAULT_PERMISSIONS: AgentPermissions = { mode: 'default', always_allow: [
 const modeOptions = [
   { value: 'default', label: 'Balanced (side-effecting tools ask)' },
   { value: 'require_approval', label: 'Require approval for every tool' },
-  { value: 'auto_approve', label: 'Auto-approve all tools' }
+  { value: 'auto_approve', label: 'Auto-approve eligible tools' }
 ];
 
 const modeDescriptions: Record<AgentPermissionMode, string> = {
   default:
     'Read-only tools run automatically; tools that send messages or write files wait for your approval.',
   require_approval:
-    'Every agent tool call waits for your approval unless the tool is on your always-allow list.',
+    'Every agent tool call waits for your approval unless the tool is on your always-allow list. Protected terminal configurations always ask.',
   auto_approve:
-    'The agent runs every tool without asking. Only use this if you trust the agent with all connected tools.'
+    'The agent runs tools without asking except protected terminal configurations, which require approval for every command.'
 };
 
 const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
@@ -109,8 +110,8 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
 
         {permissions.mode === 'auto_approve' && (
           <p className="settings-description">
-            Auto-approve is on, so every tool already runs without asking; this list applies when
-            you switch back to a stricter mode.
+            Auto-approve is on for eligible tools. Protected terminal configurations still ask
+            for every command; this list applies when you switch back to a stricter mode.
           </p>
         )}
 
@@ -121,20 +122,24 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
         ) : (
           <div className="settings-file-list">
             {tools.map((tool) => {
-              const selected = permissions.always_allow.includes(tool.name);
+              const grantable = !tool.requires_per_call_approval;
+              const selected = grantable && permissions.always_allow.includes(tool.name);
               return (
                 <button
                   key={tool.name}
                   type="button"
                   className={`settings-file-option ${selected ? 'selected' : ''}`}
                   onClick={() => toggleAlwaysAllow(tool.name)}
+                  disabled={!grantable}
                   title={tool.description}
                 >
                   <span className="settings-checkbox" aria-hidden="true">
                   </span>
                   <span>
                     {tool.name}
-                    {tool.requires_approval && (
+                    {tool.requires_per_call_approval ? (
+                      <span className="settings-description"> — always asks</span>
+                    ) : tool.requires_approval && (
                       <span className="settings-description"> — asks by default</span>
                     )}
                   </span>

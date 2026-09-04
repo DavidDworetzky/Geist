@@ -13,16 +13,33 @@ The default registry is intentionally explicit:
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
 | `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current user's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
+| `workspace.list_files` | `WorkspaceFileAdapter.list_files` | yes | Lists bounded source paths under `GEIST_WORKSPACE_ROOT`; common generated/vendor directories and credential files are excluded. |
+| `workspace.read_file` | `WorkspaceFileAdapter.read_file` | yes | Reads bounded UTF-8 line ranges under the workspace root. |
+| `workspace.search` | `WorkspaceFileAdapter.search_text` | yes | Bounded literal search across workspace text files; the coding equivalent of `rg -F`/`grep -F`. |
+| `workspace.write_file` | `WorkspaceFileAdapter.write_file` | yes, approval required | Atomically creates or replaces a workspace text file. |
+| `workspace.edit_file` | `WorkspaceFileAdapter.edit_file` | yes, approval required | Exact-match edit that fails closed unless the expected replacement count matches. |
+| `terminal.run` | configured execution backend | when configured | Runs coding commands with bounded output/runtime. Isolated, offline sandboxes run directly; host-reaching or networked backends require fresh approval for every command. |
 | `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
 | `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
 | `workspace.write_markdown` | `MarkdownFileAdapter.write_file` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.email.send` | `SendGridAdapter.send_email` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.sms.send` | `SMSAdapter.send_text` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 
-The optional read-only Markdown list/read tools can be selected by the operator
-with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. Reads and writes accept
-only `.md`/`.markdown` paths contained under the configured root. Side-effect
-mappings remain unavailable even when named in that setting.
+The coding workspace defaults to the Geist process working directory and can be
+overridden with `GEIST_WORKSPACE_ROOT`. File paths are relative and contained
+beneath that root, symlink escapes and common credential files are rejected,
+and generated/vendor directories are skipped during listing and search. Writes
+and exact edits use the same approval/resume flow as other side effects.
+
+Terminal session/permanent grants and global auto-approve never bypass the
+per-command gate when execution can reach a host workspace or the network.
+Host-reaching commands also pass through the unconditional hardline rejection
+floor. The floor is defense-in-depth; container isolation remains the security
+boundary for approval-free shell execution.
+
+The optional legacy Markdown list/read tools can still be selected by the
+operator with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. They accept
+only `.md`/`.markdown` paths contained under `GEIST_MARKDOWN_ROOT`.
 
 Adapters not mapped into chat tools:
 

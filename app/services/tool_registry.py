@@ -22,16 +22,17 @@ from agents.models.tool_calling import (
     ToolResult,
     tool_requires_approval,
 )
+from app.services.coding_workspace import CodingWorkspace
 from app.services.document_search import DocumentSearchService
 from app.services.execution import (
     create_execution_environment,
-    create_session_manager,
 )
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
     MAX_COMMAND_TIMEOUT_SECONDS,
 )
 from app.services.execution.docker import DockerExecutionEnvironment
+from app.services.goal_runtime import GoalRuntimeRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,39 @@ class TerminalRunArguments(StrictToolArguments):
     )
 
 
+class WorkspaceListArguments(StrictToolArguments):
+    path: str = Field(default="", max_length=1024)
+    pattern: str = Field(default="*", min_length=1, max_length=256)
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
+class WorkspaceReadArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    start_line: int = Field(default=1, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+    max_chars: int = Field(default=100_000, ge=1, le=200_000)
+
+
+class WorkspaceSearchArguments(StrictToolArguments):
+    query: str = Field(min_length=1, max_length=1000)
+    path: str = Field(default="", max_length=1024)
+    pattern: str = Field(default="*", min_length=1, max_length=256)
+    case_sensitive: bool = False
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class WorkspaceWriteArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(max_length=200_000)
+
+
+class WorkspaceEditArguments(StrictToolArguments):
+    path: str = Field(min_length=1, max_length=1024)
+    old_text: str = Field(min_length=1, max_length=100_000)
+    new_text: str = Field(max_length=100_000)
+    expected_replacements: int = Field(default=1, ge=1, le=100)
+
+
 class EmailSendArguments(StrictToolArguments):
     to_email: str = Field(min_length=3, max_length=320)
     subject: str = Field(min_length=1, max_length=998)
@@ -93,6 +127,30 @@ class SmsSendArguments(StrictToolArguments):
     number: str = Field(pattern=r"^\+[1-9]\d{7,14}$")
     message: str = Field(min_length=1, max_length=1600)
     idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class PlanTaskUpdate(StrictToolArguments):
+    task_id: str = Field(min_length=1, max_length=64)
+    status: Literal["pending", "in_progress", "completed", "blocked", "skipped"] | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    acceptance_criteria: list[str] | None = Field(default=None, max_length=10)
+    evidence: str | None = Field(default=None, max_length=2000)
+    evidence_refs: list[str] | None = Field(default=None, max_length=50)
+    skip_reason: str | None = Field(default=None, max_length=2000)
+
+
+class PlanUpdateArguments(StrictToolArguments):
+    updates: list[PlanTaskUpdate] = Field(min_length=1, max_length=12)
+
+
+class GoalCompleteArguments(StrictToolArguments):
+    summary: str = Field(min_length=1, max_length=4000)
+    evidence: list[str] = Field(min_length=1, max_length=20)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+
+
+class GoalWaitArguments(StrictToolArguments):
+    question: str = Field(min_length=1, max_length=4000)
 
 
 class ToolRegistry:
@@ -154,14 +212,6 @@ class ToolRegistry:
                 content=f"Tool is not configured: {call.name}",
                 error="tool_unavailable",
             )
-        if tool_requires_approval(definition, context) and call.id not in context.approved_call_ids:
-            return ToolResult(
-                call=call,
-                status="awaiting_approval",
-                content=f"Tool requires approval before execution: {call.name}",
-                error="approval_required",
-            )
-
         try:
             arguments = definition.arguments_model.model_validate(call.arguments)
         except ValidationError as error:
@@ -170,6 +220,16 @@ class ToolRegistry:
                 status="failed",
                 content=f"Invalid arguments for {call.name}: {error}",
                 error="invalid_arguments",
+            )
+
+        if tool_requires_approval(definition, context) and not (
+            context.invocation_approval is not None and context.invocation_approval.consume(call)
+        ):
+            return ToolResult(
+                call=call,
+                status="awaiting_approval",
+                content=f"Tool requires approval before execution: {call.name}",
+                error="approval_required",
             )
 
         future = self._executor.submit(definition.handler, context, arguments)
@@ -203,7 +263,9 @@ class ToolRegistry:
         )
 
 
-def build_default_tool_registry() -> ToolRegistry:
+def build_default_tool_registry(
+    orchestration_runs: GoalRuntimeRegistry | None = None,
+) -> ToolRegistry:
     explicitly_enabled = {
         name.strip()
         for name in os.getenv("GEIST_ENABLED_CHAT_TOOLS", "").split(",")
@@ -213,6 +275,87 @@ def build_default_tool_registry() -> ToolRegistry:
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
     markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+    execution_environment = create_execution_environment()
+    workspace = CodingWorkspace(execution_environment)
+
+    if orchestration_runs is not None:
+
+        def plan_update(
+            context: ToolContext, arguments: PlanUpdateArguments
+        ) -> ToolExecutionOutput:
+            result = orchestration_runs.update_plan(
+                context.run_id,
+                [update.model_dump(exclude_none=True) for update in arguments.updates],
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(result, ensure_ascii=False),
+                summary=(
+                    "Updated agentic plan"
+                    if result.get("accepted")
+                    else str(result.get("error", "Plan update rejected"))
+                ),
+            )
+
+        def goal_complete(
+            context: ToolContext, arguments: GoalCompleteArguments
+        ) -> ToolExecutionOutput:
+            result = orchestration_runs.complete_goal(
+                context.run_id,
+                arguments.summary,
+                arguments.evidence,
+                arguments.evidence_refs,
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(result, ensure_ascii=False),
+                summary=(
+                    "Goal completion accepted"
+                    if result.get("accepted")
+                    else str(result.get("error", "Goal completion rejected"))
+                ),
+            )
+
+        registry.register(
+            ToolDefinition(
+                name="agent.plan.update",
+                description=(
+                    "Create or revise tasks in the active plan. New task IDs require a title. "
+                    "Change titles, acceptance criteria, status, or evidence as you learn. Mark a task "
+                    "completed only after its acceptance criteria have direct evidence."
+                ),
+                arguments_model=PlanUpdateArguments,
+                handler=plan_update,
+                approval_exempt=True,
+                availability=lambda context: context.agentic_mode,
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                name="agent.goal.complete",
+                description=(
+                    "Claim that the active goal is fully complete after auditing every "
+                    "deliverable. Completion is rejected while plan tasks remain open."
+                ),
+                arguments_model=GoalCompleteArguments,
+                handler=goal_complete,
+                approval_exempt=True,
+                availability=lambda context: context.agentic_mode,
+            )
+        )
+
+        def goal_wait(context: ToolContext, arguments: GoalWaitArguments) -> ToolExecutionOutput:
+            result = orchestration_runs.wait_for_user(context.run_id, arguments.question)
+            return ToolExecutionOutput(content=json.dumps(result), summary=arguments.question)
+
+        registry.register(
+            ToolDefinition(
+                name="agent.goal.wait",
+                description="Pause execution to ask the user a question or request missing authorization. The next user message resumes this goal.",
+                arguments_model=GoalWaitArguments,
+                handler=goal_wait,
+                approval_exempt=True,
+                availability=lambda context: context.agentic_mode,
+            )
+        )
 
     def web_search(context: ToolContext, arguments: WebSearchArguments) -> ToolExecutionOutput:
         results = search_adapter.search(
@@ -274,6 +417,51 @@ def build_default_tool_registry() -> ToolRegistry:
         if not written:
             raise RuntimeError(f"Could not write {arguments.path}")
         return ToolExecutionOutput(content="File written", summary=f"Wrote {arguments.path}")
+
+    def workspace_list(
+        context: ToolContext, arguments: WorkspaceListArguments
+    ) -> ToolExecutionOutput:
+        files = workspace.file_operation(context, "list_files", arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps({"files": files}, ensure_ascii=False),
+            summary=f"Found {len(files)} workspace files",
+        )
+
+    def workspace_read(
+        context: ToolContext, arguments: WorkspaceReadArguments
+    ) -> ToolExecutionOutput:
+        result = workspace.file_operation(context, "read_file", arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=(f"Read {result['path']} lines {result['start_line']}-{result['end_line']}"),
+        )
+
+    def workspace_search(
+        context: ToolContext, arguments: WorkspaceSearchArguments
+    ) -> ToolExecutionOutput:
+        matches = workspace.file_operation(context, "search_text", arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps({"matches": matches}, ensure_ascii=False),
+            summary=f"Found {len(matches)} matching lines",
+        )
+
+    def workspace_write(
+        context: ToolContext, arguments: WorkspaceWriteArguments
+    ) -> ToolExecutionOutput:
+        result = workspace.file_operation(context, "write_file", arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=f"Wrote {result['path']}",
+        )
+
+    def workspace_edit(
+        context: ToolContext, arguments: WorkspaceEditArguments
+    ) -> ToolExecutionOutput:
+        result = workspace.file_operation(context, "edit_file", arguments.model_dump())
+        return ToolExecutionOutput(
+            content=json.dumps(result, ensure_ascii=False),
+            summary=f"Edited {result['path']} ({result['replacements']} replacement(s))",
+        )
 
     def email_send(context: ToolContext, arguments: EmailSendArguments) -> ToolExecutionOutput:
         from adapters.sendgrid_adapter import SendGridAdapter
@@ -348,6 +536,72 @@ def build_default_tool_registry() -> ToolRegistry:
         )
     )
 
+    registry.register(
+        ToolDefinition(
+            name="workspace.list_files",
+            description=(
+                "List source and text files beneath the coding workspace. Supports "
+                "a relative directory, glob pattern, and bounded result count."
+            ),
+            arguments_model=WorkspaceListArguments,
+            handler=workspace_list,
+            source_adapter="WorkspaceFileAdapter.list_files",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.read_file",
+            description=(
+                "Read a bounded line range from a UTF-8 source or text file beneath "
+                "the coding workspace."
+            ),
+            arguments_model=WorkspaceReadArguments,
+            handler=workspace_read,
+            source_adapter="WorkspaceFileAdapter.read_file",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.search",
+            description=(
+                "Search source and text files beneath the coding workspace, like a "
+                "bounded rg/grep using a literal query."
+            ),
+            arguments_model=WorkspaceSearchArguments,
+            handler=workspace_search,
+            source_adapter="WorkspaceFileAdapter.search_text",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.write_file",
+            description=(
+                "Create or replace a UTF-8 source or text file beneath the coding "
+                "workspace. Requires user approval."
+            ),
+            arguments_model=WorkspaceWriteArguments,
+            handler=workspace_write,
+            side_effect="filesystem_write",
+            requires_approval=True,
+            source_adapter="WorkspaceFileAdapter.write_file",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="workspace.edit_file",
+            description=(
+                "Replace an exact text block in a workspace file. The edit fails "
+                "without changing the file unless the expected match count is exact. "
+                "Requires user approval."
+            ),
+            arguments_model=WorkspaceEditArguments,
+            handler=workspace_edit,
+            side_effect="filesystem_write",
+            requires_approval=True,
+            source_adapter="WorkspaceFileAdapter.edit_file",
+        )
+    )
+
     # Reviewed mappings that are intentionally opt-in. They are in the catalog,
     # but are not sent to models unless the server explicitly enables them.
     registry.register(
@@ -403,23 +657,12 @@ def build_default_tool_registry() -> ToolRegistry:
     # runs approval-free; local or host-mounted Docker requires approval —
     # isolation and approval are two implementations of the same safety
     # budget, so a backend must hold at least one of them.
-    execution_environment = create_execution_environment()
     if execution_environment is not None:
-        session_manager = create_session_manager(execution_environment)
 
         def terminal_run(
             context: ToolContext, arguments: TerminalRunArguments
         ) -> ToolExecutionOutput:
-            if session_manager is not None and context.chat_id is not None:
-                result = session_manager.run_in_session(
-                    f"chat-{context.chat_id}",
-                    arguments.command,
-                    timeout_seconds=arguments.timeout_seconds,
-                )
-            else:
-                result = execution_environment.run(
-                    arguments.command, timeout_seconds=arguments.timeout_seconds
-                )
+            result = workspace.run(context, arguments.command, arguments.timeout_seconds)
             summary = (
                 f"exit {result.exit_code}"
                 + (" (timed out)" if result.timed_out else "")
@@ -455,8 +698,9 @@ def build_default_tool_registry() -> ToolRegistry:
                 arguments_model=TerminalRunArguments,
                 handler=terminal_run,
                 side_effect="process",
-                requires_approval=not execution_environment.is_sandboxed,
-                enabled_by_default=False,
+                requires_approval=execution_environment.requires_per_call_approval,
+                requires_per_call_approval=(execution_environment.requires_per_call_approval),
+                enabled_by_default=True,
                 timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
                 source_adapter=f"execution.{execution_environment.name}",
                 availability=_execution_available,

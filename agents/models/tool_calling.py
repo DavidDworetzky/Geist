@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -27,8 +29,9 @@ ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"
 #   default          — per-tool requires_approval flags decide (side-effecting
 #                      tools ask, read-only tools run).
 #   auto_approve     — no tool ever waits for approval.
-#   require_approval — every tool call waits for approval unless the tool is
-#                      on the user's always-allow list.
+#   require_approval — every user-impacting tool call waits for approval unless
+#                      the tool is on the user's always-allow list. Internal
+#                      orchestration bookkeeping is exempt.
 PermissionMode = Literal["default", "auto_approve", "require_approval"]
 PERMISSION_MODE_DEFAULT: PermissionMode = "default"
 PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
@@ -133,9 +136,31 @@ class ToolContext:
     user_id: int
     chat_id: int | None
     run_id: str
-    approved_call_ids: frozenset[str] = frozenset()
     permission_mode: str = PERMISSION_MODE_DEFAULT
     always_allow_tools: frozenset[str] = frozenset()
+    agentic_mode: bool = False
+    workspace_id: str | None = None
+    invocation_approval: InvocationApproval | None = None
+
+
+class InvocationApproval:
+    """One-use authorization bound to one server-issued call and validated payload."""
+
+    def __init__(self, call: ToolCall) -> None:
+        self._lock = threading.Lock()
+        self._fingerprint = self._digest(call)
+        self._used = False
+
+    @staticmethod
+    def _digest(call: ToolCall) -> str:
+        return hashlib.sha256(json.dumps(call.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def consume(self, call: ToolCall) -> bool:
+        with self._lock:
+            if self._used or self._fingerprint != self._digest(call):
+                return False
+            self._used = True
+            return True
 
 
 @dataclass
@@ -160,6 +185,8 @@ class ToolDefinition:
     handler: ToolHandler
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
+    approval_exempt: bool = False
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
@@ -193,10 +220,15 @@ def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> 
     """Effective approval requirement for one call under the user's permissions.
 
     The user's always-allow list is a standing grant, so it wins over both the
-    per-tool flag and require_approval mode; auto_approve waives everything
-    else; require_approval asks for every remaining tool; default falls back
-    to the tool's own requires_approval flag.
+    per-tool flag and require_approval mode; internal bookkeeping never asks;
+    per-call protected tools always ask; auto_approve waives everything else;
+    require_approval asks for every remaining tool; default falls back to the
+    tool's own requires_approval flag.
     """
+    if definition.approval_exempt:
+        return False
+    if definition.requires_per_call_approval:
+        return True
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
     if definition.name in context.always_allow_tools:

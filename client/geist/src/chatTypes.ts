@@ -12,6 +12,7 @@ export interface ToolCallResult {
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   requires_approval?: boolean;
+  requires_per_call_approval?: boolean;
   result_summary?: string;
   artifact_ids?: string[];
   error?: string;
@@ -27,12 +28,53 @@ export interface WorkArtifact {
   url?: string;
 }
 
+export type PlanTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'blocked'
+  | 'skipped';
+
+export type GoalStatus =
+  | 'active'
+  | 'waiting_for_user'
+  | 'complete'
+  | 'paused'
+  | 'budget_limited'
+  | 'failed';
+
+export interface PlanTask {
+  id: string;
+  title: string;
+  acceptance_criteria: string[];
+  status: PlanTaskStatus;
+  evidence?: string | null;
+  evidence_refs?: string[];
+  skip_reason?: string | null;
+}
+
+export interface OrchestrationState {
+  objective?: string;
+  agentic_mode: boolean;
+  goal_id?: string | null;
+  goal_status?: GoalStatus | null;
+  turns_used?: number;
+  max_turns?: number;
+  tasks: PlanTask[];
+  completion_summary?: string | null;
+  completion_evidence?: string[];
+  decomposition_warning?: string | null;
+  waiting_question?: string | null;
+  instructions?: Array<{ id: string; text: string; status: string }>;
+}
+
 export interface CompleteTextResponse {
   message: string | string[];
   chat_id: number | null;
   run_id?: string | null;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export interface ChatTurnResult {
@@ -43,6 +85,7 @@ export interface ChatTurnResult {
   origin_chat_id: number | null;
   tool_calls: ToolCallResult[];
   artifacts: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export type ModelLoadState = 'unloaded' | 'loading' | 'ready' | 'failed';
@@ -79,6 +122,7 @@ export interface ChatPair {
   model_load?: ModelLoadStatus;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export interface ChatHistory {

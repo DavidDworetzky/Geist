@@ -14,9 +14,7 @@ def test_resolve_unblocks_waiter_with_decision():
     registry = ToolApprovalRegistry()
     pending = registry.request("run_1", "call_1", "web.search")
 
-    resolver = threading.Timer(
-        0.05, lambda: registry.resolve("run_1", "call_1", "session")
-    )
+    resolver = threading.Timer(0.05, lambda: registry.resolve("run_1", "call_1", "session"))
     resolver.start()
     decision = registry.wait(pending, timeout_seconds=2.0)
     assert decision == "session"
@@ -46,6 +44,24 @@ def test_resolve_unknown_call_returns_false_and_bad_decision_raises():
         registry.resolve("run_1", "call_1", "yolo")
 
 
+@pytest.mark.parametrize("decision", ["session", "always"])
+def test_per_call_approval_rejects_persistent_decisions(decision):
+    registry = ToolApprovalRegistry()
+    pending = registry.request(
+        "run_1",
+        "call_1",
+        "terminal.run",
+        allow_persistent=False,
+    )
+
+    with pytest.raises(ValueError, match="approve-once or deny"):
+        registry.resolve("run_1", "call_1", decision)
+
+    assert registry.has_pending("run_1") is True
+    assert registry.resolve("run_1", "call_1", "approve") is True
+    assert registry.wait(pending, timeout_seconds=0.1) == "approve"
+
+
 def test_cancel_run_denies_all_pending():
     registry = ToolApprovalRegistry()
     first = registry.request("run_1", "call_1", "a")
@@ -71,12 +87,8 @@ def test_session_grants_are_scoped():
 def test_persist_always_allow_merges_into_settings():
     stored = Mock(agent_permissions={"mode": "default", "always_allow": ["a.tool"]})
     with (
-        patch(
-            "app.models.database.user_settings.get_user_settings", return_value=stored
-        ),
-        patch(
-            "app.models.database.user_settings.update_user_settings"
-        ) as mock_update,
+        patch("app.models.database.user_settings.get_user_settings", return_value=stored),
+        patch("app.models.database.user_settings.update_user_settings") as mock_update,
     ):
         persist_always_allow(1, "web.search")
 
@@ -88,12 +100,8 @@ def test_persist_always_allow_merges_into_settings():
 def test_persist_always_allow_noop_when_already_listed():
     stored = Mock(agent_permissions={"mode": "default", "always_allow": ["web.search"]})
     with (
-        patch(
-            "app.models.database.user_settings.get_user_settings", return_value=stored
-        ),
-        patch(
-            "app.models.database.user_settings.update_user_settings"
-        ) as mock_update,
+        patch("app.models.database.user_settings.get_user_settings", return_value=stored),
+        patch("app.models.database.user_settings.update_user_settings") as mock_update,
     ):
         persist_always_allow(1, "web.search")
     mock_update.assert_not_called()

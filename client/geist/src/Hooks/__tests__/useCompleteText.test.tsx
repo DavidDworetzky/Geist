@@ -142,6 +142,7 @@ describe('chatStreamReducer', () => {
         name: 'search',
         arguments: { query: 'pi' },
         status: 'proposed',
+        requires_per_call_approval: true,
       },
     });
     state = chatStreamReducer(state, {
@@ -164,6 +165,7 @@ describe('chatStreamReducer', () => {
       arguments: { query: 'pi' },
       status: 'succeeded',
       result_summary: 'Found it',
+      requires_per_call_approval: true,
     });
   });
 
@@ -203,6 +205,50 @@ describe('chatStreamReducer', () => {
         url: 'https://example.com/final.txt',
       }),
     ]);
+  });
+
+  it('keeps streamed plan progress through the final response', () => {
+    let state = chatStreamReducer(initialChatStreamState, {
+      type: 'START',
+      prompt: 'Build a feature',
+      chatId: null,
+    });
+    state = chatStreamReducer(state, {
+      type: 'PLAN_UPDATE',
+      tasks: [{
+        id: 'task-1',
+        title: 'Implement it',
+        acceptance_criteria: ['Test passes'],
+        status: 'pending',
+      }],
+    });
+    state = chatStreamReducer(state, {
+      type: 'GOAL_UPDATE',
+      orchestration: {
+        agentic_mode: true,
+        goal_status: 'complete',
+        turns_used: 1,
+        max_turns: 8,
+        tasks: [{
+          id: 'task-1',
+          title: 'Implement it',
+          acceptance_criteria: ['Test passes'],
+          status: 'completed',
+          evidence: 'Test passes',
+        }],
+      },
+    });
+    state = chatStreamReducer(state, {
+      type: 'FINAL',
+      prompt: 'Build a feature',
+      data: { message: ['Done'], chat_id: 2 },
+    });
+
+    expect(state.completedTurn?.orchestration).toMatchObject({
+      goal_status: 'complete',
+      turns_used: 1,
+      tasks: [expect.objectContaining({ status: 'completed' })],
+    });
   });
 });
 
@@ -340,7 +386,11 @@ describe('useCompleteText', () => {
       expect.objectContaining({ signal: expect.objectContaining({ aborted: false }) }),
     );
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
-    expect(requestBody).toMatchObject({ prompt: 'Say hello', enable_tools: true });
+    expect(requestBody).toMatchObject({
+      prompt: 'Say hello',
+      enable_tools: true,
+      agentic_mode: true,
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.state_chat_id).toBe(7);
@@ -353,6 +403,33 @@ describe('useCompleteText', () => {
     });
     expect(result.current.completedTurn?.tool_calls).toEqual([toolCall]);
     expect(result.current.completedTurn?.artifacts).toEqual([artifact]);
+  });
+
+  it('sends additional instructions without aborting or replacing the active stream', async () => {
+    Object.defineProperty(global, 'crypto', { configurable: true, value: { randomUUID: () => 'instruction-1' } });
+    let finishRead: (value: { done: boolean; value?: Uint8Array }) => void = () => {};
+    let signal: AbortSignal | undefined;
+    let reads = 0;
+    global.fetch = jest.fn((url: RequestInfo | URL, options?: RequestInit) => {
+      if (String(url).endsWith('/instructions')) return Promise.resolve({ ok: true } as Response);
+      signal = options?.signal as AbortSignal;
+      return Promise.resolve({ ok: true, body: { getReader: () => ({ read: () => {
+        reads += 1;
+        if (reads === 1) return Promise.resolve({ done: false, value: encode('event: run_started\ndata: {"run_id":"run_live"}\n\n') });
+        return new Promise((resolve) => { finishRead = resolve; });
+      } }) } } as unknown as Response);
+    }) as typeof fetch;
+    const { result } = renderHook(() => useCompleteText());
+    let completion: Promise<void> = Promise.resolve();
+    await act(async () => { completion = result.current.completeText('Build it'); });
+    await act(async () => { expect(await result.current.steerRun('Use local transcription')).toBe(true); });
+    expect(signal?.aborted).toBe(false);
+    expect(result.current.loading).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith('/agent/runs/run_live/instructions', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ instruction_id: 'instruction-1', text: 'Use local transcription' }),
+    }));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    await act(async () => { finishRead({ done: true }); await completion; });
   });
 
   it('aborts the stream and posts cancellation for a started run', async () => {

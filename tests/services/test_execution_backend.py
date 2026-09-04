@@ -58,6 +58,13 @@ def test_truncate_output_marks_dropped_content():
         "kill -9 -1",
         "echo hi; rm -rf /",
         "echo done > /dev/sda",
+        "rm -rf .",
+        "rm -rf /workspace",
+        "rm -rf /workspace/",
+        "git reset --hard HEAD~1",
+        "git clean -fdx",
+        "git checkout -- .",
+        "git restore .",
     ],
 )
 def test_hardline_blocks_unrecoverable_commands(command):
@@ -72,7 +79,6 @@ def test_hardline_blocks_unrecoverable_commands(command):
         "rm -rf /tmp/scratch",
         "echo 'rm -rf /' is dangerous",
         "ddgr search",
-        "git checkout -- .",
         "mkdir -p /tmp/x && rm -r /tmp/x",
     ],
 )
@@ -141,6 +147,7 @@ def test_docker_run_args_hardening_posture():
     joined = " ".join(args)
     assert args[:2] == ["run", "--rm"]
     assert "--cap-drop ALL" in joined
+    assert "--read-only" in args
     assert "no-new-privileges" in joined
     assert "--user 65534:65534" in joined
     assert "--network none" in joined
@@ -151,9 +158,7 @@ def test_docker_run_args_hardening_posture():
 
 
 def test_docker_run_args_workspace_mount_replaces_tmpfs():
-    args = build_docker_run_args(
-        image=DEFAULT_IMAGE, command="ls", workspace="/home/user/project"
-    )
+    args = build_docker_run_args(image=DEFAULT_IMAGE, command="ls", workspace="/home/user/project")
     joined = " ".join(args)
     assert "--volume /home/user/project:/workspace" in joined
     assert "/workspace:rw,nosuid" not in joined
@@ -172,11 +177,31 @@ def test_docker_sandbox_posture_flips_with_workspace():
     assert host_reaching.has_host_access is True
 
 
+def test_docker_network_or_workspace_requires_per_call_approval():
+    assert DockerExecutionEnvironment().requires_per_call_approval is False
+    assert DockerExecutionEnvironment(network=True).requires_per_call_approval is True
+    assert (
+        DockerExecutionEnvironment(workspace="/home/user/project").requires_per_call_approval
+        is True
+    )
+
+
+def test_host_mounted_docker_blocks_hardline_before_runtime():
+    env = DockerExecutionEnvironment(
+        workspace="/home/user/project",
+        runtime_path="/usr/bin/docker",
+    )
+    with patch("subprocess.run") as mock_run:
+        result = env.run("git reset --hard")
+
+    assert result.exit_code == 126
+    assert "BLOCKED" in result.stderr
+    mock_run.assert_not_called()
+
+
 def test_docker_reports_missing_runtime():
     env = DockerExecutionEnvironment(runtime_path=None)
-    with patch(
-        "app.services.execution.docker.find_container_runtime", return_value=None
-    ):
+    with patch("app.services.execution.docker.find_container_runtime", return_value=None):
         result = env.run("echo hi")
     assert result.exit_code == 127
     assert "container runtime" in result.stderr
@@ -184,9 +209,7 @@ def test_docker_reports_missing_runtime():
 
 def test_docker_run_invokes_runtime_with_bounded_command():
     env = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    completed = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout="hi\n", stderr=""
-    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="hi\n", stderr="")
     with patch("subprocess.run", return_value=completed) as mock_run:
         result = env.run("echo hi", timeout_seconds=10)
 
@@ -260,7 +283,8 @@ def test_registry_sandboxed_docker_tool_needs_no_approval(monkeypatch, tmp_path)
     definition = registry.get("terminal.run")
     assert definition is not None
     assert definition.requires_approval is False
-    assert definition.enabled_by_default is False
+    assert definition.requires_per_call_approval is False
+    assert definition.enabled_by_default is True
     assert definition.side_effect == "process"
 
 
@@ -268,11 +292,26 @@ def test_registry_host_reaching_backends_require_approval(monkeypatch, tmp_path)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
 
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "local")
-    assert build_default_tool_registry().get("terminal.run").requires_approval is True
+    local_definition = build_default_tool_registry().get("terminal.run")
+    assert local_definition.requires_approval is True
+    assert local_definition.requires_per_call_approval is True
 
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path))
-    assert build_default_tool_registry().get("terminal.run").requires_approval is True
+    mounted_definition = build_default_tool_registry().get("terminal.run")
+    assert mounted_definition.requires_approval is True
+    assert mounted_definition.requires_per_call_approval is True
+
+
+def test_registry_networked_docker_requires_per_call_approval(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
+    monkeypatch.setenv("GEIST_EXEC_DOCKER_NETWORK", "true")
+    monkeypatch.delenv("GEIST_EXEC_WORKSPACE", raising=False)
+
+    definition = build_default_tool_registry().get("terminal.run")
+    assert definition.requires_approval is True
+    assert definition.requires_per_call_approval is True
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +328,7 @@ def test_find_runtime_prefers_pinned_name_on_path():
 def test_find_runtime_pinned_missing_fails_closed():
     from app.services.execution.docker import find_container_runtime
 
-    with patch("shutil.which", return_value=None), patch(
-        "os.path.isfile", return_value=False
-    ):
+    with patch("shutil.which", return_value=None), patch("os.path.isfile", return_value=False):
         # A pinned-but-missing runtime must NOT fall back to docker.
         assert find_container_runtime("podman") is None
 
@@ -299,9 +336,11 @@ def test_find_runtime_pinned_missing_fails_closed():
 def test_find_runtime_accepts_absolute_binary_path():
     from app.services.execution.docker import find_container_runtime
 
-    with patch("shutil.which", return_value=None), patch(
-        "os.path.isfile", return_value=True
-    ), patch("os.access", return_value=True):
+    with (
+        patch("shutil.which", return_value=None),
+        patch("os.path.isfile", return_value=True),
+        patch("os.access", return_value=True),
+    ):
         assert find_container_runtime("/opt/podman/bin/podman") == "/opt/podman/bin/podman"
 
 

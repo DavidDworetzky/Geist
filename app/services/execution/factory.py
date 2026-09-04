@@ -12,14 +12,15 @@ Environment variables (all optional; unset backend disables execution):
   execution is unavailable rather than silently using another runtime.
 - ``GEIST_EXEC_DOCKER_IMAGE``: sandbox image (default ``python:3.11-slim``).
 - ``GEIST_EXEC_DOCKER_NETWORK``: ``1``/``true`` to give the sandbox network
-  access (default: no network).
+  access (default: no network). Networked commands require per-call approval.
 - ``GEIST_EXEC_WORKSPACE``: host directory. For the docker backend this is
   bind-mounted at /workspace and makes the environment host-reaching (the
-  tool then requires approval); for the local backend it is the working
+  tool then requires per-call approval); for the local backend it is the working
   directory.
 - ``GEIST_EXEC_PERSISTENT``: ``1``/``true`` to keep one long-lived sandbox
   container per chat session (docker backend only), so filesystem state
-  survives between terminal.run calls.
+  survives between calls for legacy execution clients. Chat coding tools always
+  share a session so file operations and terminal commands see the same files.
 - ``GEIST_EXEC_SESSION_TTL_SECONDS``: idle lifetime for persistent session
   containers (default 1800).
 """
@@ -28,10 +29,15 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from app.services.execution.base import ExecutionEnvironment
 from app.services.execution.docker import DEFAULT_IMAGE, DockerExecutionEnvironment
 from app.services.execution.local import LocalExecutionEnvironment
+
+
+if TYPE_CHECKING:
+    from app.services.execution.session import DockerSessionManager
 
 
 logger = logging.getLogger(__name__)
@@ -69,15 +75,16 @@ def create_execution_environment() -> ExecutionEnvironment | None:
     return None
 
 
-def create_session_manager(environment: ExecutionEnvironment | None):
+def create_session_manager(
+    environment: ExecutionEnvironment | None, *, required: bool = False
+) -> DockerSessionManager | None:
     """Build the persistent-session manager when configured (docker only)."""
-    if not _env_flag("GEIST_EXEC_PERSISTENT"):
+    if not required and not _env_flag("GEIST_EXEC_PERSISTENT"):
         return None
     if not isinstance(environment, DockerExecutionEnvironment):
         if environment is not None:
             logger.warning(
-                "GEIST_EXEC_PERSISTENT requires the docker backend; "
-                "persistent sessions disabled"
+                "GEIST_EXEC_PERSISTENT requires the docker backend; " "persistent sessions disabled"
             )
         return None
     from app.services.execution.session import (

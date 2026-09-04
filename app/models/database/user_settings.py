@@ -38,6 +38,9 @@ class UserSettings(Base):
     default_file_archives = Column(JSON, default=list)  # List of file IDs to search by default
     enable_rag_by_default = Column(Boolean, default=True)
 
+    # Agentic mode always decomposes, then continues until explicit completion.
+    agentic_mode_enabled = Column(Boolean, nullable=False, default=True)
+
     # Model generation settings
     default_max_tokens = Column(Integer, default=4096)
     default_temperature = Column(Float, default=1.0)
@@ -82,6 +85,7 @@ class UserSettingsModel:
     default_online_provider: str
     default_file_archives: list[int]
     enable_rag_by_default: bool
+    agentic_mode_enabled: bool
     default_max_tokens: int
     default_temperature: float
     default_top_p: float
@@ -119,6 +123,7 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 default_online_provider=settings.default_online_provider,
                 default_file_archives=settings.default_file_archives or [],
                 enable_rag_by_default=settings.enable_rag_by_default,
+                agentic_mode_enabled=settings.agentic_mode_enabled is not False,
                 default_max_tokens=settings.default_max_tokens,
                 default_temperature=settings.default_temperature,
                 default_top_p=settings.default_top_p,
@@ -155,6 +160,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_online_provider="openai",
             default_file_archives=[],
             enable_rag_by_default=True,
+            agentic_mode_enabled=True,
             default_max_tokens=4096,
             default_temperature=1.0,
             default_top_p=1.0,
@@ -180,6 +186,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
             enable_rag_by_default=settings.enable_rag_by_default,
+            agentic_mode_enabled=settings.agentic_mode_enabled is not False,
             default_max_tokens=settings.default_max_tokens,
             default_temperature=settings.default_temperature,
             default_top_p=settings.default_top_p,
@@ -230,6 +237,7 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
             enable_rag_by_default=settings.enable_rag_by_default,
+            agentic_mode_enabled=settings.agentic_mode_enabled is not False,
             default_max_tokens=settings.default_max_tokens,
             default_temperature=settings.default_temperature,
             default_top_p=settings.default_top_p,

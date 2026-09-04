@@ -108,6 +108,7 @@ def update_chat_history(
     user_id: int | None = None,
     run_id: str | None = None,
     status: str | None = None,
+    orchestration: dict[str, Any] | None = None,
     memory_enabled: bool | None = None,
     memory_mode: str | None = None,
     folder_id: int | None = None,
@@ -152,6 +153,8 @@ def update_chat_history(
             history_entry["run_id"] = run_id
         if status:
             history_entry["status"] = status
+        if orchestration:
+            history_entry["orchestration"] = _serialize_chat_extension(orchestration)
         current_history.append(history_entry)
 
         chat_session.chat_history = json.dumps(current_history)

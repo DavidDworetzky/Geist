@@ -46,6 +46,15 @@ class ExecutionEnvironment(ABC):
     def is_sandboxed(self) -> bool:
         """True when command effects are contained away from the host."""
 
+    @property
+    def requires_per_call_approval(self) -> bool:
+        """Whether every command needs approval regardless of standing grants."""
+        return not self.is_sandboxed
+
+    def command_rejection_reason(self, command: str) -> str | None:
+        """Return an unconditional policy rejection, if one applies."""
+        return None
+
     @abstractmethod
     def run(
         self,

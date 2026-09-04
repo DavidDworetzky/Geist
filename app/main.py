@@ -39,6 +39,7 @@ from app.loopback_security import install_loopback_security
 from app.models.completion import (
     CompleteTextParams,
     InitializeAgentParams,
+    RunInstructionParams,
     ToolApprovalParams,
 )
 from app.models.database.agent_preset import AgentPreset
@@ -54,6 +55,7 @@ from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.goal_runtime import DatabaseGoalStore, GoalRuntimeRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
@@ -102,9 +104,12 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 run_controls = RunControlRegistry()
+goal_runtime_registry = GoalRuntimeRegistry()
 chat_orchestrator = ChatOrchestrator(
-    build_default_tool_registry(),
+    build_default_tool_registry(goal_runtime_registry),
     run_controls=run_controls,
+    orchestration_runs=goal_runtime_registry,
+    goal_store=DatabaseGoalStore(),
 )
 
 if enhanced_logging:
@@ -410,8 +415,12 @@ def run_chat_completion(
         user_id=user_id,
         chat_id=chat_id,
         config=model_request_config(params),
-        system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+        system_prompt=chat_system_prompt(
+            params.enable_tools or params.agentic_mode,
+            memory_context,
+        ),
         enable_tools=params.enable_tools,
+        agentic_mode=params.agentic_mode,
         memory_enabled=memory_enabled,
         memory_mode=memory_mode,
         folder_id=folder_id,
@@ -440,8 +449,12 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 user_id=user_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
-                system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+                system_prompt=chat_system_prompt(
+                    params.enable_tools or params.agentic_mode,
+                    memory_context,
+                ),
                 enable_tools=params.enable_tools,
+                agentic_mode=params.agentic_mode,
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
@@ -511,9 +524,7 @@ def run_routine(routine) -> None:
         )
         return
     user_id = int(routine.user_id)
-    params = CompleteTextParams(
-        prompt=routine.prompt, max_tokens=1024, enable_tools=True
-    )
+    params = CompleteTextParams(prompt=routine.prompt, max_tokens=1024, enable_tools=True)
     for _ in chat_orchestrator.stream(
         backend=agent,
         prompt=routine.prompt,
@@ -522,6 +533,7 @@ def run_routine(routine) -> None:
         config=model_request_config(params),
         system_prompt=chat_system_prompt(True, ""),
         enable_tools=True,
+        agentic_mode=params.agentic_mode,
         interactive=False,
     ):
         pass
@@ -616,9 +628,7 @@ def create_app(
     @agent_router.post("/runs/{run_id}/tool_approval")
     def resolve_tool_approval(run_id: str, params: ToolApprovalParams):
         try:
-            resolved = tool_approval_registry.resolve(
-                run_id, params.call_id, params.decision
-            )
+            resolved = tool_approval_registry.resolve(run_id, params.call_id, params.decision)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         if not resolved:
@@ -627,6 +637,22 @@ def create_app(
                 detail="No pending approval for this run and call",
             )
         return {"run_id": run_id, "call_id": params.call_id, "decision": params.decision}
+
+    @agent_router.post("/runs/{run_id}/instructions")
+    def add_run_instruction(run_id: str, params: RunInstructionParams):
+        user = get_default_user()
+        try:
+            instruction = run_controls.enqueue(
+                run_id, user.user_id, params.instruction_id, params.text
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if instruction is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This run is no longer accepting instructions. Send a new chat message to resume.",
+            )
+        return {"run_id": run_id, "instruction": instruction}
 
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
@@ -665,10 +691,12 @@ def create_app(
                     "enabled": tool.name in enabled_names,
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
+                    "requires_per_call_approval": tool.requires_per_call_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }
                 for tool in chat_orchestrator.registry.catalog()
+                if not tool.approval_exempt
             ]
         }
 
@@ -1006,6 +1034,6 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 - container entrypoint must accept external traffic
         port=8000,  # 1MB (1024 * 1024 bytes)
     )

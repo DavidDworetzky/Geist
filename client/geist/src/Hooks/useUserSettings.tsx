@@ -35,6 +35,7 @@ export interface UserSettings {
   default_online_provider: string;
   default_file_archives: number[];
   enable_rag_by_default: boolean;
+  agentic_mode_enabled?: boolean;
   default_max_tokens: number;
   default_temperature: number;
   default_top_p: number;
@@ -57,6 +58,7 @@ export interface UserSettingsUpdate {
   default_online_provider?: string;
   default_file_archives?: number[];
   enable_rag_by_default?: boolean;
+  agentic_mode_enabled?: boolean;
   default_max_tokens?: number;
   default_temperature?: number;
   default_top_p?: number;

@@ -5,6 +5,8 @@ import {
   ChatTurnResult,
   CompleteTextResponse,
   ModelLoadStatus,
+  OrchestrationState,
+  PlanTask,
   ToolCallResult,
   WorkArtifact,
 } from '../chatTypes';
@@ -41,6 +43,7 @@ const getDefaultParams = (settings: UserSettings | null) => ({
   response_format: "text",
   agent_type: getAgentTypeFromSettings(settings),
   enable_tools: true,
+  agentic_mode: settings?.agentic_mode_enabled !== false,
 });
 
 type ToolCallUpdate = Partial<ToolCallResult> & Pick<ToolCallResult, 'id'>;
@@ -59,6 +62,8 @@ export type ChatStreamAction =
   | { type: 'MODEL_LOAD_STATUS'; status: ModelLoadStatus }
   | { type: 'TOOL_UPSERT'; toolCall: ToolCallUpdate }
   | { type: 'ARTIFACT_UPSERT'; artifact: WorkArtifact }
+  | { type: 'PLAN_UPDATE'; tasks: PlanTask[]; warning?: string | null }
+  | { type: 'GOAL_UPDATE'; orchestration: OrchestrationState }
   | { type: 'FINAL'; prompt: string; data: CompleteTextResponse }
   | { type: 'DONE'; runId?: string | null; chatId?: number | null }
   | { type: 'ERROR'; message: string }
@@ -91,6 +96,8 @@ const mergeToolCall = (
   arguments: update.arguments ?? current?.arguments ?? {},
   status: update.status ?? current?.status ?? 'proposed',
   requires_approval: update.requires_approval ?? current?.requires_approval,
+  requires_per_call_approval:
+    update.requires_per_call_approval ?? current?.requires_per_call_approval,
   result_summary: update.result_summary ?? current?.result_summary,
   artifact_ids: update.artifact_ids ?? current?.artifact_ids,
   error: update.error ?? current?.error,
@@ -237,6 +244,32 @@ export const chatStreamReducer = (
           artifacts: upsertArtifact(state.activeTurn.artifacts, action.artifact),
         },
       };
+    case 'PLAN_UPDATE':
+      if (!state.activeTurn) return state;
+      return {
+        ...state,
+        activeTurn: {
+          ...state.activeTurn,
+          orchestration: {
+            ...(state.activeTurn.orchestration ?? { agentic_mode: true }),
+            agentic_mode: true,
+            tasks: action.tasks,
+            decomposition_warning: action.warning ?? null,
+          },
+        },
+      };
+    case 'GOAL_UPDATE':
+      if (!state.activeTurn) return state;
+      return {
+        ...state,
+        activeTurn: {
+          ...state.activeTurn,
+          orchestration: {
+            ...(state.activeTurn.orchestration ?? { agentic_mode: true, tasks: [] }),
+            ...action.orchestration,
+          },
+        },
+      };
     case 'FINAL': {
       const completedTurn: ChatTurnResult = {
         run_id: action.data.run_id ?? state.activeTurn?.run_id ?? null,
@@ -246,6 +279,7 @@ export const chatStreamReducer = (
         origin_chat_id: state.activeTurn?.origin_chat_id ?? null,
         tool_calls: dedupeTools(action.data.tool_calls ?? []),
         artifacts: dedupeArtifacts(action.data.artifacts ?? []),
+        orchestration: action.data.orchestration ?? state.activeTurn?.orchestration ?? null,
       };
       return {
         ...state,
@@ -354,6 +388,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   const [state_chat_id, setStateChatId] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const [steeringError, setSteeringError] = useState<string | null>(null);
+  const [steeringStatus, setSteeringStatus] = useState<string | null>(null);
+  const [isSteering, setIsSteering] = useState(false);
+  const instructionSequenceRef = useRef(0);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
@@ -445,6 +483,14 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       dispatch({ type: 'TOOL_UPSERT', toolCall: data as unknown as ToolCallUpdate });
     } else if (event === 'artifact' && isRecord(data) && typeof data.id === 'string') {
       dispatch({ type: 'ARTIFACT_UPSERT', artifact: data as unknown as WorkArtifact });
+    } else if (event === 'plan' && isRecord(data) && Array.isArray(data.tasks)) {
+      dispatch({
+        type: 'PLAN_UPDATE',
+        tasks: data.tasks as PlanTask[],
+        warning: typeof data.warning === 'string' ? data.warning : null,
+      });
+    } else if (event === 'goal' && isRecord(data) && Array.isArray(data.tasks)) {
+      dispatch({ type: 'GOAL_UPDATE', orchestration: data as unknown as OrchestrationState });
     } else if (event === 'final' && isRecord(data)) {
       const response = data as unknown as CompleteTextResponse;
       if (typeof response.run_id === 'string') {
@@ -495,6 +541,8 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     activeRunIdRef.current = null;
 
     const currentChatId = chat_id === undefined ? state_chat_id : chat_id;
+    setSteeringError(null);
+    setSteeringStatus(null);
     const prompt = inputText;
     const params = getDefaultParams(userSettings);
     dispatch({ type: 'START', prompt, chatId: currentChatId });
@@ -592,6 +640,29 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     }
   };
 
+  const steerRun = async (text: string): Promise<boolean> => {
+    const runId = activeRunIdRef.current;
+    if (!runId || !streamState.loading) return false;
+    setIsSteering(true);
+    setSteeringError(null);
+    setSteeringStatus(null);
+    try {
+      const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/instructions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction_id: globalThis.crypto?.randomUUID?.() ?? `${runId}:${Date.now()}:${++instructionSequenceRef.current}`, text }),
+      });
+      if (!response.ok) throw new Error('Instructions were not accepted. Keep your message and send it again when the run finishes.');
+      setSteeringStatus('Instructions queued. The agent will read them before its next step.');
+      return true;
+    } catch (error) {
+      setSteeringError(error instanceof Error ? error.message : 'Could not send instructions.');
+      return false;
+    } finally {
+      setIsSteering(false);
+    }
+  };
+
   const cancelGeneration = async () => {
     const runId = activeRunIdRef.current;
     if (!runId) {
@@ -654,6 +725,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   return {
     prompt,
     completeText,
+    steerRun,
+    steeringError,
+    steeringStatus,
+    isSteering,
     cancelGeneration,
     resetChatSession,
     loading: streamState.loading,

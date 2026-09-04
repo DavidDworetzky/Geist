@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import AgentPermissionsSection from '../AgentPermissionsSection';
 
 const toolsResponse = {
@@ -15,6 +15,13 @@ const toolsResponse = {
       description: 'Send an email',
       requires_approval: true,
       side_effect: 'external_write',
+    },
+    {
+      name: 'terminal.run',
+      description: 'Run a protected host command',
+      requires_approval: true,
+      requires_per_call_approval: true,
+      side_effect: 'process',
     },
   ],
 };
@@ -40,10 +47,8 @@ describe('AgentPermissionsSection', () => {
 
     expect(screen.getByText(/Loading tools/i)).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('web.search')).toBeInTheDocument();
-      expect(screen.getByText('communication.email.send')).toBeInTheDocument();
-    });
+    expect(await screen.findByText('web.search')).toBeInTheDocument();
+    expect(screen.getByText('communication.email.send')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: ['web.search'] });
@@ -61,7 +66,7 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
 
     fireEvent.change(screen.getByLabelText(/Approval Mode/i), {
       target: { value: 'auto_approve' },
@@ -79,7 +84,7 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
     expect(screen.getByText(/Auto-approve is on/i)).toBeInTheDocument();
   });
 
@@ -95,12 +100,30 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
 
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
 
     fireEvent.click(screen.getByText(/Clear All/i));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
+  });
+
+  it('does not allow protected terminal commands onto the standing allowlist', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => toolsResponse });
+    const onChange = jest.fn();
+
+    render(
+      <AgentPermissionsSection
+        agentPermissions={{ mode: 'auto_approve', always_allow: [] }}
+        onChange={onChange}
+      />
+    );
+
+    const terminal = await screen.findByRole('button', { name: /terminal\.run/i });
+    expect(terminal).toBeDisabled();
+    expect(terminal).toHaveTextContent('always asks');
+    fireEvent.click(terminal);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

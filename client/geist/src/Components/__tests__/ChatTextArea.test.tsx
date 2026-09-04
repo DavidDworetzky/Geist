@@ -132,6 +132,36 @@ describe('ChatTextArea tool activity', () => {
   });
 });
 
+describe('ChatTextArea agentic progress', () => {
+  it('renders goal turns, task status, and evidence', () => {
+    render(<ChatTextArea chatHistory={[{
+      run_id: 'run_agentic',
+      user: 'Build a feature',
+      ai: 'Done',
+      orchestration: {
+        agentic_mode: true,
+        goal_status: 'complete',
+        turns_used: 2,
+        max_turns: 8,
+        tasks: [{
+          id: 'task-1',
+          title: 'Implement the UI',
+          acceptance_criteria: ['UI test passes'],
+          status: 'completed',
+          evidence: 'UI test passes',
+        }],
+      },
+    }]} />);
+
+    const progress = screen.getByRole('region', { name: 'Agentic progress' });
+    expect(progress).toHaveTextContent('Agentic plan');
+    expect(progress).toHaveTextContent('complete');
+    expect(progress).toHaveTextContent('Model calls 2/8');
+    expect(progress).toHaveTextContent('Implement the UI');
+    expect(progress).toHaveTextContent('UI test passes');
+  });
+});
+
 describe('ChatTextArea approval decisions', () => {
   const awaitingTurn = (): ChatPair => ({
     run_id: 'run_9',
@@ -166,5 +196,21 @@ describe('ChatTextArea approval decisions', () => {
   it('renders no decision buttons without a handler', () => {
     render(<ChatTextArea chatHistory={[awaitingTurn()]} />);
     expect(screen.queryByRole('button', { name: 'Approve once' })).not.toBeInTheDocument();
+  });
+
+  it('offers only one-time approval or denial for protected terminal commands', () => {
+    const turn = awaitingTurn();
+    turn.tool_calls![0] = {
+      ...turn.tool_calls![0],
+      name: 'terminal.run',
+      requires_per_call_approval: true,
+    };
+    render(<ChatTextArea chatHistory={[turn]} onToolApproval={() => {}} />);
+
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow for session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.getByText('Approval applies to this command only.')).toBeInTheDocument();
   });
 });

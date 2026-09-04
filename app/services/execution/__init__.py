@@ -7,8 +7,9 @@ is config-driven via ``GEIST_EXEC_BACKEND`` (unset = execution disabled).
 
 The sandbox/approval coupling follows the Hermes rule: an isolated backend
 runs without per-call approval, while a backend that can reach host files
-(local, or Docker with a bind-mounted workspace) registers its tool with
-``requires_approval=True`` so the user permission gate applies.
+(local, Docker with a bind-mounted workspace, or networked Docker) registers
+its tool with ``requires_per_call_approval=True`` so standing grants cannot
+bypass the user permission gate.
 """
 
 from app.services.execution.base import ExecutionEnvironment, ExecutionResult
