@@ -33,6 +33,7 @@ from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.plugins import router as plugins_router
+from app.api.v1.endpoints.prompt_schedules import router as prompt_schedules_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -64,6 +65,7 @@ from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
+from app.services.prompt_scheduler import start_scheduler, stop_scheduler
 from app.services.tool_approvals import approval_registry as tool_approval_registry
 from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import build_default_tool_registry
@@ -482,6 +484,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         try:
             app.state.job_worker = start_worker()
+            app.state.prompt_scheduler = start_scheduler()
             app.state.ready = True
             yield
         finally:
@@ -494,6 +497,7 @@ def create_app(
         install_loopback_security(app)
     app.state.ready = False
     app.state.job_worker = None
+    app.state.prompt_scheduler = None
 
     # agent routes, for agentic flows.
     agent_router = APIRouter()
@@ -691,6 +695,11 @@ def create_app(
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
     app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
     app.include_router(plugins_router, prefix="/api/v1/plugins", tags=["plugins"])
+    app.include_router(
+        prompt_schedules_router,
+        prefix="/api/v1/prompt-schedules",
+        tags=["prompt-schedules"],
+    )
 
     @app.get("/health", include_in_schema=False)
     def health():
@@ -940,9 +949,21 @@ def _database_is_ready() -> bool:
 
 def _stop_runtime_services() -> None:
     try:
+        stop_scheduler()
+    except Exception:
+        logger.exception("Failed to stop the prompt scheduler")
+
+    try:
         stop_worker()
     except Exception:
         logger.exception("Failed to stop the job worker")
+
+    try:
+        from app.services.inference import clear_inference_runtime_cache
+
+        clear_inference_runtime_cache()
+    except Exception:
+        logger.exception("Failed to clear the scheduled-inference runtime cache")
 
     try:
         from app.services.local_models import shutdown_local_model_manager

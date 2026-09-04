@@ -41,6 +41,16 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    name: 'Schedules',
+    path: '/schedules',
+    description: 'Recurring prompts',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 2h2v2h6V2h2v2h1.5A2.5 2.5 0 0 1 21 6.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 19.5v-13A2.5 2.5 0 0 1 5.5 4H7V2Zm12 8H5v9.5c0 .28.22.5.5.5h13a.5.5 0 0 0 .5-.5V10Zm-7 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm0 1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM5.5 6a.5.5 0 0 0-.5.5V8h14V6.5a.5.5 0 0 0-.5-.5h-13Z" />
+      </svg>
+    ),
+  },
+  {
     name: 'Settings',
     path: '/settings',
     description: 'Defaults',
@@ -92,6 +102,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith('/workflows')) return 'Workflows';
   if (pathname.startsWith('/files')) return 'Files';
   if (pathname.startsWith('/models')) return 'Models';
+  if (pathname.startsWith('/schedules')) return 'Schedules';
   if (pathname.startsWith('/tools')) return 'Tools';
   if (pathname.startsWith('/settings')) return 'Settings';
   return 'Chat';

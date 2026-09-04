@@ -1,4 +1,5 @@
 """Tests for the job queue worker and handler registry."""
+
 import datetime
 import importlib
 import time
@@ -111,6 +112,20 @@ def test_worker_fails_unknown_kind(sqlite_database):
     failed = get_job(job.job_id)
     assert failed.status == JobStatus.FAILED.value
     assert "No handler registered" in failed.error
+
+
+def test_worker_kind_filters_keep_inference_on_its_own_lane(sqlite_database, temp_handler):
+    inference_job = enqueue_job("prompt.inference", payload={"prompt": "later"})
+    temp_handler("test.general", lambda payload: "general done")
+    general_job = enqueue_job("test.general")
+
+    general_worker = JobWorker(exclude_kinds={"prompt.inference"})
+    assert general_worker.run_once() is True
+
+    untouched = get_job(inference_job.job_id)
+    completed = get_job(general_job.job_id)
+    assert untouched.status == JobStatus.QUEUED.value
+    assert completed.status == JobStatus.SUCCEEDED.value
 
 
 def test_worker_start_stop_processes_queued_job(sqlite_database, temp_handler):
