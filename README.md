@@ -1,6 +1,5 @@
 # Geist
-FOSS Project for private local AI. Chat and Agents / Assistants.
-Geist is a framework for multiple natural language AI Assistants to offload personal assistant work and help busy individuals.
+Geist is a local first, privacy first, voice enabled harness for AI agents.
 
 # Roadmap
 1. Create core OODA architecture for AI Assistants using various LLM transformer architectures.
