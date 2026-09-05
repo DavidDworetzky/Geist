@@ -98,6 +98,11 @@ voice = [
 packaged = [
     "pyinstaller==6.21.0",
 ]
+# Optional voice-model packages are intentionally undeclared, following the
+# qwen_tts precedent (plan 151): providers fail loudly at runtime with
+# install instructions. faster-whisper (faster_whisper STT), silero-vad
+# (neural VAD), kokoro (kokoro TTS), nemo-toolkit[asr] (parakeet STT), and
+# cosyvoice (cosyvoice2 TTS). See plans/155-SOTA-LOCAL-VOICE-MODELS.md.
 
 [dependency-groups]
 dev = [
