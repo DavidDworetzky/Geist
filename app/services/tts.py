@@ -13,8 +13,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
 
-import numpy as np
-
 
 if TYPE_CHECKING:
     import torch
@@ -332,6 +330,8 @@ class SesameTTSProvider(TTSProvider):
         Yields:
             bytes: PCM audio chunks (16-bit signed integers, mono)
         """
+        import numpy as np
+
         # Generate full audio
         audio_tensor = self.synthesize(text, speaker)
 
@@ -424,6 +424,8 @@ class OpenAITTSProvider(TTSProvider):
 
         Note: OpenAI TTS doesn't support streaming, so we generate and chunk.
         """
+        import numpy as np
+
         audio_tensor = self.synthesize(text, speaker)
         audio_np = audio_tensor.cpu().numpy()
         audio_int16 = (audio_np * 32767).astype(np.int16)
@@ -495,6 +497,8 @@ class KokoroMLXTTSProvider(TTSProvider):
 
     @staticmethod
     def _result_to_pcm(result: Any) -> tuple[bytes, int]:
+        import numpy as np
+
         audio = getattr(result, "audio", None)
         if audio is None:
             raise RuntimeError("MLX Audio returned a result without audio")
@@ -525,6 +529,7 @@ class KokoroMLXTTSProvider(TTSProvider):
                     yield pcm
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
         import torch
 
         pcm = b"".join(self.synthesize_streaming(text, speaker))
@@ -577,6 +582,8 @@ class Qwen3MLXTTSProvider(TTSProvider):
 
     @staticmethod
     def _result_to_pcm(result: Any) -> tuple[bytes, int]:
+        import numpy as np
+
         audio = getattr(result, "audio", None)
         if audio is None:
             raise RuntimeError("MLX Audio returned a result without audio")
@@ -609,6 +616,7 @@ class Qwen3MLXTTSProvider(TTSProvider):
                     yield pcm
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
         import torch
 
         pcm = b"".join(self.synthesize_streaming(text, speaker))
@@ -694,6 +702,7 @@ class MagpieTTSProvider(TTSProvider):
             self._sample_rate = int(self._process.sample_rate)
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
         import torch
 
         pcm = b"".join(self.synthesize_streaming(text, speaker))
