@@ -2,20 +2,67 @@
 Voice session service for handling real-time audio streaming, STT, LLM, and TTS.
 """
 
+import asyncio
+import functools
 import logging
+import re
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, Generator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 
-from adapters.mms_adapter import MMSAdapter
-from adapters.whisper_adapter import WhisperAdapter
 from agents.base_agent import BaseAgent
 from app.services.tts import TTSProvider, create_tts_provider
 
 
 logger = logging.getLogger(__name__)
+SEGMENT_BOUNDARY = re.compile(r"[.!?](?:[\"')\]]+)?\s+")
+MAX_UNPUNCTUATED_SEGMENT = 180
+
+
+def create_stt_adapter(provider_type: str, **kwargs) -> Any:
+    """Create an STT adapter without importing optional audio runtimes at module load."""
+
+    if provider_type.lower() == "mms":
+        from adapters.mms_adapter import MMSAdapter
+
+        return MMSAdapter()
+    if provider_type.lower() == "whisper":
+        from adapters.whisper_adapter import WhisperAdapter
+
+        return WhisperAdapter(api_key=kwargs.get("whisper_api_key"))
+    raise ValueError(f"Unknown STT provider: {provider_type}")
+
+
+def _ready_tts_segments(text: str, *, final: bool = False) -> tuple[list[str], str]:
+    """Split stable response text without speaking an unfinished phrase."""
+
+    segments: list[str] = []
+    remaining = text
+    while remaining:
+        boundary = SEGMENT_BOUNDARY.search(remaining)
+        if boundary:
+            segment = remaining[: boundary.end()].strip()
+            remaining = remaining[boundary.end() :]
+            if segment:
+                segments.append(segment)
+            continue
+        if len(remaining) >= MAX_UNPUNCTUATED_SEGMENT:
+            split_at = remaining.rfind(" ", 0, MAX_UNPUNCTUATED_SEGMENT)
+            if split_at <= 0:
+                split_at = MAX_UNPUNCTUATED_SEGMENT
+            segment = remaining[:split_at].strip()
+            remaining = remaining[split_at:].lstrip()
+            if segment:
+                segments.append(segment)
+            continue
+        break
+    if final and remaining.strip():
+        segments.append(remaining.strip())
+        remaining = ""
+    return segments, remaining
 
 
 class VoiceSessionService:
@@ -46,7 +93,7 @@ class VoiceSessionService:
         Args:
             agent: Agent to use for text completion
             stt_provider: STT provider ("mms" or "whisper")
-            tts_provider: TTS provider ("sesame", "openai", or "qwen3")
+            tts_provider: TTS provider ("sesame", "openai", "kokoro", "qwen3", or "magpie")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
@@ -60,14 +107,7 @@ class VoiceSessionService:
         self.chunk_duration_ms = chunk_duration_ms
 
         # Initialize STT
-        self.stt: MMSAdapter | WhisperAdapter
-        if stt_provider.lower() == "mms":
-            self.stt = MMSAdapter()
-        elif stt_provider.lower() == "whisper":
-            api_key = provider_kwargs.get("whisper_api_key")
-            self.stt = WhisperAdapter(api_key=api_key)
-        else:
-            raise ValueError(f"Unknown STT provider: {stt_provider}")
+        self.stt = create_stt_adapter(stt_provider, **provider_kwargs)
 
         # Initialize TTS
         self.tts: TTSProvider = create_tts_provider(tts_provider, **provider_kwargs)
@@ -77,6 +117,11 @@ class VoiceSessionService:
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.silence_threshold_frames = int(silence_duration_ms / chunk_duration_ms)
+        self.silence_samples = 0
+        self.buffered_samples = 0
+        self.has_speech = False
+        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-session")
+        self._closed = False
 
         self.logger = logging.getLogger(__name__)
 
@@ -91,37 +136,27 @@ class VoiceSessionService:
 
     def add_audio_chunk(self, audio_chunk: bytes) -> str | None:
         """
-        Add audio chunk to buffer and check for phrase boundaries.
+        Buffer PCM without running inference on the capture/control thread.
 
         Args:
             audio_chunk: Raw audio bytes (PCM 16-bit signed integer, mono)
 
         Returns:
-            Optional[str]: Partial transcript if available, None otherwise
+            None. The endpoint schedules partial transcription on the worker.
         """
-        # Convert bytes to numpy array
+        if not audio_chunk or len(audio_chunk) % 2:
+            raise ValueError("Audio must contain complete PCM16 samples")
         audio_np = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
-
-        # Add to buffer
-        self.audio_buffer.append(audio_np)
-
-        # Check for speech
         if self._detect_speech(audio_np):
+            self.has_speech = True
+            self.silence_samples = 0
             self.silence_frames = 0
         else:
+            self.silence_samples += len(audio_np)
             self.silence_frames += 1
-
-        # If we have enough audio, run STT for partial transcript
-        if len(self.audio_buffer) >= 10:  # ~1 second at 100ms chunks
-            try:
-                combined_audio = np.concatenate(list(self.audio_buffer))
-                # MMS expects 16kHz
-                transcript = self.stt.transcribe(combined_audio, language="en")
-                return transcript
-            except Exception as e:
-                self.logger.error(f"Partial STT failed: {e}")
-                return None
-
+        if self.has_speech:
+            self.audio_buffer.append(audio_np)
+            self.buffered_samples += len(audio_np)
         return None
 
     def check_phrase_boundary(self) -> bool:
@@ -131,7 +166,31 @@ class VoiceSessionService:
         Returns:
             bool: True if phrase boundary detected
         """
-        return self.silence_frames >= self.silence_threshold_frames
+        return self.has_speech and (
+            self.silence_samples * 1000 >= self.sample_rate * self.silence_duration_ms
+            or self.buffered_samples >= self.sample_rate * 30
+        )
+
+    def take_audio(self) -> np.ndarray:
+        audio = (
+            np.concatenate(list(self.audio_buffer))
+            if self.audio_buffer
+            else np.array([], dtype=np.float32)
+        )
+        self.reset()
+        return audio
+
+    async def transcribe(self, audio: np.ndarray) -> str:
+        if not audio.size:
+            return ""
+        return str(await self._run(self.stt.transcribe, audio, language="en"))
+
+    async def _run(self, function, *args, **kwargs):
+        if self._closed:
+            raise RuntimeError("Voice session is closed")
+        return await asyncio.get_running_loop().run_in_executor(
+            self._worker, functools.partial(function, *args, **kwargs)
+        )
 
     def get_final_transcript(self) -> str:
         """
@@ -145,7 +204,7 @@ class VoiceSessionService:
 
         try:
             # Combine all buffered audio
-            combined_audio = np.concatenate(list(self.audio_buffer))
+            combined_audio = self.take_audio()
 
             # Run final STT
             transcript = self.stt.transcribe(combined_audio, language="en")
@@ -154,7 +213,7 @@ class VoiceSessionService:
             self.audio_buffer.clear()
             self.silence_frames = 0
 
-            return transcript
+            return str(transcript)
         except Exception as e:
             self.logger.error(f"Final STT failed: {e}")
             self.audio_buffer.clear()
@@ -167,7 +226,27 @@ class VoiceSessionService:
         chat_id: int | None = None,
         system_prompt: str | None = None,
         use_streaming: bool = True,
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        # Advance on one worker thread: bounded to a single event, with no GPU
+        # work on the event loop. Closing is queued behind any in-flight step.
+        iterator = self._process_with_agent(transcript, chat_id, system_prompt, use_streaming)
+        sentinel = object()
+        try:
+            while True:
+                event = await self._run(next, iterator, sentinel)
+                if event is sentinel:
+                    return
+                yield event
+        finally:
+            self._worker.submit(iterator.close)
+
+    def _process_with_agent(
+        self,
+        transcript: str,
+        chat_id: int | None = None,
+        system_prompt: str | None = None,
+        use_streaming: bool = True,
+    ) -> Generator[dict[str, Any], None, None]:
         """
         Process transcript with agent and yield responses.
 
@@ -192,17 +271,42 @@ class VoiceSessionService:
                     yield {"type": "text_start"}
 
                     full_text = ""
+                    pending_tts_text = ""
+                    audio_started = False
                     for chunk in self.agent.stream_complete_text(
                         prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
                     ):
                         full_text += chunk
+                        pending_tts_text += chunk
                         yield {"type": "text_chunk", "text": chunk}
+
+                        segments, pending_tts_text = _ready_tts_segments(pending_tts_text)
+                        for segment in segments:
+                            if not audio_started:
+                                yield {
+                                    "type": "audio_start",
+                                    "encoding": "pcm_s16le",
+                                    "sample_rate": self.tts.sample_rate,
+                                    "channels": 1,
+                                }
+                                audio_started = True
+                            for audio_chunk in self.tts.synthesize_streaming(segment):
+                                yield {"type": "audio_chunk", "audio": audio_chunk}
 
                     yield {"type": "text_complete", "text": full_text}
 
-                    # Generate TTS from complete text
-                    for audio_chunk in self.tts.synthesize_streaming(full_text):
-                        yield {"type": "audio_chunk", "audio": audio_chunk}
+                    tail_segments, _ = _ready_tts_segments(pending_tts_text, final=True)
+                    for segment in tail_segments:
+                        if not audio_started:
+                            yield {
+                                "type": "audio_start",
+                                "encoding": "pcm_s16le",
+                                "sample_rate": self.tts.sample_rate,
+                                "channels": 1,
+                            }
+                            audio_started = True
+                        for audio_chunk in self.tts.synthesize_streaming(segment):
+                            yield {"type": "audio_chunk", "audio": audio_chunk}
 
                     yield {"type": "audio_complete"}
 
@@ -232,21 +336,17 @@ class VoiceSessionService:
                 yield {"type": "text_complete", "text": response_text}
 
                 # Generate TTS
+                yield {
+                    "type": "audio_start",
+                    "encoding": "pcm_s16le",
+                    "sample_rate": self.tts.sample_rate,
+                    "channels": 1,
+                }
                 for audio_chunk in self.tts.synthesize_streaming(response_text):
                     yield {"type": "audio_chunk", "audio": audio_chunk}
 
                 yield {"type": "audio_complete"}
 
-        except ModuleNotFoundError as e:
-            if e.name == "qwen_tts":
-                message = (
-                    "Qwen3 TTS provider requires the qwen_tts package. "
-                    "Install qwen_tts before selecting tts_provider=qwen3."
-                )
-            else:
-                message = str(e)
-            self.logger.error(f"Agent processing failed: {message}")
-            yield {"type": "error", "message": message}
         except Exception as e:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
@@ -256,4 +356,18 @@ class VoiceSessionService:
         self.audio_buffer.clear()
         self.transcript_buffer = ""
         self.silence_frames = 0
+        self.silence_samples = 0
+        self.buffered_samples = 0
+        self.has_speech = False
         self.logger.info("Voice session reset")
+
+    def close(self) -> None:
+        """Release provider resources when the WebSocket session ends."""
+        if self._closed:
+            return
+        self._closed = True
+        self.reset()
+        close = getattr(self.tts, "close", None)
+        if callable(close):
+            self._worker.submit(close)
+        self._worker.shutdown(wait=False)

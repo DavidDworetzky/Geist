@@ -26,43 +26,26 @@ const voiceModelsResponse = {
     },
     {
       provider: 'qwen3',
-      display_name: 'Qwen3 TTS',
+      display_name: 'Qwen3 TTS (local MLX)',
       type: 'local',
-      default_model: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice',
+      default_model: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
       models: [
         {
           id: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
           display_name: 'Qwen3 TTS 0.6B Custom Voice',
           sample_rate: 24000,
           supports_streaming: true,
-          streaming_mode: 'native_or_chunked',
-          supports_instruction_control: true,
+          streaming_mode: 'native_pcm',
+          supports_instruction_control: false,
           supports_voice_cloning: false,
-          voices: [
-            { id: 'Cherry', display_name: 'Cherry' },
-            { id: 'Ethan', display_name: 'Ethan' },
-          ],
-          languages: [
-            { code: 'en', display_name: 'English' },
-            { code: 'ja', display_name: 'Japanese' },
-          ],
-        },
-        {
-          id: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice',
-          display_name: 'Qwen3 TTS 1.7B Custom Voice',
-          sample_rate: 24000,
-          supports_streaming: true,
-          streaming_mode: 'native_or_chunked',
-          supports_instruction_control: true,
-          supports_voice_cloning: false,
-          voices: [
-            { id: 'Cherry', display_name: 'Cherry' },
-            { id: 'Ethan', display_name: 'Ethan' },
-          ],
-          languages: [
-            { code: 'en', display_name: 'English' },
-            { code: 'ja', display_name: 'Japanese' },
-          ],
+          voices: [{ id: 'Aiden', display_name: 'Aiden' }],
+          languages: [{ code: 'English', display_name: 'English' }],
+          artifact: {
+            id: 'qwen3-tts-0.6b-customvoice-mlx-6bit',
+            status: 'installed',
+            supported: true,
+            runtime_ready: true,
+          },
         },
       ],
     },
@@ -121,7 +104,7 @@ describe('VoiceSettings', () => {
     render(<VoiceSettings selection={DEFAULT_VOICE_SELECTION} onChange={onChange} />);
 
     fireEvent.click(screen.getByLabelText('Voice settings'));
-    await waitFor(() => screen.getByLabelText(/Voice provider/i));
+    await screen.findByLabelText(/Voice provider/i);
 
     fireEvent.change(screen.getByLabelText(/Voice provider/i), {
       target: { value: 'qwen3' },
@@ -130,48 +113,35 @@ describe('VoiceSettings', () => {
     expect(onChange).toHaveBeenCalledWith({
       sttProvider: 'mms',
       ttsProvider: 'qwen3',
-      ttsModel: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice',
-      ttsVoice: 'Cherry',
-      ttsLanguage: 'en',
+      ttsModel: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
+      ttsVoice: 'Aiden',
+      ttsLanguage: 'English',
     });
   });
 
-  it('shows model, voice, and language selects for multi-option providers', async () => {
+  it('disables a local provider until its weights and runtime are ready', async () => {
+    const unavailableResponse = JSON.parse(JSON.stringify(voiceModelsResponse));
+    const artifact = unavailableResponse.providers[1].models[0].artifact;
+    artifact.status = 'not_installed';
+    artifact.runtime_ready = false;
+    artifact.runtime_detail = 'MLX Audio is not installed.';
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
-      json: async () => voiceModelsResponse,
+      json: async () => unavailableResponse,
     });
     const onChange = jest.fn();
 
-    render(
-      <VoiceSettings
-        selection={{
-          sttProvider: 'mms',
-          ttsProvider: 'qwen3',
-          ttsModel: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice',
-          ttsVoice: 'Cherry',
-          ttsLanguage: 'en',
-        }}
-        onChange={onChange}
-      />
-    );
+    render(<VoiceSettings selection={DEFAULT_VOICE_SELECTION} onChange={onChange} />);
 
     fireEvent.click(screen.getByLabelText('Voice settings'));
-    await waitFor(() => screen.getByLabelText(/Voice provider/i));
+    const select = await screen.findByLabelText(/Voice provider/i);
+    const qwenOption = screen.getByRole('option', {
+      name: /Qwen3 TTS.*download or runtime required/i,
+    });
 
-    expect(screen.getByLabelText(/Model/)).toHaveValue(
-      'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
-    );
-
-    fireEvent.change(screen.getByLabelText(/^Voice$/), { target: { value: 'Ethan' } });
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ ttsVoice: 'Ethan' })
-    );
-
-    fireEvent.change(screen.getByLabelText(/Language/), { target: { value: 'ja' } });
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ ttsLanguage: 'ja' })
-    );
+    expect(qwenOption).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'qwen3' } });
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('surfaces an error when the catalog fails to load', async () => {

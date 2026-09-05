@@ -106,7 +106,8 @@ function RuntimeSummary(): JSX.Element {
   const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
-  const compatibleArtifacts = artifacts.filter(artifact => artifact.supported !== false);
+  const compatibleArtifacts = artifacts.filter(artifact => artifact.supported !== false
+    && (!artifact.modality || artifact.modality === 'llm'));
 
   const model = mode === 'online'
     ? settings?.default_online_model

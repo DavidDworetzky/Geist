@@ -18,6 +18,7 @@ from app.services.local_models import (
     DOWNLOAD_DISK_RESERVE_BYTES,
     InsufficientStorageError,
     LocalModelArtifact,
+    LocalModelComponent,
     LocalModelManager,
     default_model_home,
     local_artifact_supported,
@@ -136,6 +137,157 @@ def test_model_lookup_prefers_the_platform_supported_artifact(tmp_path, managers
     managers.append(manager)
 
     assert manager.find_artifact("Qwen/Qwen3.8-27B") == gguf
+
+
+def test_voice_catalog_exposes_one_platform_specific_artifact_per_runtime():
+    kokoro = next(item for item in CURATED_LOCAL_ARTIFACTS if item.id == "kokoro-82m-bf16-mlx")
+    qwen = next(
+        item for item in CURATED_LOCAL_ARTIFACTS if item.id == "qwen3-tts-0.6b-customvoice-mlx-6bit"
+    )
+    magpie = next(item for item in CURATED_LOCAL_ARTIFACTS if item.runtime == "nemo_speech")
+
+    assert kokoro.revision == "a71e4d38b236d968966a2002c4c895dbd12b1c3c"
+    assert kokoro.modality == "tts"
+    assert kokoro.default_voice == "af_heart"
+    assert kokoro.allow_patterns == (
+        "config.json",
+        "kokoro-v1_0.safetensors",
+        "voices/af_heart.safetensors",
+    )
+    assert kokoro.sha256 == "4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8"
+    assert local_artifact_supported(kokoro, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(kokoro, system="Linux", machine="x86_64") is False
+
+    assert qwen.revision == "7dc92af14613355896fcab13b268c19ede233139"
+    assert qwen.modality == "tts"
+    assert qwen.default_voice == "Aiden"
+    assert qwen.primary_weight == "model.safetensors"
+    assert qwen.primary_weight_size_bytes == 1_146_758_090
+    assert qwen.sha256 == "77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513"
+    assert local_artifact_supported(qwen, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(qwen, system="Linux", machine="x86_64") is False
+
+    assert magpie.modality == "tts"
+    assert magpie.default_voice == "John"
+    assert len(magpie.components) == 3
+    assert local_artifact_supported(magpie, system="Linux", machine="x86_64") is True
+    assert local_artifact_supported(magpie, system="Darwin", machine="arm64") is False
+
+
+def test_qwen_tts_snapshot_requires_nested_audio_tokenizer(tmp_path):
+    artifact = _mlx_artifact(
+        id="test-qwen-tts",
+        validation_profile="qwen_tts_mlx",
+        primary_weight="model.safetensors",
+        primary_weight_size_bytes=4,
+        sha256=hashlib.sha256(b"test").hexdigest(),
+    )
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    for relative in (
+        "config.json",
+        "model.safetensors",
+        "vocab.json",
+        "merges.txt",
+        "speech_tokenizer/config.json",
+    ):
+        path = snapshot / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"test")
+    LocalModelManager._write_directory_manifest(artifact, snapshot)
+
+    with pytest.raises(ValueError, match="speech_tokenizer/model.safetensors"):
+        LocalModelManager._verify_snapshot(artifact, snapshot)
+
+    (snapshot / "speech_tokenizer" / "model.safetensors").write_bytes(b"test")
+    assert LocalModelManager._verify_snapshot(artifact, snapshot) == artifact.revision
+
+
+def test_kokoro_snapshot_requires_only_curated_vera_voice(tmp_path):
+    artifact = _mlx_artifact(
+        id="test-kokoro-tts",
+        validation_profile="kokoro_tts_mlx",
+        primary_weight="kokoro-v1_0.safetensors",
+        primary_weight_size_bytes=4,
+        sha256=hashlib.sha256(b"test").hexdigest(),
+    )
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    for relative in ("config.json", "kokoro-v1_0.safetensors"):
+        (snapshot / relative).write_bytes(b"test")
+    LocalModelManager._write_directory_manifest(artifact, snapshot)
+
+    with pytest.raises(ValueError, match="voices/af_heart.safetensors"):
+        LocalModelManager._verify_snapshot(artifact, snapshot)
+
+    voice = snapshot / "voices" / "af_heart.safetensors"
+    voice.parent.mkdir()
+    voice.write_bytes(b"test")
+    assert LocalModelManager._verify_snapshot(artifact, snapshot) == artifact.revision
+
+
+def test_bundle_download_is_atomically_installed_and_verified(tmp_path, managers):
+    model_bytes = b"GGUFmagpie"
+    codec_bytes = b"GGUFcodec"
+    artifact = LocalModelArtifact(
+        id="test-voice-bundle",
+        model_id="test/voice",
+        display_name="Test voice bundle",
+        format="bundle",
+        backend="nemo_speech",
+        runtime="nemo_speech",
+        modality="tts",
+        filename="bundle",
+        components=(
+            LocalModelComponent(
+                id="model",
+                repo_id="test/model",
+                revision="model-revision",
+                destination="model",
+                filename="model.gguf",
+                size_bytes=len(model_bytes),
+                sha256=hashlib.sha256(model_bytes).hexdigest(),
+            ),
+            LocalModelComponent(
+                id="tokenizer",
+                repo_id="test/model",
+                revision="tokenizer-revision",
+                destination="model",
+                required_files=("tokenizer/vocab.txt",),
+            ),
+            LocalModelComponent(
+                id="codec",
+                repo_id="test/codec",
+                revision="codec-revision",
+                destination="codec",
+                filename="codec.gguf",
+                size_bytes=len(codec_bytes),
+                sha256=hashlib.sha256(codec_bytes).hexdigest(),
+            ),
+        ),
+    )
+
+    def downloader(_artifact, destination, progress):
+        (destination / "model" / "tokenizer").mkdir(parents=True)
+        (destination / "codec").mkdir(parents=True)
+        (destination / "model" / "model.gguf").write_bytes(model_bytes)
+        (destination / "model" / "tokenizer" / "vocab.txt").write_text("test")
+        (destination / "codec" / "codec.gguf").write_bytes(codec_bytes)
+        progress(3, 3)
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(artifact,),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    installed = manager.download_artifact(artifact.id)
+
+    assert installed.name == "bundle"
+    assert not (tmp_path / ".downloads" / "test-voice-bundle.partial.bundle").exists()
+    assert manager.status(artifact.id)["status"] == "installed"
+    assert manager.require_installed(artifact.id)[1] == installed
 
 
 @pytest.fixture

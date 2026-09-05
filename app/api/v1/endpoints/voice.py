@@ -2,10 +2,12 @@
 Voice chat WebSocket endpoint for real-time audio streaming.
 """
 
+import asyncio
 import base64
 import json
 import logging
 import os
+from contextlib import aclosing, suppress
 from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -54,7 +56,9 @@ async def get_agent_for_session(
     )
 
     # Create the agent from workspace-owned settings.
-    agent = UserSettingsService.create_agent_from_default_workspace(agent_context, overrides)
+    agent = await asyncio.to_thread(
+        UserSettingsService.create_agent_from_default_workspace, agent_context, overrides
+    )
     return agent
 
 
@@ -109,9 +113,23 @@ async def list_voice_models():
     """Return supported voice/TTS providers and model options for frontend selection."""
     from app.services.tts import get_supported_tts_providers
 
+    providers = get_supported_tts_providers()
+    local_ready = next(
+        (
+            provider["provider"]
+            for provider in providers
+            if provider.get("type") == "local"
+            and any(
+                model.get("artifact", {}).get("status") == "installed"
+                and model.get("artifact", {}).get("runtime_ready") is True
+                for model in provider.get("models", [])
+            )
+        ),
+        None,
+    )
     return {
-        "default_provider": "sesame",
-        "providers": get_supported_tts_providers(),
+        "default_provider": local_ready or "sesame",
+        "providers": providers,
     }
 
 
@@ -121,7 +139,10 @@ async def voice_stream_websocket(
     session_id: int = Query(..., description="Chat session ID"),
     agent_type: str = Query("online", description="Agent type (online or local)"),
     stt_provider: str = Query("mms", description="STT provider (mms or whisper)"),
-    tts_provider: str = Query("sesame", description="TTS provider (sesame, openai, or qwen3)"),
+    tts_provider: str = Query(
+        "sesame",
+        description="TTS provider (sesame, openai, kokoro, qwen3, or magpie)",
+    ),
     tts_model: str | None = Query(None, description="TTS model ID override"),
     tts_voice: str | None = Query(None, description="TTS voice override"),
     tts_language: str | None = Query(None, description="TTS language code override"),
@@ -139,6 +160,7 @@ async def voice_stream_websocket(
       - {"type": "text_start"}
       - {"type": "text_chunk", "text": "..."}
       - {"type": "text_complete", "text": "..."}
+      - {"type": "audio_start", "encoding": "pcm_s16le", "sample_rate": 24000, "channels": 1}
       - {"type": "audio_chunk"} followed by binary audio data
       - {"type": "audio_complete"}
       - {"type": "done"}
@@ -156,6 +178,51 @@ async def voice_stream_websocket(
 
     voice_service: VoiceSessionService | None = None
     stop_requested: bool = False
+    response_task: asyncio.Task | None = None
+    partial_task: asyncio.Task | None = None
+    last_partial_samples = 0
+
+    async def cancel_turn() -> None:
+        nonlocal response_task, partial_task
+        for task in (response_task, partial_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    with suppress(asyncio.CancelledError):
+                        await task
+                except Exception:
+                    logger.debug("Voice task ended after connection failure", exc_info=True)
+        response_task = partial_task = None
+
+    async def respond(audio) -> None:
+        assert voice_service is not None
+        try:
+            transcript = await voice_service.transcribe(audio)
+            if transcript.strip():
+                await websocket.send_json({"type": "transcript_final", "text": transcript})
+                async with aclosing(
+                    voice_service.process_with_agent(
+                        transcript=transcript, chat_id=session_id, system_prompt=DEFAULT_PROMPT
+                    )
+                ) as responses:
+                    async for response in responses:
+                        if response["type"] == "audio_chunk":
+                            await websocket.send_bytes(response["audio"])
+                        else:
+                            await websocket.send_json(response)
+            await websocket.send_json({"type": "done"})
+        except Exception as error:
+            await websocket.send_json({"type": "error", "message": str(error)})
+            await websocket.send_json({"type": "done"})
+
+    async def transcribe_partial(audio) -> None:
+        assert voice_service is not None
+        try:
+            transcript = await voice_service.transcribe(audio)
+            if transcript:
+                await websocket.send_json({"type": "transcript_partial", "text": transcript})
+        except Exception:
+            logger.debug("Partial STT unavailable", exc_info=True)
 
     try:
         # Get agent context and create agent
@@ -183,12 +250,16 @@ async def voice_stream_websocket(
             # Receive audio chunk
             try:
                 data = await websocket.receive()
+                if data["type"] == "websocket.disconnect":
+                    break
 
                 # Handle text messages (control)
                 if "text" in data:
                     message = json.loads(data["text"])
                     if message.get("type") == "reset":
+                        await cancel_turn()
                         voice_service.reset()
+                        last_partial_samples = 0
                         await websocket.send_json({"type": "reset_complete"})
                         continue
                     if message.get("type") in {"stop", "close", "end"}:
@@ -198,43 +269,27 @@ async def voice_stream_websocket(
 
                 # Handle binary audio
                 if "bytes" in data:
+                    # Half-duplex: do not accumulate the assistant's speech as
+                    # another user turn while inference is active.
+                    if response_task is not None and not response_task.done():
+                        continue
                     audio_chunk = data["bytes"]
-
-                    # Add to buffer and get partial transcript
-                    partial_transcript = voice_service.add_audio_chunk(audio_chunk)
-
-                    if partial_transcript:
-                        await websocket.send_json(
-                            {"type": "transcript_partial", "text": partial_transcript}
-                        )
-
-                    # Check for phrase boundary
+                    voice_service.add_audio_chunk(audio_chunk)
                     if voice_service.check_phrase_boundary():
-                        # Get final transcript
-                        final_transcript = voice_service.get_final_transcript()
+                        await cancel_turn()
+                        audio = voice_service.take_audio()
+                        last_partial_samples = 0
+                        await websocket.send_json({"type": "processing"})
+                        response_task = asyncio.create_task(respond(audio))
+                    elif voice_service.buffered_samples - last_partial_samples >= 16000 and (
+                        partial_task is None or partial_task.done()
+                    ):
+                        import numpy as np
 
-                        if final_transcript:
-                            await websocket.send_json(
-                                {"type": "transcript_final", "text": final_transcript}
-                            )
-
-                            # Process with agent and stream response
-                            async for response in voice_service.process_with_agent(
-                                transcript=final_transcript,
-                                chat_id=session_id,
-                                system_prompt=DEFAULT_PROMPT,
-                                use_streaming=True,
-                            ):
-                                if response["type"] == "audio_chunk":
-                                    # Send audio as binary
-                                    await websocket.send_json({"type": "audio_chunk_start"})
-                                    await websocket.send_bytes(response["audio"])
-                                else:
-                                    # Send other messages as JSON
-                                    await websocket.send_json(response)
-
-                            # Signal turn complete
-                            await websocket.send_json({"type": "done"})
+                        last_partial_samples = voice_service.buffered_samples
+                        partial_task = asyncio.create_task(
+                            transcribe_partial(np.concatenate(list(voice_service.audio_buffer)))
+                        )
 
             except WebSocketDisconnect:
                 logger.info(f"Voice WebSocket disconnected: session_id={session_id}")
@@ -250,8 +305,9 @@ async def voice_stream_websocket(
         except Exception as send_error:
             logger.debug(f"Failed to send error message to WebSocket: {send_error}")
     finally:
+        await cancel_turn()
         if voice_service:
-            voice_service.reset()
+            voice_service.close()
         try:
             await websocket.close()
         except Exception as close_error:
@@ -276,6 +332,7 @@ async def voice_upload(
 
     Upload an audio clip, get back transcript, text response, and audio response.
     """
+    voice_service = None
     try:
         import numpy as np
 
@@ -305,7 +362,7 @@ async def voice_upload(
         audio_np = np.frombuffer(audio_file, dtype=np.int16).astype(np.float32) / 32768.0
 
         # Transcribe
-        transcript = voice_service.stt.transcribe(audio_np, language="en")
+        transcript = await voice_service.transcribe(audio_np)
 
         # Get agent response (non-streaming for HTTP)
         full_text = ""
@@ -336,3 +393,6 @@ async def voice_upload(
     except Exception as e:
         logger.error(f"Voice upload error: {e}", exc_info=True)
         return {"error": str(e)}
+    finally:
+        if voice_service is not None:
+            voice_service.close()
