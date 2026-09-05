@@ -60,9 +60,11 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "workspace.list_markdown",
         "workspace.read_markdown",
         "adapter.JobStatusAdapter.check_async_tool",
+        "adapter.CronScheduleAdapter.create_prompt_schedule",
     }
     assert catalog["web.search"].enabled_by_default is True
     assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
+    assert catalog["adapter.CronScheduleAdapter.create_prompt_schedule"].enabled_by_default is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
     assert catalog["workspace.list_markdown"].enabled_by_default is True
@@ -79,6 +81,7 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "documents.search",
         "workspace.list_markdown",
         "workspace.read_markdown",
+        "adapter.CronScheduleAdapter.create_prompt_schedule",
     }
 
 
@@ -152,6 +155,7 @@ def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
         "workspace.list_markdown",
         "workspace.read_markdown",
         "adapter.JobStatusAdapter.check_async_tool",
+        "adapter.CronScheduleAdapter.create_prompt_schedule",
     }
 
 
@@ -191,6 +195,7 @@ def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monk
     assert image == {"image.generate"}
     assert "image.generate" not in action
     assert {"web.search", "documents.search"} <= action
+    assert "adapter.CronScheduleAdapter.create_prompt_schedule" in action
 
     assert registry.definitions_for_intent(_context(), "answer", include_retrieval=False) == []
 

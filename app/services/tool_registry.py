@@ -11,6 +11,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from adapters.cron_schedule_adapter import CronScheduleAdapter
 from adapters.image_generation_adapter import ImageGenerationAdapter
 from adapters.job_status_adapter import JobStatusAdapter
 from adapters.markdown_file_adapter import MarkdownFileAdapter
@@ -332,6 +333,7 @@ def build_default_tool_registry() -> ToolRegistry:
         for name in os.getenv("GEIST_ENABLED_CHAT_TOOLS", "").split(",")
         if name.strip()
     }
+    explicitly_enabled.add("adapter.CronScheduleAdapter.create_prompt_schedule")
     registry = ToolRegistry(explicitly_enabled=explicitly_enabled)
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
@@ -452,10 +454,9 @@ def build_default_tool_registry() -> ToolRegistry:
         )
     )
     # Reflected adapter actions ride through the same registry as the curated
-    # tools above (one registry, several sources) but stay disabled until an
-    # operator opts in by name via GEIST_ENABLED_CHAT_TOOLS, e.g.
-    # adapter.JobStatusAdapter.check_async_tool.
+    # tools above. Scheduling is available to chat by default; other adapter
+    # actions stay disabled until an operator opts in via GEIST_ENABLED_CHAT_TOOLS.
     from app.services.adapter_tool_source import AdapterToolSource
 
-    registry.add_source(AdapterToolSource([JobStatusAdapter()]))
+    registry.add_source(AdapterToolSource([JobStatusAdapter(), CronScheduleAdapter()]))
     return registry
