@@ -1,0 +1,181 @@
+{
+  "hardware": "macOS-26.2-arm64-arm-64bit",
+  "device": {
+    "device_name": "Apple M2 Max",
+    "max_recommended_working_set_size": 83494174720,
+    "memory_size": 103079215104,
+    "architecture": "applegpu_g14s",
+    "max_buffer_length": 62620631040,
+    "resource_limit": 499000
+  },
+  "mlx_lm_version": "0.31.3",
+  "mlx_version": "0.32.2",
+  "drafter_bits": 8,
+  "tuning": [
+    {
+      "k": 5120,
+      "n": 248320,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8225371114331361,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.998914917251897,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 4,
+      "speedup": 1.8349989791607666,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8008701086673553,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.9154768752498004,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.775073079783725,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.9161290277288305,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 8,
+      "split_k": 4,
+      "speedup": 1.9976905170997536,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 4,
+      "speedup": 1.835804466226366,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 4096,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.7709619470647606,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 4096,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.7034485638911254,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 25600,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.985925981662779,
+      "dependent_chain": true,
+      "chain_length": 12
+    }
+  ],
+  "results": [
+    {
+      "trial": 0,
+      "prompt": "custom",
+      "mode": "baseline",
+      "generation_tokens": 512,
+      "generation_tps": 20.452005975678148,
+      "elapsed_seconds": 38.15312462486327,
+      "prefill_seconds": 13.167800417169929
+    },
+    {
+      "trial": 0,
+      "prompt": "custom",
+      "mode": "dflash",
+      "cap": 7,
+      "selector_strategy": "local",
+      "block_size": 8,
+      "small_m": true,
+      "packed": false,
+      "wide_kernel": false,
+      "direct_fragment": false,
+      "shuffle_fragments": false,
+      "split_k": 8,
+      "half_operands": false,
+      "prompt_tokens": 1866,
+      "cached_prompt_tokens": 0,
+      "prompt_tps": 142.27351410246771,
+      "prefill_seconds": 13.115582417231053,
+      "generation_tokens": 512,
+      "generation_tps": 96.26442613030615,
+      "decode_seconds": 5.308295291848481,
+      "elapsed_seconds": 18.42388412542641,
+      "verify_rounds": 10,
+      "accepted_drafts_per_round": 50.2,
+      "peak_memory_gb": 54.58399617,
+      "copy_rounds": 5,
+      "copy_accepted": 467,
+      "copy_proposed": 589,
+      "column_tiles": 1,
+      "stage_stride": 8,
+      "speedup": 4.706845198695196,
+      "tokens_identical": true,
+      "first_difference": null,
+      "token_sha256": "5f3766353d5f6f6dfd3818f90a843b1d37d760cc68a454e2e7f926af3f8a040f",
+      "text": "```python\nDEFAULT_RETRIES = 3\nDEFAULT_TIMEOUT = 45\n\nclass ServiceConfig:\n    def __init__(self):\n        self.worker_01_limit = 8\n        self.worker_02_limit = 16\n        self.worker_03_limit = 24\n        self.worker_04_limit = 32\n        self.worker_05_limit = 40\n        self.worker_06_limit = 48\n        self.worker_07_limit = 56\n        self.worker_08_limit = 64\n        self.worker_09_limit = 72\n        self.worker_10_limit = 80\n        self.worker_11_limit = 88\n        self.worker_12_limit = 96\n        self.worker_13_limit = 104\n        self.worker_14_limit = 112\n        self.worker_15_limit = 120\n        self.worker_16_limit = 128\n        self.worker_17_limit = 136\n        self.worker_18_limit = 144\n        self.worker_19_limit = 152\n        self.worker_20_limit = 160\n        self.worker_21_limit = 168\n        self.worker_22_limit = 176\n        self.worker_23_limit = 184\n        self.worker_24_limit = 192\n        self.worker_25_limit = 200\n        self.worker_26_limit = 208\n        self.worker_27_limit = 216\n        self.worker_28_limit = 224\n        self.worker_29_limit = 232\n        self.worker_30_limit = 240\n        self.worker_31_limit = 248\n        self.worker_32_limit = 256\n\n    def limits(self):\n        return {\n            \"worker_01\": self.worker_01_limit,\n            \"worker_02\": self.worker_02_limit,\n            \"worker_03\": self.worker_03_limit,\n            \"worker_04\": self.worker_04_limit,\n            \"worker_05\": self.worker"
+    }
+  ],
+  "temperature": 0.0,
+  "top_p": 1.0,
+  "top_k": 0,
+  "lab_variant": null,
+  "compile_verifier": false,
+  "copy_window": 127,
+  "expanded_mlp": "bf16",
+  "expanded_min_rows": 64,
+  "expanded_max_rows": 256,
+  "median_dflash_tps": 96.26442613030615
+}

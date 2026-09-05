@@ -104,7 +104,7 @@ class MLXLMBackend:
         self.weights_dir = weights_dir
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
         self.model, self.tokenizer = load(weights_dir or model_id)
-        self.last_stats: dict[str, int | float | str] = {}
+        self.last_stats: dict[str, int | float | str | None] = {}
         self.prefill_step_size = _prefill_step_size()
         self._generation_lock = threading.RLock()
         self._prompt_cache = None
@@ -141,13 +141,16 @@ class MLXLMBackend:
                     self.tokenizer,
                     drafter,
                     prefill_step_size=self.prefill_step_size,
+                    adaptive=True,
                 )
                 self._small_m_wrappers = install_small_m(self.model)
                 drafter.bind(self.model)
                 self._small_m_wrappers += install_small_m(drafter)
                 self.small_m_tuning = tune_small_m(self._small_m_wrappers)
                 self._dflash = decoder
-                logging.getLogger(__name__).info("Enabled in-process MLX DFlash 2 for Qwen 3.8")
+                logger.info(
+                    "Enabled adaptive MLX DFlash 2 with qualified Metal kernels for Qwen 3.8"
+                )
             except Exception as error:
                 for wrapper in self._small_m_wrappers:
                     wrapper.enabled = False
