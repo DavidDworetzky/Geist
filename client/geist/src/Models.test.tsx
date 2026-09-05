@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import Models from './Models';
 
 
@@ -61,6 +61,31 @@ const mlxArtifact = {
   repo_id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   supported: true,
   requires_auth: true,
+};
+
+const voiceArtifact = {
+  id: 'qwen3-tts-0.6b-customvoice-mlx-6bit',
+  model_id: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
+  display_name: 'Qwen3 TTS 0.6B CustomVoice (MLX 6-bit)',
+  format: 'snapshot',
+  backend: 'mlx_audio',
+  runtime: 'mlx_audio',
+  modality: 'tts',
+  quantization: '6-bit',
+  status: 'not_installed',
+  bytes_downloaded: 0,
+  total_bytes: 1830000000,
+  progress_unit: 'files',
+  progress_completed: 0,
+  progress_total: null,
+  source: 'curated',
+  supported: true,
+  runtime_ready: false,
+  runtime_detail: 'The optional MLX Audio runtime is not installed.',
+  sample_rate: 24000,
+  default_voice: 'Aiden',
+  license: 'Apache-2.0',
+  license_url: 'https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
 };
 
 let availableArtifacts: any[] = [artifact];
@@ -323,6 +348,23 @@ it('installs from the Models page without changing the active model', async () =
   ));
   expect(mockUpdateSettings).not.toHaveBeenCalled();
   await waitFor(() => expect(download).not.toBeDisabled());
+});
+
+it('shows and downloads the curated voice model without changing the chat model', async () => {
+  availableArtifacts = [artifact, voiceArtifact];
+  render(<Models />);
+
+  const voicePanel = await screen.findByRole('region', { name: 'Voice models' });
+  expect(within(voicePanel).getByText(voiceArtifact.display_name)).toBeInTheDocument();
+  expect(within(voicePanel).getByText('Aiden · 24000 Hz')).toBeInTheDocument();
+
+  fireEvent.click(within(voicePanel).getByRole('button', { name: 'Download' }));
+
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+    '/api/v1/models/local/artifacts/qwen3-tts-0.6b-customvoice-mlx-6bit/download',
+    { method: 'POST' },
+  ));
+  expect(mockUpdateSettings).not.toHaveBeenCalled();
 });
 
 it('imports a local GGUF through the managed API', async () => {

@@ -64,8 +64,11 @@ export default function Models(): JSX.Element {
   const [activeTab, setActiveTab] = useState<ModelsTab>('local');
 
   const onlineProviders = providers.filter(provider => !NON_ONLINE_PROVIDER_IDS.has(provider));
-  const compatibleLocalArtifacts = localArtifacts.filter(artifact => artifact.supported !== false);
-  const installingLocalArtifact = compatibleLocalArtifacts.find(isArtifactInstalling);
+  const compatibleLocalArtifacts = localArtifacts.filter(artifact => artifact.supported !== false
+    && (!artifact.modality || artifact.modality === 'llm'));
+  const voiceArtifacts = localArtifacts.filter(artifact => artifact.supported !== false
+    && artifact.modality === 'tts');
+  const installingLocalArtifact = localArtifacts.find(isArtifactInstalling);
 
   useEffect(() => {
     if (onlineProviders.length === 0 || settingsLoading) return;
@@ -361,6 +364,100 @@ export default function Models(): JSX.Element {
           )}
         </div>
           </section>
+
+          {voiceArtifacts.length > 0 && (
+            <section className="provider-panel local-model-panel" aria-labelledby="voice-model-files-heading">
+              <div className="provider-panel-header">
+                <div>
+                  <h3 id="voice-model-files-heading">Voice models</h3>
+                  <p>Download curated low-latency voice models for this computer.</p>
+                </div>
+              </div>
+              <div className="model-table">
+                <div className="model-table-row model-table-heading">
+                  <span>Artifact</span>
+                  <span>Runtime</span>
+                  <span>Status</span>
+                  <span>Actions</span>
+                </div>
+                {voiceArtifacts.map(artifact => {
+                  const busy = ['queued', 'downloading', 'cancelling'].includes(artifact.status);
+                  const total = artifact.total_bytes ?? 0;
+                  return (
+                    <div className="model-table-row" key={artifact.id}>
+                      <span>
+                        <strong>{artifact.display_name}</strong>
+                        <small>{artifact.default_voice} · {artifact.sample_rate || 0} Hz</small>
+                        {artifact.license_url ? (
+                          <small>
+                            <a href={artifact.license_url} target="_blank" rel="noreferrer">
+                              {artifact.license || 'Model license'}
+                            </a>
+                          </small>
+                        ) : artifact.license ? <small>{artifact.license}</small> : null}
+                      </span>
+                      <span>{artifact.runtime === 'mlx_audio' ? 'MLX Audio' : 'NeMo-Speech.cpp'}</span>
+                      <span>
+                        {artifact.status}
+                        {busy && (
+                          <small>
+                            {artifact.progress_unit === 'files'
+                              ? `${artifact.progress_completed ?? 0} / ${artifact.progress_total ?? '?'} files`
+                              : `${formatBytes(artifact.bytes_downloaded)} / ${formatBytes(total)}`}
+                          </small>
+                        )}
+                        {artifact.status === 'installed' && artifact.runtime_ready === false && (
+                          <small>{artifact.runtime_detail}</small>
+                        )}
+                        {artifact.status === 'installed' && artifact.runtime_ready === true && (
+                          <small>Ready in Voice settings.</small>
+                        )}
+                        {artifact.error && <small>{artifact.error}</small>}
+                      </span>
+                      <span className="settings-inline-actions">
+                        {artifact.status === 'installed' ? (
+                          <button
+                            className="button button-secondary button-small"
+                            disabled={localAction === artifact.id}
+                            onClick={() => void runArtifactAction(artifact.id, 'remove')}
+                          >
+                            Remove
+                          </button>
+                        ) : busy ? (
+                          <button
+                            className="button button-secondary button-small"
+                            disabled={localAction === artifact.id}
+                            onClick={() => void runArtifactAction(artifact.id, 'cancel')}
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              className="button button-secondary button-small"
+                              disabled={localAction === artifact.id}
+                              onClick={() => void installArtifact(artifact)}
+                            >
+                              Download
+                            </button>
+                            {artifact.bytes_downloaded > 0 && (
+                              <button
+                                className="button button-secondary button-small"
+                                disabled={localAction === artifact.id}
+                                onClick={() => void runArtifactAction(artifact.id, 'remove')}
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       )}
 

@@ -1,11 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-interface VoiceMessage {
-  type: string;
-  text?: string;
-  message?: string;
-}
-
 interface UseVoiceChatProps {
   sessionId: number;
   agentType?: string;
@@ -22,287 +16,208 @@ interface UseVoiceChatProps {
   onError?: (error: string) => void;
 }
 
-const useVoiceChat = ({
-  sessionId,
-  agentType = 'online',
-  sttProvider = 'mms',
-  ttsProvider = 'sesame',
-  ttsModel,
-  ttsVoice,
-  ttsLanguage,
-  ttsInstruct,
-  ttsSpeed,
-  onTranscriptPartial,
-  onTranscriptFinal,
-  onAssistantText,
-  onError
-}: UseVoiceChatProps) => {
+const useVoiceChat = (props: UseVoiceChatProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [partialTranscript, setPartialTranscript] = useState('');
   const [assistantText, setAssistantText] = useState('');
-  
+  const callbacks = useRef(props);
+  callbacks.current = props;
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<ArrayBuffer[]>([]);
-  const isPlayingRef = useRef(false);
+  const playbackContextRef = useRef<AudioContext | null>(null);
+  const sourcesRef = useRef(new Set<AudioBufferSourceNode>());
+  const nextPlaybackTimeRef = useRef(0);
+  const generationRef = useRef(0);
+  const activeRef = useRef(false);
+  const readyRef = useRef(false);
+  const processingRef = useRef(false);
 
-  // Audio playback
-  const playAudioQueue = useCallback(async () => {
-    if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
-      return;
-    }
-
-    isPlayingRef.current = true;
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-
-    while (audioQueueRef.current.length > 0) {
-      const audioBuffer = audioQueueRef.current.shift()!;
-
-      // Convert Int16 PCM to Float32 for Web Audio
-      const int16Array = new Int16Array(audioBuffer);
-      const float32Array = new Float32Array(int16Array.length);
-
-      for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-      }
-
-      // Create audio buffer
-      const buffer = audioContext.createBuffer(1, float32Array.length, 24000); // 24kHz from Sesame
-      buffer.getChannelData(0).set(float32Array);
-
-      // Play
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContext.destination);
-
-      await new Promise<void>(resolve => {
-        source.onended = () => resolve();
-        source.start();
-      });
-    }
-
-    isPlayingRef.current = false;
+  const clearPlayback = useCallback(() => {
+    sourcesRef.current.forEach(source => {
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    });
+    sourcesRef.current.clear();
+    nextPlaybackTimeRef.current = 0;
   }, []);
 
-  // WebSocket setup
-  const connectWebSocket = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const params = new URLSearchParams({
-      session_id: String(sessionId),
-      agent_type: agentType,
-      stt_provider: sttProvider,
-      tts_provider: ttsProvider
-    });
-
-    if (ttsModel) {
-      params.set('tts_model', ttsModel);
-    }
-    if (ttsVoice) {
-      params.set('tts_voice', ttsVoice);
-    }
-    if (ttsLanguage) {
-      params.set('tts_language', ttsLanguage);
-    }
-    if (ttsInstruct) {
-      params.set('tts_instruct', ttsInstruct);
-    }
-    if (ttsSpeed !== undefined) {
-      params.set('tts_speed', String(ttsSpeed));
-    }
-
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/voice/stream?${params.toString()}`;
-    
-    console.log('Voice WebSocket connecting to:', wsUrl);
-    
-    const ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-      console.log('Voice WebSocket connected successfully');
-    };
-    
-    ws.onmessage = async (event) => {
-      if (event.data instanceof Blob) {
-        // Audio chunk received
-        const arrayBuffer = await event.data.arrayBuffer();
-        audioQueueRef.current.push(arrayBuffer);
-        if (!isPlayingRef.current) {
-          playAudioQueue();
-        }
-      } else {
-        // JSON message
-        const message: VoiceMessage = JSON.parse(event.data);
-        
-        switch (message.type) {
-          case 'ready':
-            console.log('Voice session ready');
-            break;
-          case 'transcript_partial':
-            setPartialTranscript(message.text || '');
-            onTranscriptPartial?.(message.text || '');
-            break;
-          case 'transcript_final':
-            setPartialTranscript('');
-            onTranscriptFinal?.(message.text || '');
-            break;
-          case 'text_start':
-            setIsProcessing(true);
-            setAssistantText('');
-            break;
-          case 'text_chunk':
-            setAssistantText(prev => prev + (message.text || ''));
-            onAssistantText?.(message.text || '');
-            break;
-          case 'text_complete':
-            setAssistantText(message.text || '');
-            break;
-          case 'audio_chunk_start':
-            // Next message will be audio binary
-            break;
-          case 'audio_complete':
-            break;
-          case 'done':
-            setIsProcessing(false);
-            break;
-          case 'error':
-            console.error('Voice error:', message.message);
-            onError?.(message.message || 'Unknown error');
-            break;
-        }
-      }
-    };
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      console.error('WebSocket readyState:', ws.readyState);
-      console.error('Attempted URL was:', wsUrl);
-      onError?.('WebSocket connection error - check browser console for details');
-    };
-    
-    ws.onclose = (event) => {
-      console.log('Voice WebSocket disconnected, code:', event.code, 'reason:', event.reason);
-      if (event.code !== 1000 && event.code !== 1001) {
-        // Abnormal closure
-        console.warn('WebSocket closed abnormally. This may indicate a proxy or server issue.');
-      }
-    };
-    
-    wsRef.current = ws;
-    return ws;
-  }, [
-    sessionId,
-    agentType,
-    sttProvider,
-    ttsProvider,
-    ttsModel,
-    ttsVoice,
-    ttsLanguage,
-    ttsInstruct,
-    ttsSpeed,
-    onTranscriptPartial,
-    onTranscriptFinal,
-    onAssistantText,
-    onError,
-    playAudioQueue
-  ]);
-
-  // Start recording
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
-      
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-      
-      processor.onaudioprocess = (e) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-          return;
-        }
-        
-        const inputData = e.inputBuffer.getChannelData(0);
-        
-        // Convert Float32 to Int16 PCM
-        const int16Data = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-        
-        // Send to WebSocket
-        wsRef.current.send(int16Data.buffer);
-      };
-      
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      
-      // Connect WebSocket
-      connectWebSocket();
-      
-      setIsRecording(true);
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      onError?.('Microphone access denied or unavailable');
-    }
-  }, [connectWebSocket, onError]);
-
-  // Stop recording
   const stopRecording = useCallback(() => {
+    generationRef.current += 1;
+    activeRef.current = readyRef.current = processingRef.current = false;
+    const socket = wsRef.current;
+    wsRef.current = null;
+    if (socket) {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'stop' }));
+      socket.close();
+    }
     if (processorRef.current) {
+      processorRef.current.onaudioprocess = null;
       processorRef.current.disconnect();
       processorRef.current = null;
     }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
+    clearPlayback();
+    for (const ref of [audioContextRef, playbackContextRef]) {
+      if (ref.current) void ref.current.close();
+      ref.current = null;
     }
-    
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    
     setIsRecording(false);
+    setIsProcessing(false);
     setPartialTranscript('');
-  }, []);
+  }, [clearPlayback]);
 
-  // Toggle recording
-  const toggleRecording = useCallback(() => {
-    if (isRecording) {
+  const startRecording = useCallback(async () => {
+    if (activeRef.current) return;
+    activeRef.current = true;
+    const generation = ++generationRef.current;
+    const current = () => generation === generationRef.current;
+    try {
+      // Resume playback during the user gesture, not on a network callback.
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const playback = new AudioContextClass();
+      playbackContextRef.current = playback;
+      await playback.resume();
+      if (!current()) return;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+      });
+      if (!current()) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      mediaStreamRef.current = stream;
+      const capture = new AudioContextClass({ sampleRate: 16000 });
+      audioContextRef.current = capture;
+      if (capture.sampleRate !== 16000) throw new Error('Microphone must support 16 kHz audio');
+      const source = capture.createMediaStreamSource(stream);
+      const processor = capture.createScriptProcessor(1024, 1, 1);
+      processorRef.current = processor;
+      processor.onaudioprocess = (event: AudioProcessingEvent) => {
+        const ws = wsRef.current;
+        if (!readyRef.current || processingRef.current || sourcesRef.current.size
+          || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const pcm = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const sample = Math.max(-1, Math.min(1, input[i]));
+          pcm[i] = sample < 0 ? sample * 32768 : sample * 32767;
+        }
+        ws.send(pcm.buffer);
+      };
+      source.connect(processor);
+      processor.connect(capture.destination);
+      const options = callbacks.current;
+      const params = new URLSearchParams({
+        session_id: String(options.sessionId), agent_type: options.agentType || 'online',
+        stt_provider: options.sttProvider || 'mms', tts_provider: options.ttsProvider || 'sesame',
+      });
+      for (const [key, value] of Object.entries({
+        tts_model: options.ttsModel, tts_voice: options.ttsVoice,
+        tts_language: options.ttsLanguage, tts_instruct: options.ttsInstruct,
+        tts_speed: options.ttsSpeed,
+      })) {
+        if (value !== undefined) params.set(key, String(value));
+      }
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/voice/stream?${params}`);
+      socket.binaryType = 'arraybuffer';
+      wsRef.current = socket;
+      let sampleRate = 0;
+      let messages = Promise.resolve();
+      socket.onmessage = event => {
+        // Preserve frame order across Blob conversion; stop/reconnect invalidates
+        // pending callbacks before they can create any more audio.
+        messages = messages.then(async () => {
+          if (!current()) return;
+          const data = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
+          if (!current()) return;
+          if (data instanceof ArrayBuffer) {
+            if (!sampleRate || data.byteLength % 2) throw new Error('Invalid voice PCM frame');
+            if (!data.byteLength) return;
+            const pcm = new Int16Array(data);
+            const buffer = playback.createBuffer(1, pcm.length, sampleRate);
+            const samples = buffer.getChannelData(0);
+            for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+            const source = playback.createBufferSource();
+            source.buffer = buffer;
+            source.connect(playback.destination);
+            sourcesRef.current.add(source);
+            source.onended = () => { sourcesRef.current.delete(source); source.disconnect(); };
+            const startAt = Math.max(playback.currentTime + 0.02, nextPlaybackTimeRef.current);
+            source.start(startAt);
+            nextPlaybackTimeRef.current = startAt + buffer.duration;
+            return;
+          }
+          const message = JSON.parse(data);
+          switch (message.type) {
+            case 'ready': readyRef.current = true; break;
+            case 'transcript_partial':
+              setPartialTranscript(message.text || '');
+              callbacks.current.onTranscriptPartial?.(message.text || ''); break;
+            case 'transcript_final':
+              setPartialTranscript('');
+              callbacks.current.onTranscriptFinal?.(message.text || ''); break;
+            case 'processing':
+            case 'text_start':
+              processingRef.current = true;
+              setIsProcessing(true);
+              setAssistantText(''); break;
+            case 'text_chunk':
+              setAssistantText(prev => prev + (message.text || ''));
+              callbacks.current.onAssistantText?.(message.text || ''); break;
+            case 'text_complete': setAssistantText(message.text || ''); break;
+            case 'audio_start':
+              if (message.encoding !== 'pcm_s16le' || message.channels !== 1
+                || !Number.isInteger(message.sample_rate) || message.sample_rate < 8000
+                || message.sample_rate > 96000) throw new Error('Unsupported voice audio format');
+              sampleRate = message.sample_rate;
+              // Do not rewind: audio from the preceding turn may still be audible.
+              break;
+            case 'reset_complete':
+              clearPlayback();
+              sampleRate = 0;
+              processingRef.current = false;
+              setIsProcessing(false);
+              setPartialTranscript(''); break;
+            case 'done':
+              processingRef.current = false;
+              setIsProcessing(false); break;
+            case 'error': throw new Error(message.message || 'Voice processing failed');
+          }
+        }).catch(error => {
+          if (!current()) return;
+          stopRecording();
+          callbacks.current.onError?.(error.message || 'Voice playback failed');
+        });
+        return messages;
+      };
+      socket.onerror = () => {
+        if (!current()) return;
+        stopRecording();
+        callbacks.current.onError?.('Voice connection failed');
+      };
+      socket.onclose = () => { if (current()) stopRecording(); };
+      setIsRecording(true);
+    } catch (error) {
+      if (!current()) return;
       stopRecording();
-    } else {
-      startRecording();
+      callbacks.current.onError?.(error instanceof Error ? error.message : 'Microphone unavailable');
     }
-  }, [isRecording, startRecording, stopRecording]);
+  }, [clearPlayback, stopRecording]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stopRecording();
-    };
-  }, [stopRecording]);
+  const toggleRecording = useCallback(() => {
+    if (activeRef.current) stopRecording();
+    else void startRecording();
+  }, [startRecording, stopRecording]);
 
-  return {
-    isRecording,
-    isProcessing,
-    partialTranscript,
-    assistantText,
-    startRecording,
-    stopRecording,
-    toggleRecording
-  };
+  useEffect(() => () => stopRecording(), [stopRecording, props.sessionId]);
+  return { isRecording, isProcessing, partialTranscript, assistantText,
+    startRecording, stopRecording, toggleRecording };
 };
 
 export default useVoiceChat;

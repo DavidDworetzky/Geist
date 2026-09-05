@@ -2,23 +2,33 @@
 Text-to-Speech (TTS) service abstraction and implementations.
 """
 
+from __future__ import annotations
+
+import copy
+import importlib.util
 import logging
+import sys
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
 
-import numpy as np
-import torch
-import torchaudio
-
 
 if TYPE_CHECKING:
+    import torch
+
     from agents.architectures.sesame.generator import Generator
 
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+DEFAULT_KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
+KOKORO_MLX_ARTIFACT_ID = "kokoro-82m-bf16-mlx"
+KOKORO_DEFAULT_VOICE = "af_heart"
+DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+QWEN3_MLX_ARTIFACT_ID = "qwen3-tts-0.6b-customvoice-mlx-6bit"
+MAGPIE_TTS_MODEL = "nvidia/magpie_tts_multilingual_357m"
+MAGPIE_ARTIFACT_ID = "magpie-tts-multilingual-357m-nemo-speech"
 
 SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
     {
@@ -85,65 +95,63 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
         ],
     },
     {
+        "provider": "kokoro",
+        "display_name": "Vera (Kokoro local MLX)",
+        "type": "local",
+        "default_model": DEFAULT_KOKORO_TTS_MODEL,
+        "models": [
+            {
+                "id": DEFAULT_KOKORO_TTS_MODEL,
+                "display_name": "Vera · Kokoro 82M BF16",
+                "artifact_id": KOKORO_MLX_ARTIFACT_ID,
+                "sample_rate": 24000,
+                "supports_streaming": True,
+                "streaming_mode": "sentence_buffered_pcm",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": False,
+                "voices": [{"id": KOKORO_DEFAULT_VOICE, "display_name": "Vera"}],
+                "languages": [{"code": "a", "display_name": "English (US)"}],
+            },
+        ],
+    },
+    {
         "provider": "qwen3",
-        "display_name": "Qwen3 TTS",
+        "display_name": "Qwen3 TTS (local MLX)",
         "type": "local",
         "default_model": DEFAULT_QWEN3_TTS_MODEL,
         "models": [
             {
-                "id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
-                "display_name": "Qwen3 TTS 0.6B Custom Voice",
-                "sample_rate": 24000,
-                "supports_streaming": True,
-                "streaming_mode": "native_or_chunked",
-                "supports_instruction_control": True,
-                "supports_voice_cloning": False,
-                "voices": [
-                    {"id": "Cherry", "display_name": "Cherry"},
-                    {"id": "Chelsie", "display_name": "Chelsie"},
-                    {"id": "Ethan", "display_name": "Ethan"},
-                    {"id": "Serena", "display_name": "Serena"},
-                ],
-                "languages": [
-                    {"code": "en", "display_name": "English"},
-                    {"code": "zh", "display_name": "Chinese"},
-                    {"code": "ja", "display_name": "Japanese"},
-                    {"code": "ko", "display_name": "Korean"},
-                    {"code": "de", "display_name": "German"},
-                    {"code": "fr", "display_name": "French"},
-                    {"code": "ru", "display_name": "Russian"},
-                    {"code": "pt", "display_name": "Portuguese"},
-                    {"code": "es", "display_name": "Spanish"},
-                    {"code": "it", "display_name": "Italian"},
-                ],
-            },
-            {
                 "id": DEFAULT_QWEN3_TTS_MODEL,
-                "display_name": "Qwen3 TTS 1.7B Custom Voice",
+                "display_name": "Qwen3 TTS 0.6B Custom Voice",
+                "artifact_id": QWEN3_MLX_ARTIFACT_ID,
                 "sample_rate": 24000,
                 "supports_streaming": True,
-                "streaming_mode": "native_or_chunked",
-                "supports_instruction_control": True,
+                "streaming_mode": "native_pcm",
+                "supports_instruction_control": False,
                 "supports_voice_cloning": False,
-                "voices": [
-                    {"id": "Cherry", "display_name": "Cherry"},
-                    {"id": "Chelsie", "display_name": "Chelsie"},
-                    {"id": "Ethan", "display_name": "Ethan"},
-                    {"id": "Serena", "display_name": "Serena"},
-                ],
-                "languages": [
-                    {"code": "en", "display_name": "English"},
-                    {"code": "zh", "display_name": "Chinese"},
-                    {"code": "ja", "display_name": "Japanese"},
-                    {"code": "ko", "display_name": "Korean"},
-                    {"code": "de", "display_name": "German"},
-                    {"code": "fr", "display_name": "French"},
-                    {"code": "ru", "display_name": "Russian"},
-                    {"code": "pt", "display_name": "Portuguese"},
-                    {"code": "es", "display_name": "Spanish"},
-                    {"code": "it", "display_name": "Italian"},
-                ],
+                "voices": [{"id": "Aiden", "display_name": "Aiden"}],
+                "languages": [{"code": "English", "display_name": "English"}],
             },
+        ],
+    },
+    {
+        "provider": "magpie",
+        "display_name": "NVIDIA Magpie TTS (local CUDA)",
+        "type": "local",
+        "default_model": MAGPIE_TTS_MODEL,
+        "models": [
+            {
+                "id": MAGPIE_TTS_MODEL,
+                "display_name": "Magpie TTS Multilingual 357M",
+                "artifact_id": MAGPIE_ARTIFACT_ID,
+                "sample_rate": 22050,
+                "supports_streaming": True,
+                "streaming_mode": "native_pcm",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": False,
+                "voices": [{"id": "John", "display_name": "John"}],
+                "languages": [{"code": "en-US", "display_name": "English"}],
+            }
         ],
     },
 ]
@@ -151,7 +159,38 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
 
 def get_supported_tts_providers() -> list[dict[str, Any]]:
     """Return frontend-consumable metadata for supported TTS providers."""
-    return SUPPORTED_TTS_PROVIDERS
+    from app.services.local_models import get_local_model_manager
+
+    manager = get_local_model_manager()
+    providers = copy.deepcopy(SUPPORTED_TTS_PROVIDERS)
+    available: list[dict[str, Any]] = []
+    for provider in providers:
+        models = []
+        for model in provider.get("models", []):
+            artifact_id = model.get("artifact_id")
+            if not artifact_id:
+                models.append(model)
+                continue
+            status = manager.status(artifact_id)
+            if status.get("supported") is False:
+                continue
+            model["artifact"] = {
+                key: status.get(key)
+                for key in (
+                    "id",
+                    "status",
+                    "supported",
+                    "runtime_ready",
+                    "runtime_detail",
+                    "license",
+                    "license_url",
+                )
+            }
+            models.append(model)
+        provider["models"] = models
+        if models:
+            available.append(provider)
+    return available
 
 
 def allowed_models_for_provider(provider_type: str) -> list[str]:
@@ -291,6 +330,8 @@ class SesameTTSProvider(TTSProvider):
         Yields:
             bytes: PCM audio chunks (16-bit signed integers, mono)
         """
+        import numpy as np
+
         # Generate full audio
         audio_tensor = self.synthesize(text, speaker)
 
@@ -349,6 +390,9 @@ class OpenAITTSProvider(TTSProvider):
         """
         import io
 
+        import torch
+        import torchaudio
+
         url = "https://api.openai.com/v1/audio/speech"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
@@ -380,6 +424,8 @@ class OpenAITTSProvider(TTSProvider):
 
         Note: OpenAI TTS doesn't support streaming, so we generate and chunk.
         """
+        import numpy as np
+
         audio_tensor = self.synthesize(text, speaker)
         audio_np = audio_tensor.cpu().numpy()
         audio_int16 = (audio_np * 32767).astype(np.int16)
@@ -396,156 +442,69 @@ class OpenAITTSProvider(TTSProvider):
         return self._sample_rate
 
 
-class Qwen3TTSProvider(TTSProvider):
-    """TTS provider using Qwen3 TTS models."""
+class KokoroMLXTTSProvider(TTSProvider):
+    """Pinned Kokoro provider with no synthesis-time downloads."""
 
     def __init__(
         self,
-        model: str = DEFAULT_QWEN3_TTS_MODEL,
-        voice: str = "Cherry",
-        language: str = "en",
-        instruct: str | None = None,
+        model: str = DEFAULT_KOKORO_TTS_MODEL,
+        voice: str = KOKORO_DEFAULT_VOICE,
+        language: str = "a",
         speed: float = 1.0,
-        device: str | None = None,
-        sample_rate: int = 24000,
-    ):
+    ) -> None:
+        if voice != KOKORO_DEFAULT_VOICE:
+            raise ValueError(f"Kokoro only supports the curated {KOKORO_DEFAULT_VOICE} voice")
+        if language != "a":
+            raise ValueError("Kokoro only supports US English in the initial voice slice")
+        if not 0.5 <= speed <= 2.0:
+            raise ValueError("Kokoro speed must be between 0.5 and 2.0")
         self.model = model
         self.voice = voice
         self.language = language
-        self.instruct = instruct
         self.speed = speed
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self._sample_rate = sample_rate
-        self._engine = None
-        self.logger = logging.getLogger(__name__)
+        self._sample_rate = 24_000
+        self._engine: Any | None = None
+        self._voice_path: str | None = None
+        self._lock = threading.Lock()
 
-    def _ensure_initialized(self):
-        """Lazy initialize Qwen3 TTS so normal app startup stays lightweight."""
+    def _ensure_initialized(self) -> None:
         if self._engine is not None:
             return
+        from app.services.local_models import get_local_model_manager
 
-        try:
-            from qwen_tts import QwenTTS
-        except ImportError as e:
-            # Covers both a missing package and a mismatched API surface
-            # (e.g. the class name changing) - this provider is experimental
-            # and the qwen_tts integration has not been validated end-to-end.
+        artifact, path = get_local_model_manager().require_installed(KOKORO_MLX_ARTIFACT_ID)
+        if artifact.model_id != self.model:
+            raise RuntimeError("Installed Kokoro voice artifact does not match the selected model")
+        if importlib.util.find_spec("en_core_web_sm") is None:
             raise RuntimeError(
-                "The qwen3 TTS provider requires the optional 'qwen_tts' package "
-                "and is experimental. Install/verify qwen_tts or select another "
-                f"tts_provider. Import failed with: {e}"
-            ) from e
-
-        self.logger.info(f"Initializing Qwen3 TTS via qwen_tts: {self.model}")
-        if hasattr(QwenTTS, "from_pretrained"):
-            self._engine = QwenTTS.from_pretrained(self.model, device=self.device)
-        else:
-            self._engine = QwenTTS(model=self.model, device=self.device)
-
-    def _build_kwargs(self, text: str) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "text": text,
-            "voice": self.voice,
-            "language": self.language,
-            "speed": self.speed,
-        }
-        if self.instruct:
-            kwargs["instruct"] = self.instruct
-        return kwargs
+                "Kokoro's locked English speech assets are missing. Reinstall Geist's voice "
+                "extra; runtime downloads are disabled."
+            )
+        voice_path = path / "voices" / f"{KOKORO_DEFAULT_VOICE}.safetensors"
+        if not voice_path.is_file():
+            raise RuntimeError("The managed Kokoro artifact is missing the Vera voice weights")
+        try:
+            from mlx_audio.tts.utils import load_model
+        except ImportError as error:
+            raise RuntimeError(
+                "Kokoro on Apple Silicon requires the optional MLX Audio runtime."
+            ) from error
+        # Kokoro's upstream config predates MLX Audio's `model_type` field.
+        # Supply the architecture explicitly because Geist stores every model
+        # under a generic `snapshot` directory.
+        self._engine = load_model(path, model_type="kokoro")
+        self._voice_path = str(voice_path)
 
     @staticmethod
-    def _has_real_method(obj: Any, method_name: str) -> bool:
-        if method_name in getattr(obj, "__dict__", {}):
-            return True
-        return any(method_name in getattr(cls, "__dict__", {}) for cls in type(obj).__mro__)
+    def _result_to_pcm(result: Any) -> tuple[bytes, int]:
+        import numpy as np
 
-    def _generate_with_qwen_tts(self, text: str) -> tuple[torch.Tensor, int]:
-        kwargs = self._build_kwargs(text)
-        engine = self._engine
-
-        for method_name in ("synthesize", "generate", "infer"):
-            method = getattr(engine, method_name, None)
-            if method is None or not self._has_real_method(engine, method_name):
-                continue
-            result = method(**kwargs)
-            return self._coerce_audio_result(result)
-
-        raise RuntimeError("Loaded qwen_tts engine does not expose synthesize, generate, or infer.")
-
-    def _coerce_audio_result(self, result: Any) -> tuple[torch.Tensor, int]:
-        sample_rate = self._sample_rate
-        audio = result
-
-        if isinstance(result, tuple):
-            audio = result[0]
-            if len(result) > 1 and isinstance(result[1], int):
-                sample_rate = result[1]
-        elif isinstance(result, dict):
-            sample_rate = result.get("sample_rate") or result.get("sampling_rate") or sample_rate
-            audio = None
-            for key in ("audio", "wav", "waveform", "speech"):
-                if key in result and result[key] is not None:
-                    audio = result[key]
-                    break
-        elif hasattr(result, "waveform"):
-            audio = result.waveform
-            sample_rate = getattr(result, "sample_rate", sample_rate)
-        elif hasattr(result, "sequences"):
-            audio = result.sequences
-            sample_rate = getattr(result, "sample_rate", sample_rate)
-
+        audio = getattr(result, "audio", None)
         if audio is None:
-            raise RuntimeError("Qwen3 TTS returned no audio data.")
-
-        if isinstance(audio, np.ndarray):
-            audio_tensor = torch.from_numpy(audio)
-        elif isinstance(audio, torch.Tensor):
-            audio_tensor = audio.detach().cpu()
-        else:
-            audio_tensor = torch.tensor(audio)
-
-        audio_tensor = audio_tensor.float().squeeze()
-        if audio_tensor.ndim > 1:
-            audio_tensor = audio_tensor.mean(dim=0)
-
-        self._sample_rate = int(sample_rate)
-        return audio_tensor, self._sample_rate
-
-    @staticmethod
-    def _audio_tensor_to_pcm(audio_tensor: torch.Tensor) -> bytes:
-        audio_np = audio_tensor.cpu().numpy()
-        audio_np = np.clip(audio_np, -1.0, 1.0)
-        audio_int16 = (audio_np * 32767).astype(np.int16)
-        return bytes(audio_int16.tobytes())
-
-    def _stream_native(self, text: str) -> Iterator[bytes] | None:
-        self._ensure_initialized()
-        engine = self._engine
-        if engine is None:
-            return None
-
-        for method_name in ("synthesize_streaming", "generate_stream", "stream"):
-            method = getattr(engine, method_name, None)
-            if method is None or not self._has_real_method(engine, method_name):
-                continue
-
-            def _iter_chunks(stream_method=method):
-                for chunk in stream_method(**self._build_kwargs(text)):
-                    if isinstance(chunk, bytes):
-                        yield chunk
-                        continue
-                    audio_tensor, _ = self._coerce_audio_result(chunk)
-                    yield self._audio_tensor_to_pcm(audio_tensor)
-
-            return _iter_chunks()
-
-        return None
-
-    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
-        self._ensure_initialized()
-
-        audio, _ = self._generate_with_qwen_tts(text)
-        return audio
+            raise RuntimeError("MLX Audio returned a result without audio")
+        samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        return pcm, int(getattr(result, "sample_rate", 24_000))
 
     def synthesize_streaming(
         self,
@@ -553,19 +512,207 @@ class Qwen3TTSProvider(TTSProvider):
         speaker: int = 0,
         chunk_size_ms: int = 100,
     ) -> Iterator[bytes]:
-        native_stream = self._stream_native(text)
-        if native_stream is not None:
-            yield from native_stream
+        del speaker, chunk_size_ms
+        with self._lock:
+            self._ensure_initialized()
+            if self._engine is None or self._voice_path is None:
+                raise RuntimeError("Kokoro MLX TTS failed to initialize")
+            for result in self._engine.generate(
+                text=text,
+                voice=self._voice_path,
+                speed=self.speed,
+                lang_code=self.language,
+            ):
+                pcm, sample_rate = self._result_to_pcm(result)
+                self._sample_rate = sample_rate
+                if pcm:
+                    yield pcm
+
+    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
+        import torch
+
+        pcm = b"".join(self.synthesize_streaming(text, speaker))
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        return torch.from_numpy(samples)
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    def close(self) -> None:
+        with self._lock:
+            self._engine = None
+            self._voice_path = None
+
+
+class Qwen3MLXTTSProvider(TTSProvider):
+    """Pinned Qwen3 TTS provider using an explicitly installed MLX snapshot."""
+
+    def __init__(
+        self,
+        model: str = DEFAULT_QWEN3_TTS_MODEL,
+        voice: str = "Aiden",
+        language: str = "English",
+        streaming_interval: float = 0.32,
+    ) -> None:
+        self.model = model
+        self.voice = voice
+        self.language = language
+        self.streaming_interval = streaming_interval
+        self._sample_rate = 24_000
+        self._engine: Any | None = None
+        self._lock = threading.Lock()
+
+    def _ensure_initialized(self) -> None:
+        if self._engine is not None:
             return
+        from app.services.local_models import get_local_model_manager
 
-        audio_tensor = self.synthesize(text, speaker)
-        audio_np = np.clip(audio_tensor.cpu().numpy(), -1.0, 1.0)
-        audio_int16 = (audio_np * 32767).astype(np.int16)
-        chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
+        artifact, path = get_local_model_manager().require_installed(QWEN3_MLX_ARTIFACT_ID)
+        if artifact.model_id != self.model:
+            raise RuntimeError("Installed Qwen voice artifact does not match the selected model")
+        try:
+            from mlx_audio.tts.utils import load_model
+        except ImportError as error:
+            raise RuntimeError(
+                "Qwen3 TTS on Apple Silicon requires the optional MLX Audio runtime."
+            ) from error
+        self._engine = load_model(str(path))
 
-        for i in range(0, len(audio_int16), chunk_samples):
-            chunk = audio_int16[i : i + chunk_samples]
-            yield chunk.tobytes()
+    @staticmethod
+    def _result_to_pcm(result: Any) -> tuple[bytes, int]:
+        import numpy as np
+
+        audio = getattr(result, "audio", None)
+        if audio is None:
+            raise RuntimeError("MLX Audio returned a result without audio")
+        samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        return pcm, int(getattr(result, "sample_rate", 24_000))
+
+    def synthesize_streaming(
+        self,
+        text: str,
+        speaker: int = 0,
+        chunk_size_ms: int = 100,
+    ) -> Iterator[bytes]:
+        del speaker, chunk_size_ms
+        with self._lock:
+            self._ensure_initialized()
+            if self._engine is None:
+                raise RuntimeError("Qwen MLX TTS failed to initialize")
+            results = self._engine.generate_custom_voice(
+                text=text,
+                speaker=self.voice,
+                language=self.language,
+                stream=True,
+                streaming_interval=self.streaming_interval,
+            )
+            for result in results:
+                pcm, sample_rate = self._result_to_pcm(result)
+                self._sample_rate = sample_rate
+                if pcm:
+                    yield pcm
+
+    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
+        import torch
+
+        pcm = b"".join(self.synthesize_streaming(text, speaker))
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        return torch.from_numpy(samples)
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+
+class MagpieTTSProvider(TTSProvider):
+    """Pinned Magpie provider backed by an isolated NeMo-Speech.cpp worker."""
+
+    def __init__(
+        self,
+        model: str = MAGPIE_TTS_MODEL,
+        voice: str = "John",
+        language: str = "en-US",
+    ) -> None:
+        self.model = model
+        self.voice = voice
+        self.language = language
+        self._sample_rate = 22_050
+        self._process: Any | None = None
+
+    def _ensure_initialized(self) -> None:
+        if self._process is not None:
+            return
+        from app.services.local_models import (
+            get_local_model_manager,
+            resolve_nemo_speech_library,
+        )
+        from app.services.local_tts_process import LocalTTSProcess
+
+        artifact, path = get_local_model_manager().require_installed(MAGPIE_ARTIFACT_ID)
+        if artifact.model_id != self.model:
+            raise RuntimeError("Installed Magpie artifact does not match the selected model")
+        library = resolve_nemo_speech_library()
+        if not library:
+            raise RuntimeError(
+                "NeMo-Speech.cpp's TTS shared library is required for NVIDIA Magpie."
+            )
+        if getattr(sys, "frozen", False):
+            raise RuntimeError(
+                "The initial Magpie runtime is supported from the native Geist source "
+                "distribution; packaged sidecar wiring is not available yet."
+            )
+
+        command = (
+            sys.executable,
+            "-m",
+            "app.services.magpie_tts_worker",
+            "--library",
+            library,
+            "--magpie-model",
+            str(path / "magpie" / "magpie_tts_multilingual_357m.v2602.f16.gguf"),
+            "--codec-model",
+            str(path / "codec" / "nemo_nano_codec_22khz_1.89kbps_21.5fps.decoder.f16.gguf"),
+            "--tokenizer-dir",
+            str(path / "magpie" / "tokenizer"),
+            "--language",
+            self.language,
+            "--voice",
+            self.voice,
+        )
+        self._process = LocalTTSProcess(command)
+
+    def synthesize_streaming(
+        self,
+        text: str,
+        speaker: int = 0,
+        chunk_size_ms: int = 100,
+    ) -> Iterator[bytes]:
+        del speaker, chunk_size_ms
+        self._ensure_initialized()
+        if self._process is None:
+            raise RuntimeError("Magpie TTS failed to initialize")
+        yield from self._process.synthesize(
+            {"text": text, "voice": self.voice, "language": self.language}
+        )
+        if self._process.sample_rate:
+            self._sample_rate = int(self._process.sample_rate)
+
+    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        import numpy as np
+        import torch
+
+        pcm = b"".join(self.synthesize_streaming(text, speaker))
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        return torch.from_numpy(samples)
+
+    def close(self) -> None:
+        if self._process is not None:
+            self._process.close()
+            self._process = None
 
     @property
     def sample_rate(self) -> int:
@@ -577,13 +724,15 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
     Factory function to create TTS provider.
 
     Args:
-        provider_type: Type of provider ("sesame", "openai", or "qwen3")
+        provider_type: Type of provider ("sesame", "openai", "kokoro", "qwen3", or "magpie")
         **kwargs: Provider-specific arguments
 
     Returns:
         TTSProvider: Initialized TTS provider
     """
     if provider_type.lower() == "sesame":
+        import torch
+
         device = kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu")
         return SesameTTSProvider(device=device)
     elif provider_type.lower() == "openai":
@@ -593,15 +742,24 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
         model = _validate_tts_model("openai", kwargs.get("model", "gpt-4o-mini-tts"))
         voice = kwargs.get("voice", "alloy")
         return OpenAITTSProvider(api_key=api_key, model=model, voice=voice)
-    elif provider_type.lower() in {"qwen", "qwen3"}:
-        return Qwen3TTSProvider(
-            model=_validate_tts_model("qwen3", kwargs.get("model", DEFAULT_QWEN3_TTS_MODEL)),
-            voice=kwargs.get("voice", "Cherry"),
-            language=kwargs.get("language", "en"),
-            instruct=kwargs.get("instruct"),
+    elif provider_type.lower() == "kokoro":
+        return KokoroMLXTTSProvider(
+            model=_validate_tts_model("kokoro", kwargs.get("model", DEFAULT_KOKORO_TTS_MODEL)),
+            voice=kwargs.get("voice", KOKORO_DEFAULT_VOICE),
+            language=kwargs.get("language", "a"),
             speed=float(kwargs.get("speed", 1.0)),
-            device=kwargs.get("device"),
-            sample_rate=int(kwargs.get("sample_rate", 24000)),
+        )
+    elif provider_type.lower() in {"qwen", "qwen3"}:
+        return Qwen3MLXTTSProvider(
+            model=_validate_tts_model("qwen3", kwargs.get("model", DEFAULT_QWEN3_TTS_MODEL)),
+            voice=kwargs.get("voice", "Aiden"),
+            language=kwargs.get("language", "English"),
+        )
+    elif provider_type.lower() == "magpie":
+        return MagpieTTSProvider(
+            model=_validate_tts_model("magpie", kwargs.get("model", MAGPIE_TTS_MODEL)),
+            voice=kwargs.get("voice", "John"),
+            language=kwargs.get("language", "en-US"),
         )
     else:
         raise ValueError(f"Unknown TTS provider: {provider_type}")

@@ -10,6 +10,8 @@ from __future__ import annotations
 import atexit
 import errno
 import hashlib
+import importlib.metadata
+import importlib.util
 import json
 import logging
 import os
@@ -37,6 +39,22 @@ logger = logging.getLogger(__name__)
 GGUF_MAGIC = b"GGUF"
 COPY_CHUNK_SIZE = 4 * 1024 * 1024
 DOWNLOAD_DISK_RESERVE_BYTES = 256 * 1024 * 1024
+DIRECTORY_FORMATS = {"snapshot", "bundle"}
+
+
+@dataclass(frozen=True)
+class LocalModelComponent:
+    """One pinned Hugging Face source inside a composite artifact."""
+
+    id: str
+    repo_id: str
+    revision: str
+    destination: str
+    filename: str | None = None
+    allow_patterns: tuple[str, ...] | None = None
+    required_files: tuple[str, ...] = ()
+    sha256: str | None = None
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +77,15 @@ class LocalModelArtifact:
     supports_tool_calling: bool = False
     allow_patterns: tuple[str, ...] | None = None
     requires_auth: bool = False
+    modality: str = "llm"
+    runtime: str | None = None
+    validation_profile: str = "causal_lm"
+    components: tuple[LocalModelComponent, ...] = ()
+    sample_rate: int | None = None
+    default_voice: str | None = None
+    license_url: str | None = None
+    primary_weight: str | None = None
+    primary_weight_size_bytes: int | None = None
 
 
 # Official Qwen GGUF metadata verified for the pinned artifact.  Keeping this
@@ -135,6 +162,110 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
         license="Apache-2.0",
         supports_tool_calling=True,
     ),
+    LocalModelArtifact(
+        id="kokoro-82m-bf16-mlx",
+        model_id="hexgrad/Kokoro-82M",
+        display_name="Vera · Kokoro 82M (MLX BF16)",
+        format="snapshot",
+        backend="mlx_audio",
+        runtime="mlx_audio",
+        modality="tts",
+        repo_id="mlx-community/Kokoro-82M-bf16",
+        revision="a71e4d38b236d968966a2002c4c895dbd12b1c3c",
+        filename="snapshot",
+        size_bytes=327_639_823,
+        sha256="4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8",
+        quantization="BF16",
+        license="Apache-2.0",
+        license_url="https://huggingface.co/hexgrad/Kokoro-82M",
+        validation_profile="kokoro_tts_mlx",
+        sample_rate=24_000,
+        default_voice="af_heart",
+        primary_weight="kokoro-v1_0.safetensors",
+        primary_weight_size_bytes=327_115_152,
+        allow_patterns=(
+            "config.json",
+            "kokoro-v1_0.safetensors",
+            "voices/af_heart.safetensors",
+        ),
+    ),
+    LocalModelArtifact(
+        id="qwen3-tts-0.6b-customvoice-mlx-6bit",
+        model_id="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        display_name="Qwen3 TTS 0.6B CustomVoice (MLX 6-bit)",
+        format="snapshot",
+        backend="mlx_audio",
+        runtime="mlx_audio",
+        modality="tts",
+        repo_id="mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-6bit",
+        revision="7dc92af14613355896fcab13b268c19ede233139",
+        filename="snapshot",
+        size_bytes=1_830_000_000,
+        sha256="77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513",
+        quantization="6-bit",
+        license="Apache-2.0",
+        license_url="https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        validation_profile="qwen_tts_mlx",
+        sample_rate=24_000,
+        default_voice="Aiden",
+        primary_weight="model.safetensors",
+        primary_weight_size_bytes=1_146_758_090,
+        allow_patterns=(
+            "*.json",
+            "*.txt",
+            "*.safetensors",
+            "speech_tokenizer/*.json",
+            "speech_tokenizer/*.safetensors",
+        ),
+    ),
+    LocalModelArtifact(
+        id="magpie-tts-multilingual-357m-nemo-speech",
+        model_id="nvidia/magpie_tts_multilingual_357m",
+        display_name="NVIDIA Magpie TTS Multilingual 357M (F16)",
+        format="bundle",
+        backend="nemo_speech",
+        runtime="nemo_speech",
+        modality="tts",
+        filename="bundle",
+        size_bytes=527_427_936,
+        quantization="F16",
+        license="NVIDIA Open Model License",
+        license_url=(
+            "https://www.nvidia.com/en-us/agreements/enterprise-software/"
+            "nvidia-open-model-license/"
+        ),
+        validation_profile="magpie_tts",
+        sample_rate=22_050,
+        default_voice="John",
+        components=(
+            LocalModelComponent(
+                id="magpie_model",
+                repo_id="nvidia/magpie_tts_multilingual_357m",
+                revision="61a0a4494a40e85adecebaa02b4aa6c70b5fef0d",
+                destination="magpie",
+                filename="magpie_tts_multilingual_357m.v2602.f16.gguf",
+                size_bytes=448_604_832,
+                sha256="901d299a8b1df016cf81cae0089a7a7c15627b9633d033357e15a47d9a219a75",
+            ),
+            LocalModelComponent(
+                id="tokenizer",
+                repo_id="nvidia/magpie_tts_multilingual_357m",
+                revision="61a0a4494a40e85adecebaa02b4aa6c70b5fef0d",
+                destination="magpie",
+                allow_patterns=("tokenizer/*",),
+                required_files=("tokenizer/ipa_cmudict-0.7b_nv23.01.txt",),
+            ),
+            LocalModelComponent(
+                id="codec",
+                repo_id="nvidia/nemo-nano-codec-22khz-1.89kbps-21.5fps",
+                revision="fc00890b604aa2de298d2641ffc6c5f6caf8c4d7",
+                destination="codec",
+                filename="nemo_nano_codec_22khz_1.89kbps_21.5fps.decoder.f16.gguf",
+                size_bytes=78_823_104,
+                sha256="cc86d36d821a27cdc1d4ef600a3e2b0dabe76e88fcc2a8652d9543134c07ef2d",
+            ),
+        ),
+    ),
 )
 
 
@@ -182,6 +313,26 @@ def _safe_component(value: str) -> str:
     return normalized
 
 
+def _safe_relative_path(value: str) -> Path:
+    if not value or "\\" in value:
+        raise ValueError("Artifact path must be a non-empty POSIX relative path")
+    relative = Path(value)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("Artifact path escapes its managed directory")
+    return relative
+
+
+def _safe_relative_directory(value: str) -> Path:
+    return _safe_relative_path(value)
+
+
+def _safe_relative_filename(value: str) -> Path:
+    relative = _safe_relative_path(value)
+    if len(relative.parts) != 1:
+        raise ValueError("Artifact filename must not include a directory")
+    return relative
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -222,7 +373,96 @@ def local_artifact_supported(
         )
     if artifact.backend == "mlx_llama":
         return platform_name == "darwin" and architecture in {"arm64", "aarch64"}
+    if artifact.backend == "mlx_audio":
+        return platform_name == "darwin" and architecture in {"arm64", "aarch64"}
+    if artifact.backend == "nemo_speech":
+        return platform_name == "linux" and architecture in {"amd64", "x86_64"}
     return True
+
+
+def resolve_nemo_speech_library(environment: dict[str, str] | None = None) -> str | None:
+    """Find the NeMo-Speech.cpp TTS shared library without mutating the host."""
+
+    env = environment if environment is not None else os.environ
+    configured = env.get("GEIST_NEMO_SPEECH_LIBRARY")
+    if configured and Path(configured).expanduser().is_file():
+        return str(Path(configured).expanduser().resolve())
+
+    runtime_home = env.get("GEIST_NEMO_SPEECH_HOME")
+    if runtime_home:
+        root = Path(runtime_home).expanduser()
+        for relative in (
+            "lib/libnemo_speech_tts.so",
+            "bin/libnemo_speech_tts.so",
+            "lib/libnemo_speech_tts.dylib",
+            "bin/nemo_speech_tts.dll",
+        ):
+            candidate = root / relative
+            if candidate.is_file():
+                return str(candidate.resolve())
+
+    import ctypes.util
+
+    return ctypes.util.find_library("nemo_speech_tts")
+
+
+def local_artifact_runtime_status(artifact: LocalModelArtifact) -> tuple[bool, str | None]:
+    """Return runtime availability separately from platform compatibility."""
+
+    if artifact.runtime == "mlx_audio":
+        required_modules = ["mlx_audio"]
+        if artifact.validation_profile == "kokoro_tts_mlx":
+            required_modules.extend(("misaki", "en_core_web_sm"))
+        missing_modules = [
+            module for module in required_modules if importlib.util.find_spec(module) is None
+        ]
+        ready = not missing_modules
+        installed_version = None
+        if ready:
+            try:
+                installed_version = importlib.metadata.version("mlx-audio")
+            except importlib.metadata.PackageNotFoundError:
+                ready = False
+            else:
+                version_numbers = tuple(
+                    int(value) for value in re.findall(r"\d+", installed_version)[:3]
+                )
+                ready = version_numbers >= (0, 5, 1)
+        return (
+            ready,
+            None
+            if ready
+            else (
+                "The macOS voice extra must include MLX Audio 0.5.1 or newer"
+                + (
+                    " plus its locked English speech assets"
+                    if artifact.validation_profile == "kokoro_tts_mlx"
+                    else ""
+                )
+                + "; "
+                + (
+                    f"version {installed_version} is installed."
+                    if installed_version
+                    else (
+                        "missing: " + ", ".join(missing_modules)
+                        if missing_modules
+                        else "the runtime is not installed in this Geist environment."
+                    )
+                )
+            ),
+        )
+    if artifact.runtime == "nemo_speech":
+        ready = resolve_nemo_speech_library() is not None
+        return (
+            ready,
+            None
+            if ready
+            else (
+                "NeMo-Speech.cpp's TTS shared library was not found. Set "
+                "GEIST_NEMO_SPEECH_HOME or GEIST_NEMO_SPEECH_LIBRARY."
+            ),
+        )
+    return True, None
 
 
 class LocalModelManager:
@@ -295,9 +535,9 @@ class LocalModelManager:
 
     def _artifact_path(self, artifact: LocalModelArtifact) -> Path:
         filename = Path(artifact.filename).name
-        if artifact.format == "snapshot":
-            if filename != "snapshot":
-                raise ValueError(f"Unsafe snapshot directory for artifact {artifact.id}")
+        if artifact.format in DIRECTORY_FORMATS:
+            if filename != artifact.format:
+                raise ValueError(f"Unsafe {artifact.format} directory for artifact {artifact.id}")
             return self.artifacts_dir / _safe_component(artifact.id) / filename
         if (
             filename != artifact.filename
@@ -309,7 +549,9 @@ class LocalModelManager:
         return self.artifacts_dir / _safe_component(artifact.id) / filename
 
     def _partial_path(self, artifact: LocalModelArtifact) -> Path:
-        suffix = "partial.snapshot" if artifact.format == "snapshot" else "partial.gguf"
+        suffix = (
+            f"partial.{artifact.format}" if artifact.format in DIRECTORY_FORMATS else "partial.gguf"
+        )
         return self.downloads_dir / f"{_safe_component(artifact.id)}.{suffix}"
 
     @staticmethod
@@ -336,7 +578,7 @@ class LocalModelManager:
 
     @staticmethod
     def _artifact_exists(artifact: LocalModelArtifact, path: Path) -> bool:
-        return path.is_dir() if artifact.format == "snapshot" else path.is_file()
+        return path.is_dir() if artifact.format in DIRECTORY_FORMATS else path.is_file()
 
     def _remove_artifact_target(self, artifact: LocalModelArtifact) -> None:
         target = self._artifact_path(artifact)
@@ -359,7 +601,9 @@ class LocalModelManager:
             return f"Installed model files are missing from {target}."
         try:
             if artifact.format == "snapshot":
-                self._verify_snapshot(artifact, target)
+                self._verify_snapshot(artifact, target, verify_weights=False)
+            elif artifact.format == "bundle":
+                self._verify_bundle(artifact, target, verify_weights=False)
             else:
                 _validate_gguf(target)
                 if artifact.size_bytes is not None and target.stat().st_size != artifact.size_bytes:
@@ -424,9 +668,11 @@ class LocalModelManager:
                     status="installed",
                     bytes_downloaded=installed_size,
                     total_bytes=installed_size,
-                    progress_completed=(1 if artifact.format == "snapshot" else installed_size),
-                    progress_total=(1 if artifact.format == "snapshot" else installed_size),
-                    sha256=(None if artifact.format == "snapshot" else checksum),
+                    progress_completed=(
+                        1 if artifact.format in DIRECTORY_FORMATS else installed_size
+                    ),
+                    progress_total=(1 if artifact.format in DIRECTORY_FORMATS else installed_size),
+                    sha256=(None if artifact.format in DIRECTORY_FORMATS else checksum),
                     path=str(target),
                     error=None,
                 )
@@ -443,6 +689,8 @@ class LocalModelManager:
 
         if artifact.format == "snapshot":
             return self._verify_snapshot(artifact, path)
+        if artifact.format == "bundle":
+            return self._verify_bundle(artifact, path)
 
         _validate_gguf(path)
         stats = path.stat()
@@ -464,7 +712,9 @@ class LocalModelManager:
         return checksum
 
     @staticmethod
-    def _verify_snapshot(artifact: LocalModelArtifact, path: Path) -> str:
+    def _verify_snapshot(
+        artifact: LocalModelArtifact, path: Path, *, verify_weights: bool = True
+    ) -> str:
         if not path.is_dir():
             raise ValueError("Managed MLX snapshot is not a directory")
         manifest_path = path / ".geist-artifact.json"
@@ -476,21 +726,123 @@ class LocalModelManager:
             raise ValueError("Managed MLX snapshot belongs to a different artifact")
         if artifact.revision and manifest.get("revision") != artifact.revision:
             raise ValueError("Managed MLX snapshot revision does not match the curated artifact")
-        if not (path / "config.json").is_file():
-            raise ValueError("Managed MLX snapshot is missing config.json")
-        if not ((path / "tokenizer.json").is_file() or (path / "tokenizer.model").is_file()):
-            raise ValueError("Managed MLX snapshot is missing tokenizer files")
-        if not any(path.glob("*.safetensors")):
-            raise ValueError("Managed MLX snapshot is missing safetensors weights")
+        if artifact.validation_profile == "kokoro_tts_mlx":
+            kokoro_required = (
+                "config.json",
+                "kokoro-v1_0.safetensors",
+                "voices/af_heart.safetensors",
+            )
+            missing = [relative for relative in kokoro_required if not (path / relative).is_file()]
+            if missing:
+                raise ValueError("Managed Kokoro TTS snapshot is incomplete: " + ", ".join(missing))
+            if artifact.primary_weight:
+                primary_weight = path / _safe_relative_path(artifact.primary_weight)
+                primary_size = primary_weight.stat().st_size
+                if (
+                    artifact.primary_weight_size_bytes is not None
+                    and primary_size != artifact.primary_weight_size_bytes
+                ):
+                    raise ValueError("Managed Kokoro TTS primary weight has an unexpected size")
+                if (
+                    verify_weights
+                    and artifact.sha256
+                    and (_sha256_file(primary_weight).casefold() != artifact.sha256.casefold())
+                ):
+                    raise ValueError(
+                        "Managed Kokoro TTS primary weight failed SHA-256 verification"
+                    )
+        elif artifact.validation_profile == "qwen_tts_mlx":
+            qwen_required = (
+                "config.json",
+                "model.safetensors",
+                "vocab.json",
+                "merges.txt",
+                "speech_tokenizer/config.json",
+                "speech_tokenizer/model.safetensors",
+            )
+            missing = [relative for relative in qwen_required if not (path / relative).is_file()]
+            if missing:
+                raise ValueError("Managed Qwen TTS snapshot is incomplete: " + ", ".join(missing))
+            if artifact.primary_weight:
+                primary_weight = path / _safe_relative_path(artifact.primary_weight)
+                primary_size = primary_weight.stat().st_size
+                if (
+                    artifact.primary_weight_size_bytes is not None
+                    and primary_size != artifact.primary_weight_size_bytes
+                ):
+                    raise ValueError("Managed Qwen TTS primary weight has an unexpected size")
+                if (
+                    verify_weights
+                    and artifact.sha256
+                    and (_sha256_file(primary_weight).casefold() != artifact.sha256.casefold())
+                ):
+                    raise ValueError("Managed Qwen TTS primary weight failed SHA-256 verification")
+        else:
+            if not (path / "config.json").is_file():
+                raise ValueError("Managed MLX snapshot is missing config.json")
+            if not ((path / "tokenizer.json").is_file() or (path / "tokenizer.model").is_file()):
+                raise ValueError("Managed MLX snapshot is missing tokenizer files")
+            if not any(path.glob("*.safetensors")):
+                raise ValueError("Managed MLX snapshot is missing safetensors weights")
         return str(manifest.get("revision") or artifact.revision or "snapshot")
 
-    def list_artifacts(self, model_id: str | None = None) -> list[dict[str, Any]]:
+    @staticmethod
+    def _verify_bundle(
+        artifact: LocalModelArtifact, path: Path, *, verify_weights: bool = True
+    ) -> str:
+        if not path.is_dir():
+            raise ValueError("Managed voice bundle is not a directory")
+        manifest_path = path / ".geist-artifact.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError) as error:
+            raise ValueError("Managed voice bundle is missing its completion manifest") from error
+        if manifest.get("artifact_id") != artifact.id:
+            raise ValueError("Managed voice bundle belongs to a different artifact")
+
+        recorded_components = manifest.get("components")
+        expected_components = [
+            {"id": component.id, "revision": component.revision}
+            for component in artifact.components
+        ]
+        if recorded_components != expected_components:
+            raise ValueError("Managed voice bundle component revisions do not match")
+
+        for component in artifact.components:
+            destination = path / _safe_relative_directory(component.destination)
+            if component.filename:
+                component_path = destination / _safe_relative_filename(component.filename)
+                _validate_gguf(component_path)
+                stats = component_path.stat()
+                if component.size_bytes is not None and stats.st_size != component.size_bytes:
+                    raise ValueError(f"Voice component {component.id} has an unexpected size")
+                if (
+                    verify_weights
+                    and component.sha256
+                    and _sha256_file(component_path).casefold() != component.sha256
+                ):
+                    raise ValueError(f"Voice component {component.id} failed SHA-256 verification")
+            for relative in component.required_files:
+                if not (destination / _safe_relative_path(relative)).is_file():
+                    raise ValueError(
+                        f"Voice component {component.id} is missing required file {relative}"
+                    )
+        return "bundle"
+
+    def list_artifacts(
+        self,
+        model_id: str | None = None,
+        modality: str | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             result = []
             state_changed = False
             for artifact in self._artifacts.values():
                 if model_id is not None and artifact.model_id != model_id:
                     continue
+                if modality is not None and artifact.modality != modality:
+                    continue
+                runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
                 previous_state = dict(self._states.get(artifact.id, {}))
                 state = self._state_for_locked(artifact)
                 state_changed = state_changed or (
@@ -502,6 +854,8 @@ class LocalModelManager:
                         **asdict(artifact),
                         **dict(state),
                         "supported": self._artifact_support(artifact),
+                        "runtime_ready": runtime_ready,
+                        "runtime_detail": runtime_detail,
                     }
                 )
             if state_changed:
@@ -529,10 +883,13 @@ class LocalModelManager:
                     self._save_index_locked()
                 except OSError:
                     logger.warning("Could not persist reconciled local-model state", exc_info=True)
+            runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
             return {
                 **asdict(artifact),
                 **dict(state),
                 "supported": self._artifact_support(artifact),
+                "runtime_ready": runtime_ready,
+                "runtime_detail": runtime_detail,
             }
 
     def find_artifact(self, model_or_artifact_id: str) -> LocalModelArtifact:
@@ -630,6 +987,8 @@ class LocalModelManager:
         self._require_supported(artifact)
         if artifact.format == "snapshot":
             return self._download_snapshot_artifact(artifact)
+        if artifact.format == "bundle":
+            return self._download_bundle_artifact(artifact)
         target = self._artifact_path(artifact)
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
         temporary = self._partial_path(artifact)
@@ -790,7 +1149,7 @@ class LocalModelManager:
             if self._cancel_events.setdefault(artifact.id, threading.Event()).is_set():
                 raise ModelDownloadCancelledError("Model download was cancelled")
             completed = True
-            self._write_snapshot_manifest(artifact, temporary)
+            self._write_directory_manifest(artifact, temporary)
             self._verify_snapshot(artifact, temporary)
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -829,13 +1188,159 @@ class LocalModelManager:
                 shutil.rmtree(temporary, ignore_errors=True)
             raise
 
+    def _download_bundle_artifact(self, artifact: LocalModelArtifact) -> Path:
+        target = self._artifact_path(artifact)
+        self.downloads_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self._partial_path(artifact)
+        temporary.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            state = self._state_for_locked(artifact)
+            if state.get("status") == "installed" and target.is_dir():
+                return target
+            state.update(
+                status="downloading",
+                bytes_downloaded=self._payload_size(temporary),
+                total_bytes=artifact.size_bytes,
+                progress_unit="files",
+                progress_completed=0,
+                progress_total=len(artifact.components),
+                error=None,
+                path=None,
+            )
+            self._save_index_locked()
+
+        def progress(completed: int, total: int | None) -> None:
+            with self._lock:
+                cancel_event = self._cancel_events.setdefault(artifact.id, threading.Event())
+                if cancel_event.is_set():
+                    raise ModelDownloadCancelledError("Model download was cancelled")
+                state = self._state_for_locked(artifact)
+                state.update(
+                    bytes_downloaded=self._payload_size(temporary),
+                    progress_unit="files",
+                    progress_completed=completed,
+                    progress_total=total,
+                )
+                self._save_index_locked()
+
+        completed_download = False
+        try:
+            if self._downloader is not None:
+                self._downloader(artifact, temporary, progress)
+            else:
+                total = len(artifact.components)
+                for index, component in enumerate(artifact.components):
+                    progress(index, total)
+                    self._download_bundle_component(artifact, component, temporary)
+                    progress(index + 1, total)
+            completed_download = True
+            self._write_directory_manifest(artifact, temporary)
+            self._verify_bundle(artifact, temporary)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                shutil.rmtree(target)
+            os.replace(temporary, target)
+            installed_size = self._payload_size(target)
+            with self._lock:
+                state = self._state_for_locked(artifact)
+                state.update(
+                    status="installed",
+                    bytes_downloaded=installed_size,
+                    total_bytes=installed_size,
+                    progress_unit="files",
+                    progress_completed=len(artifact.components),
+                    progress_total=len(artifact.components),
+                    sha256=None,
+                    path=str(target),
+                    error=None,
+                )
+                self._save_index_locked()
+            return target
+        except Exception as error:
+            with self._lock:
+                state = self._state_for_locked(artifact)
+                cancelled = isinstance(error, ModelDownloadCancelledError)
+                state.update(
+                    status="cancelled" if cancelled else "failed",
+                    bytes_downloaded=self._payload_size(temporary),
+                    error=None if cancelled else str(error),
+                    path=None,
+                )
+                self._save_index_locked()
+            if completed_download:
+                shutil.rmtree(temporary, ignore_errors=True)
+            raise
+
+    def _download_bundle_component(
+        self,
+        artifact: LocalModelArtifact,
+        component: LocalModelComponent,
+        bundle_root: Path,
+    ) -> None:
+        destination = bundle_root / _safe_relative_directory(component.destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        if component.filename:
+            filename = str(_safe_relative_filename(component.filename))
+            component_artifact = LocalModelArtifact(
+                id=f"{artifact.id}-{component.id}",
+                model_id=artifact.model_id,
+                display_name=f"{artifact.display_name}: {component.id}",
+                format="gguf",
+                backend=artifact.backend,
+                filename=filename,
+                repo_id=component.repo_id,
+                revision=component.revision,
+                sha256=component.sha256,
+                size_bytes=component.size_bytes,
+            )
+
+            def component_progress(_downloaded: int, _total: int | None) -> None:
+                if self._cancel_events.setdefault(artifact.id, threading.Event()).is_set():
+                    raise ModelDownloadCancelledError("Model download was cancelled")
+
+            self._download_hugging_face_artifact(
+                component_artifact,
+                destination / filename,
+                component_progress,
+            )
+            return
+
+        from huggingface_hub import snapshot_download
+        from tqdm.auto import tqdm
+
+        manager = self
+
+        class ComponentProgress(tqdm):
+            def update(self, n=1):
+                if manager._cancel_events.setdefault(artifact.id, threading.Event()).is_set():
+                    raise ModelDownloadCancelledError("Model download was cancelled")
+                if self.disable:
+                    self.n += n
+                    return None
+                return super().update(n)
+
+        token = os.getenv("HUGGING_FACE_HUB_TOKEN") or os.getenv("HF_TOKEN")
+        snapshot_download(
+            repo_id=component.repo_id,
+            revision=component.revision,
+            token=token,
+            local_dir=str(destination),
+            allow_patterns=list(component.allow_patterns or ()),
+            max_workers=1,
+            tqdm_class=ComponentProgress,
+        )
+
     @staticmethod
-    def _write_snapshot_manifest(artifact: LocalModelArtifact, target: Path) -> None:
+    def _write_directory_manifest(artifact: LocalModelArtifact, target: Path) -> None:
         manifest = {
             "version": 1,
             "artifact_id": artifact.id,
             "repo_id": artifact.repo_id,
             "revision": artifact.revision,
+            "components": [
+                {"id": component.id, "revision": component.revision}
+                for component in artifact.components
+            ],
         }
         manifest_path = target / ".geist-artifact.json"
         temporary = manifest_path.with_suffix(".json.tmp")
@@ -928,7 +1433,7 @@ class LocalModelManager:
             ) from error
         with self._lock:
             state = self._state_for_locked(artifact)
-            if artifact.format != "snapshot" and state.get("sha256") != checksum:
+            if artifact.format not in DIRECTORY_FORMATS and state.get("sha256") != checksum:
                 state["sha256"] = checksum
                 self._save_index_locked()
         return artifact, path

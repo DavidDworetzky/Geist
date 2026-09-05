@@ -1,7 +1,8 @@
 import React, { useState, useRef, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
-import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
+import VoiceSettings from './VoiceSettings';
+import useVoiceSelection from '../Hooks/useVoiceSelection';
 import useVoiceChat from '../Hooks/useVoiceChat';
 
 interface EnhancedChatInputProps {
@@ -37,7 +38,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+  const { selection: voiceSelection, setSelection: setVoiceSelection, catalog, ready: voiceReady }
+    = useVoiceSelection(enableVoice);
 
   const {
     isRecording,
@@ -197,13 +199,14 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
               <VoiceSettings
                 selection={voiceSelection}
                 onChange={setVoiceSelection}
+                catalog={catalog}
                 disabled={disabled || isRecording}
               />
               <VoiceButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
                 onClick={toggleRecording}
-                disabled={disabled}
+                disabled={disabled || (!voiceReady && !isRecording)}
               />
             </>
           )}

@@ -1,4 +1,5 @@
 """Tests for model-specific weight download locations."""
+
 import os
 
 import pytest
@@ -56,9 +57,7 @@ def test_voice_models_download_into_hugging_face_cache(monkeypatch):
     assert "sesame/csm-1b" in fetched_repos
     assert "facebook/mms-1b-all" in fetched_repos
     # Sesame needs the Mimi codec weights alongside the CSM checkpoint
-    assert any(
-        call["repo_id"] == "kyutai/moshiko-pytorch-bf16" for call in file_calls
-    )
+    assert any(call["repo_id"] == "kyutai/moshiko-pytorch-bf16" for call in file_calls)
 
 
 def test_voice_registry_covers_local_tts_provider_models():
@@ -67,15 +66,18 @@ def test_voice_registry_covers_local_tts_provider_models():
     tts = pytest.importorskip("app.services.tts")
 
     registry_repos = {
-        download["repo_id"]
-        for spec in VOICE_MODELS.values()
-        for download in spec["downloads"]
+        download["repo_id"] for spec in VOICE_MODELS.values() for download in spec["downloads"]
     }
+    local_models = pytest.importorskip("app.services.local_models")
+    managed_artifact_ids = {artifact.id for artifact in local_models.CURATED_LOCAL_ARTIFACTS}
 
     for provider in tts.SUPPORTED_TTS_PROVIDERS:
         if provider["type"] != "local":
             continue
         for model in provider["models"]:
+            if model.get("artifact_id"):
+                assert model["artifact_id"] in managed_artifact_ids
+                continue
             assert model["id"] in registry_repos, (
                 f"Local TTS model {model['id']} is not downloadable via "
                 "scripts/download_models.py VOICE_MODELS"

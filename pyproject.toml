@@ -56,7 +56,7 @@ local-mlx = [
     "transformers==5.15.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tokenizers==0.22.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "sentencepiece==0.2.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentencepiece==0.2.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "einops==0.8.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tiktoken==0.9.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx==0.31.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -73,12 +73,13 @@ local-transformers = [
     "tokenizers==0.22.1",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
-    "sentencepiece==0.2.0",
+    "sentencepiece==0.2.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentencepiece==0.2.0; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "einops==0.8.1",
     "tiktoken==0.9.0",
 ]
 voice = [
-    "sounddevice==0.5.0",
+    "sounddevice==0.5.3",
     "sphn==0.1.12",
     "numpy==2.2.3",
     "torch==2.6.0",
@@ -91,9 +92,14 @@ voice = [
     "tokenizers==0.22.1",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
-    "sentencepiece==0.2.0",
+    # 0.2.0 collides with PyTorch's C++ flags on combined MMS/Kokoro shutdown.
+    "sentencepiece==0.2.2 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "sentencepiece==0.2.0; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "einops==0.8.1",
     "tiktoken==0.9.0",
+    "mlx-audio==0.5.1 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "misaki[en]==0.9.4 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "en-core-web-sm==3.8.0 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 packaged = [
     "pyinstaller==6.21.0",
@@ -132,6 +138,7 @@ required-environments = [
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
