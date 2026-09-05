@@ -1,6 +1,7 @@
 """Selection tests for the switchable MLX runner."""
 
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,7 @@ from agents.architectures.llama.mlx_lm_backend import (
     _first_stop_index,
     _is_qwen3_model,
     _normalize_stops,
+    _prefill_step_size,
     _stop_prefix_length,
 )
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
@@ -320,6 +322,29 @@ def test_structured_messages_reach_mlx_backend_unchanged():
     runner.llama.complete_messages.assert_called_once_with(messages)
 
 
+def test_mlx_runner_streams_backend_segments_without_buffering():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    runner.llama.stream_model_turn = None
+    runner.llama.stream_messages.return_value = iter(("co", "balt"))
+
+    events = list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="Name the code word.")],
+            [],
+            ModelRequestConfig(max_tokens=8, temperature=0.0),
+        )
+    )
+
+    assert [event.kind for event in events] == [
+        "text_delta",
+        "text_delta",
+        "turn_complete",
+    ]
+    assert [event.text for event in events[:2]] == ["co", "balt"]
+    assert events[-1].turn.text == "cobalt"
+
+
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.tokenizer = MagicMock()
@@ -427,6 +452,37 @@ def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call():
     assert turn.tool_calls[0].arguments == {"query": "celebrity news"}
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_mlx_lm_plain_turn_streams_lazily_and_closes(cancel):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    produced = []
+    closed = []
+
+    def responses(*args):
+        try:
+            for segment in ("co", "balt"):
+                produced.append(segment)
+                yield segment
+        finally:
+            closed.append(True)
+
+    backend.stream_messages = responses
+    events = backend.stream_model_turn(
+        [ChatMessage(role="user", content="Name the code word.")], [], ModelRequestConfig()
+    )
+    first = next(events)
+    assert first.kind == "text_delta"
+    assert produced == ["co"]
+    if cancel:
+        events.close()
+        assert produced == ["co"]
+    else:
+        remaining = list(events)
+        assert [event.kind for event in remaining] == ["text_delta", "turn_complete"]
+        assert remaining[-1].turn.text == "cobalt"
+    assert closed == [True]
+
+
 def test_manual_mlx_stays_tool_disabled():
     runner = MLXLlamaRunner()
     runner.llama = MagicMock()
@@ -504,14 +560,15 @@ def test_qwen3_stream_warns_for_unsupported_penalties_and_cross_chunk_stop(caplo
     ]
 
     def response_stream():
-        yield from responses
+        for response in responses:
+            yield response.text
 
     stream = response_stream()
-    stream_generate = MagicMock(return_value=stream)
+    backend._stream_prompt = MagicMock(return_value=stream)
     make_sampler = MagicMock(return_value="sampler")
     logits_processors = [object(), object()]
     make_logits_processors = MagicMock(return_value=logits_processors)
-    mlx_lm_module = _backend_module("mlx_lm", "stream_generate", stream_generate)
+    mlx_lm_module = ModuleType("mlx_lm")
     sample_utils_module = _backend_module(
         "mlx_lm.sample_utils",
         "make_sampler",
@@ -534,14 +591,7 @@ def test_qwen3_stream_warns_for_unsupported_penalties_and_cross_chunk_stop(caplo
     make_sampler.assert_called_once_with(temp=1.0, top_p=0.95, top_k=20)
     make_logits_processors.assert_called_once_with()
     assert "presence/frequency penalties" in caplog.text
-    stream_generate.assert_called_once_with(
-        backend.model,
-        backend.tokenizer,
-        "rendered prompt",
-        max_tokens=100,
-        sampler="sampler",
-        logits_processors=logits_processors,
-    )
+    backend._stream_prompt.assert_called_once_with("rendered prompt", "sampler", logits_processors)
     assert stream.gi_frame is None
 
 
@@ -559,10 +609,10 @@ def test_non_qwen_stream_omits_top_k_and_empty_logits_processors():
     backend.presence_penalty = 0.0
     backend.stop = None
 
-    stream_generate = MagicMock(return_value=iter(()))
+    backend._stream_prompt = MagicMock(return_value=iter(()))
     make_sampler = MagicMock(return_value="sampler")
     make_logits_processors = MagicMock(return_value=[])
-    mlx_lm_module = _backend_module("mlx_lm", "stream_generate", stream_generate)
+    mlx_lm_module = ModuleType("mlx_lm")
     sample_utils_module = _backend_module(
         "mlx_lm.sample_utils",
         "make_sampler",
@@ -581,7 +631,7 @@ def test_non_qwen_stream_omits_top_k_and_empty_logits_processors():
 
     make_sampler.assert_called_once_with(temp=0.7, top_p=0.9)
     make_logits_processors.assert_called_once_with()
-    assert stream_generate.call_args.kwargs["logits_processors"] is None
+    backend._stream_prompt.assert_called_once_with("rendered prompt", "sampler", None)
 
 
 def test_mlx_lm_uses_a_thread_local_generation_stream():
@@ -608,3 +658,141 @@ def test_mlx_lm_uses_a_thread_local_generation_stream():
 
     assert generation_module.generation_stream is thread_local_stream
     assert backend.supports_native_tool_calling is True
+
+
+def test_mlx_prefill_step_size_rejects_invalid_values(monkeypatch):
+    monkeypatch.setenv("GEIST_MLX_PREFILL_STEP_SIZE", "0")
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        _prefill_step_size()
+
+
+def test_mlx_lm_reuses_an_exact_conversation_prefix(monkeypatch):
+    monkeypatch.setenv("GEIST_MLX_DFLASH", "off")
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model = MagicMock()
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.tokenizer = MagicMock()
+    backend.tokenizer.bos_token = None
+    backend.tokenizer.apply_chat_template.side_effect = ("first", "second")
+    backend.tokenizer.encode.side_effect = ([1, 2], [1, 2, 3, 4])
+    backend.max_new_tokens = 2
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.chat_template_kwargs = {}
+    backend.frequency_penalty = 0.0
+    backend.presence_penalty = 0.0
+    backend.stop = None
+    backend.prefill_step_size = 2048
+    backend._generation_lock = threading.RLock()
+    backend._prompt_cache = None
+    backend._cached_tokens = ()
+    prompt_cache = MagicMock()
+
+    mlx_core = ModuleType("mlx.core")
+    mlx_core.array = MagicMock(side_effect=lambda tokens: tuple(tokens))
+    mlx_module = ModuleType("mlx")
+    mlx_module.core = mlx_core
+    mlx_lm_module = ModuleType("mlx_lm")
+    cache_module = ModuleType("mlx_lm.models.cache")
+    cache_module.make_prompt_cache = MagicMock(return_value=prompt_cache)
+    sampler_module = ModuleType("mlx_lm.sample_utils")
+    sampler_module.make_sampler = MagicMock(return_value="sampler")
+    sampler_module.make_logits_processors = MagicMock(return_value=[])
+    calls = []
+
+    def stream_generate(*args, **kwargs):
+        calls.append((args, kwargs))
+        token = 9 if len(calls) == 1 else 10
+        yield SimpleNamespace(
+            text="A" if len(calls) == 1 else "B",
+            token=token,
+            prompt_tps=100.0,
+            generation_tokens=1,
+            generation_tps=20.0,
+            peak_memory=1.0,
+        )
+
+    mlx_lm_module.stream_generate = stream_generate
+    modules = {
+        "mlx": mlx_module,
+        "mlx.core": mlx_core,
+        "mlx_lm": mlx_lm_module,
+        "mlx_lm.models.cache": cache_module,
+        "mlx_lm.sample_utils": sampler_module,
+    }
+
+    with patch.dict(sys.modules, modules):
+        assert "".join(backend.stream_messages([{"role": "user", "content": "x"}])) == "A"
+        backend.tokenizer.encode.side_effect = ([1, 2, 9, 3, 4],)
+        assert "".join(backend.stream_messages([{"role": "user", "content": "y"}])) == "B"
+
+    assert calls[0][0][2] == (1, 2)
+    assert calls[1][0][2] == (3, 4)
+    assert calls[1][1]["prompt_cache"] is prompt_cache
+    assert backend.last_stats["cached_prompt_tokens"] == 3
+    cache_module.make_prompt_cache.assert_called_once_with(backend.model)
+
+
+def test_mlx_lm_discards_cache_when_the_prefix_changes(monkeypatch):
+    monkeypatch.setenv("GEIST_MLX_DFLASH", "off")
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model = MagicMock()
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.tokenizer = MagicMock()
+    backend.tokenizer.bos_token = None
+    backend.tokenizer.apply_chat_template.return_value = "changed"
+    backend.tokenizer.encode.return_value = [7, 8]
+    backend.max_new_tokens = 1
+    backend.temperature = 0.0
+    backend.top_p = 1.0
+    backend.chat_template_kwargs = {}
+    backend.frequency_penalty = 0.0
+    backend.presence_penalty = 0.0
+    backend.stop = None
+    backend.prefill_step_size = 2048
+    backend._generation_lock = threading.RLock()
+    backend._prompt_cache = MagicMock(name="old_cache")
+    backend._cached_tokens = (1, 2, 3)
+    fresh_cache = MagicMock(name="fresh_cache")
+
+    mlx_core = ModuleType("mlx.core")
+    mlx_core.array = MagicMock(side_effect=lambda tokens: tuple(tokens))
+    mlx_module = ModuleType("mlx")
+    mlx_module.core = mlx_core
+    mlx_lm_module = ModuleType("mlx_lm")
+    mlx_lm_module.stream_generate = MagicMock(
+        return_value=iter(
+            [
+                SimpleNamespace(
+                    text="C",
+                    token=11,
+                    prompt_tps=50.0,
+                    generation_tokens=1,
+                    generation_tps=10.0,
+                    peak_memory=1.0,
+                )
+            ]
+        )
+    )
+    cache_module = ModuleType("mlx_lm.models.cache")
+    cache_module.make_prompt_cache = MagicMock(return_value=fresh_cache)
+    sampler_module = ModuleType("mlx_lm.sample_utils")
+    sampler_module.make_sampler = MagicMock(return_value="sampler")
+    sampler_module.make_logits_processors = MagicMock(return_value=[])
+
+    with patch.dict(
+        sys.modules,
+        {
+            "mlx": mlx_module,
+            "mlx.core": mlx_core,
+            "mlx_lm": mlx_lm_module,
+            "mlx_lm.models.cache": cache_module,
+            "mlx_lm.sample_utils": sampler_module,
+        },
+    ):
+        assert "".join(backend.stream_messages([{"role": "user", "content": "z"}])) == "C"
+
+    assert backend.last_stats["cached_prompt_tokens"] == 0
+    assert backend._prompt_cache is fresh_cache
+    cache_module.make_prompt_cache.assert_called_once_with(backend.model)

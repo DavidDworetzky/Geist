@@ -56,6 +56,7 @@ def test_qwen3_8_27b_declares_runtime_compatibility():
     assert spec.local is True
     assert spec.backend == "mlx_llama"
     assert spec.context_window == 262144
+    assert spec.max_output_tokens == 131072
     assert spec.parameter_count == "27B"
     assert spec.min_transformers_version == "5.8.0"
     assert spec.supports_vision is False

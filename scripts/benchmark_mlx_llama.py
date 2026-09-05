@@ -17,13 +17,21 @@ from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--implementation", choices=("manual", "mlx_lm"), required=True)
+    parser.add_argument(
+        "--implementation",
+        choices=("manual", "mlx_lm"),
+        required=True,
+    )
     parser.add_argument(
         "--model-id",
         default="meta-llama/Meta-Llama-3.1-8B-Instruct",
     )
     parser.add_argument("--weights-dir", required=True)
     parser.add_argument("--prompt", default="Explain why the sky is blue in one sentence.")
+    parser.add_argument(
+        "--follow-up-prompt",
+        help="Run a second conversation turn to measure exact-prefix cache reuse.",
+    )
     parser.add_argument("--system-prompt", default="You are a concise helpful assistant.")
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -44,7 +52,6 @@ def main() -> None:
         },
     )
     load_seconds = time.perf_counter() - load_started
-
     config = GenerationConfig(
         max_tokens=args.max_tokens,
         temperature=args.temperature,
@@ -55,6 +62,23 @@ def main() -> None:
     wall_seconds = time.perf_counter() - generation_started
     stats = dict(getattr(runner.llama, "last_stats", {}))
 
+    follow_up = None
+    if args.follow_up_prompt:
+        conversation = [
+            {"role": "system", "content": args.system_prompt},
+            {"role": "user", "content": args.prompt},
+            {"role": "assistant", "content": messages[-1]["content"]},
+            {"role": "user", "content": args.follow_up_prompt},
+        ]
+        follow_up_started = time.perf_counter()
+        follow_up_messages = runner.complete_messages(conversation, config)
+        follow_up_wall_seconds = time.perf_counter() - follow_up_started
+        follow_up = {
+            "generation_wall_seconds": follow_up_wall_seconds,
+            **dict(getattr(runner.llama, "last_stats", {})),
+            "text": follow_up_messages[-1]["content"],
+        }
+
     result = {
         "implementation": args.implementation,
         "model_id": args.model_id,
@@ -64,6 +88,7 @@ def main() -> None:
         "generation_wall_seconds": wall_seconds,
         **stats,
         "text": messages[-1]["content"],
+        "follow_up": follow_up,
     }
     print(json.dumps(result, indent=2, sort_keys=True))
 

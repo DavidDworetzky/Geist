@@ -1,0 +1,215 @@
+{
+  "hardware": "macOS-26.2-arm64-arm-64bit",
+  "device": {
+    "device_name": "Apple M2 Max",
+    "max_recommended_working_set_size": 83494174720,
+    "memory_size": 103079215104,
+    "architecture": "applegpu_g14s",
+    "max_buffer_length": 62620631040,
+    "resource_limit": 499000
+  },
+  "mlx_lm_version": "0.31.3",
+  "mlx_version": "0.32.2",
+  "drafter_bits": 8,
+  "tuning": [
+    {
+      "k": 5120,
+      "n": 248320,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8113691332915267
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.7863364348901412
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 2.017710789363904
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8401967780185848
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.746784067040474
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8088528231490582
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "bits": 4,
+      "split_k": 4,
+      "speedup": 1.7447202854341433
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.7518201946031438
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.9990779856968004
+    },
+    {
+      "k": 4096,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.7828544468034915
+    },
+    {
+      "k": 5120,
+      "n": 4096,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.7387558926686595
+    },
+    {
+      "k": 25600,
+      "n": 5120,
+      "bits": 8,
+      "split_k": 8,
+      "speedup": 1.8836115089799104
+    }
+  ],
+  "results": [
+    {
+      "trial": 0,
+      "prompt": "code",
+      "mode": "baseline",
+      "generation_tokens": 256,
+      "generation_tps": 21.13467972097081,
+      "elapsed_seconds": 12.820135875139385,
+      "prefill_seconds": 0.7546585001982749
+    },
+    {
+      "trial": 0,
+      "prompt": "code",
+      "mode": "dflash",
+      "cap": 7,
+      "small_m": true,
+      "split_k": 8,
+      "half_operands": false,
+      "prompt_tokens": 47,
+      "cached_prompt_tokens": 0,
+      "prompt_tps": 86.92536207028294,
+      "prefill_seconds": 0.5406937501393259,
+      "generation_tokens": 256,
+      "generation_tps": 33.92043246657612,
+      "decode_seconds": 7.51759283291176,
+      "elapsed_seconds": 8.05828941706568,
+      "verify_rounds": 42,
+      "accepted_drafts_per_round": 5.095238095238095,
+      "peak_memory_gb": 20.820764168,
+      "column_tiles": 1,
+      "speedup": 1.604965531269381,
+      "tokens_identical": false,
+      "first_difference": 3,
+      "token_sha256": "cf9e03d08b8bb5fb2c24c3f8939ac7fbfc7a0956625565d28d340b6b8dfbdc7e"
+    },
+    {
+      "trial": 0,
+      "prompt": "math",
+      "mode": "baseline",
+      "generation_tokens": 256,
+      "generation_tps": 21.14146756132139,
+      "elapsed_seconds": 12.797121208161116,
+      "prefill_seconds": 0.7355176671408117
+    },
+    {
+      "trial": 0,
+      "prompt": "math",
+      "mode": "dflash",
+      "cap": 7,
+      "small_m": true,
+      "split_k": 8,
+      "half_operands": false,
+      "prompt_tokens": 39,
+      "cached_prompt_tokens": 0,
+      "prompt_tps": 72.96745301844956,
+      "prefill_seconds": 0.5344848749227822,
+      "generation_tokens": 256,
+      "generation_tps": 35.56291421268535,
+      "decode_seconds": 7.170390999875963,
+      "elapsed_seconds": 7.70487954095006,
+      "verify_rounds": 40,
+      "accepted_drafts_per_round": 5.4,
+      "peak_memory_gb": 20.820764168,
+      "column_tiles": 1,
+      "speedup": 1.6821402823401057,
+      "tokens_identical": false,
+      "first_difference": 0,
+      "token_sha256": "12a20e2d2b90336e43e68309333f4e0f7e7d21ac61bd48130057152d05e239b0"
+    },
+    {
+      "trial": 0,
+      "prompt": "chat",
+      "mode": "baseline",
+      "generation_tokens": 256,
+      "generation_tps": 21.02215480481685,
+      "elapsed_seconds": 12.903305417392403,
+      "prefill_seconds": 0.7732453751377761
+    },
+    {
+      "trial": 0,
+      "prompt": "chat",
+      "mode": "dflash",
+      "cap": 7,
+      "small_m": true,
+      "split_k": 8,
+      "half_operands": false,
+      "prompt_tokens": 46,
+      "cached_prompt_tokens": 0,
+      "prompt_tps": 85.34848003783469,
+      "prefill_seconds": 0.5389668331481516,
+      "generation_tokens": 256,
+      "generation_tps": 20.56084205269498,
+      "decode_seconds": 12.402215791866183,
+      "elapsed_seconds": 12.941186166368425,
+      "verify_rounds": 69,
+      "accepted_drafts_per_round": 2.710144927536232,
+      "peak_memory_gb": 20.820764168,
+      "column_tiles": 1,
+      "speedup": 0.9780558769353098,
+      "tokens_identical": false,
+      "first_difference": 0,
+      "token_sha256": "583625db66a345316e616d2803066fabe7ca908432fd59416c3fea082d0bb394"
+    }
+  ],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "median_dflash_tps": 33.92043246657612,
+  "provenance": {
+    "target": "mlx-community/Qwen3.8-27B-4bit",
+    "target_revision": "3e6447f082e89cc7f0bc6e5441afd38dfce760ff",
+    "drafter": "incoai/Qwen3.8-27B-DFlash2",
+    "drafter_revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4",
+    "date": "2026-09-04",
+    "note": "One warm paired run per prompt, independently sampled at temperature 0.7 and top_p 0.9. Token equality is not expected; text removed."
+  }
+}
