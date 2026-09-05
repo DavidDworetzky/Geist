@@ -260,6 +260,23 @@ class MLXLlamaRunner(BaseRunner):
         structured_messages = [
             {"role": message.role, "content": message.content} for message in messages
         ]
+        stream_messages = getattr(backend, "stream_messages", None)
+        if callable(stream_messages):
+            segments = []
+            responses = stream_messages(structured_messages)
+            try:
+                for segment in responses:
+                    if segment:
+                        segments.append(segment)
+                        yield ModelEvent.text_delta(segment)
+            finally:
+                close = getattr(responses, "close", None)
+                if callable(close):
+                    close()
+            yield ModelEvent.turn_complete(
+                ModelTurn(text="".join(segments).strip(), finish_reason="stop")
+            )
+            return
         completion = LlamaCompletion.from_dict(backend.complete_messages(structured_messages))
         text = next(
             (message.content for message in completion.messages if message.role == "assistant"),
@@ -270,6 +287,9 @@ class MLXLlamaRunner(BaseRunner):
         yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
 
     def cleanup(self) -> None:
+        cleanup = getattr(self.llama, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
         self.llama = None
         self.supports_native_tool_calling = False
         logger.info("MLX Llama runner cleaned up")

@@ -2,9 +2,12 @@
 
 import importlib
 import logging
+import os
 import re
+import threading
 import time
 from collections.abc import Iterator
+from contextlib import closing
 from typing import Any
 
 from agents.architectures.chat_template_tools import (
@@ -18,6 +21,7 @@ from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
     ModelRequestConfig,
+    ModelTurn,
     ToolDefinition,
 )
 
@@ -59,6 +63,17 @@ def _configure_thread_local_generation_stream() -> None:
     generate_module.generation_stream = mx.new_thread_local_stream(mx.default_device())
 
 
+def _prefill_step_size() -> int:
+    raw = os.environ.get("GEIST_MLX_PREFILL_STEP_SIZE", "2048")
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError("GEIST_MLX_PREFILL_STEP_SIZE must be an integer") from error
+    if value <= 0:
+        raise ValueError("GEIST_MLX_PREFILL_STEP_SIZE must be greater than zero")
+    return value
+
+
 class MLXLMBackend:
     """Load and generate with mlx-lm while matching ``LlamaMLX.complete``."""
 
@@ -89,7 +104,14 @@ class MLXLMBackend:
         self.weights_dir = weights_dir
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
         self.model, self.tokenizer = load(weights_dir or model_id)
-        self.last_stats: dict[str, float] = {}
+        self.last_stats: dict[str, int | float | str] = {}
+        self.prefill_step_size = _prefill_step_size()
+        self._generation_lock = threading.RLock()
+        self._prompt_cache = None
+        self._cached_tokens: tuple[int, ...] = ()
+        self._dflash = None
+        self._dflash_checked = False
+        self._small_m_wrappers = []
         self._unsupported_penalties_warned = False
         model_spec = infer_model_spec(model_id)
         self.supports_native_tool_calling = bool(
@@ -100,6 +122,66 @@ class MLXLMBackend:
                 template_options=self._template_options(),
             )
         )
+
+    def _prepare_dflash(self) -> None:
+        if getattr(self, "_dflash_checked", False):
+            return
+        from agents.architectures.llama.dflash_artifact import find_dflash_path
+
+        path = find_dflash_path(self.model_id)
+        if path is not None:
+            from agents.architectures.llama.dflash_backend import DFlashDecoder, load_drafter
+            from agents.architectures.llama.qwen_small_m import install_small_m, tune_small_m
+
+            self._small_m_wrappers = []
+            try:
+                drafter = load_drafter(str(path), self.model)
+                decoder = DFlashDecoder(
+                    self.model,
+                    self.tokenizer,
+                    drafter,
+                    prefill_step_size=self.prefill_step_size,
+                )
+                self._small_m_wrappers = install_small_m(self.model)
+                drafter.bind(self.model)
+                self._small_m_wrappers += install_small_m(drafter)
+                self.small_m_tuning = tune_small_m(self._small_m_wrappers)
+                self._dflash = decoder
+                logging.getLogger(__name__).info("Enabled in-process MLX DFlash 2 for Qwen 3.8")
+            except Exception as error:
+                for wrapper in self._small_m_wrappers:
+                    wrapper.enabled = False
+                if os.environ.get("GEIST_MLX_DFLASH", "auto").casefold() == "on":
+                    raise
+                logging.getLogger(__name__).warning(
+                    "DFlash initialization failed; using ordinary MLX: %s", error
+                )
+        self._dflash_checked = True
+
+    def _stream_dflash(self, prompt_tokens: list[int]) -> Iterator[str]:
+        detokenizer = self.tokenizer.detokenizer
+        detokenizer.reset()
+        generator = self._dflash.generate(
+            prompt_tokens,
+            max_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            top_k=QWEN3_TOP_K if _is_qwen3_model(self.model_id) else 0,
+        )
+        try:
+            with closing(generator):
+                for token in generator:
+                    if token not in self.tokenizer.eos_token_ids:
+                        detokenizer.add_token(token)
+                        segment = detokenizer.last_segment
+                        if segment:
+                            yield segment
+            detokenizer.finalize()
+            segment = detokenizer.last_segment
+            if segment:
+                yield segment
+        finally:
+            self.last_stats = {"implementation": "mlx_dflash", **self._dflash.last_stats}
 
     def _template_options(self) -> dict[str, Any]:
         template_options = dict(self.chat_template_kwargs)
@@ -148,7 +230,6 @@ class MLXLMBackend:
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
         """Yield decoded text for a structured conversation."""
-        from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
         prompt = self._build_messages_prompt(messages, tools)
@@ -169,22 +250,12 @@ class MLXLMBackend:
             self._unsupported_penalties_warned = True
         logits_processors = make_logits_processors()
         stops = _normalize_stops(self.stop)
-        started = time.perf_counter()
-        final_response = None
         pending_text = ""
         stopped = False
-        response_stream = stream_generate(
-            self.model,
-            self.tokenizer,
-            prompt,
-            max_tokens=self.max_new_tokens,
-            sampler=sampler,
-            logits_processors=logits_processors or None,
-        )
+        response_stream = self._stream_prompt(prompt, sampler, logits_processors or None)
         try:
-            for response in response_stream:
-                final_response = response
-                pending_text += response.text
+            for segment in response_stream:
+                pending_text += segment
                 stop_index = _first_stop_index(pending_text, stops)
                 if stop_index is not None:
                     if stop_index:
@@ -205,16 +276,80 @@ class MLXLMBackend:
         if pending_text and not stopped:
             yield pending_text
 
-        elapsed = time.perf_counter() - started
-        if final_response is not None:
-            self.last_stats = {
-                "prompt_tokens": int(final_response.prompt_tokens),
-                "prompt_tps": float(final_response.prompt_tps),
-                "generation_tokens": int(final_response.generation_tokens),
-                "generation_tps": float(final_response.generation_tps),
-                "peak_memory_gb": float(final_response.peak_memory),
-                "elapsed_seconds": elapsed,
-            }
+    def _stream_prompt(self, prompt: str, sampler, logits_processors=None) -> Iterator[str]:
+        import mlx.core as mx
+        from mlx_lm import stream_generate
+        from mlx_lm.models.cache import make_prompt_cache
+
+        add_special_tokens = self.tokenizer.bos_token is None or not prompt.startswith(
+            self.tokenizer.bos_token
+        )
+        prompt_tokens = list(self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+        with self._generation_lock:
+            if self.max_new_tokens >= 32:
+                self._prepare_dflash()
+            use_dflash = getattr(self, "_dflash", None) is not None and self.max_new_tokens >= 32
+            for wrapper in getattr(self, "_small_m_wrappers", []):
+                wrapper.enabled = use_dflash
+            if use_dflash:
+                yield from self._stream_dflash(prompt_tokens)
+                return
+            cached_count = len(self._cached_tokens)
+            cache_hit = (
+                self._prompt_cache is not None
+                and cached_count < len(prompt_tokens)
+                and tuple(prompt_tokens[:cached_count]) == self._cached_tokens
+            )
+            if cache_hit:
+                prompt_cache = self._prompt_cache
+                suffix = prompt_tokens[cached_count:]
+            else:
+                prompt_cache = make_prompt_cache(self.model)
+                suffix = prompt_tokens
+                cached_count = 0
+
+            started = time.perf_counter()
+            final_response = None
+            output_tokens = []
+            responses = stream_generate(
+                self.model,
+                self.tokenizer,
+                mx.array(suffix),
+                max_tokens=self.max_new_tokens,
+                sampler=sampler,
+                logits_processors=logits_processors,
+                prompt_cache=prompt_cache,
+                prefill_step_size=self.prefill_step_size,
+            )
+            try:
+                for response in responses:
+                    final_response = response
+                    output_tokens.append(int(response.token))
+                    if response.text:
+                        yield response.text
+            except BaseException:
+                self._prompt_cache = None
+                self._cached_tokens = ()
+                raise
+            finally:
+                close = getattr(responses, "close", None)
+                if callable(close):
+                    close()
+
+            elapsed = time.perf_counter() - started
+            self._prompt_cache = prompt_cache
+            self._cached_tokens = tuple(prompt_tokens + output_tokens)
+            if final_response is not None:
+                self.last_stats = {
+                    "implementation": "mlx_lm",
+                    "prompt_tokens": len(prompt_tokens),
+                    "cached_prompt_tokens": cached_count,
+                    "prompt_tps": float(final_response.prompt_tps),
+                    "generation_tokens": int(final_response.generation_tokens),
+                    "generation_tps": float(final_response.generation_tps),
+                    "peak_memory_gb": float(final_response.peak_memory),
+                    "elapsed_seconds": elapsed,
+                }
 
     def complete(self, system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
         messages = []
@@ -250,6 +385,22 @@ class MLXLMBackend:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         payload = build_tool_payload(messages, tools)
+        if not tools:
+            segments = []
+            responses = self.stream_messages(payload.messages, payload.tools)
+            try:
+                for segment in responses:
+                    if segment:
+                        segments.append(segment)
+                        yield ModelEvent.text_delta(segment)
+            finally:
+                close = getattr(responses, "close", None)
+                if callable(close):
+                    close()
+            yield ModelEvent.turn_complete(
+                ModelTurn(text="".join(segments).strip(), finish_reason="stop")
+            )
+            return
         response = "".join(self.stream_messages(payload.messages, payload.tools)).strip()
         turn = parse_tool_response(
             response,
