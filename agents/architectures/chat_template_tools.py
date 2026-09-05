@@ -204,3 +204,103 @@ def parse_tool_response(
         tool_calls=calls,
         finish_reason="tool_calls" if calls else "stop",
     )
+
+
+class ToolResponseStream:
+    """Expose text incrementally; keep tool markup private until validation."""
+
+    def __init__(self, provider_to_internal: dict[str, str]) -> None:
+        self.provider_to_internal = provider_to_internal
+        self._raw: list[str] = []
+        self._emitted: list[str] = []
+        self._tool: list[str] | None = None
+        self._pending = ""
+        self._whitespace: list[str] = []
+        self._at_start = True
+        self._bare_json = False
+
+    def feed(self, segment: str) -> str:
+        self._raw.append(segment)
+        if self._bare_json:
+            return ""
+        remaining = self._pending + segment
+        self._pending = ""
+        if self._at_start:
+            remaining = remaining.lstrip()
+            if not remaining:
+                return ""
+            self._at_start = False
+            # The complete-response parser accepts untagged JSON tool calls.
+            # Their text/tool interpretation is only authoritative at EOF.
+            if self.provider_to_internal and remaining.startswith("{"):
+                self._bare_json = True
+                return ""
+
+        visible = []
+        while remaining:
+            if self._tool is not None:
+                closing = remaining.find(_TOOL_CALL_CLOSE)
+                if closing < 0:
+                    body, self._pending = self._split_marker_prefix(remaining, (_TOOL_CALL_CLOSE,))
+                    self._tool.append(body)
+                    break
+                end = closing + len(_TOOL_CALL_CLOSE)
+                self._tool.append(remaining[:end])
+                # Reject bad markup before releasing any following text. Calls
+                # are only returned by finish(), after validating the whole turn.
+                parse_tool_response(
+                    "".join(self._tool), provider_to_internal=self.provider_to_internal
+                )
+                self._tool = None
+                remaining = remaining[end:]
+                continue
+
+            opening = remaining.find(_TOOL_CALL_OPEN)
+            closing = remaining.find(_TOOL_CALL_CLOSE)
+            if closing >= 0 and (opening < 0 or closing < opening):
+                raise ValueError("Model returned unexpected closing tool-call markup")
+            if opening >= 0:
+                visible.append(remaining[:opening])
+                self._tool = [_TOOL_CALL_OPEN]
+                remaining = remaining[opening + len(_TOOL_CALL_OPEN) :]
+                continue
+            text, self._pending = self._split_marker_prefix(
+                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE)
+            )
+            visible.append(text)
+            break
+
+        text = "".join(visible)
+        if not self._emitted:
+            text = text.lstrip()
+        stripped = text.rstrip()
+        if not stripped:
+            if text:
+                self._whitespace.append(text)
+            return ""
+        delta = "".join(self._whitespace) + stripped
+        self._whitespace = [text[len(stripped) :]]
+        self._emitted.append(delta)
+        return delta
+
+    def finish(self) -> tuple[str, ModelTurn]:
+        turn = parse_tool_response(
+            "".join(self._raw), provider_to_internal=self.provider_to_internal
+        )
+        emitted = "".join(self._emitted)
+        if not turn.text.startswith(emitted):
+            raise ValueError("Streamed text does not match the parsed model turn")
+        return turn.text[len(emitted) :], turn
+
+    @staticmethod
+    def _split_marker_prefix(text: str, markers: tuple[str, ...]) -> tuple[str, str]:
+        retained = max(
+            (
+                length
+                for marker in markers
+                for length in range(1, min(len(text), len(marker) - 1) + 1)
+                if text.endswith(marker[:length])
+            ),
+            default=0,
+        )
+        return (text[:-retained], text[-retained:]) if retained else (text, "")

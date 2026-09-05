@@ -1,5 +1,70 @@
 # Feature research log
 
+## 2026-09-05 — Preserve streaming through tool-enabled MLX chat
+
+### Finding and change
+
+The model already yielded decoded segments, but the tool-enabled MLX adapter
+joined the entire response before parsing it. Merely making tools available
+therefore delayed all ordinary answer text until the turn ended. The browser
+sends `enable_tools: true`; a nonempty selected tool catalog exposed this path.
+
+Replace that join with incremental text/tool-marker parsing. Ordinary prose
+streams immediately, including text before and after tagged tool calls.
+Incomplete marker prefixes and tool JSON remain private; tool calls are only
+returned after the complete turn passes the existing fail-closed parser.
+Cancellation and parser errors close the upstream iterator. Joined text deltas
+match the authoritative final text, including internal whitespace.
+
+Compatibility exception: responses beginning with `{` remain buffered because
+the existing protocol also accepts untagged, whole-response JSON tool calls.
+Their interpretation is not final until EOF. This fix does not change that
+protocol or promise token-at-a-time delivery of tool arguments. Adaptive DFlash
+and qualified Metal defaults are unchanged; this is a delivery-latency fix,
+not a new GPU-throughput result.
+
+### Regression contract
+
+The browser test in `client/geist/e2e/chat.spec.ts` replaces only the decoded
+model-segment source. It exercises the real tool-enabled MLX adapter,
+`MLXLlamaRunner`, `LocalAgent`, chat orchestrator, SSE route and HTTP delivery,
+frontend stream reader/reducer, and rendered chat message.
+
+The source yields `STREAM-FIRST`, then waits on an explicit gate. The browser
+must display it while the response is unfinished before releasing generation.
+The same handshake is repeated for `STREAM-SECOND` before allowing the final
+segment. This catches buffering of the whole turn **and** emitting one early
+chunk then aggregating the rest. No model-speed assumption or sleep determines
+success; timeouts only bound a broken test. Control endpoints exist exclusively
+in the test server, not the production app. The existing `browser-e2e` CI job
+already runs this spec; no GPU or MLX installation is required for that gate.
+
+Negative control: wrapping the real adapter stream with `list(...)` caused the
+new test to fail at the first visible-chunk assertion while the model-source
+gate was closed. The fixed implementation passed both intermediate assertions.
+
+### Validation
+
+- Docker: 528 passed, 4 skipped across agent tests and affected orchestrator,
+  tool-router/registry, tool API, and settings API contracts. Initialize the
+  disposable SQLite schema before running route tests; an initial attempt
+  without initialization failed on missing tables.
+- Native MLX: 151 passed across DFlash, n-gram proposals, and speculation-policy
+  tests. The parser/runner coverage additionally checks one-character chunks,
+  split tags, malformed calls, raw JSON compatibility, whitespace, and closure.
+- Browser: all 8 chat/privacy tests passed against the native test server;
+  all 4 chat tests also passed through authenticated Docker HTTP delivery.
+- Real Qwen3.8-27B Q4 MLX browser smoke: tools available, intent routing disabled
+  in an isolated test workspace, greedy generation capped at 128 tokens. First
+  visible text at 28.626 s, completion at 37.044 s (cold runtime/model setup
+  included); partial output was visible 8.418 s before completion. No browser
+  page errors. These timings are a delivery check, not a throughput benchmark.
+- Native settings smoke passed: change temperature, save, reload, and restore.
+- An additional 10,000 seeded randomized text/chunk-boundary checks matched the
+  existing complete-response parser exactly.
+- Ruff lint/format and changed-file mypy passed. No dependencies were installed
+  or changed. Existing user UI, databases, and other worktrees were untouched.
+
 ## 2026-09-05 — MLX single-stream inference throughput
 
 ### Question and experimental contract

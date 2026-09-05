@@ -11,8 +11,8 @@ from contextlib import closing
 from typing import Any
 
 from agents.architectures.chat_template_tools import (
+    ToolResponseStream,
     build_tool_payload,
-    parse_tool_response,
     tokenizer_supports_tools,
 )
 from agents.model_catalog import infer_model_spec
@@ -404,11 +404,18 @@ class MLXLMBackend:
                 ModelTurn(text="".join(segments).strip(), finish_reason="stop")
             )
             return
-        response = "".join(self.stream_messages(payload.messages, payload.tools)).strip()
-        turn = parse_tool_response(
-            response,
-            provider_to_internal=payload.provider_to_internal,
-        )
-        if turn.text:
-            yield ModelEvent.text_delta(turn.text)
-        yield ModelEvent.turn_complete(turn)
+        parser = ToolResponseStream(payload.provider_to_internal)
+        responses = self.stream_messages(payload.messages, payload.tools)
+        try:
+            for segment in responses:
+                text = parser.feed(segment)
+                if text:
+                    yield ModelEvent.text_delta(text)
+            tail, turn = parser.finish()
+            if tail:
+                yield ModelEvent.text_delta(tail)
+            yield ModelEvent.turn_complete(turn)
+        finally:
+            close = getattr(responses, "close", None)
+            if callable(close):
+                close()
