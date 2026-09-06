@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 from collections.abc import Iterator
 from typing import Any, Protocol
 
@@ -46,6 +47,7 @@ class MLXLlamaRunner(BaseRunner):
     IMPLEMENTATIONS = {"manual", "mlx_lm"}
 
     def __init__(self):
+        self._request_lock = threading.Lock()
         self.llama: _MLXBackend | None = None
         self.model_id: str | None = None
         self.weights_dir: str | None = None
@@ -218,19 +220,21 @@ class MLXLlamaRunner(BaseRunner):
         user_prompt: str,
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
-        backend = self._apply_generation_config(generation_config)
-        return backend.complete(
-            system_prompt=system_prompt or "You are a helpful assistant.",
-            user_prompt=user_prompt,
-        )
+        with self._request_lock:
+            backend = self._apply_generation_config(generation_config)
+            return backend.complete(
+                system_prompt=system_prompt or "You are a helpful assistant.",
+                user_prompt=user_prompt,
+            )
 
     def complete_messages(
         self,
         messages: list[dict[str, str | None]],
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
-        backend = self._apply_generation_config(generation_config)
-        return backend.complete_messages(messages)
+        with self._request_lock:
+            backend = self._apply_generation_config(generation_config)
+            return backend.complete_messages(messages)
 
     def stream_model_turn(
         self,
@@ -240,6 +244,17 @@ class MLXLlamaRunner(BaseRunner):
     ) -> Iterator[ModelEvent]:
         """Run a structured turn through mlx-lm, keeping manual MLX text-only."""
 
+        # Configuration and the backend's mutable caches belong to one request.
+        # A plain Lock can be released by a different SSE worker on close().
+        with self._request_lock:
+            yield from self._stream_model_turn(messages, tools, config)
+
+    def _stream_model_turn(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition],
+        config: ModelRequestConfig,
+    ) -> Iterator[ModelEvent]:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         backend = self._apply_generation_config(
@@ -260,23 +275,6 @@ class MLXLlamaRunner(BaseRunner):
         structured_messages = [
             {"role": message.role, "content": message.content} for message in messages
         ]
-        stream_messages = getattr(backend, "stream_messages", None)
-        if callable(stream_messages):
-            segments = []
-            responses = stream_messages(structured_messages)
-            try:
-                for segment in responses:
-                    if segment:
-                        segments.append(segment)
-                        yield ModelEvent.text_delta(segment)
-            finally:
-                close = getattr(responses, "close", None)
-                if callable(close):
-                    close()
-            yield ModelEvent.turn_complete(
-                ModelTurn(text="".join(segments).strip(), finish_reason="stop")
-            )
-            return
         completion = LlamaCompletion.from_dict(backend.complete_messages(structured_messages))
         text = next(
             (message.content for message in completion.messages if message.role == "assistant"),
@@ -287,9 +285,10 @@ class MLXLlamaRunner(BaseRunner):
         yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
 
     def cleanup(self) -> None:
-        cleanup = getattr(self.llama, "cleanup", None)
-        if callable(cleanup):
-            cleanup()
-        self.llama = None
-        self.supports_native_tool_calling = False
+        with self._request_lock:
+            cleanup = getattr(self.llama, "cleanup", None)
+            if callable(cleanup):
+                cleanup()
+            self.llama = None
+            self.supports_native_tool_calling = False
         logger.info("MLX Llama runner cleaned up")
