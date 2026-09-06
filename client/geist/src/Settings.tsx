@@ -220,9 +220,9 @@ const Settings: React.FC = () => {
               />
               <SettingsToggle
                 label="Intent Router"
-                checked={localSettings.ui_preferences?.intentRouterEnabled !== false}
+                checked={localSettings.ui_preferences?.intentRouterEnabled === true}
                 onChange={(value) => updateUiPreference('intentRouterEnabled', value)}
-                description="Select a focused tool catalog for each turn. Turn this off to expose the full enabled catalog."
+                description="Off by default. Enable an extra model pass to select a focused tool catalog for each turn. When off, the full enabled catalog is available."
               />
             </section>
           )}

@@ -1,10 +1,11 @@
 """Run Geist with a deterministic chat agent for browser end-to-end tests."""
 
 import os
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 
+from adapters.search_adapter import SearchAdapter
 from agents.models.tool_calling import ChatMessage, ModelEvent, ModelTurn
 from initdb import main as initialize_database
 from tests.streaming_probe import StreamingProbe
@@ -59,6 +60,21 @@ def run_server() -> None:
         raise RuntimeError("browser E2E workspace settings were not initialized")
 
     probe = StreamingProbe()
+    original_search = SearchAdapter.search
+
+    def search_for_probe(self, search_term, max_results=5, recency=None):
+        if probe.active and probe.scenario == "xml_tool":
+            probe.search_calls.append({"query": search_term, "max_results": max_results})
+            return [
+                {
+                    "title": "Fixture celebrity headline",
+                    "url": "https://example.com/news",
+                    "snippet": "Test search result",
+                }
+            ]
+        return original_search(self, search_term, max_results=max_results, recency=recency)
+
+    SearchAdapter.search = search_for_probe
     original_intent_router_enabled = geist_main.intent_router_enabled
 
     def get_e2e_agent(_agent_type: Any):
@@ -71,8 +87,8 @@ def run_server() -> None:
     app = geist_main.create_app()
 
     @app.post("/api/e2e/streaming/start")
-    def start_streaming_probe() -> dict[str, Any]:
-        probe.start()
+    def start_streaming_probe(scenario: Literal["text", "xml_tool"] = "text") -> dict[str, Any]:
+        probe.start(scenario)
         return probe.state()
 
     @app.get("/api/e2e/streaming/state")

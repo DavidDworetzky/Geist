@@ -312,7 +312,7 @@ class ChatOrchestrator:
         config: ModelRequestConfig,
         system_prompt: str | None,
         enable_tools: bool = True,
-        enable_intent_router: bool = True,
+        enable_intent_router: bool = False,
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,

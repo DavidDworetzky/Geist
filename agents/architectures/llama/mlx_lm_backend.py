@@ -404,7 +404,7 @@ class MLXLMBackend:
                 ModelTurn(text="".join(segments).strip(), finish_reason="stop")
             )
             return
-        parser = ToolResponseStream(payload.provider_to_internal)
+        parser = ToolResponseStream(payload.provider_to_internal, payload.tools)
         responses = self.stream_messages(payload.messages, payload.tools)
         try:
             for segment in responses:

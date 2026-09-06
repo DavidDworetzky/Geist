@@ -142,9 +142,10 @@ def test_complete_messages_preserves_structured_conversation_roles():
     assert applied_messages == messages
 
 
-def test_native_tool_turn_injects_catalog_and_returns_structured_call():
+@pytest.mark.parametrize("tool_format", ["json", "xml"])
+def test_native_tool_turn_injects_catalog_and_returns_structured_call(tool_format):
     runner = TransformersRunner()
-    runner.model_id = "Qwen/Qwen3-4B"
+    runner.model_id = "Qwen/Qwen3.8-27B" if tool_format == "xml" else "Qwen/Qwen3-4B"
     runner.model = _model()
     runner.tokenizer = _tokenizer()
     runner.config = MagicMock(max_position_embeddings=64)
@@ -152,7 +153,9 @@ def test_native_tool_turn_injects_catalog_and_returns_structured_call():
     runner.supports_native_tool_calling = True
     safe_name = provider_tool_name("web.search")
     runner.tokenizer.decode.return_value = (
-        f'<tool_call>{{"name":"{safe_name}",' '"arguments":{"query":"celebrity news"}}</tool_call>'
+        f'<tool_call>{{"name":"{safe_name}","arguments":{{"query":"123"}}}}</tool_call>'
+        if tool_format == "json"
+        else f"<tool_call><function={safe_name}><parameter=query>123</parameter></function></tool_call>"
     )
 
     events = list(
@@ -169,7 +172,7 @@ def test_native_tool_turn_injects_catalog_and_returns_structured_call():
     turn = events[-1].turn
     assert turn is not None
     assert turn.tool_calls[0].name == "web.search"
-    assert turn.tool_calls[0].arguments == {"query": "celebrity news"}
+    assert turn.tool_calls[0].arguments == {"query": "123"}
 
 
 def test_stream_without_tools_preserves_existing_text_completion_path():

@@ -67,6 +67,32 @@ test('streams through every local MLX chat layer before generation can finish', 
   }
 });
 
+test('dispatches Qwen XML search calls and streams the tool-grounded answer', async ({ page }) => {
+  const control = '/api/e2e/streaming';
+  expect((await page.request.post(`${control}/start?scenario=xml_tool`)).ok()).toBe(true);
+  try {
+    await page.getByPlaceholder('Type your message...')
+      .fill('Search the internet and find me some recent celebrity headlines.');
+    await page.getByRole('button', { name: 'Send' }).click();
+    const answer = page.locator('.chat-message-ai');
+    await expect(answer).toContainText('STREAM-FIRST');
+    await expect(page.getByRole('status', { name: 'Geist is responding' })).toBeVisible();
+    expect(await (await page.request.get(`${control}/state`)).json()).toMatchObject({
+      search_calls: [{ query: 'recent celebrity headlines', max_results: 3 }],
+      tool_result_seen: true,
+      closed: false,
+    });
+    await expect(answer).not.toContainText('<function=');
+    expect((await page.request.post(`${control}/release/1`)).ok()).toBe(true);
+    await expect(answer).toContainText('STREAM-FIRST STREAM-SECOND');
+    expect((await page.request.post(`${control}/release/2`)).ok()).toBe(true);
+    await expect(answer).toContainText('STREAM-FIRST STREAM-SECOND STREAM-FINAL');
+    await expect(page.getByRole('status', { name: 'Geist is responding' })).toBeHidden();
+  } finally {
+    await page.request.post(`${control}/reset`);
+  }
+});
+
 test('persists a conversation and hydrates structured follow-up context', async ({ page }) => {
   const messageInput = page.getByPlaceholder('Type your message...');
   await messageInput.fill('Remember cobalt.');

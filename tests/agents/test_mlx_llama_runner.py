@@ -412,19 +412,19 @@ def test_mlx_lm_prompt_keeps_structural_template_options():
     )
 
 
-def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call():
+@pytest.mark.parametrize("tool_format", ["json", "xml"])
+def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call(tool_format):
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model_id = "Qwen/Qwen3.8-27B"
     backend.supports_native_tool_calling = True
     safe_name = provider_tool_name("web.search")
+    response = (
+        f'<tool_call>{{"name":"{safe_name}","arguments":{{"query":"123"}}}}</tool_call>'
+        if tool_format == "json"
+        else f"<tool_call>\n<function={safe_name}>\n<parameter=query>\n123\n</parameter>\n</function>\n</tool_call>"
+    )
     backend.stream_messages = MagicMock(
-        return_value=iter(
-            [
-                "<tool_",
-                f'call>{{"name":"{safe_name}","arguments":',
-                '{"query":"celebrity news"}}</tool_call>',
-            ]
-        )
+        return_value=iter(response[index : index + 7] for index in range(0, len(response), 7))
     )
     messages = [
         ChatMessage(role="user", content="Find news"),
@@ -449,7 +449,7 @@ def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call():
     turn = events[-1].turn
     assert turn is not None
     assert turn.tool_calls[0].name == "web.search"
-    assert turn.tool_calls[0].arguments == {"query": "celebrity news"}
+    assert turn.tool_calls[0].arguments == {"query": "123"}
 
 
 @pytest.mark.parametrize("cancel", [False, True])
@@ -488,7 +488,17 @@ def test_mlx_lm_turn_streams_lazily_and_closes(cancel, with_tools):
     assert closed == [True]
 
 
-def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn():
+@pytest.mark.parametrize(
+    "markup, error",
+    [
+        ("<tool_call>{bad}</tool_call>", "invalid tool-call JSON"),
+        (
+            "<tool_call><function=safe><parameter=query>x</function></tool_call>",
+            "malformed function parameter markup",
+        ),
+    ],
+)
+def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn(markup, error):
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model_id = "Qwen/Qwen3.8-27B"
     backend.supports_native_tool_calling = True
@@ -497,7 +507,7 @@ def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn():
 
     def responses(*args):
         try:
-            for part in ("Working.", "<tool_call>{bad}</tool_call>", "Must not be consumed"):
+            for part in ("Working.", markup, "Must not be consumed"):
                 produced.append(part)
                 yield part
         finally:
@@ -508,7 +518,7 @@ def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn():
         [ChatMessage(role="user", content="Look this up")], [_search_tool()], ModelRequestConfig()
     )
     assert next(events).text == "Working."
-    with pytest.raises(ValueError, match="invalid tool-call JSON"):
+    with pytest.raises(ValueError, match=error):
         next(events)
     assert closed == [True]
     assert len(produced) == 2

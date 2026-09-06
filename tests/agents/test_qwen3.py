@@ -86,7 +86,11 @@ def _search_tool():
     return ToolDefinition(
         name="web.search",
         description="Search the web",
-        arguments_schema={"type": "object", "properties": {}},
+        arguments_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
         handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
     )
 
@@ -456,21 +460,20 @@ class TestQwen3RunnerInference:
         assert kwargs.get("do_sample") is False
         assert kwargs.get("temperature") is None
 
+    @pytest.mark.parametrize("tool_format", ["json", "xml"])
     @patch("agents.architectures.vllm_runner.transformers.pipeline")
-    def test_compatibility_runner_returns_native_tool_turn(self, mock_pipeline_fn):
+    def test_compatibility_runner_returns_native_tool_turn(self, mock_pipeline_fn, tool_format):
         runner = self._create_loaded_runner()
         runner.supports_native_tool_calling = True
         safe_name = provider_tool_name("web.search")
         prompt_text = runner.tokenizer.apply_chat_template.return_value
+        response = (
+            f'<tool_call>{{"name":"{safe_name}","arguments":{{"query":"123"}}}}</tool_call>'
+            if tool_format == "json"
+            else f"<tool_call><function={safe_name}><parameter=query>123</parameter></function></tool_call>"
+        )
         mock_pipe = MagicMock()
-        mock_pipe.return_value = [
-            {
-                "generated_text": (
-                    prompt_text + f'<tool_call>{{"name":"{safe_name}",'
-                    '"arguments":{"query":"news"}}</tool_call>'
-                )
-            }
-        ]
+        mock_pipe.return_value = [{"generated_text": prompt_text + response}]
         mock_pipeline_fn.return_value = mock_pipe
 
         events = list(
@@ -487,6 +490,7 @@ class TestQwen3RunnerInference:
         turn = events[-1].turn
         assert turn is not None
         assert turn.tool_calls[0].name == "web.search"
+        assert turn.tool_calls[0].arguments == {"query": "123"}
 
     @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_stream_without_tools_preserves_text_completion(self, mock_pipeline_fn):

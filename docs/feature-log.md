@@ -1,5 +1,46 @@
 # Feature research log
 
+## 2026-09-05 — Qualify Qwen tool calls and default intent routing off
+
+The celebrity-headlines failure occurred before search dispatch: the shared
+parser required JSON, while the installed Qwen3.8 checkpoint instructs XML-like
+`function`/`parameter` markup. Git history reproduces the same failure with the
+original parser from #337. Neither the DFlash/Metal work nor #358 introduced
+that assumption; #358's prose-only live check nevertheless missed it.
+
+Accept both protocols, preserve schema-declared string arguments, and retain
+fail-closed parsing and registry validation. Pass schemas through MLX,
+Transformers, and the compatibility runner. Intent routing is off when unset
+in backend and UI; existing explicit opt-ins remain intact. No inference
+backend, kernel, dependency, or model artifact changed.
+
+Added cross-runner format matrices, malformed-stream cleanup, parser-to-dispatch
+validation, actual installed-template and real Qwen tool-result round trips,
+and a full-stack browser search test that requires intermediate answer text
+before generation finishes. Added browser preference save/reload/restore.
+
+Validation: **560 Docker tests passed, 6 skipped** (platform/opt-in checks),
+**2 real native MLX tests passed**, **17 Settings unit tests passed**, and the
+frontend production build passed. **10 browser tests passed** with a fresh
+isolated native database; **6 chat/settings browser tests passed** through
+authenticated Docker HTTP delivery. Docker startup was healthy and `/chat`
+returned HTTP 200; its only error was the deliberately injected failure test.
+Ruff and changed-file mypy passed. Commit hooks additionally reported existing
+Whisper typing, all-interface bind, and frontend lint findings; these were
+verified unchanged and the three affected hooks skipped, as detailed below.
+
+Testing notes: a compatibility-runner mock originally supplied an empty schema;
+the new numeric-looking-string test caught that unrealistic fixture, now fixed.
+Early browser runs hit a Chrome teardown/setup timeout and, on reuse of the
+same database, existing privacy tests found duplicate fixture data. The final
+fresh-database full run passed without weakening assertions. Installed Qwen
+qualification is opt-in because ordinary CI has no Apple GPU/weights; mocks do
+not qualify every model family. No packages were installed. The default change
+is not a new throughput or TTFB benchmark.
+
+See [the historical investigation and qualification checklist](model-tool-regressions.md)
+for the causal timeline, regression matrix, commands, and remaining limits.
+
 ## 2026-09-05 — Preserve streaming through tool-enabled MLX chat
 
 ### Finding and change

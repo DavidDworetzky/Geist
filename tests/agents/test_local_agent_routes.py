@@ -31,10 +31,16 @@ agent_completion = {
 }
 
 
-def test_intent_router_setting_defaults_on_and_respects_explicit_false():
+def test_intent_router_setting_defaults_off_and_respects_explicit_preferences():
     with patch(
         "app.main.UserSettingsService.get_or_create_workspace_settings_by_id",
         return_value=SimpleNamespace(ui_preferences={}),
+    ):
+        assert intent_router_enabled(7) is False
+
+    with patch(
+        "app.main.UserSettingsService.get_or_create_workspace_settings_by_id",
+        return_value=SimpleNamespace(ui_preferences={"intentRouterEnabled": True}),
     ):
         assert intent_router_enabled(7) is True
 

@@ -81,6 +81,7 @@ def test_classifier_failure_falls_back_to_action_tools_without_image_generation(
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt="Assistant prompt",
+            enable_intent_router=True,
         )
     )
 
@@ -94,7 +95,8 @@ def test_classifier_failure_falls_back_to_action_tools_without_image_generation(
     ]
 
 
-def test_disabled_intent_router_exposes_full_catalog_without_classifying():
+@pytest.mark.parametrize("routing_options", [{}, {"enable_intent_router": False}])
+def test_disabled_intent_router_exposes_full_catalog_without_classifying(routing_options):
     registry = ToolRegistry()
     for name, tags in [
         ("public.search", frozenset({"public_retrieval"})),
@@ -126,7 +128,7 @@ def test_disabled_intent_router_exposes_full_catalog_without_classifying():
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt="Assistant prompt",
-            enable_intent_router=False,
+            **routing_options,
         )
     )
 
@@ -193,6 +195,7 @@ def test_intent_router_filters_catalog_before_assistant_turn(
             chat_id=None,
             config=ModelRequestConfig(),
             system_prompt="Assistant prompt",
+            enable_intent_router=True,
         )
     )
 
