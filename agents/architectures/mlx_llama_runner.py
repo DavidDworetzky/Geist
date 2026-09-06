@@ -5,8 +5,9 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Iterator
-from typing import Any, Protocol
+from collections.abc import Callable, Generator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Protocol, TypeVar, cast
 
 from agents.models.llama_completion import LlamaCompletion
 from agents.models.tool_calling import (
@@ -21,6 +22,7 @@ from .base_runner import BaseRunner, GenerationConfig
 
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 class _MLXBackend(Protocol):
@@ -48,6 +50,7 @@ class MLXLlamaRunner(BaseRunner):
 
     def __init__(self):
         self._request_lock = threading.Lock()
+        self._worker: ThreadPoolExecutor | None = None
         self.llama: _MLXBackend | None = None
         self.model_id: str | None = None
         self.weights_dir: str | None = None
@@ -115,7 +118,18 @@ class MLXLlamaRunner(BaseRunner):
             )
         return str(installed_path)
 
+    def _on_worker(self, function: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+        # Called under _request_lock. All model/cache operations share one
+        # long-lived thread because Metal streams and lazy arrays are thread-local.
+        if self._worker is None:
+            self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="geist-mlx")
+        return self._worker.submit(function, *args, **kwargs).result()
+
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
+        with self._request_lock:
+            self._on_worker(self._load, model_id, device_config)
+
+    def _load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         """Load the selected implementation and propagate the requested model path."""
         device_config = device_config or {}
         requested = device_config.get("implementation")
@@ -221,8 +235,9 @@ class MLXLlamaRunner(BaseRunner):
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
         with self._request_lock:
-            backend = self._apply_generation_config(generation_config)
-            return backend.complete(
+            backend = self._on_worker(self._apply_generation_config, generation_config)
+            return self._on_worker(
+                backend.complete,
                 system_prompt=system_prompt or "You are a helpful assistant.",
                 user_prompt=user_prompt,
             )
@@ -233,8 +248,8 @@ class MLXLlamaRunner(BaseRunner):
         generation_config: GenerationConfig,
     ) -> list[dict[str, str]]:
         with self._request_lock:
-            backend = self._apply_generation_config(generation_config)
-            return backend.complete_messages(messages)
+            backend = self._on_worker(self._apply_generation_config, generation_config)
+            return self._on_worker(backend.complete_messages, messages)
 
     def stream_model_turn(
         self,
@@ -242,19 +257,36 @@ class MLXLlamaRunner(BaseRunner):
         tools: list[ToolDefinition],
         config: ModelRequestConfig,
     ) -> Iterator[ModelEvent]:
-        """Run a structured turn through mlx-lm, keeping manual MLX text-only."""
+        """Stream one turn; overlapping requests on this runner fail immediately."""
 
         # Configuration and the backend's mutable caches belong to one request.
         # A plain Lock can be released by a different SSE worker on close().
-        with self._request_lock:
-            yield from self._stream_model_turn(messages, tools, config)
+        if not self._request_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "MLX runner is busy; close the active stream before starting another"
+            )
+        try:
+            source = self._stream_model_turn(messages, tools, config)
+            end = object()
+            try:
+                while True:
+                    event = self._on_worker(next, source, end)
+                    if event is end:
+                        break
+                    # One advance per consumer request: no speculative queue or
+                    # whole-turn aggregation between the model and SSE.
+                    yield cast(ModelEvent, event)
+            finally:
+                self._on_worker(source.close)
+        finally:
+            self._request_lock.release()
 
     def _stream_model_turn(
         self,
         messages: list[ChatMessage],
         tools: list[ToolDefinition],
         config: ModelRequestConfig,
-    ) -> Iterator[ModelEvent]:
+    ) -> Generator[ModelEvent, None, None]:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         backend = self._apply_generation_config(
@@ -285,10 +317,15 @@ class MLXLlamaRunner(BaseRunner):
         yield ModelEvent.turn_complete(ModelTurn(text=text, finish_reason="stop"))
 
     def cleanup(self) -> None:
+        # Model phase-out intentionally waits for the active stream to close;
+        # freeing its model/cache or worker while in use would be unsafe.
         with self._request_lock:
             cleanup = getattr(self.llama, "cleanup", None)
             if callable(cleanup):
-                cleanup()
+                self._on_worker(cleanup)
             self.llama = None
             self.supports_native_tool_calling = False
+            if self._worker is not None:
+                self._worker.shutdown()
+                self._worker = None
         logger.info("MLX Llama runner cleaned up")

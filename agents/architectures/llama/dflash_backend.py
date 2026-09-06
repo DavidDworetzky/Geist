@@ -202,8 +202,9 @@ class DFlashDecoder:
                         else:
                             p = target_probabilities(logits[0, -1], temperature, top_p, top_k)
                             pending = int(mx.random.categorical(mx.log(p)).item())
-                        mx.eval(hidden, [item.state for item in cache])
-                        policy.observe_native(time.perf_counter() - direct_started)
+                        if policy.calibrating:
+                            mx.eval(hidden, [item.state for item in cache])
+                            policy.observe_native(time.perf_counter() - direct_started)
                         context_tail.append(hidden)
                         if len(context_tail) >= _DEFERRED_CONTEXT_LIMIT:
                             previous = mx.concatenate([context, *context_tail[:-1]], axis=1)

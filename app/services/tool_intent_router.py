@@ -88,11 +88,17 @@ class ToolIntentRouter:
         completed_text: str | None = None
         config = ModelRequestConfig(max_tokens=128, temperature=0.0, top_p=1.0)
 
-        for event in backend.stream_model_turn(classifier_messages, [], config):
-            if not isinstance(event, ModelEvent):
-                raise TypeError("Intent classifier backend returned an invalid event")
-            if event.kind == "turn_complete" and event.turn is not None:
-                completed_text = event.turn.text
+        responses = backend.stream_model_turn(classifier_messages, [], config)
+        try:
+            for event in responses:
+                if not isinstance(event, ModelEvent):
+                    raise TypeError("Intent classifier backend returned an invalid event")
+                if event.kind == "turn_complete" and event.turn is not None:
+                    completed_text = event.turn.text
+        finally:
+            close = getattr(responses, "close", None)
+            if callable(close):
+                close()
 
         if completed_text is None:
             raise RuntimeError("Intent classifier backend did not complete its turn")
