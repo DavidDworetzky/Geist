@@ -19,7 +19,11 @@ from agents.architectures.llama.dflash_artifact import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--weights-dir", type=Path)
+    parser.add_argument(
+        "--weights-dir",
+        type=Path,
+        help="Destination snapshot directory (default: Geist model home)",
+    )
     args = parser.parse_args()
     destination = args.weights_dir or default_dflash_path()
     snapshot_download(
