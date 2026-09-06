@@ -107,6 +107,13 @@ PR #357 integration validation: **88 passed** in the focused Docker runner,
 artifact, policy, n-gram and orchestrator suites; **218 passed** in the native
 Metal, runner, artifact, policy and n-gram suites after the parent merge.
 
+Second review: native timing materialization is restricted to calibration, so
+latched fallback does not synchronize unnecessarily on every token. Explicit
+invalid split-K and conflicting benchmark-CLI tests were added. The reviewer's
+macOS 14 skip for unsupported experimental `relaxed` Metal math was preserved;
+that variant still executes on this newer local Mac. Follow-up native
+Metal/policy validation: **162 passed**.
+
 ## PR #358: stream failure persistence
 
 Accepted: save already-emitted prose on malformed tool output, disconnect, and
@@ -151,3 +158,52 @@ saved true remains an opt-in, even though it is uncommon in historical settings.
 Process-scoped test search stubs and test assertions are not production code.
 The first actual-model cross-worker test exposed the deeper Metal affinity bug;
 that fix belongs in #356 and is propagated here before final qualification.
+
+## Integrated qualification after all parent merges
+
+Final production-code head before this evidence-only update: `71c7345`.
+All tests used existing dependencies; no packages were installed or updated.
+
+- Docker backend: **592 passed, 7 skipped** with isolated SQLite, running
+  `pytest tests/agents tests/services/test_chat_orchestrator.py
+  tests/services/test_tool_intent_router.py tests/test_streaming_probe.py
+  tests/services/test_user_settings_service.py tests/api/test_user_settings_routes.py
+  tests/services/test_tool_registry.py -q --tb=short -p no:cacheprovider`.
+  Docker does not substitute for the skipped native/live-model paths below.
+- Native Apple Silicon: **228 passed**, running `pytest
+  tests/agents/test_mlx_dflash.py tests/agents/test_mlx_llama_runner.py
+  tests/agents/test_dflash_artifact.py tests/agents/test_speculation_policy.py
+  tests/agents/test_ngram_draft.py -q --tb=short -p no:cacheprovider`.
+- Actual installed Qwen 3.8 27B 4-bit with DFlash2: **3 passed** in 19.69 seconds,
+  using `GEIST_RUN_MLX_TOOL_SMOKE=1 pytest tests/agents/test_mlx_tool_live.py -q -s
+  --tb=short -p no:cacheprovider`. This verifies the tokenizer's tool format,
+  generated tool dispatch/result use, and cross-consumer-worker stream
+  advancement/close followed by another generation.
+- Frontend: **42 passed** across `useCompleteText`, `src/__tests__/Chat`,
+  `Settings`, and `useUserSettings`, with the existing React Scripts runner and
+  `--watchAll=false --runInBand --runTestsByPath`. Existing React `act` warnings
+  and intentional error-path console messages remain test-only warnings.
+- Isolated Docker application at port 5592: successful startup and authenticated
+  `curl /chat` HTTP 200. Chrome `playwright test` against all three E2E files:
+  **11 passed**, including source-gated streaming, Qwen XML dispatch,
+  failed-prose reload, memory privacy, and router default/opt-in/opt-out. Repeating
+  memory tests against a reused database caused duplicate-fixture failures;
+  recreating the disposable test container restored a clean full pass without
+  changing production code or weakening assertions.
+- Real native application at port 5593: production `create_app`, existing model
+  artifact, offline weights, router off, fresh SQLite and no model stubs. Chrome
+  verified generated prose while Stop remained visible, cancellation, reopening
+  the persisted partial response, a successful follow-up generation, and saved
+  router opt-in/opt-out. No browser errors. Cancellation aborts the SSE connection
+  before its final navigation event, so this check explicitly reopened the saved
+  chat from persisted history. A single observed first-visible latency was 10.45
+  seconds; this is a smoke result, not a throughput/latency benchmark.
+
+Runtime isolation: Docker used the existing backend image and an explicit
+scratch Compose file. Native used a scratch Python launcher with `MLX_BACKEND=1`
+and dotenv loading disabled; `make run` was not invoked because this pass avoided
+implicit setup/install steps and local secret-file reads. Existing frontend
+assets were reused because this review pass did not change frontend production
+code. Ports 3000/5587 and the user's existing database were not replaced.
+Missing optional SendGrid/Twilio credentials produced adapter warnings, not chat
+or model failures. All review-fix commits passed the applicable local hooks.
