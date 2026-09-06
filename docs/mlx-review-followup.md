@@ -317,3 +317,16 @@ meaningful after #359 changes the default to off. Its initial integrated failure
 was a fixture assumption, not an availability-guard failure. No production
 default was changed to satisfy the test. The earlier 42-test frontend pass is
 unchanged; this follow-up contains no frontend production edits.
+
+### Concurrent-readiness qualification
+
+After propagating review T's fix through all four branches, production head
+`0c57038` passed the same integrated Docker selection: **626 passed, 7 skipped**
+(633 collected, zero errors/failures). The seven new regressions cover duplicate
+startup and chat-owned load races without queuing conflicting model requests.
+The earlier 241 native tests and real-Qwen browser passes still cover the
+unchanged Metal/decoder code. A fresh native application restart for this last
+readiness-only follow-up was attempted twice, but permission-review requests
+timed out before process startup; this final native rerun is **blocked**, not a
+pass. No package installation, secret-file access, or user-UI replacement was
+used to work around that limitation.
