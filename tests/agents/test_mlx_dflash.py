@@ -131,8 +131,29 @@ def test_lab_install_is_idempotent_and_preserves_single_row():
     assert bool(mx.array_equal(expected, model(x)).item())
 
 
+@pytest.mark.parametrize("variant", ["pad", "fp16_native", "affine_fold"])
+def test_lab_direct_call_preserves_unsupported_quantization(variant, monkeypatch):
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=32, bits=4)
+    x = mx.ones((8, 512), dtype=mx.bfloat16)
+    monkeypatch.setattr(
+        "agents.architectures.llama.qwen_kernel_lab.experimental_kernel",
+        lambda *args: pytest.fail("Unsupported grouping must not construct a kernel"),
+    )
+    assert bool(mx.array_equal(layer(x), lab_matmul(layer, x, variant)).item())
+
+
+@pytest.mark.parametrize("source", ["absent", "match match"])
+def test_lab_source_rewrites_reject_missing_or_ambiguous_targets(source):
+    from agents.architectures.llama.qwen_kernel_lab import _replace_once
+
+    with pytest.raises(ValueError, match="source drift"):
+        _replace_once(source, "match", "replacement")
+
+
 @pytest.mark.parametrize("rows", [1, 8, 64, 257])
-def test_expanded_weights_are_bounded_and_preserve_fallback(rows):
+def test_expanded_weights_are_bounded_and_preserve_fallback(rows, monkeypatch):
     model = nn.Module()
     model.mlp = nn.Module()
     model.mlp.gate_proj = nn.Linear(512, 4096, bias=True)
@@ -146,6 +167,7 @@ def test_expanded_weights_are_bounded_and_preserve_fallback(rows):
     assert model.mlp.gate_proj is original
     wrappers = install_expanded_mlp(model, budget_gb=0.01)
     assert len(wrappers) == 1
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 10**15)
     assert install_expanded_mlp(model, budget_gb=0.01) == []
     actual = model.mlp.gate_proj(x)
     assert bool(mx.allclose(expected, actual, atol=0.01, rtol=0.01).item())
@@ -394,6 +416,7 @@ def test_adaptive_transition_preserves_target_and_drafter_cache(
         policy.fallback = True
 
     monkeypatch.setattr(SpeculationPolicy, "observe_round", force_fallback)
+    monkeypatch.setattr("agents.architectures.llama.dflash_backend._DEFERRED_CONTEXT_LIMIT", 8)
     decoder = DFlashDecoder(
         model, SimpleNamespace(eos_token_ids=set()), drafter, prefill_step_size=7, adaptive=True
     )

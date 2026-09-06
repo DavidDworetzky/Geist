@@ -25,7 +25,7 @@ ordinary MLX-LM path. Requests with an output budget below 32 tokens use ordinar
 decoding. Invalid/incompatible artifacts or a failed kernel qualification fall
 back with a warning in automatic mode.
 
-On `codex/mlx-100tps-lab`, the application baseline is **adaptive DFlash +
+The application baseline is **adaptive DFlash +
 qualified Metal kernels**. No opt-in flag is needed: the existing automatic
 selection constructs the decoder with adaptation enabled. Copy proposals,
 expanded MLP weights, and compiled recurrence remain disabled. This does not
@@ -33,6 +33,8 @@ change your selected model or install missing auxiliary weights.
 
 - `GEIST_MLX_DFLASH=off`: force ordinary MLX-LM decoding.
 - `GEIST_MLX_DFLASH=on`: require DFlash; surface initialization errors.
+- `GEIST_MLX_DFLASH_ADAPTIVE=off`: keep DFlash and qualified kernels but disable
+  adaptation, for independent A/B diagnosis. Adaptation remains on by default.
 - `GEIST_MLX_DFLASH_DIR=/absolute/path`: select an explicit local snapshot.
 - `GEIST_MLX_PREFILL_STEP_SIZE=2048`: configure prompt-processing chunk size.
 

@@ -141,7 +141,7 @@ class MLXLMBackend:
                     self.tokenizer,
                     drafter,
                     prefill_step_size=self.prefill_step_size,
-                    adaptive=True,
+                    adaptive=os.environ.get("GEIST_MLX_DFLASH_ADAPTIVE", "on").casefold() != "off",
                 )
                 self._small_m_wrappers = install_small_m(self.model)
                 drafter.bind(self.model)

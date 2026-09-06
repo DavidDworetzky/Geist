@@ -18,9 +18,21 @@ from agents.architectures.llama.qwen_small_m import small_m_matmul
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights-dir", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--rows", nargs="+", type=int, default=[8, 256])
+    parser.add_argument(
+        "--weights-dir",
+        help="Local target checkpoint directory; never downloads weights.",
+        required=True,
+    )
+    parser.add_argument(
+        "--output", help="Write per-trial results as JSON to this path.", required=True
+    )
+    parser.add_argument(
+        "--rows",
+        help="Projection or verification row counts to measure.",
+        nargs="+",
+        type=int,
+        default=[8, 256],
+    )
     args = parser.parse_args()
     model, _ = load(args.weights_dir)
     layer = model.language_model.model.layers[0].mlp.gate_proj

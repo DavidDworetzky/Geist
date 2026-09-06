@@ -10,18 +10,26 @@ from mlx.utils import tree_unflatten
 from agents.architectures.llama.qwen_small_m import _SRC, _UNPACK, small_m_matmul
 
 
+def _replace_once(source: str, old: str, new: str) -> str:
+    if source.count(old) != 1:
+        raise ValueError(f"Experimental kernel source drift: expected one match for {old!r}")
+    return source.replace(old, new, 1)
+
+
 @cache
 def experimental_kernel(bits: int, math_mode: str, accumulator: str):
-    source = _SRC.replace("__UNPACK__", _UNPACK[bits])
+    source = _replace_once(_SRC, "__UNPACK__", _UNPACK[bits])
     inputs = ["x", "w", "sc", "bi"]
     if accumulator == "affine_fold":
         inputs.append("xsum")
         for word in ("p0", "p1"):
-            source = source.replace(
+            source = _replace_once(
+                source,
                 f"(T)(bfloat16_t)((float)(({word} >> (4 * t)) & 15u) * s + bb)",
                 f"(T)(({word} >> (4 * t)) & 15u)",
             )
-        source = source.replace(
+        source = _replace_once(
+            source,
             "int kbeg = (int)sg * KPS;",
             """
             simdgroup_matrix<float, 8, 8> totals[TC * RT];
@@ -34,7 +42,8 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
         """,
         )
         boundary = "        simdgroup_barrier(mem_flags::mem_threadgroup);\n    }"
-        source = source.replace(
+        source = _replace_once(
+            source,
             boundary,
             """
             int group = (kbeg + kk) / 64;
@@ -54,11 +63,17 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
         """
             + boundary,
         )
-        source = source.replace("simdgroup_store(C[ct], red", "simdgroup_store(totals[ct], red")
+        source = _replace_once(
+            source, "simdgroup_store(C[ct], red", "simdgroup_store(totals[ct], red"
+        )
     elif accumulator != "float32":
-        source = source.replace("simdgroup_matrix<float, 8, 8> C", "simdgroup_matrix<half, 8, 8> C")
-        source = source.replace(
-            "C[ct] = simdgroup_matrix<float, 8, 8>(0)", "C[ct] = simdgroup_matrix<half, 8, 8>(0)"
+        source = _replace_once(
+            source, "simdgroup_matrix<float, 8, 8> C", "simdgroup_matrix<half, 8, 8> C"
+        )
+        source = _replace_once(
+            source,
+            "C[ct] = simdgroup_matrix<float, 8, 8>(0)",
+            "C[ct] = simdgroup_matrix<half, 8, 8>(0)",
         )
         store = "for (int ct = 0; ct < TC * RT; ++ct) simdgroup_store(C[ct], red + (sg * TC * RT + ct) * 64, 8);"
         replacement = """
@@ -70,7 +85,8 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
         }
         """
         if accumulator == "float16_chunked":
-            source = source.replace(
+            source = _replace_once(
+                source,
                 "int kbeg = (int)sg * KPS;",
                 """
                 simdgroup_matrix<float, 8, 8> totals[TC * RT];
@@ -80,7 +96,8 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
             """,
             )
             boundary = "        simdgroup_barrier(mem_flags::mem_threadgroup);\n    }"
-            source = source.replace(
+            source = _replace_once(
+                source,
                 boundary,
                 """
                 for (int ct = 0; ct < TC * RT; ++ct) {
@@ -92,7 +109,7 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
                 + boundary,
             )
             replacement = store.replace("C[ct]", "totals[ct]")
-        source = source.replace(store, replacement)
+        source = _replace_once(source, store, replacement)
     return mx.fast.metal_kernel(
         name=f"geist_lab_{bits}_{math_mode}_{accumulator}",
         input_names=inputs,
@@ -103,6 +120,8 @@ def experimental_kernel(bits: int, math_mode: str, accumulator: str):
 
 
 def lab_matmul(linear, x, variant: str, *, split_k: int = 8, pad_rows: int = 16):
+    if linear.mode != "affine" or linear.bits not in (4, 8) or linear.group_size != 64:
+        return linear(x)
     rows, k = math.prod(x.shape[:-1]), x.shape[-1]
     n = linear.weight.shape[0]
     flat = x.reshape(rows, k)
@@ -119,7 +138,7 @@ def lab_matmul(linear, x, variant: str, *, split_k: int = 8, pad_rows: int = 16)
                 linear.scales.astype(mx.float16),
                 linear.biases.astype(mx.float16),
                 transpose=True,
-                group_size=64,
+                group_size=linear.group_size,
                 bits=linear.bits,
             ).astype(x.dtype)
         else:
@@ -129,7 +148,7 @@ def lab_matmul(linear, x, variant: str, *, split_k: int = 8, pad_rows: int = 16)
                 linear.scales,
                 linear.biases,
                 transpose=True,
-                group_size=64,
+                group_size=linear.group_size,
                 bits=linear.bits,
             )
         out = out[:rows].reshape(*x.shape[:-1], n)
@@ -146,12 +165,12 @@ def lab_matmul(linear, x, variant: str, *, split_k: int = 8, pad_rows: int = 16)
         "affine_fold": "affine_fold",
     }.get(variant, "float32")
     math_mode = variant if variant in {"relaxed", "fast"} else "safe"
-    kernel = experimental_kernel(linear.bits, math_mode, accumulator)
     if variant == "affine_fold" and (linear.bits != 4 or n % 8):
         return linear(x)
     row_tiles = (rows + 7) // 8
-    if rows > 32 or k % (split_k * 64):
+    if not 1 <= rows <= 32 or split_k not in (1, 2, 4, 8, 16) or k % (split_k * 64):
         raise ValueError("Experimental MMA requires up to 32 rows and aligned split-K")
+    kernel = experimental_kernel(linear.bits, math_mode, accumulator)
     if rows != row_tiles * 8:
         flat = mx.concatenate([flat, mx.zeros((row_tiles * 8 - rows, k), dtype=x.dtype)])
     operand_dtype = mx.float16 if accumulator.startswith("float16") else mx.bfloat16

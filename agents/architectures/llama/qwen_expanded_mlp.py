@@ -52,6 +52,8 @@ def install_expanded_mlp(
             continue
         size = quantized.weight.size * (32 // quantized.bits) * 2
         candidates.append((name, layer, size))
+    if not candidates:
+        return []
     needed = sum(size for _, _, size in candidates)
     recommended = mx.device_info()["max_recommended_working_set_size"]
     if needed > budget_gb * 1e9 or needed + mx.get_active_memory() > recommended * 0.85:
