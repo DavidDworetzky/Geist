@@ -23,6 +23,7 @@ from agents.agent_type import AgentType
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
+from agents.model_load_status import model_load_status_registry
 from agents.models.agent_completion import AgentCompletion
 from agents.models.tool_calling import ModelRequestConfig, ToolContext
 from agents.online_agent import OnlineAgent
@@ -97,6 +98,16 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
 }
 _agent_cache_lock = threading.RLock()
 _local_agent_creation_lock = threading.Lock()
+_local_agent_loading_model_id: str | None = None
+
+
+class LocalModelBusyError(RuntimeError):
+    """An existing load owns the local runtime; this is not that load failing."""
+
+    def __init__(self, model_id: str | None):
+        super().__init__("Local model is loading or switching; retry when it is ready")
+        self.model_id = model_id
+
 
 # mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
@@ -148,6 +159,7 @@ def get_or_create_agent(agent_type: AgentType):
 
 
 def _get_or_create_local_agent(agent_type: AgentType):
+    global _local_agent_loading_model_id
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -187,8 +199,14 @@ def _get_or_create_local_agent(agent_type: AgentType):
         # Do not hold the shared cache lock while a local model waits for an
         # active stream to close. Other model switches fail busy, not queued.
         if not _local_agent_creation_lock.acquire(blocking=False):
-            raise RuntimeError("Local model is loading or switching; retry when it is ready")
-        stale_agents = _clear_local_agent_cache()
+            raise LocalModelBusyError(_local_agent_loading_model_id)
+        try:
+            _local_agent_loading_model_id = factory_config.model
+            stale_agents = _clear_local_agent_cache()
+        except BaseException:
+            _local_agent_loading_model_id = None
+            _local_agent_creation_lock.release()
+            raise
 
     try:
         for stale_agent in stale_agents:
@@ -197,6 +215,8 @@ def _get_or_create_local_agent(agent_type: AgentType):
         new_agent = _create_local_agent(factory_config)
         with _agent_cache_lock:
             _set_local_agent_cache(new_agent, signature)
+            if factory_config.model:
+                model_load_status_registry.mark_ready(factory_config.model)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
             factory_config.model,
@@ -205,7 +225,9 @@ def _get_or_create_local_agent(agent_type: AgentType):
         )
         return new_agent
     finally:
-        _local_agent_creation_lock.release()
+        with _agent_cache_lock:
+            _local_agent_loading_model_id = None
+            _local_agent_creation_lock.release()
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:

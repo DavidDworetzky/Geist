@@ -5,7 +5,9 @@ from unittest.mock import patch
 import pytest
 
 from agents.agent_type import AgentType
+from agents.model_load_status import ModelLoadStatusRegistry
 from app import main as geist_main
+from app.api.v1.endpoints import models as models_endpoint
 from app.models.user_settings import AgentFactoryConfig
 
 
@@ -150,3 +152,84 @@ def test_stalled_local_cleanup_does_not_hold_shared_cache_lock(monkeypatch):
         with geist_main._agent_cache_lock:
             geist_main.agent_cache.update(saved_cache)
             geist_main._agent_cache_signatures.update(saved_signatures)
+
+
+@pytest.mark.parametrize("ready_before_publishing", [False, True])
+@pytest.mark.parametrize("owner_is_readiness", [False, True])
+def test_duplicate_readiness_start_follows_inflight_load_to_ready(
+    monkeypatch, ready_before_publishing, owner_is_readiness
+):
+    statuses = ModelLoadStatusRegistry()
+    monkeypatch.setattr(models_endpoint, "model_load_status_registry", statuses)
+    monkeypatch.setattr(geist_main, "model_load_status_registry", statuses)
+    monkeypatch.setattr(geist_main, "agent_cache", {key: None for key in geist_main.agent_cache})
+    monkeypatch.setattr(
+        geist_main, "_agent_cache_signatures", {key: None for key in geist_main.agent_cache}
+    )
+    monkeypatch.setattr(
+        geist_main, "_get_local_agent_factory_config", lambda: _factory_config("a", model="target")
+    )
+    entered, release = threading.Event(), threading.Event()
+    created = []
+
+    def create(_):
+        created.append(True)
+        if ready_before_publishing:
+            statuses.mark_ready("target")
+        entered.set()
+        assert release.wait(5)
+        return object()
+
+    monkeypatch.setattr(geist_main, "_create_local_agent", create)
+    statuses.mark_loading("target", "Loading")
+    with ThreadPoolExecutor(max_workers=2) as requests:
+        if owner_is_readiness:
+            first = requests.submit(models_endpoint._initialize_configured_local_runtime, "target")
+        else:
+            first = requests.submit(geist_main.get_or_create_agent, AgentType.LOCALAGENT)
+        try:
+            assert entered.wait(2)
+            statuses.mark_loading("target", "Repeated readiness request")
+            second = requests.submit(models_endpoint._initialize_configured_local_runtime, "target")
+            second.result(timeout=2)
+            assert statuses.get("target").state == "loading"
+        finally:
+            release.set()
+        first.result(timeout=2)
+    assert statuses.get("target").state == "ready"
+    assert len(created) == 1
+    assert geist_main._local_agent_loading_model_id is None
+    assert not geist_main._local_agent_creation_lock.locked()
+
+
+@pytest.mark.parametrize("state", ["ready", "failed"])
+def test_busy_readiness_preserves_load_owner_terminal_result(monkeypatch, state):
+    statuses = ModelLoadStatusRegistry()
+    monkeypatch.setattr(models_endpoint, "model_load_status_registry", statuses)
+    if state == "ready":
+        statuses.mark_ready("target")
+    else:
+        statuses.mark_failed("target", "Real load failure")
+    before = statuses.get("target")
+
+    def busy(_):
+        raise geist_main.LocalModelBusyError("target")
+
+    monkeypatch.setattr(geist_main, "get_active_agent", busy)
+    models_endpoint._initialize_configured_local_runtime("target")
+    assert statuses.get("target") == before
+
+
+def test_other_model_busy_does_not_leave_unowned_loading_status(monkeypatch):
+    statuses = ModelLoadStatusRegistry()
+    statuses.mark_loading("requested", "Loading")
+    statuses.mark_loading("other", "Loading")
+    monkeypatch.setattr(models_endpoint, "model_load_status_registry", statuses)
+
+    def busy(_):
+        raise geist_main.LocalModelBusyError("other")
+
+    monkeypatch.setattr(geist_main, "get_active_agent", busy)
+    models_endpoint._initialize_configured_local_runtime("requested")
+    assert statuses.get("requested").state == "failed"
+    assert statuses.get("other").state == "loading"

@@ -109,6 +109,24 @@ reports no new finding. Those two hooks were skipped only for this commit after
 baseline comparison; all other applicable hooks ran, and no hook configuration,
 adapter, dependency, or bind address was changed to silence them.
 
+Fourth-review follow-up (T): a duplicate readiness request must not turn an
+in-flight local model load into a failed UI state. A typed busy result now carries
+the model being loaded. Readiness requests for that same model follow the owner's
+status without overwriting a terminal result; conflicting model requests still
+fail explicitly because they are not queued. Publishing the completed agent also
+publishes ready, closing the race where a repeated start resets loading after
+the constructor reports ready but before a chat-owned load enters the cache.
+The creation lock is released even if stale-cache clearing fails.
+
+Concurrent regressions cover both chat-owned and readiness-owned loads, including
+the constructor-ready/cache-publication window, one actual construction, preserved
+ready/failed outcomes, and a conflicting target without an owner. Docker:
+`pytest tests/agents/test_local_agent_cache.py tests/agents/test_model_load_status.py
+tests/services/test_local_models.py tests/agents/test_mlx_llama_runner.py -q
+--tb=short -p no:cacheprovider`: **104 passed**. Ruff and installed-project mypy
+on `app/main.py` and the models endpoint pass. Bandit still reports only the
+unchanged script bind above; the same scoped hook exceptions apply to this fix.
+
 ## PR #357: measured policy and experimental safeguards
 
 Accepted: independently disable adaptation with `GEIST_MLX_DFLASH_ADAPTIVE=off`
