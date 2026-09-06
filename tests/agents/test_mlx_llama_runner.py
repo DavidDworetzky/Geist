@@ -24,6 +24,7 @@ from agents.models.tool_calling import (
     ModelEvent,
     ModelRequestConfig,
     ModelTurn,
+    ToolCall,
     ToolDefinition,
     ToolExecutionOutput,
 )
@@ -399,6 +400,26 @@ def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
         for event in stream:
             visible.append(event.text)
     assert "".join(visible) == "Hello."
+
+
+@pytest.mark.parametrize("offer_other_tool", [False, True])
+def test_mlx_lm_rejects_historical_unoffered_tool_without_exposing_it(offer_other_tool):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.supports_native_tool_calling = True
+    name = provider_tool_name("past.lookup")
+    response = f'<tool_call>{{"name":"{name}","arguments":{{}}}}</tool_call>'
+    backend.stream_messages = lambda *args: iter(response)
+    history = [
+        ChatMessage(
+            role="assistant", tool_calls=[ToolCall(id="old", name="past.lookup", arguments={})]
+        )
+    ]
+    stream = backend.stream_model_turn(
+        history, [_search_tool()] if offer_other_tool else [], ModelRequestConfig()
+    )
+    with pytest.raises(ValueError, match="unknown tool"):
+        for event in stream:
+            pytest.fail(f"Unavailable tool exposed an event: {event.kind}")
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():

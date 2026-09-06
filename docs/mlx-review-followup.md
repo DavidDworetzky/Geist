@@ -126,3 +126,21 @@ universal JSON streaming. The reported 'backend failed to start' copy is not the
 orchestrator's mid-stream error path: it already returns 'Chat completion failed'.
 Small explicit iterator cleanup and private-buffer white-box assertions remain
 intentional; neither needs a new abstraction or public parser API.
+
+Second-review follow-up: historical tool names are serialized but no longer
+included in the output parser's offered-name map. This covers both empty and
+narrowed tool catalogs across adapters, not just MLX. Orchestration independently
+rejects any completed call that was not offered before persisting or dispatching
+it. Tests cover history-bearing no-tools/narrowed-tool requests and a malicious
+structured backend under disabled tools and privacy-sensitive routing.
+Model-message snapshots now use the same lock as cancellation writes; probe
+start/state are locked, and the malformed-output fixture fails explicitly if the
+expected parser error disappears.
+
+The persistence lock still spans the final database write intentionally: moving
+that write outside requires an in-flight persistence state and retry semantics
+to preserve exactly-once behavior. The write occurs when ending/cancelling the
+turn, not during ordinary steady-state token production. Incremental early
+rejection and whole-response incomplete-markup diagnostics can retain different
+wording without relaxing either fail-closed contract. Shared prefix-holdback
+logic for different stop/protocol markers is not refactored here.

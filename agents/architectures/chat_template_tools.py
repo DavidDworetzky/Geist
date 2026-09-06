@@ -85,7 +85,9 @@ def build_tool_payload(
     return ChatTemplateToolPayload(
         messages=serialized_messages,
         tools=[tool.to_openai(internal_to_provider[tool.name]) for tool in tools],
-        provider_to_internal=provider_to_internal,
+        # Historical calls still need stable serialization names, but history
+        # must never re-authorize a tool omitted from this turn's catalog.
+        provider_to_internal={internal_to_provider[tool.name]: tool.name for tool in tools},
     )
 
 

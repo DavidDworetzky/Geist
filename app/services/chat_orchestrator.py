@@ -345,6 +345,8 @@ class ChatOrchestrator:
 
                 if status in {"failed", "cancelled"} and pending_text:
                     # Persist only emitted prose, never an unvalidated tool call.
+                    # Cancellation can append from its endpoint thread; mutable
+                    # transcript reads/writes therefore share this lock.
                     run.record_assistant(
                         ChatMessage(role="assistant", content="".join(pending_text))
                     )
@@ -437,7 +439,9 @@ class ChatOrchestrator:
                     return
 
                 completed_turn = None
-                responses = backend.stream_model_turn(run.model_messages, tools, config)
+                with run.persistence_lock:
+                    model_messages = run.model_messages
+                responses = backend.stream_model_turn(model_messages, tools, config)
                 try:
                     for event in responses:
                         if cancellation.is_set():
@@ -460,6 +464,10 @@ class ChatOrchestrator:
 
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")
+
+                offered_names = {tool.name for tool in tools}
+                if any(call.name not in offered_names for call in completed_turn.tool_calls):
+                    raise ValueError("Model requested a tool not offered for this turn")
 
                 assistant_message = ChatMessage(
                     role="assistant",

@@ -203,6 +203,60 @@ def test_intent_router_filters_catalog_before_assistant_turn(
     ]
 
 
+@pytest.mark.parametrize("tools_disabled", [False, True])
+def test_unoffered_tool_cannot_execute_or_enter_persisted_transcript(tools_disabled):
+    executed, writes = [], []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="public.search",
+            description="Search publicly",
+            arguments_model=LookupArguments,
+            handler=lambda *args: executed.append(True),
+            semantic_tags=frozenset({"public_retrieval"}),
+        )
+    )
+    turns = (
+        []
+        if tools_disabled
+        else [ModelTurn(text='{"intent":"sensitive_answer","needs_retrieval":true}')]
+    )
+    turns.append(
+        ModelTurn(
+            text="Looking into it.",
+            tool_calls=[ToolCall(id="bad", name="public.search", arguments={"query": "private"})],
+        )
+    )
+    backend = ScriptedBackend(turns)
+
+    def write(**snapshot):
+        writes.append(snapshot)
+        return SimpleNamespace(chat_session_id=42)
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        intent_router=ToolIntentRouter(),
+        history_loader=lambda _: [],
+        history_writer=write,
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Private request",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Assistant",
+            enable_tools=not tools_disabled,
+        )
+    )
+    assert executed == []
+    assert any(event.event == "error" for event in events)
+    assert not any(event.event == "tool_call" for event in events)
+    assert writes[-1]["transcript"][-1]["content"] == "Looking into it."
+    assert all(not message.get("tool_calls") for message in writes[-1]["transcript"])
+
+
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///tmp/secret", "not-a-url"])
 def test_artifact_urls_reject_unsafe_schemes(url):
     with pytest.raises(ValueError, match="HTTP"):

@@ -22,30 +22,32 @@ class StreamingProbe:
 
     def reset(self) -> None:
         with self._lock:
-            self._generation += 1
-            self.active = False
-            self.stage = 0
-            self.closed = False
-            self.tools_seen = False
-            for gate in self.gates:
-                gate.set()
+            self._reset()
 
-    def start(self) -> None:
-        self.reset()
-        self.gates = [Event(), Event()]
+    def _reset(self) -> None:
+        self._generation += 1
+        self.active = False
         self.stage = 0
         self.closed = False
         self.tools_seen = False
-        self.active = True
+        for gate in self.gates:
+            gate.set()
+
+    def start(self) -> None:
+        with self._lock:
+            self._reset()
+            self.gates = [Event(), Event()]
+            self.active = True
 
     def state(self) -> dict[str, Any]:
-        return {
-            "active": self.active,
-            "stage": self.stage,
-            "closed": self.closed,
-            "tools_seen": self.tools_seen,
-            "released": [gate.is_set() for gate in self.gates],
-        }
+        with self._lock:
+            return {
+                "active": self.active,
+                "stage": self.stage,
+                "closed": self.closed,
+                "tools_seen": self.tools_seen,
+                "released": [gate.is_set() for gate in self.gates],
+            }
 
     def segments(self, tools: list[dict[str, Any]] | None) -> Iterator[str]:
         if not tools:
