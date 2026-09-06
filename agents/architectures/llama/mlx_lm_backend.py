@@ -78,6 +78,8 @@ def _prefill_step_size() -> int:
 
 def _cache_matches_tokens(cache, count: int) -> bool:
     offsets = [item.offset for item in cache if isinstance(getattr(item, "offset", None), int)]
+    if not offsets:
+        logger.debug("Prefix cache reuse disabled: cache exposes no verifiable token offset")
     return bool(offsets) and all(offset == count for offset in offsets)
 
 
@@ -386,6 +388,8 @@ class MLXLMBackend:
             self._prompt_cache = None
             self._cached_tokens = ()
             self._dflash = None
+            for wrapper in self._small_m_wrappers:
+                wrapper.enabled = False
             self._small_m_wrappers = []
             self.small_m_tuning = []
             self.model = None

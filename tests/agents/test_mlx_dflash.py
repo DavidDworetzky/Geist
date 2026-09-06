@@ -262,7 +262,6 @@ def test_generator_close_invalidates_cache(small_target):
 
 def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
     model, _ = small_target
-    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
     drafter = SimpleNamespace(
         config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
         make_cache=lambda: [],
@@ -270,8 +269,16 @@ def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
         append_ctx=lambda *_: None,
         select_block=lambda *_, cap, **kwargs: (mx.zeros((cap,), dtype=mx.int32), None, None),
     )
-    decoder = DFlashDecoder(model, SimpleNamespace(eos_token_ids=set()), drafter)
     runner = MLXLlamaRunner()
+
+    def load():
+        target = TextModel(model.args)
+        target.eval()
+        target.lm_head.weight = mx.zeros_like(target.lm_head.weight)
+        return DFlashDecoder(target, SimpleNamespace(eos_token_ids=set()), drafter)
+
+    with runner._request_lock:
+        decoder = runner._on_worker(load)
 
     def events(*args):
         with closing(decoder.generate([1, 2], max_tokens=4)) as tokens:

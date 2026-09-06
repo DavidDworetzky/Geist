@@ -257,11 +257,15 @@ class MLXLlamaRunner(BaseRunner):
         tools: list[ToolDefinition],
         config: ModelRequestConfig,
     ) -> Iterator[ModelEvent]:
-        """Run a structured turn through mlx-lm, keeping manual MLX text-only."""
+        """Stream one turn; overlapping requests on this runner fail immediately."""
 
         # Configuration and the backend's mutable caches belong to one request.
         # A plain Lock can be released by a different SSE worker on close().
-        with self._request_lock:
+        if not self._request_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "MLX runner is busy; close the active stream before starting another"
+            )
+        try:
             source = self._stream_model_turn(messages, tools, config)
             end = object()
             try:
@@ -274,6 +278,8 @@ class MLXLlamaRunner(BaseRunner):
                     yield cast(ModelEvent, event)
             finally:
                 self._on_worker(source.close)
+        finally:
+            self._request_lock.release()
 
     def _stream_model_turn(
         self,

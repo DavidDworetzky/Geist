@@ -376,6 +376,9 @@ def test_mlx_runner_stream_can_resume_and_close_on_different_workers():
     stream = runner.stream_model_turn([], [], ModelRequestConfig())
     with ThreadPoolExecutor(max_workers=1) as first, ThreadPoolExecutor(max_workers=1) as second:
         assert first.submit(next, stream).result(timeout=2).text == "first"
+        competing = runner.stream_model_turn([], [], ModelRequestConfig())
+        with pytest.raises(RuntimeError, match="busy"):
+            first.submit(next, competing).result(timeout=2)
         assert second.submit(next, stream).result(timeout=2).text == "second"
         second.submit(stream.close).result(timeout=2)
     assert closed == [True]

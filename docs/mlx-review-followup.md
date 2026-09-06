@@ -64,3 +64,16 @@ Cleanup waits for the active request and then releases the worker. A regression
 asserts that different consumer threads still execute all model work/cleanup on
 the same thread. Real-model cancellation/recovery and SSE validation are required
 again for this follow-up; the earlier green counts do not establish this fix.
+
+Second-review follow-up: load is now serialized, overlapping streams fail busy
+instead of self-deadlocking, classifier iterators close explicitly on protocol
+errors, cleanup disables retained wrappers, and unverifiable offset-less caches
+log a debug diagnostic. Single-slot cache eviction by an opted-in classifier is
+an acknowledged performance limitation, not corrupted output; the fourth PR
+turns routing off by default. A keyed classifier cache would be a separate
+memory/performance policy, not a prerequisite for correct prefix matching.
+The retention bound and backpressure behavior are now in the runtime guide.
+Decoder-local retention constants stay independently testable. CI stack-base
+coverage must stay while these PRs target those bases; removing it before merge
+would reopen the verification gap. Existing workflow indentation was normalized
+because the repository YAML hook requires it. No dependency versions changed.
