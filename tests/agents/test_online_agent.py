@@ -210,6 +210,7 @@ class TestOnlineAgentInitialization:
         "model_id",
         [
             "x-ai/grok-4.6",
+            "qwen/qwen3.8-max-0902",
             "qwen/qwen3.8-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
@@ -351,6 +352,39 @@ class TestOnlineAgentAPIRequests:
                 assert "stop" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["reasoning"] == {"effort": reasoning_effort}
+
+    def test_qwen38_max_0902_applies_request_contract_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="qwen/qwen3.8-max-0902",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "qwen/qwen3.8-max-0902",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 2,
+                        "temperature": 0.5,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "response_format": {"type": "json_object"},
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 0.5
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["response_format"] == {"type": "json_object"}
+                assert payload["reasoning"] == {"effort": "xhigh"}
 
     def test_meta_model_api_removes_unsupported_parameters(self, caplog):
         context = create_mock_agent_context()

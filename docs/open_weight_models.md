@@ -11,8 +11,8 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
-intentionally server-backed. For models with published weights, their total
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Max 0902, and Qwen 3.8 Flash
+routes are also intentionally server-backed. For models with published weights, their total
 resident weights make an in-process laptop load impractical even when their
 mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -91,6 +91,31 @@ Meta describes open weights as future work.
 The Contributor tier remains under provider `openrouter`. Although Meta lists
 the tier, direct Chat Completions availability has not been reliable enough to
 make it a first-party provider option in Geist.
+
+## OpenRouter-hosted Qwen3.8 Max 0902
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+[`qwen/qwen3.8-max-0902`](https://openrouter.ai/qwen/qwen3.8-max-0902).
+OpenRouter replaced the retired
+`qwen/qwen3.8-max` route with this dated snapshot in September 2026; the old
+model page redirects to the new snapshot and Geist retains its request
+contract as a compatibility alias. The model accepts
+text, image, and video input, has a 1,000,000-token context window and
+131,072-token output limit, and supports streaming, native function calling,
+and JSON-schema structured outputs. Reasoning is mandatory; Geist sends the
+documented default `xhigh` effort and omits the unsupported `n` parameter.
+OpenRouter lists the current price as $2 per million input tokens, $6 per
+million output tokens, and $0.25 per million cached input tokens.
+
+The route currently has one Alibaba endpoint. OpenRouter's
+[provider policy](https://openrouter.ai/docs/guides/privacy/provider-logging)
+reports that Alibaba does not train on requests, but retains prompts for an
+unspecified period, and the endpoint is absent from OpenRouter's
+[ZDR list](https://openrouter.ai/api/v1/endpoints/zdr) as of September 6, 2026.
+Do not send confidential workloads to this model. Alibaba's
+[public model listing](https://www.alibabacloud.com/help/en/model-studio/models)
+does not publish a parameter count for this proprietary model, so the catalog
+leaves parameter fields unset.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 

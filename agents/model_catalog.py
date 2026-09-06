@@ -468,8 +468,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
-        "qwen/qwen3.8-max",
-        "Qwen 3.8 Max",
+        "qwen/qwen3.8-max-0902",
+        "Qwen 3.8 Max (0902)",
         "qwen",
         provider="openrouter",
         backend="openai_compatible",
@@ -480,10 +480,15 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_reasoning=True,
         supports_streaming=True,
         recommended=True,
-        parameter_count="2.4T",
-        activated_parameters="95B",
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="xhigh",
         local=False,
-        performance_note="Hosted-only flagship MoE; OpenRouter proxies Alibaba's endpoint until open weights ship.",
+        performance_note=(
+            "Alibaba's hosted 0902 snapshot through OpenRouter with mandatory "
+            "reasoning and native tools. The sole endpoint retains prompts for an "
+            "unspecified period and is not ZDR; do not use it for confidential workloads."
+        ),
+        aliases=("qwen/qwen3.8-max",),
     ),
     ModelSpec(
         "qwen/qwen3.8-flash",
@@ -671,7 +676,7 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
     # catalog entries so they can never fall through to an accidental local
     # trillion-parameter load.
     if "qwen3.8-max" in value:
-        return get_model_spec("qwen/qwen3.8-max")
+        return get_model_spec("qwen/qwen3.8-max-0902")
     if "moonshotai/kimi-k2" in value:
         return get_model_spec("kimi-k2.5")
     if "zai-org/glm-5" in value:
