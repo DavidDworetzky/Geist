@@ -248,6 +248,7 @@ def test_unoffered_tool_cannot_execute_or_enter_persisted_transcript(tools_disab
             config=ModelRequestConfig(),
             system_prompt="Assistant",
             enable_tools=not tools_disabled,
+            enable_intent_router=True,
         )
     )
     assert executed == []
