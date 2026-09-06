@@ -440,6 +440,84 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     assert not controls.cancel(run_id, workspace_id=1)
 
 
+def test_disconnect_explicitly_closes_backend_even_if_iterator_is_retained():
+    closed = []
+
+    def responses():
+        try:
+            yield ModelEvent.text_delta("visible")
+            yield ModelEvent.turn_complete(ModelTurn(text="visible"))
+        finally:
+            closed.append(True)
+
+    retained = responses()
+    backend = SimpleNamespace(
+        supports_native_tool_calling=False,
+        stream_model_turn=lambda *args: retained,
+    )
+    stream = ChatOrchestrator(
+        ToolRegistry(), history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1)
+    ).stream(
+        backend=backend,
+        prompt="hello",
+        workspace_id=1,
+        chat_id=None,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+    while next(stream).event != "delta":
+        pass
+    stream.close()
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("ending", ["malformed", "disconnect", "cancel"])
+def test_partial_streamed_prose_is_persisted_once_without_unvalidated_tools(ending):
+    from agents.architectures.chat_template_tools import ToolResponseStream
+
+    def responses(*args):
+        parser = ToolResponseStream({"safe": "web.search"})
+        yield ModelEvent.text_delta(parser.feed("Working. "))
+        parser.feed("<tool_call>{bad}</tool_call>")
+
+    controls = RunControlRegistry()
+    writes = []
+    orchestrator = ChatOrchestrator(
+        ToolRegistry(),
+        run_controls=controls,
+        history_writer=lambda **kwargs: writes.append(kwargs) or SimpleNamespace(chat_session_id=3),
+    )
+    stream = orchestrator.stream(
+        backend=SimpleNamespace(supports_native_tool_calling=False, stream_model_turn=responses),
+        prompt="hello",
+        workspace_id=1,
+        chat_id=None,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+    run_id = next(stream).payload["run_id"]
+    while (event := next(stream)).event != "delta":
+        pass
+    assert event.payload["text"] == "Working."
+    if ending == "malformed":
+        events = list(stream)
+        assert (
+            next(event for event in events if event.event == "error").payload["message"]
+            == "Chat completion failed"
+        )
+    else:
+        if ending == "cancel":
+            assert controls.cancel(run_id, workspace_id=1)
+        stream.close()
+    assert len(writes) == 1
+    assert writes[0]["status"] == ("failed" if ending == "malformed" else "cancelled")
+    assert writes[0]["new_ai_message"] == "Working."
+    assert not writes[0]["tool_calls"]
+    assistant = writes[0]["transcript"][-1]
+    assert assistant["content"] == "Working."
+    assert not assistant.get("tool_calls")
+
+
 def test_backend_without_native_tools_receives_empty_registry():
     backend = ScriptedBackend([ModelTurn(text="local answer")])
     backend.supports_native_tool_calling = False

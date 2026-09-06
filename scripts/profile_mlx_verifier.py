@@ -60,12 +60,30 @@ def fenced_forward(target, ids, cache):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights-dir", required=True)
-    parser.add_argument("--rows", nargs="+", type=int, default=[1, 8, 16, 32, 64])
-    parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--compile-verifier", action="store_true")
-    parser.add_argument("--expanded-mlp", action="store_true")
+    parser.add_argument(
+        "--weights-dir",
+        help="Local target checkpoint directory; never downloads weights.",
+        required=True,
+    )
+    parser.add_argument(
+        "--rows",
+        help="Projection or verification row counts to measure.",
+        nargs="+",
+        type=int,
+        default=[1, 8, 16, 32, 64],
+    )
+    parser.add_argument(
+        "--trials", help="Measured trials after an unreported warm-up.", type=int, default=3
+    )
+    parser.add_argument(
+        "--output", help="Write per-trial results as JSON to this path.", required=True
+    )
+    parser.add_argument(
+        "--compile-verifier", help="Use the opt-in compiled target verifier.", action="store_true"
+    )
+    parser.add_argument(
+        "--expanded-mlp", help="Enable the opt-in dense MLP weight experiment.", action="store_true"
+    )
     args = parser.parse_args()
     if args.compile_verifier and args.expanded_mlp:
         parser.error("The expanded-weight A/B changes routes; compiled routes must stay fixed")

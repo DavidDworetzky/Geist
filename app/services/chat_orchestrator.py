@@ -336,11 +336,20 @@ class ChatOrchestrator:
         )
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = []
+        pending_text: list[str] = []
 
         def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
             with run.persistence_lock:
                 if run.persisted:
                     return conversation.chat_id
+
+                if status in {"failed", "cancelled"} and pending_text:
+                    # Persist only emitted prose, never an unvalidated tool call.
+                    run.record_assistant(
+                        ChatMessage(role="assistant", content="".join(pending_text))
+                    )
+                    pending_text.clear()
+                    ai_message = run.assistant_text or None
 
                 # Snapshot mutable run state so a cancellation callback can
                 # safely persist while a provider/tool thread is unwinding.
@@ -428,16 +437,26 @@ class ChatOrchestrator:
                     return
 
                 completed_turn = None
-                for event in backend.stream_model_turn(run.model_messages, tools, config):
-                    if cancellation.is_set():
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
-                    if not isinstance(event, ModelEvent):
-                        raise TypeError("Model backend returned an invalid event")
-                    if event.kind == "text_delta" and event.text:
-                        yield ChatStreamEvent("delta", {"text": event.text})
-                    elif event.kind == "turn_complete":
-                        completed_turn = event.turn
+                responses = backend.stream_model_turn(run.model_messages, tools, config)
+                try:
+                    for event in responses:
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+                        if not isinstance(event, ModelEvent):
+                            raise TypeError("Model backend returned an invalid event")
+                        if event.kind == "text_delta" and event.text:
+                            with run.persistence_lock:
+                                if cancellation.is_set() or run.persisted:
+                                    continue
+                                pending_text.append(event.text)
+                            yield ChatStreamEvent("delta", {"text": event.text})
+                        elif event.kind == "turn_complete":
+                            completed_turn = event.turn
+                finally:
+                    close = getattr(responses, "close", None)
+                    if callable(close):
+                        close()
 
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")
@@ -447,7 +466,10 @@ class ChatOrchestrator:
                     content=completed_turn.text or None,
                     tool_calls=completed_turn.tool_calls,
                 )
-                run.record_assistant(assistant_message)
+                with run.persistence_lock:
+                    if not run.persisted:
+                        run.record_assistant(assistant_message)
+                    pending_text.clear()
 
                 if not completed_turn.tool_calls:
                     run.mark_model_completed()
@@ -623,6 +645,9 @@ class ChatOrchestrator:
                 "done",
                 {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
+        except GeneratorExit:
+            persist_turn("cancelled", run.assistant_text or None)
+            raise
         except Exception as error:
             logger.exception("Chat run %s failed", run.run_id)
             persisted_chat_id = persist_turn(

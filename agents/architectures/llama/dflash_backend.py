@@ -16,6 +16,12 @@ from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
 from agents.architectures.llama.speculation_policy import SpeculationPolicy
 
 
+_DEFERRED_CONTEXT_LIMIT = 64
+
+
+MAX_RETAINED_PREFIX_TOKENS = 32768
+
+
 def load_drafter(path: str, target, bits: int = 8):
     root = Path(path).expanduser()
     raw = json.loads((root / "config.json").read_text())
@@ -76,6 +82,7 @@ def sampled_accept(logits, proposals, candidate_ids, q_rows, temperature, top_p,
     )
     accepted = int(mx.cumprod(matches.astype(mx.int32)).sum().item())
     distribution = p[-1] if accepted == count else mx.maximum(p[accepted] - q[accepted], 0)
+    distribution = mx.where(mx.sum(distribution) > 0, distribution, p[accepted])
     replacement = int(mx.random.categorical(mx.log(distribution)).item())
     return accepted, replacement
 
@@ -195,9 +202,10 @@ class DFlashDecoder:
                         else:
                             p = target_probabilities(logits[0, -1], temperature, top_p, top_k)
                             pending = int(mx.random.categorical(mx.log(p)).item())
+                        mx.eval(hidden, [item.state for item in cache])
                         policy.observe_native(time.perf_counter() - direct_started)
                         context_tail.append(hidden)
-                        if len(context_tail) >= self.prefill_step_size:
+                        if len(context_tail) >= _DEFERRED_CONTEXT_LIMIT:
                             previous = mx.concatenate([context, *context_tail[:-1]], axis=1)
                             self.drafter.append_ctx(self.drafter.project_ctx(previous), draft_cache)
                             mx.eval([item.state for item in draft_cache])
@@ -223,17 +231,21 @@ class DFlashDecoder:
                     )
                     copying = len(copied) >= 16
                     copy_cooldown = max(0, copy_cooldown - 1)
-                    block = mx.array(
-                        [[pending] + [self.drafter.config.mask_token_id] * (self.block_size - 1)]
-                    )
-                    uniforms = mx.random.uniform(shape=(cap,)) if temperature else None
                     if copying:
                         cap = len(copied)
                         proposals = mx.array(copied)
+                        candidates, q_rows = None, None
                         self.drafter.append_ctx(self.drafter.project_ctx(context), draft_cache)
                         copy_rounds += 1
                         copy_proposed += cap
                     else:
+                        block = mx.array(
+                            [
+                                [pending]
+                                + [self.drafter.config.mask_token_id] * (self.block_size - 1)
+                            ]
+                        )
+                        uniforms = mx.random.uniform(shape=(cap,)) if temperature else None
                         proposals, candidates, q_rows = self.drafter.select_block(
                             block,
                             context,
@@ -261,6 +273,8 @@ class DFlashDecoder:
                         accepted = int(accepted_array.item())
                         replacement = int(target_ids[accepted].item())
                     else:
+                        if candidates is None or q_rows is None:
+                            raise ValueError("Sampled proposals require a draft distribution")
                         accepted, replacement = sampled_accept(
                             logits[0], proposals, candidates, q_rows, temperature, top_p, top_k
                         )
@@ -300,8 +314,9 @@ class DFlashDecoder:
                     pending = output[-1]
                 if context_tail:
                     context = mx.concatenate([context, *context_tail], axis=1)
-                self._cached_tokens = tuple(prompt_tokens + output[:-1])
-                self._cached_state = (cache, draft_cache, context)
+                if len(prompt_tokens) + len(output) - 1 <= MAX_RETAINED_PREFIX_TOKENS:
+                    self._cached_tokens = tuple(prompt_tokens + output[:-1])
+                    self._cached_state = (cache, draft_cache, context)
             finally:
                 mx.synchronize(stream)
                 decode_seconds = time.perf_counter() - decode_started

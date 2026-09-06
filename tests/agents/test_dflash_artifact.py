@@ -82,7 +82,11 @@ def test_dflash_stream_filters_eos_finalizes_and_reports_stats():
     assert detokenizer.tokens == [3, 4]
 
 
-def test_default_dflash_is_adaptive_qualified_and_idempotent(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode,adaptive", [(None, True), ("on", True), ("off", False)])
+def test_default_dflash_is_adaptive_qualified_and_idempotent(monkeypatch, tmp_path, mode, adaptive):
+    monkeypatch.delenv("GEIST_MLX_DFLASH_ADAPTIVE", raising=False)
+    if mode is not None:
+        monkeypatch.setenv("GEIST_MLX_DFLASH_ADAPTIVE", mode)
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model_id = "Qwen/Qwen3.8-27B"
     backend.model, backend.tokenizer = object(), object()
@@ -121,7 +125,7 @@ def test_default_dflash_is_adaptive_qualified_and_idempotent(monkeypatch, tmp_pa
         backend.tokenizer,
         drafter,
         prefill_step_size=2048,
-        adaptive=True,
+        adaptive=adaptive,
     )
     tune.assert_called_once_with(wrappers)
     assert install.call_args_list == [call(backend.model), call(drafter)]

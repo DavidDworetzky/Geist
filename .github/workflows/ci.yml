@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [main, codex/mlx-dflash-throughput, codex/mlx-100tps-lab, codex/mlx-tool-streaming]
 
 # Cancel superseded runs on PRs; let pushes to main run to completion
 concurrency:
@@ -29,7 +29,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
         ports:
-          - 5432:5432
+        - 5432:5432
 
     steps:
     - uses: actions/checkout@v4
@@ -123,15 +123,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: linux-x64
-            os: ubuntu-latest
-            extras: ""
-          - target: win32-x64
-            os: windows-latest
-            extras: ""
-          - target: darwin-arm64
-            os: macos-14
-            extras: "--extra local-mlx"
+        - target: linux-x64
+          os: ubuntu-latest
+          extras: ""
+        - target: win32-x64
+          os: windows-latest
+          extras: ""
+        - target: darwin-arm64
+          os: macos-14
+          extras: "--extra local-mlx"
 
     steps:
     - uses: actions/checkout@v4
@@ -168,6 +168,27 @@ jobs:
         tests/test_loopback_security.py
         tests/test_runtime_config.py
         tests/scripts/test_build_native_sidecar.py
+
+    - name: Run MLX adapter and tool protocol contracts
+      if: matrix.target == 'darwin-arm64'
+      run: >-
+        uv run pytest -q
+        tests/agents/test_mlx_llama_runner.py
+        tests/agents/test_chat_template_tools.py
+        tests/agents/test_dflash_artifact.py
+
+    - name: Detect Metal availability
+      if: matrix.target == 'darwin-arm64'
+      id: metal
+      shell: bash
+      run: >-
+        uv run python -c
+        'import mlx.core as mx; print("available=" + str(mx.metal.is_available()).lower())'
+        >> "$GITHUB_OUTPUT"
+
+    - name: Run native Metal speculative invariants
+      if: matrix.target == 'darwin-arm64' && steps.metal.outputs.available == 'true'
+      run: uv run pytest -q tests/agents/test_mlx_dflash.py
 
   browser-e2e:
     runs-on: ubuntu-latest
@@ -327,10 +348,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: backend
-            dockerfile: Dockerfile
-          - image: frontend
-            dockerfile: client/geist/Dockerfile
+        - image: backend
+          dockerfile: Dockerfile
+        - image: frontend
+          dockerfile: client/geist/Dockerfile
 
     steps:
     - uses: actions/checkout@v4

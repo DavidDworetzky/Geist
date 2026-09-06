@@ -2,6 +2,7 @@
 
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -20,7 +21,9 @@ from agents.architectures.llama.mlx_lm_backend import (
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.models.tool_calling import (
     ChatMessage,
+    ModelEvent,
     ModelRequestConfig,
+    ModelTurn,
     ToolDefinition,
     ToolExecutionOutput,
 )
@@ -325,8 +328,15 @@ def test_structured_messages_reach_mlx_backend_unchanged():
 def test_mlx_runner_streams_backend_segments_without_buffering():
     runner = MLXLlamaRunner()
     runner.llama = MagicMock()
-    runner.llama.stream_model_turn = None
-    runner.llama.stream_messages.return_value = iter(("co", "balt"))
+    produced = []
+
+    def responses(*args):
+        for text in ("co", "balt"):
+            produced.append(text)
+            yield ModelEvent.text_delta(text)
+        yield ModelEvent.turn_complete(ModelTurn(text="cobalt"))
+
+    runner.llama.stream_model_turn = responses
 
     events = list(
         runner.stream_model_turn(
@@ -343,6 +353,42 @@ def test_mlx_runner_streams_backend_segments_without_buffering():
     ]
     assert [event.text for event in events[:2]] == ["co", "balt"]
     assert events[-1].turn.text == "cobalt"
+    assert produced == ["co", "balt"]
+
+
+def test_mlx_runner_stream_can_resume_and_close_on_different_workers():
+    runner = MLXLlamaRunner()
+    runner.llama = MagicMock()
+    closed = []
+
+    def responses(*args):
+        try:
+            yield ModelEvent.text_delta("first")
+            yield ModelEvent.text_delta("second")
+        finally:
+            closed.append(True)
+
+    runner.llama.stream_model_turn = responses
+    stream = runner.stream_model_turn([], [], ModelRequestConfig())
+    with ThreadPoolExecutor(max_workers=1) as first, ThreadPoolExecutor(max_workers=1) as second:
+        assert first.submit(next, stream).result(timeout=2).text == "first"
+        assert second.submit(next, stream).result(timeout=2).text == "second"
+        second.submit(stream.close).result(timeout=2)
+    assert closed == [True]
+    assert runner._request_lock.acquire(blocking=False)
+    runner._request_lock.release()
+
+
+@pytest.mark.parametrize("markup", ["<tool_call>", "</tool_call>"])
+def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.stream_messages = lambda *args: iter("Hello. " + markup + "secret arguments")
+    stream = backend.stream_model_turn([], [], ModelRequestConfig())
+    visible = []
+    with pytest.raises(ValueError, match="tool"):
+        for event in stream:
+            visible.append(event.text)
+    assert "".join(visible) == "Hello."
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
@@ -699,6 +745,13 @@ def test_mlx_lm_uses_a_thread_local_generation_stream():
 
     assert generation_module.generation_stream is thread_local_stream
     assert backend.supports_native_tool_calling is True
+    with ThreadPoolExecutor(max_workers=1) as first, ThreadPoolExecutor(max_workers=1) as second:
+        first.submit(backend._generation_lock.acquire).result(timeout=2)
+        second.submit(backend._generation_lock.release).result(timeout=2)
+    backend._prompt_cache = object()
+    backend._dflash = object()
+    backend.cleanup()
+    assert backend.model is backend.tokenizer is backend._prompt_cache is backend._dflash is None
 
 
 def test_mlx_prefill_step_size_rejects_invalid_values(monkeypatch):
@@ -725,10 +778,10 @@ def test_mlx_lm_reuses_an_exact_conversation_prefix(monkeypatch):
     backend.presence_penalty = 0.0
     backend.stop = None
     backend.prefill_step_size = 2048
-    backend._generation_lock = threading.RLock()
+    backend._generation_lock = threading.Lock()
     backend._prompt_cache = None
     backend._cached_tokens = ()
-    prompt_cache = MagicMock()
+    prompt_cache = [SimpleNamespace(offset=0)]
 
     mlx_core = ModuleType("mlx.core")
     mlx_core.array = MagicMock(side_effect=lambda tokens: tuple(tokens))
@@ -744,6 +797,7 @@ def test_mlx_lm_reuses_an_exact_conversation_prefix(monkeypatch):
 
     def stream_generate(*args, **kwargs):
         calls.append((args, kwargs))
+        prompt_cache[0].offset += len(args[2]) + 1
         token = 9 if len(calls) == 1 else 10
         yield SimpleNamespace(
             text="A" if len(calls) == 1 else "B",
@@ -775,8 +829,14 @@ def test_mlx_lm_reuses_an_exact_conversation_prefix(monkeypatch):
     cache_module.make_prompt_cache.assert_called_once_with(backend.model)
 
 
-def test_mlx_lm_discards_cache_when_the_prefix_changes(monkeypatch):
+@pytest.mark.parametrize(
+    "cache_offset,limit,retained", [(3, 32768, True), (2, 32768, False), (3, 2, False)]
+)
+def test_mlx_lm_discards_cache_when_the_prefix_changes(monkeypatch, cache_offset, limit, retained):
     monkeypatch.setenv("GEIST_MLX_DFLASH", "off")
+    monkeypatch.setattr(
+        "agents.architectures.llama.mlx_lm_backend.MAX_RETAINED_PREFIX_TOKENS", limit
+    )
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model = MagicMock()
     backend.model_id = "Qwen/Qwen3.8-27B"
@@ -792,10 +852,10 @@ def test_mlx_lm_discards_cache_when_the_prefix_changes(monkeypatch):
     backend.presence_penalty = 0.0
     backend.stop = None
     backend.prefill_step_size = 2048
-    backend._generation_lock = threading.RLock()
+    backend._generation_lock = threading.Lock()
     backend._prompt_cache = MagicMock(name="old_cache")
     backend._cached_tokens = (1, 2, 3)
-    fresh_cache = MagicMock(name="fresh_cache")
+    fresh_cache = [SimpleNamespace(offset=cache_offset)]
 
     mlx_core = ModuleType("mlx.core")
     mlx_core.array = MagicMock(side_effect=lambda tokens: tuple(tokens))
@@ -835,5 +895,5 @@ def test_mlx_lm_discards_cache_when_the_prefix_changes(monkeypatch):
         assert "".join(backend.stream_messages([{"role": "user", "content": "z"}])) == "C"
 
     assert backend.last_stats["cached_prompt_tokens"] == 0
-    assert backend._prompt_cache is fresh_cache
+    assert backend._prompt_cache is (fresh_cache if retained else None)
     cache_module.make_prompt_cache.assert_called_once_with(backend.model)

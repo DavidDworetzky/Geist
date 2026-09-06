@@ -21,12 +21,13 @@ from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
     ModelRequestConfig,
-    ModelTurn,
     ToolDefinition,
 )
 
 
 QWEN3_TOP_K = 20
+DFLASH_MIN_TOKENS = 32
+MAX_RETAINED_PREFIX_TOKENS = 32768
 logger = logging.getLogger(__name__)
 
 
@@ -74,6 +75,11 @@ def _prefill_step_size() -> int:
     return value
 
 
+def _cache_matches_tokens(cache, count: int) -> bool:
+    offsets = [item.offset for item in cache if isinstance(getattr(item, "offset", None), int)]
+    return bool(offsets) and all(offset == count for offset in offsets)
+
+
 class MLXLMBackend:
     """Load and generate with mlx-lm while matching ``LlamaMLX.complete``."""
 
@@ -106,12 +112,14 @@ class MLXLMBackend:
         self.model, self.tokenizer = load(weights_dir or model_id)
         self.last_stats: dict[str, int | float | str | None] = {}
         self.prefill_step_size = _prefill_step_size()
-        self._generation_lock = threading.RLock()
+        # Starlette may resume/close a synchronous stream on a different worker.
+        self._generation_lock = threading.Lock()
         self._prompt_cache = None
         self._cached_tokens: tuple[int, ...] = ()
         self._dflash = None
         self._dflash_checked = False
         self._small_m_wrappers = []
+        self.small_m_tuning = []
         self._unsupported_penalties_warned = False
         model_spec = infer_model_spec(model_id)
         self.supports_native_tool_calling = bool(
@@ -141,24 +149,21 @@ class MLXLMBackend:
                     self.tokenizer,
                     drafter,
                     prefill_step_size=self.prefill_step_size,
-                    adaptive=True,
+                    adaptive=os.environ.get("GEIST_MLX_DFLASH_ADAPTIVE", "on").casefold() != "off",
                 )
                 self._small_m_wrappers = install_small_m(self.model)
+                # Rebind after wrapping so the drafter shares the wrapped head.
                 drafter.bind(self.model)
                 self._small_m_wrappers += install_small_m(drafter)
                 self.small_m_tuning = tune_small_m(self._small_m_wrappers)
                 self._dflash = decoder
-                logger.info(
-                    "Enabled adaptive MLX DFlash 2 with qualified Metal kernels for Qwen 3.8"
-                )
+                logger.info("Enabled MLX DFlash 2 with qualified Metal kernels for Qwen 3.8")
             except Exception as error:
                 for wrapper in self._small_m_wrappers:
                     wrapper.enabled = False
                 if os.environ.get("GEIST_MLX_DFLASH", "auto").casefold() == "on":
                     raise
-                logging.getLogger(__name__).warning(
-                    "DFlash initialization failed; using ordinary MLX: %s", error
-                )
+                logger.warning("DFlash initialization failed; using ordinary MLX: %s", error)
         self._dflash_checked = True
 
     def _stream_dflash(self, prompt_tokens: list[int]) -> Iterator[str]:
@@ -289,9 +294,13 @@ class MLXLMBackend:
         )
         prompt_tokens = list(self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
         with self._generation_lock:
-            if self.max_new_tokens >= 32:
+            if self.max_new_tokens >= DFLASH_MIN_TOKENS and not logits_processors:
                 self._prepare_dflash()
-            use_dflash = getattr(self, "_dflash", None) is not None and self.max_new_tokens >= 32
+            use_dflash = (
+                getattr(self, "_dflash", None) is not None
+                and self.max_new_tokens >= DFLASH_MIN_TOKENS
+                and not logits_processors
+            )
             for wrapper in getattr(self, "_small_m_wrappers", []):
                 wrapper.enabled = use_dflash
             if use_dflash:
@@ -300,6 +309,7 @@ class MLXLMBackend:
             cached_count = len(self._cached_tokens)
             cache_hit = (
                 self._prompt_cache is not None
+                and _cache_matches_tokens(self._prompt_cache, cached_count)
                 and cached_count < len(prompt_tokens)
                 and tuple(prompt_tokens[:cached_count]) == self._cached_tokens
             )
@@ -340,8 +350,18 @@ class MLXLMBackend:
                     close()
 
             elapsed = time.perf_counter() - started
-            self._prompt_cache = prompt_cache
-            self._cached_tokens = tuple(prompt_tokens + output_tokens)
+            cached_tokens = tuple(prompt_tokens + output_tokens)
+            # In mlx-lm 0.31.3 the lookahead step consumes the token before it
+            # is yielded. Check actual KV offsets rather than assuming this
+            # contract survives a future dependency change.
+            if len(cached_tokens) <= MAX_RETAINED_PREFIX_TOKENS and _cache_matches_tokens(
+                prompt_cache, len(cached_tokens)
+            ):
+                self._prompt_cache = prompt_cache
+                self._cached_tokens = cached_tokens
+            else:
+                self._prompt_cache = None
+                self._cached_tokens = ()
             if final_response is not None:
                 self.last_stats = {
                     "implementation": "mlx_lm",
@@ -360,6 +380,17 @@ class MLXLMBackend:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
         return self.complete_messages(messages)
+
+    def cleanup(self) -> None:
+        with self._generation_lock:
+            self._prompt_cache = None
+            self._cached_tokens = ()
+            self._dflash = None
+            self._small_m_wrappers = []
+            self.small_m_tuning = []
+            self.model = None
+            self.tokenizer = None
+            self.supports_native_tool_calling = False
 
     def complete_messages(
         self,
@@ -388,22 +419,6 @@ class MLXLMBackend:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         payload = build_tool_payload(messages, tools)
-        if not tools:
-            segments = []
-            responses = self.stream_messages(payload.messages, payload.tools)
-            try:
-                for segment in responses:
-                    if segment:
-                        segments.append(segment)
-                        yield ModelEvent.text_delta(segment)
-            finally:
-                close = getattr(responses, "close", None)
-                if callable(close):
-                    close()
-            yield ModelEvent.turn_complete(
-                ModelTurn(text="".join(segments).strip(), finish_reason="stop")
-            )
-            return
         parser = ToolResponseStream(payload.provider_to_internal, payload.tools)
         responses = self.stream_messages(payload.messages, payload.tools)
         try:
