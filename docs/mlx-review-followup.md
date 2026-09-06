@@ -52,3 +52,15 @@ Validation on this Mac, using existing dependencies (no installs):
 - Full-stack Docker/native browser and real Qwen tool validation is repeated at
   the top of the stack after propagation. The existing user's UI/database is
   preserved while isolated regressions run.
+
+### Real-model follow-up: thread affinity
+
+A stronger native Qwen regression found that fixing lock ownership alone is
+insufficient: resuming DFlash on a second worker raised `There is no Stream(gpu,
+...) in current thread`. Runner load, completion, stream advancement/close and
+cleanup now execute on one persistent model worker. The bridge submits exactly
+one `next()` per consumer request; it does not aggregate or eagerly queue output.
+Cleanup waits for the active request and then releases the worker. A regression
+asserts that different consumer threads still execute all model work/cleanup on
+the same thread. Real-model cancellation/recovery and SSE validation are required
+again for this follow-up; the earlier green counts do not establish this fix.

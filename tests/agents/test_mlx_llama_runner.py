@@ -360,12 +360,16 @@ def test_mlx_runner_stream_can_resume_and_close_on_different_workers():
     runner = MLXLlamaRunner()
     runner.llama = MagicMock()
     closed = []
+    model_threads = []
 
     def responses(*args):
         try:
+            model_threads.append(threading.get_ident())
             yield ModelEvent.text_delta("first")
+            model_threads.append(threading.get_ident())
             yield ModelEvent.text_delta("second")
         finally:
+            model_threads.append(threading.get_ident())
             closed.append(True)
 
     runner.llama.stream_model_turn = responses
@@ -375,8 +379,11 @@ def test_mlx_runner_stream_can_resume_and_close_on_different_workers():
         assert second.submit(next, stream).result(timeout=2).text == "second"
         second.submit(stream.close).result(timeout=2)
     assert closed == [True]
+    assert len(set(model_threads)) == 1
     assert runner._request_lock.acquire(blocking=False)
     runner._request_lock.release()
+    runner.cleanup()
+    assert runner._worker is None
 
 
 @pytest.mark.parametrize("markup", ["<tool_call>", "</tool_call>"])

@@ -2,6 +2,8 @@
 
 import itertools
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +35,8 @@ from agents.architectures.llama.qwen_small_m import (
     tune_small_m,
 )
 from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
+from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+from agents.models.tool_calling import ModelEvent, ModelRequestConfig
 
 
 @pytest.fixture
@@ -254,6 +258,41 @@ def test_generator_close_invalidates_cache(small_target):
     assert decoder._cached_state is None
     assert decoder._cached_tokens == ()
     assert decoder.target.records == {}
+
+
+def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+        project_ctx=lambda h: h,
+        append_ctx=lambda *_: None,
+        select_block=lambda *_, cap, **kwargs: (mx.zeros((cap,), dtype=mx.int32), None, None),
+    )
+    decoder = DFlashDecoder(model, SimpleNamespace(eos_token_ids=set()), drafter)
+    runner = MLXLlamaRunner()
+
+    def events(*args):
+        with closing(decoder.generate([1, 2], max_tokens=4)) as tokens:
+            for token in tokens:
+                yield ModelEvent.text_delta(str(token))
+
+    runner._stream_model_turn = events
+    stream = runner.stream_model_turn([], [], ModelRequestConfig())
+    try:
+        with (
+            ThreadPoolExecutor(max_workers=1) as first,
+            ThreadPoolExecutor(max_workers=1) as second,
+        ):
+            assert first.submit(next, stream).result(timeout=10).text == "0"
+            assert second.submit(next, stream).result(timeout=10).text == "0"
+            second.submit(stream.close).result(timeout=10)
+        assert decoder._cached_state is None
+        assert len(list(runner.stream_model_turn([], [], ModelRequestConfig()))) == 4
+    finally:
+        stream.close()
+        runner.cleanup()
 
 
 @pytest.mark.parametrize("top_k", [0, 1, 2, 3])
