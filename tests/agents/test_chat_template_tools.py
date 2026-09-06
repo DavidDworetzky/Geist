@@ -17,6 +17,13 @@ class SearchArguments(BaseModel):
     max_results: int = 3
 
 
+def test_leading_prose_streams_before_malformed_tool_failure():
+    parser = ToolResponseStream({"safe": "web.search"})
+    assert parser.feed("Working. ") == "Working."
+    with pytest.raises(ValueError, match="invalid tool-call JSON"):
+        parser.feed("<tool_call>{bad}</tool_call>")
+
+
 def search_tool() -> ToolDefinition:
     return ToolDefinition(
         name="web.search",

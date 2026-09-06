@@ -388,7 +388,7 @@ def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
     with pytest.raises(ValueError, match="tool"):
         for event in stream:
             visible.append(event.text)
-    assert "".join(visible) == "Hello. "
+    assert "".join(visible) == "Hello."
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():

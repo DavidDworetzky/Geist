@@ -258,7 +258,7 @@ class ToolResponseStream:
             opening = remaining.find(_TOOL_CALL_OPEN)
             closing = remaining.find(_TOOL_CALL_CLOSE)
             if closing >= 0 and (opening < 0 or closing < opening):
-                raise ValueError("Model returned unexpected closing tool-call markup")
+                raise ValueError("Model returned malformed tool-call markup")
             if opening >= 0:
                 visible.append(remaining[:opening])
                 self._tool = [_TOOL_CALL_OPEN]
@@ -271,6 +271,7 @@ class ToolResponseStream:
             break
 
         text = "".join(visible)
+        # Leading whitespace must never enter the deferred inter-chunk buffer.
         if not self._emitted:
             text = text.lstrip()
         stripped = text.rstrip()

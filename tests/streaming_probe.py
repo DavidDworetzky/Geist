@@ -1,7 +1,7 @@
 """A gated model source with the real local-agent/MLX adapter stack above it."""
 
 from collections.abc import Iterator
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
@@ -11,6 +11,9 @@ from agents.local_agent import LocalAgent
 
 class StreamingProbe:
     def __init__(self) -> None:
+        # Process-global probe: Playwright must keep workers=1 / fullyParallel=false.
+        self._lock = Lock()
+        self._generation = 0
         self.active = False
         self.stage = 0
         self.closed = False
@@ -18,9 +21,14 @@ class StreamingProbe:
         self.gates = [Event(), Event()]
 
     def reset(self) -> None:
-        self.active = False
-        for gate in self.gates:
-            gate.set()
+        with self._lock:
+            self._generation += 1
+            self.active = False
+            self.stage = 0
+            self.closed = False
+            self.tools_seen = False
+            for gate in self.gates:
+                gate.set()
 
     def start(self) -> None:
         self.reset()
@@ -40,20 +48,28 @@ class StreamingProbe:
         }
 
     def segments(self, tools: list[dict[str, Any]] | None) -> Iterator[str]:
-        self.tools_seen = bool(tools)
-        if not self.tools_seen:
+        if not tools:
             raise AssertionError("The streaming regression must exercise the tool-enabled path")
-        gates = self.gates
+        with self._lock:
+            self.tools_seen = True
+            gates, generation = self.gates, self._generation
         try:
             for index, segment in enumerate(("STREAM-FIRST", " STREAM-SECOND", " STREAM-FINAL")):
-                self.stage = index + 1
+                with self._lock:
+                    if generation != self._generation:
+                        return
+                    self.stage = index + 1
                 yield segment
-                if index < len(gates) and not gates[index].wait(timeout=15):
+                # Both SSE iteration and synchronous control routes use workers;
+                # never put this blocking wait on an async event-loop thread.
+                if index < len(gates) and not gates[index].wait(timeout=10):
                     raise TimeoutError(
                         "Browser did not receive a chunk before releasing generation"
                     )
         finally:
-            self.closed = True
+            with self._lock:
+                if generation == self._generation:
+                    self.closed = True
 
     def agent(self) -> LocalAgent:
         backend = ProbeMLXBackend(self)
@@ -62,6 +78,7 @@ class StreamingProbe:
         runner.model_id = backend.model_id
         runner.implementation = "mlx_lm"
         runner.supports_native_tool_calling = True
+        # Bypass weight loading only; retain production agent/runner/adapter dispatch.
         agent = LocalAgent.__new__(LocalAgent)
         agent.runner = runner
         agent.runner_type = "mlx_llama"

@@ -102,3 +102,15 @@ test('leaves connecting and surfaces a safe model failure', async ({ page }) => 
   await expect(page.getByRole('status', { name: 'Geist is responding' })).toBeHidden();
   await expect(messageInput).toBeEnabled();
 });
+
+test('preserves streamed prose after a malformed tool failure and reload', async ({ page }) => {
+  await page.getByPlaceholder('Type your message...').fill('Trigger failure after prose');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText(backendFailureMessage, { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
+  await expect(page).toHaveURL(/\/chat\/\d+$/);
+  await page.reload();
+  await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
+  await expect(page.getByText('Turn status: failed', { exact: true })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('<tool_call>');
+});

@@ -26,6 +26,12 @@ class BrowserE2EAgent:
         )
         if prompt == "Trigger backend failure":
             raise RuntimeError("browser e2e injected failure")
+        if prompt == "Trigger failure after prose":
+            from agents.architectures.chat_template_tools import ToolResponseStream
+
+            parser = ToolResponseStream({"safe": "web.search"})
+            yield ModelEvent.text_delta(parser.feed("Working on it. "))
+            parser.feed("<tool_call>{bad}</tool_call>")
         if prompt == "Remember cobalt.":
             response = "I will remember cobalt."
         elif prompt == "What should you remember?":
@@ -92,6 +98,8 @@ def run_server() -> None:
         return probe.state()
 
     if web_dir := os.getenv("GEIST_E2E_WEB_DIR"):
+        # Register probe controls before the SPA catch-all, or it shadows them.
+        app.state.web_dir = web_dir
         geist_main.install_spa(app, web_dir)
 
     uvicorn.run(

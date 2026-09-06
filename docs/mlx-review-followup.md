@@ -77,3 +77,27 @@ historical machine commands are intentionally retained as research provenance.
 The opt-in n-gram index is O(prompt + output tokens), not an unbounded cross-run
 cache. Review tooling permissions were not widened to bypass denied commands;
 Docker/native evidence and the newly enabled CI provide verification instead.
+
+PR #357 integration validation: **88 passed** in the focused Docker runner,
+artifact, policy, n-gram and orchestrator suites; **218 passed** in the native
+Metal, runner, artifact, policy and n-gram suites after the parent merge.
+
+## PR #358: stream failure persistence
+
+Accepted: save already-emitted prose on malformed tool output, disconnect, and
+cancel, exactly once with failed/cancelled status and no unvalidated tool calls.
+Completed turns remain authoritative and do not duplicate the emitted deltas.
+Use the same incremental parser with and without tools, and normalize malformed
+closing-marker errors. Probe reset now clears observable state and invalidates
+old producers so their cleanup cannot mark a new run closed. Gate waits are ten
+seconds, and comments explain worker isolation, constructor bypass and SPA route
+ordering. A browser regression checks failed-turn prose survives reload.
+
+Not adopted: swallowing the final parser mismatch would silently reconcile
+incompatible output after bytes were sent; it remains an explicit failure.
+Bare JSON responses still buffer until EOF for the established whole-response
+tool-call compatibility contract. That limitation is documented, not a claim of
+universal JSON streaming. The reported 'backend failed to start' copy is not the
+orchestrator's mid-stream error path: it already returns 'Chat completion failed'.
+Small explicit iterator cleanup and private-buffer white-box assertions remain
+intentional; neither needs a new abstraction or public parser API.
