@@ -276,3 +276,26 @@ Missing optional SendGrid/Twilio credentials produced adapter warnings, not chat
 or model failures. Hook results at that qualification point were green; the
 later foundational follow-up and its top-stack merge use the two documented
 baseline-only hook exceptions described above.
+
+### Final follow-up qualification
+
+After the worker reentrancy/cache-lock changes, profiling correction, tool-scope
+enforcement, and remaining XML marker guards, production head `20ee353` passed:
+
+- The same integrated Docker selection above: **619 passed, 7 skipped**.
+- One native invocation combining the listed Metal/runner/artifact/policy/ngram
+  suites with `test_mlx_tool_live.py`: **241 passed**, including all three
+  real-Qwen tests and the independent-runner/public-load regression.
+- Full fresh-database Chrome E2E: **11 passed**.
+- Real native Chrome: incremental text while generation is active, cancellation,
+  reopening the partial persisted chat, successful follow-up, and saved router
+  opt-in/opt-out all passed again, with no browser errors. Both Docker and native
+  authenticated chat routes returned HTTP 200. This loaded-app smoke observed
+  22.55 seconds to first visible text; it is not a controlled latency benchmark.
+- Installed-dependency mypy on runner, app, parser, and orchestrator: **passed**.
+
+The new sensitive-route regression explicitly enables routing so it remains
+meaningful after #359 changes the default to off. Its initial integrated failure
+was a fixture assumption, not an availability-guard failure. No production
+default was changed to satisfy the test. The earlier 42-test frontend pass is
+unchanged; this follow-up contains no frontend production edits.
