@@ -70,6 +70,8 @@ def test_partial_verify_recovers_recurrent_and_attention_state(small_target, kee
     mx.eval(verified)
     target.rollback(actual_cache, keep)
     for expected, actual in zip(expected_cache, actual_cache, strict=False):
+        for name in ("offset", "lengths", "left_padding"):
+            assert getattr(expected, name, None) == getattr(actual, name, None)
         for a, b in zip(expected.state, actual.state, strict=False):
             assert bool(mx.allclose(a, b, atol=3e-5, rtol=3e-4).item())
     next_id = mx.array([[12]])
@@ -85,6 +87,56 @@ def test_hidden_capture_preserves_target_forward(small_target):
     actual, hidden = target.forward(ids, model.make_cache(), capture=True)
     assert hidden.shape == (1, 4, 256)
     assert bool(mx.array_equal(expected, actual).item())
+
+
+@pytest.mark.parametrize("count", [1, 2, 8])
+@pytest.mark.parametrize("eos", [False, True])
+def test_installed_stream_generate_tail_and_cache_contract(small_target, count, eos):
+    from mlx_lm import stream_generate
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
+
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    tokenizer = TokenizerWrapper(
+        SimpleNamespace(
+            decode=lambda tokens: "x" * len(tokens),
+            clean_up_tokenization_spaces=False,
+            eos_token_id=0 if eos else 127,
+            get_vocab=lambda: {},
+            chat_template=None,
+        )
+    )
+    cache = model.make_cache()
+    responses = list(
+        stream_generate(model, tokenizer, [1, 2, 3], max_tokens=count, prompt_cache=cache)
+    )
+    expected = 1 if eos else count
+    assert [response.token for response in responses] == [0] * expected
+    assert "".join(response.text for response in responses) == ("" if eos else "x" * count)
+    assert responses[-1].finish_reason == ("stop" if eos else "length")
+    assert all(item.offset == 3 + expected for item in cache if hasattr(item, "offset"))
+
+
+def test_rollback_rejects_incomplete_attention_trim(small_target, monkeypatch):
+    model, target = small_target
+    cache = model.make_cache()
+    logits, _ = target.forward(mx.array([[1, 2, 3]]), cache, capture=True)
+    mx.eval(logits)
+    attention = next(item for item in cache if hasattr(item, "offset"))
+    monkeypatch.setattr(attention, "trim", lambda count: count - 1)
+    with pytest.raises(RuntimeError, match="roll back"):
+        target.rollback(cache, 1)
+
+
+def test_speculative_capture_rejects_padded_recurrent_cache(small_target):
+    from agents.architectures.llama.qwen_speculative import captured_delta
+
+    model, _ = small_target
+    layer = next(layer for layer in model.model.layers if layer.is_linear)
+    cache = model.make_cache()[model.model.ssm_idx]
+    cache.left_padding = mx.array([0])
+    with pytest.raises(ValueError, match="single sequence"):
+        captured_delta(layer.linear_attn, mx.zeros((1, 2, 128)), None, cache)
 
 
 @pytest.mark.parametrize("rows", [6, 7, 8])
@@ -204,16 +256,21 @@ def test_generator_close_invalidates_cache(small_target):
     assert decoder.target.records == {}
 
 
-@pytest.mark.parametrize("top_k", [0, 1, 2, 4])
-def test_nucleus_temperature_order_matches_mlx_lm(top_k):
-    from mlx_lm.sample_utils import apply_top_k, apply_top_p
+@pytest.mark.parametrize("top_k", [0, 1, 2, 3])
+def test_nucleus_temperature_order_matches_mlx_lm(top_k, monkeypatch):
+    from mlx_lm import sample_utils
 
     logits = mx.array([[1.0, 1.5, -1.0, 0.0]])
     logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-    filtered = apply_top_p(logprobs, 0.8)
-    if 0 < top_k < logits.shape[-1]:
-        filtered = apply_top_k(filtered, top_k)
-    expected = mx.softmax(filtered / 0.7, axis=-1)
+    captured = []
+
+    def capture(logits, temp):
+        captured.append(mx.softmax(logits / temp, axis=-1))
+        return mx.argmax(logits, axis=-1)
+
+    monkeypatch.setattr(sample_utils, "categorical_sampling", capture)
+    sample_utils.make_sampler(temp=0.7, top_p=0.8, top_k=top_k)(logprobs)
+    expected = captured[0]
     assert bool(mx.array_equal(target_probabilities(logits, 0.7, 0.8, top_k), expected).item())
 
 

@@ -428,16 +428,22 @@ class ChatOrchestrator:
                     return
 
                 completed_turn = None
-                for event in backend.stream_model_turn(run.model_messages, tools, config):
-                    if cancellation.is_set():
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
-                    if not isinstance(event, ModelEvent):
-                        raise TypeError("Model backend returned an invalid event")
-                    if event.kind == "text_delta" and event.text:
-                        yield ChatStreamEvent("delta", {"text": event.text})
-                    elif event.kind == "turn_complete":
-                        completed_turn = event.turn
+                responses = backend.stream_model_turn(run.model_messages, tools, config)
+                try:
+                    for event in responses:
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+                        if not isinstance(event, ModelEvent):
+                            raise TypeError("Model backend returned an invalid event")
+                        if event.kind == "text_delta" and event.text:
+                            yield ChatStreamEvent("delta", {"text": event.text})
+                        elif event.kind == "turn_complete":
+                            completed_turn = event.turn
+                finally:
+                    close = getattr(responses, "close", None)
+                    if callable(close):
+                        close()
 
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")

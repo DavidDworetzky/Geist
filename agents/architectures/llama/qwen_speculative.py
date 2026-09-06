@@ -26,7 +26,11 @@ class DeltaInputs:
 
 def captured_delta(layer, inputs, mask, cache):
     batch, width, _ = inputs.shape
-    if layer.sharding_group is not None or cache.lengths is not None:
+    if (
+        layer.sharding_group is not None
+        or cache.lengths is not None
+        or cache.left_padding is not None
+    ):
         raise ValueError("Speculative Qwen requires an unsharded single sequence")
     qkv = layer.in_proj_qkv(inputs)
     z = layer.in_proj_z(inputs).reshape(batch, width, layer.num_v_heads, layer.head_v_dim)
@@ -124,7 +128,10 @@ class QwenSpeculativeTarget:
         if rejected:
             for index, (layer, state) in enumerate(zip(self.body.layers, cache, strict=False)):
                 if not layer.is_linear:
-                    state.trim(rejected)
+                    if state.trim(rejected) != rejected:
+                        raise RuntimeError(
+                            "Attention cache could not roll back every rejected token"
+                        )
                     continue
                 r = self.records[index]
                 gdn = layer.linear_attn

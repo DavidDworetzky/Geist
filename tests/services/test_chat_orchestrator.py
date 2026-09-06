@@ -437,6 +437,37 @@ def test_cancel_ack_persists_even_when_browser_closes_stream():
     assert not controls.cancel(run_id, workspace_id=1)
 
 
+def test_disconnect_explicitly_closes_backend_even_if_iterator_is_retained():
+    closed = []
+
+    def responses():
+        try:
+            yield ModelEvent.text_delta("visible")
+            yield ModelEvent.turn_complete(ModelTurn(text="visible"))
+        finally:
+            closed.append(True)
+
+    retained = responses()
+    backend = SimpleNamespace(
+        supports_native_tool_calling=False,
+        stream_model_turn=lambda *args: retained,
+    )
+    stream = ChatOrchestrator(
+        ToolRegistry(), history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1)
+    ).stream(
+        backend=backend,
+        prompt="hello",
+        workspace_id=1,
+        chat_id=None,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+    while next(stream).event != "delta":
+        pass
+    stream.close()
+    assert closed == [True]
+
+
 def test_backend_without_native_tools_receives_empty_registry():
     backend = ScriptedBackend([ModelTurn(text="local answer")])
     backend.supports_native_tool_calling = False

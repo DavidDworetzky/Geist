@@ -14,6 +14,9 @@ from agents.architectures.llama.dflash_model import DFlashConfig, DFlashDraftMod
 from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
 
 
+MAX_RETAINED_PREFIX_TOKENS = 32768
+
+
 def load_drafter(path: str, target, bits: int = 8):
     root = Path(path).expanduser()
     raw = json.loads((root / "config.json").read_text())
@@ -74,6 +77,7 @@ def sampled_accept(logits, proposals, candidate_ids, q_rows, temperature, top_p,
     )
     accepted = int(mx.cumprod(matches.astype(mx.int32)).sum().item())
     distribution = p[-1] if accepted == count else mx.maximum(p[accepted] - q[accepted], 0)
+    distribution = mx.where(mx.sum(distribution) > 0, distribution, p[accepted])
     replacement = int(mx.random.categorical(mx.log(distribution)).item())
     return accepted, replacement
 
@@ -227,8 +231,9 @@ class DFlashDecoder:
                         if token in self.tokenizer.eos_token_ids:
                             break
                     pending = output[-1]
-                self._cached_tokens = tuple(prompt_tokens + output[:-1])
-                self._cached_state = (cache, draft_cache, context)
+                if len(prompt_tokens) + len(output) - 1 <= MAX_RETAINED_PREFIX_TOKENS:
+                    self._cached_tokens = tuple(prompt_tokens + output[:-1])
+                    self._cached_state = (cache, draft_cache, context)
             finally:
                 mx.synchronize(stream)
                 decode_seconds = time.perf_counter() - decode_started
