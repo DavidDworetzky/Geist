@@ -346,3 +346,8 @@ readiness-only follow-up was attempted twice, but permission-review requests
 timed out before process startup; this final native rerun is **blocked**, not a
 pass. No package installation, secret-file access, or user-UI replacement was
 used to work around that limitation.
+
+After the additional owner-failure/default-model follow-up, integrated production
+head `684b0dd` passed the same Docker selection: **638 passed, 7 skipped**.
+Installed-project mypy on the app and models endpoint also passed. The native
+restart limitation remains unchanged; no new Metal/decoder behavior was added.
