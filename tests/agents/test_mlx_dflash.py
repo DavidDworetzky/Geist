@@ -1,7 +1,10 @@
 """Native Metal checks for speculative state recovery and small-row matmul."""
 
 import itertools
+import platform
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +40,8 @@ from agents.architectures.llama.qwen_small_m import (
 )
 from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
 from agents.architectures.llama.speculation_policy import SpeculationPolicy
+from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+from agents.models.tool_calling import ModelEvent, ModelRequestConfig
 
 
 @pytest.fixture
@@ -106,11 +111,18 @@ def test_compiled_verifier_restores_state_across_different_widths(small_target, 
     assert bool(mx.allclose(expected, actual, atol=3e-5, rtol=3e-4).item())
 
 
+def _macos_before_15() -> bool:
+    major = platform.mac_ver()[0].split(".")[0]
+    return major.isdigit() and int(major) < 15
+
+
 @pytest.mark.parametrize(
     "variant",
     ["pad", "fp16_native", "relaxed", "fast", "half_acc", "chunked_half_acc", "affine_fold"],
 )
 def test_laboratory_projections_have_finite_bounded_errors(variant):
+    if variant == "relaxed" and _macos_before_15():
+        pytest.skip("Metal math mode `relaxed` requires macOS 15")
     mx.random.seed(42)
     layer = nn.Linear(512, 4096, bias=False)
     layer.set_dtype(mx.bfloat16)
@@ -152,6 +164,45 @@ def test_lab_source_rewrites_reject_missing_or_ambiguous_targets(source):
 
     with pytest.raises(ValueError, match="source drift"):
         _replace_once(source, "match", "replacement")
+
+
+@pytest.mark.parametrize("split_k", [0, 3, 32])
+def test_lab_rejects_invalid_split_before_constructing_kernel(split_k, monkeypatch):
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=64, bits=4)
+    monkeypatch.setattr(
+        "agents.architectures.llama.qwen_kernel_lab.experimental_kernel",
+        lambda *args: pytest.fail("Invalid split must not construct a kernel"),
+    )
+    with pytest.raises(ValueError, match="split-K"):
+        lab_matmul(layer, mx.ones((8, 512), dtype=mx.bfloat16), "fast", split_k=split_k)
+
+
+def test_benchmark_kernel_conflict_fails_before_loading_weights(monkeypatch, capsys):
+    from scripts import benchmark_mlx_dflash as benchmark
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "benchmark",
+            "--weights-dir",
+            "unused",
+            "--drafter-dir",
+            "unused",
+            "--small-m",
+            "--lab-variant",
+            "pad",
+        ],
+    )
+    monkeypatch.setattr(
+        benchmark, "load", lambda *args: pytest.fail("Must validate before loading")
+    )
+    with pytest.raises(SystemExit) as error:
+        benchmark.main()
+    assert error.value.code == 2
+    assert "Select either --small-m or --lab-variant" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("rows", [1, 8, 64, 257])
@@ -521,6 +572,48 @@ def test_adaptive_native_step_respects_eos_and_close(small_target, cancel):
         assert decoder._cached_tokens == (1, 2, 0)
     assert decoder.target.records == {}
     assert decoder.last_stats["profile_seconds"]["native"] > 0
+
+
+def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
+    model, _ = small_target
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+        project_ctx=lambda h: h,
+        append_ctx=lambda *_: None,
+        select_block=lambda *_, cap, **kwargs: (mx.zeros((cap,), dtype=mx.int32), None, None),
+    )
+    runner = MLXLlamaRunner()
+
+    def load():
+        target = TextModel(model.args)
+        target.eval()
+        target.lm_head.weight = mx.zeros_like(target.lm_head.weight)
+        return DFlashDecoder(target, SimpleNamespace(eos_token_ids=set()), drafter)
+
+    with runner._request_lock:
+        decoder = runner._on_worker(load)
+
+    def events(*args):
+        with closing(decoder.generate([1, 2], max_tokens=4)) as tokens:
+            for token in tokens:
+                yield ModelEvent.text_delta(str(token))
+
+    runner._stream_model_turn = events
+    stream = runner.stream_model_turn([], [], ModelRequestConfig())
+    try:
+        with (
+            ThreadPoolExecutor(max_workers=1) as first,
+            ThreadPoolExecutor(max_workers=1) as second,
+        ):
+            assert first.submit(next, stream).result(timeout=10).text == "0"
+            assert second.submit(next, stream).result(timeout=10).text == "0"
+            second.submit(stream.close).result(timeout=10)
+        assert decoder._cached_state is None
+        assert len(list(runner.stream_model_turn([], [], ModelRequestConfig()))) == 4
+    finally:
+        stream.close()
+        runner.cleanup()
 
 
 @pytest.mark.parametrize("top_k", [0, 1, 2, 3])

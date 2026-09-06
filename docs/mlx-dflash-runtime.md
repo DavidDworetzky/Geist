@@ -73,6 +73,21 @@ budget and elapsed time. Target state and deferred drafter context survive
 the switch so exact-prefix follow-ups can still reuse their caches. The gate
 reduces low-acceptance regressions; it does not eliminate them.
 
+Each decoder retains at most 32,768 prefix tokens between requests, and cleanup
+releases its cached state. This does not reduce the generation/context limit.
+Prefix reuse is a single-slot optimization: interposed requests with a different
+system prefix, including an enabled intent classifier, can evict conversation
+state. The top of this stack disables that extra classifier pass by default;
+explicit opt-in does not promise the same cache-hit rate as direct chat.
+
+Only one streamed request may be active per runner. Model work and generator
+cleanup stay on one dedicated worker because Metal streams are thread-local.
+Consumer backpressure pauses generation; another stream fails as busy instead
+of waiting forever on an interleaved consumer. Load and cleanup wait for the
+active request to close. Tool markup stays private, but preceding ordinary prose
+can be visible before a later protocol error; the streaming follow-up persists
+that prose with a failed/cancelled status.
+
 ## Correctness and limitations
 
 Greedy decoding accepts only a prefix matching the target verifier's argmax.
