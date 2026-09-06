@@ -12,11 +12,11 @@ Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
 and OpenRouter's GPT-6.1 Terra, Ling 3.1 Flash, Fireworks Ember-1, Claude Opus
-5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8
-Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed. For
-models with published weights, their total resident weights make an in-process
-laptop load impractical even when their mixture-of-experts active-parameter
-count is much smaller.
+5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen
+3.8 Max 0902, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
+intentionally server-backed. For models with published weights, their total
+resident weights make an in-process laptop load impractical even when their
+mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -336,6 +336,31 @@ The exact Novita endpoint appears in OpenRouter's
 retention and not using prompts for training. Re-check the endpoint inventory
 and provider policy before confidential use. OpenRouter does not retain prompt
 or response content unless logging is explicitly enabled.
+
+## OpenRouter-hosted Qwen3.8 Max 0902
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+[`qwen/qwen3.8-max-0902`](https://openrouter.ai/qwen/qwen3.8-max-0902).
+OpenRouter replaced the retired
+`qwen/qwen3.8-max` route with this dated snapshot in September 2026; the old
+model page redirects to the new snapshot and Geist retains its request
+contract as a compatibility alias. The model accepts
+text, image, and video input, has a 1,000,000-token context window and
+131,072-token output limit, and supports streaming, native function calling,
+and JSON-schema structured outputs. Reasoning is mandatory; Geist sends the
+documented default `xhigh` effort and omits the unsupported `n` parameter.
+OpenRouter lists the current price as $2 per million input tokens, $6 per
+million output tokens, and $0.25 per million cached input tokens.
+
+The route currently has one Alibaba endpoint. OpenRouter's
+[provider policy](https://openrouter.ai/docs/guides/privacy/provider-logging)
+reports that Alibaba does not train on requests, but retains prompts for an
+unspecified period, and the endpoint is absent from OpenRouter's
+[ZDR list](https://openrouter.ai/api/v1/endpoints/zdr) as of September 6, 2026.
+Do not send confidential workloads to this model. Alibaba's
+[public model listing](https://www.alibabacloud.com/help/en/model-studio/models)
+does not publish a parameter count for this proprietary model, so the catalog
+leaves parameter fields unset.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
