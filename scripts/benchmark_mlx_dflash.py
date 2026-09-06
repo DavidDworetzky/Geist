@@ -57,8 +57,14 @@ def main() -> None:
     )
     parser.add_argument("--suite", choices=("standard", "extended"), default="standard")
     parser.add_argument("--caps", nargs="+", type=int, default=[7])
-    parser.add_argument("--small-m", action="store_true")
-    parser.add_argument("--autotune", action="store_true")
+    parser.add_argument(
+        "--small-m", action="store_true", help="Install qualified small-row Metal projections."
+    )
+    parser.add_argument(
+        "--autotune",
+        action="store_true",
+        help="Time and select small-row projection kernels before trials.",
+    )
     parser.add_argument(
         "--lab-variant",
         help="Use a separately qualified experimental projection variant.",
@@ -149,7 +155,13 @@ def main() -> None:
     )
     parser.add_argument("--experimental-block-size", type=int, choices=(8, 12, 16, 24, 32))
     parser.add_argument("--block-sweep", nargs="+", type=int, choices=(8, 12, 16, 24, 32))
-    parser.add_argument("--split-k", type=int, choices=(1, 2, 4, 8, 16), default=8)
+    parser.add_argument(
+        "--split-k",
+        type=int,
+        choices=(1, 2, 4, 8, 16),
+        default=8,
+        help="Number of K-dimension partitions for small-row projections.",
+    )
     parser.add_argument("--half-operands", action="store_true")
     parser.add_argument("--column-tiles", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--stage-stride", type=int, choices=(8, 9, 10, 12, 16), default=8)

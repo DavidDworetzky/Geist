@@ -102,3 +102,12 @@ historical machine commands are intentionally retained as research provenance.
 The opt-in n-gram index is O(prompt + output tokens), not an unbounded cross-run
 cache. Review tooling permissions were not widened to bypass denied commands;
 Docker/native evidence and the newly enabled CI provide verification instead.
+
+Third-review follow-up: explicit profiling now fences native hidden/cache state
+even after calibration; default unprofiled fallback still avoids that extra
+fence. A real-Metal regression asserts zero such fences in ordinary fallback,
+one per token in profiling, and no re-calibration. Added help for the three
+documented hands-on flags (`--small-m`, `--autotune`, `--split-k`). Native
+Metal/policy follow-up: **165 passed**. Unsupported macOS 14 `relaxed` experiments
+continue to report Metal's capability error rather than silently changing the
+requested math variant; this is an explicit research mode, not the default path.

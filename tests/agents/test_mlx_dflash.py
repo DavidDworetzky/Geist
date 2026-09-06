@@ -574,6 +574,45 @@ def test_adaptive_native_step_respects_eos_and_close(small_target, cancel):
     assert decoder.last_stats["profile_seconds"]["native"] > 0
 
 
+@pytest.mark.parametrize("profile", [False, True])
+def test_profiled_fallback_fences_hidden_state_without_recalibration(
+    small_target, monkeypatch, profile
+):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    initialize = SpeculationPolicy.__init__
+
+    def fallback_only(policy):
+        initialize(policy)
+        policy.native_seconds = [1.0] * 4
+        policy.fallback = True
+
+    monkeypatch.setattr(SpeculationPolicy, "__init__", fallback_only)
+    monkeypatch.setattr(
+        SpeculationPolicy,
+        "observe_native",
+        lambda *args: pytest.fail("fallback must not recalibrate"),
+    )
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+    )
+    decoder = DFlashDecoder(
+        model, SimpleNamespace(eos_token_ids=set()), drafter, adaptive=True, profile=profile
+    )
+    evaluate = mx.eval
+    fences = []
+
+    def record_eval(*args, **kwargs):
+        if len(args) == 2 and getattr(args[0], "shape", None) == (1, 1, 256):
+            fences.append(True)
+        return evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(mx, "eval", record_eval)
+    assert list(decoder.generate([1, 2], max_tokens=4)) == [0] * 4
+    assert len(fences) == (3 if profile else 0)
+
+
 def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
     model, _ = small_target
     drafter = SimpleNamespace(
