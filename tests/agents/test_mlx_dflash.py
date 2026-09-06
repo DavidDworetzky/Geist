@@ -1,6 +1,7 @@
 """Native Metal checks for speculative state recovery and small-row matmul."""
 
 import itertools
+import platform
 import sys
 from types import SimpleNamespace
 
@@ -106,11 +107,18 @@ def test_compiled_verifier_restores_state_across_different_widths(small_target, 
     assert bool(mx.allclose(expected, actual, atol=3e-5, rtol=3e-4).item())
 
 
+def _macos_before_15() -> bool:
+    major = platform.mac_ver()[0].split(".")[0]
+    return major.isdigit() and int(major) < 15
+
+
 @pytest.mark.parametrize(
     "variant",
     ["pad", "fp16_native", "relaxed", "fast", "half_acc", "chunked_half_acc", "affine_fold"],
 )
 def test_laboratory_projections_have_finite_bounded_errors(variant):
+    if variant == "relaxed" and _macos_before_15():
+        pytest.skip("Metal math mode `relaxed` requires macOS 15")
     mx.random.seed(42)
     layer = nn.Linear(512, 4096, bias=False)
     layer.set_dtype(mx.bfloat16)
