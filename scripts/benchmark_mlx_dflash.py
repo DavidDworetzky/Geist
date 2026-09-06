@@ -42,10 +42,16 @@ PROMPTS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights-dir", required=True)
+    parser.add_argument(
+        "--weights-dir",
+        help="Local target checkpoint directory; never downloads weights.",
+        required=True,
+    )
     parser.add_argument("--drafter-dir", required=True)
     parser.add_argument("--max-tokens", type=int, default=256)
-    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument(
+        "--trials", help="Measured trials after an unreported warm-up.", type=int, default=3
+    )
     parser.add_argument(
         "--prompts", nargs="+", choices=list(PROMPTS), default=["code", "math", "chat"]
     )
@@ -55,6 +61,7 @@ def main() -> None:
     parser.add_argument("--autotune", action="store_true")
     parser.add_argument(
         "--lab-variant",
+        help="Use a separately qualified experimental projection variant.",
         choices=(
             "pad",
             "fp16_native",
@@ -65,20 +72,73 @@ def main() -> None:
             "affine_fold",
         ),
     )
-    parser.add_argument("--pad-rows", type=int, default=16)
-    parser.add_argument("--compile-verifier", action="store_true")
-    parser.add_argument("--compile-sweep", action="store_true")
-    parser.add_argument("--warm-verifier-widths", action="store_true")
-    parser.add_argument("--copy-window", type=int, default=0)
-    parser.add_argument("--copy-sweep", nargs="+", type=int)
-    parser.add_argument("--adaptive", action="store_true")
-    parser.add_argument("--adaptive-sweep", action="store_true")
-    parser.add_argument("--expanded-mlp", choices=("bf16", "fp16"))
-    parser.add_argument("--expanded-budget-gb", type=float, default=36)
-    parser.add_argument("--expanded-min-rows", type=int, default=64)
-    parser.add_argument("--expanded-max-rows", type=int, default=256)
-    parser.add_argument("--expanded-sweep", action="store_true")
-    parser.add_argument("--prompt-file", type=Path)
+    parser.add_argument(
+        "--pad-rows",
+        help="Minimum row count for the padded native projection experiment.",
+        type=int,
+        default=16,
+    )
+    parser.add_argument(
+        "--compile-verifier", help="Use the opt-in compiled target verifier.", action="store_true"
+    )
+    parser.add_argument(
+        "--compile-sweep",
+        help="Compare compiled and ordinary verifier routes.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--warm-verifier-widths",
+        help="Warm verification widths before collecting timings.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--copy-window",
+        help="Maximum greedy copy proposal length; zero disables copying.",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--copy-sweep", help="Compare these independent copy-window sizes.", nargs="+", type=int
+    )
+    parser.add_argument(
+        "--adaptive",
+        help="Enable the per-request native/speculative break-even policy.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--adaptive-sweep", help="Compare adaptive and non-adaptive decoding.", action="store_true"
+    )
+    parser.add_argument(
+        "--expanded-mlp",
+        help="Enable the opt-in dense MLP weight experiment.",
+        choices=("bf16", "fp16"),
+    )
+    parser.add_argument(
+        "--expanded-budget-gb",
+        help="Maximum additional decimal GB for expanded MLP weights.",
+        type=float,
+        default=36,
+    )
+    parser.add_argument(
+        "--expanded-min-rows",
+        help="Minimum row count routed to expanded MLP weights.",
+        type=int,
+        default=64,
+    )
+    parser.add_argument(
+        "--expanded-max-rows",
+        help="Maximum row count routed to expanded MLP weights.",
+        type=int,
+        default=256,
+    )
+    parser.add_argument(
+        "--expanded-sweep",
+        help="Compare expanded MLP routing enabled and disabled.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--prompt-file", help="Read a custom benchmark prompt from this text file.", type=Path
+    )
     parser.add_argument("--packed", action="store_true")
     parser.add_argument("--wide-kernel", action="store_true")
     parser.add_argument("--direct-fragment", action="store_true")
@@ -99,6 +159,8 @@ def main() -> None:
     parser.add_argument("--drafter-bits", type=int, choices=(0, 4, 8), default=8)
     parser.add_argument("--output")
     args = parser.parse_args()
+    if args.lab_variant and args.small_m:
+        parser.error("Select either --small-m or --lab-variant")
     if args.suite == "extended":
         args.prompts = list(PROMPTS)
     if args.lab_variant and args.autotune:
@@ -123,8 +185,6 @@ def main() -> None:
     drafter.bind(model)
     wrappers += install_small_m(drafter) if args.small_m else []
     if args.lab_variant:
-        if args.small_m:
-            parser.error("Select either --small-m or --lab-variant")
         from agents.architectures.llama.qwen_kernel_lab import install_lab
 
         wrappers = install_lab(model, args.lab_variant, args.pad_rows)

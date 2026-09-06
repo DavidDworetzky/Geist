@@ -19,12 +19,23 @@ from agents.architectures.llama.qwen_kernel_lab import lab_matmul
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights-dir", required=True)
-    parser.add_argument("--rows", type=int, default=8)
-    parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--chain-length", type=int, default=8)
+    parser.add_argument(
+        "--weights-dir",
+        help="Local target checkpoint directory; never downloads weights.",
+        required=True,
+    )
+    parser.add_argument(
+        "--rows", help="Projection or verification row counts to measure.", type=int, default=8
+    )
+    parser.add_argument(
+        "--trials", help="Measured trials after an unreported warm-up.", type=int, default=3
+    )
+    parser.add_argument(
+        "--chain-length", help="Dependent projections per timing trial.", type=int, default=8
+    )
     parser.add_argument(
         "--variants",
+        help="Independent projection variants to compare.",
         nargs="+",
         default=[
             "native",
@@ -37,8 +48,15 @@ def main():
             "chunked_half_acc",
         ],
     )
-    parser.add_argument("--pad-rows", type=int, default=16)
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--pad-rows",
+        help="Minimum row count for the padded native projection experiment.",
+        type=int,
+        default=16,
+    )
+    parser.add_argument(
+        "--output", help="Write per-trial results as JSON to this path.", required=True
+    )
     args = parser.parse_args()
     model, _ = load(args.weights_dir)
     groups = {}
