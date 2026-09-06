@@ -126,3 +126,19 @@ tests/services/test_local_models.py tests/agents/test_mlx_llama_runner.py -q
 --tb=short -p no:cacheprovider`: **104 passed**. Ruff and installed-project mypy
 on `app/main.py` and the models endpoint pass. Bandit still reports only the
 unchanged script bind above; the same scoped hook exceptions apply to this fix.
+
+Fifth-review follow-up: the load owner now publishes failure even when agent
+factory/context/runner construction raises before `runner.load` can report it.
+Failure publication shares the cache-lock critical section that releases load
+ownership, so a busy follower cannot reset loading after the owner's last
+terminal write. Owner identity and terminal writes also use the same resolved
+default-model fallback as the factory and cache signature. The concurrency
+matrix now covers success/failure and explicit/default model IDs: **116 focused
+Docker tests passed** with the same selection above. Ruff and installed mypy
+pass; Bandit still reports only the documented pre-existing script bind.
+
+The proposed post-success logging race is not a busy path: after cache publication
+a same-signature follower obtains the cached agent and publishes ready itself.
+The constructor's earlier ready notification predates this work and supports
+direct LocalAgent users; consolidating all such lifecycle notifications is a
+separate contract change, not necessary to close the reviewed owner/follower bug.
