@@ -156,9 +156,12 @@ def test_stalled_local_cleanup_does_not_hold_shared_cache_lock(monkeypatch):
 
 @pytest.mark.parametrize("ready_before_publishing", [False, True])
 @pytest.mark.parametrize("owner_is_readiness", [False, True])
-def test_duplicate_readiness_start_follows_inflight_load_to_ready(
-    monkeypatch, ready_before_publishing, owner_is_readiness
+@pytest.mark.parametrize("load_fails", [False, True])
+@pytest.mark.parametrize("configured_model", ["target", ""])
+def test_duplicate_readiness_start_follows_inflight_load_to_terminal_state(
+    monkeypatch, ready_before_publishing, owner_is_readiness, load_fails, configured_model
 ):
+    model_id = configured_model or geist_main.DEFAULT_LOCAL_MODEL
     statuses = ModelLoadStatusRegistry()
     monkeypatch.setattr(models_endpoint, "model_load_status_registry", statuses)
     monkeypatch.setattr(geist_main, "model_load_status_registry", statuses)
@@ -167,7 +170,9 @@ def test_duplicate_readiness_start_follows_inflight_load_to_ready(
         geist_main, "_agent_cache_signatures", {key: None for key in geist_main.agent_cache}
     )
     monkeypatch.setattr(
-        geist_main, "_get_local_agent_factory_config", lambda: _factory_config("a", model="target")
+        geist_main,
+        "_get_local_agent_factory_config",
+        lambda: _factory_config("a", model=configured_model),
     )
     entered, release = threading.Event(), threading.Event()
     created = []
@@ -175,28 +180,36 @@ def test_duplicate_readiness_start_follows_inflight_load_to_ready(
     def create(_):
         created.append(True)
         if ready_before_publishing:
-            statuses.mark_ready("target")
+            statuses.mark_ready(model_id)
         entered.set()
         assert release.wait(5)
+        if load_fails:
+            raise ValueError("Initialization failed before runner.load")
         return object()
 
     monkeypatch.setattr(geist_main, "_create_local_agent", create)
-    statuses.mark_loading("target", "Loading")
+    statuses.mark_loading(model_id, "Loading")
     with ThreadPoolExecutor(max_workers=2) as requests:
         if owner_is_readiness:
-            first = requests.submit(models_endpoint._initialize_configured_local_runtime, "target")
+            first = requests.submit(models_endpoint._initialize_configured_local_runtime, model_id)
         else:
             first = requests.submit(geist_main.get_or_create_agent, AgentType.LOCALAGENT)
         try:
             assert entered.wait(2)
-            statuses.mark_loading("target", "Repeated readiness request")
-            second = requests.submit(models_endpoint._initialize_configured_local_runtime, "target")
+            statuses.mark_loading(model_id, "Repeated readiness request")
+            second = requests.submit(models_endpoint._initialize_configured_local_runtime, model_id)
             second.result(timeout=2)
-            assert statuses.get("target").state == "loading"
+            assert statuses.get(model_id).state == "loading"
         finally:
             release.set()
-        first.result(timeout=2)
-    assert statuses.get("target").state == "ready"
+        if load_fails and not owner_is_readiness:
+            with pytest.raises(ValueError, match="Initialization failed before runner.load"):
+                first.result(timeout=2)
+        else:
+            first.result(timeout=2)
+    assert statuses.get(model_id).state == ("failed" if load_fails else "ready")
+    if load_fails:
+        assert statuses.get(model_id).detail == "Initialization failed before runner.load"
     assert len(created) == 1
     assert geist_main._local_agent_loading_model_id is None
     assert not geist_main._local_agent_creation_lock.locked()

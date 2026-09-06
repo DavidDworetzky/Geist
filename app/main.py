@@ -180,6 +180,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             return requested_agent
 
         factory_config = _get_local_agent_factory_config()
+        model_id = factory_config.model or DEFAULT_LOCAL_MODEL
         signature = _local_agent_configuration_signature(factory_config)
 
         local_entries = [
@@ -201,13 +202,15 @@ def _get_or_create_local_agent(agent_type: AgentType):
         if not _local_agent_creation_lock.acquire(blocking=False):
             raise LocalModelBusyError(_local_agent_loading_model_id)
         try:
-            _local_agent_loading_model_id = factory_config.model
+            _local_agent_loading_model_id = model_id
             stale_agents = _clear_local_agent_cache()
-        except BaseException:
+        except BaseException as error:
             _local_agent_loading_model_id = None
             _local_agent_creation_lock.release()
+            model_load_status_registry.mark_failed(model_id, str(error))
             raise
 
+    load_error: BaseException | None = None
     try:
         for stale_agent in stale_agents:
             _phase_out_agent_safely(stale_agent)
@@ -215,8 +218,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
         new_agent = _create_local_agent(factory_config)
         with _agent_cache_lock:
             _set_local_agent_cache(new_agent, signature)
-            if factory_config.model:
-                model_load_status_registry.mark_ready(factory_config.model)
+            model_load_status_registry.mark_ready(model_id)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
             factory_config.model,
@@ -224,10 +226,15 @@ def _get_or_create_local_agent(agent_type: AgentType):
             factory_config.runner_type or "auto",
         )
         return new_agent
+    except BaseException as error:
+        load_error = error
+        raise
     finally:
         with _agent_cache_lock:
             _local_agent_loading_model_id = None
             _local_agent_creation_lock.release()
+            if load_error is not None:
+                model_load_status_registry.mark_failed(model_id, str(load_error))
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:
