@@ -77,3 +77,34 @@ Decoder-local retention constants stay independently testable. CI stack-base
 coverage must stay while these PRs target those bases; removing it before merge
 would reopen the verification gap. Existing workflow indentation was normalized
 because the repository YAML hook requires it. No dependency versions changed.
+
+Third-review follow-up: worker-side iterator finalization now executes inline
+instead of waiting on its own single-thread queue. Worker creation has its own
+lock, failed initial loads release the executor, and a public-load regression
+compares constructor, decode, close and cleanup thread identities. Load and
+non-streaming completions share the explicit busy policy; streamed contention
+fails on first advance. Cleanup remains a safe wait, but stale-agent phase-out
+and new-model construction no longer hold the shared agent-cache lock. A
+separate nonblocking local-model creation lock prevents duplicate loads while
+allowing online lookups; a stalled-cleanup regression pins both behaviors.
+Focused Docker: **90 passed**; native Metal/runner: **156 passed**.
+
+The reported process-global generation-stream collision did not reproduce.
+`new_thread_local_stream` returns a `ThreadLocalStream` dispatcher, not a concrete
+stream tied to its construction thread (see the [MLX API reference](https://ml-explore.github.io/mlx/build/html/python/devices_and_streams.html)).
+A new real-Metal regression loads two actual adapters through public `load()` on
+distinct workers, suspends runner A, loads/advances/closes/cleans up B, and resumes
+A to completion with live lookahead/cache state. It passes without changing the
+backend's stream configuration. The original affinity failure involved moving
+live lazy-array/DFlash state between consumer threads, which worker pinning fixes.
+The sentinel-based generator advance is safe under PEP 479; changing it would
+not fix an established defect. Cosmetic dependency spacing remains untouched.
+
+Hook exception for this follow-up: the isolated mypy hook reports the unchanged
+`adapters/whisper_adapter.py:38` returning Any, and Bandit reports the unchanged
+`app/main.py` script entrypoint's `0.0.0.0` bind. Both reproduce on the committed
+`0b5438f` version of `app/main.py` with the same cached hook executables. The
+changed runner and app pass mypy with the installed project dependencies; Bandit
+reports no new finding. Those two hooks were skipped only for this commit after
+baseline comparison; all other applicable hooks ran, and no hook configuration,
+adapter, dependency, or bind address was changed to silence them.

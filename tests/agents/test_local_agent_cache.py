@@ -1,4 +1,8 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+
+import pytest
 
 from agents.agent_type import AgentType
 from app import main as geist_main
@@ -101,3 +105,48 @@ def test_local_agent_signature_covers_model_runner_artifact_and_generation() -> 
     assert signature != geist_main._local_agent_configuration_signature(
         _factory_config("artifact-a", temperature=0.2)
     )
+
+
+def test_stalled_local_cleanup_does_not_hold_shared_cache_lock(monkeypatch):
+    saved_cache = dict(geist_main.agent_cache)
+    saved_signatures = dict(geist_main._agent_cache_signatures)
+    cleanup_started = threading.Event()
+    release_cleanup = threading.Event()
+
+    class StalledAgent:
+        def phase_out(self):
+            cleanup_started.set()
+            assert release_cleanup.wait(5)
+
+    old = StalledAgent()
+    new = object()
+    online = object()
+    try:
+        with geist_main._agent_cache_lock:
+            geist_main._set_local_agent_cache(old, "old-signature")
+            geist_main.agent_cache[AgentType.GPT4AGENT] = online
+        monkeypatch.setattr(
+            geist_main, "_get_local_agent_factory_config", lambda: _factory_config("new")
+        )
+        monkeypatch.setattr(geist_main, "_create_local_agent", lambda _: new)
+        with ThreadPoolExecutor(max_workers=2) as callers:
+            switching = callers.submit(geist_main.get_or_create_agent, AgentType.LOCALAGENT)
+            try:
+                assert cleanup_started.wait(2)
+                assert (
+                    callers.submit(geist_main.get_or_create_agent, AgentType.GPT4AGENT).result(
+                        timeout=2
+                    )
+                    is online
+                )
+                with pytest.raises(RuntimeError, match="loading or switching"):
+                    geist_main.get_or_create_agent(AgentType.LOCALAGENT)
+            finally:
+                release_cleanup.set()
+            assert switching.result(timeout=2) is new
+        assert not geist_main._local_agent_creation_lock.locked()
+    finally:
+        release_cleanup.set()
+        with geist_main._agent_cache_lock:
+            geist_main.agent_cache.update(saved_cache)
+            geist_main._agent_cache_signatures.update(saved_signatures)

@@ -1,5 +1,6 @@
 """Native Metal checks for speculative state recovery and small-row matmul."""
 
+import importlib
 import itertools
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -119,6 +120,61 @@ def test_installed_stream_generate_tail_and_cache_contract(small_target, count, 
     assert "".join(response.text for response in responses) == ("" if eos else "x" * count)
     assert responses[-1].finish_reason == ("stop" if eos else "length")
     assert all(item.offset == 3 + expected for item in cache if hasattr(item, "offset"))
+
+
+def test_independent_public_runners_keep_valid_metal_streams(small_target, monkeypatch):
+    import mlx_lm
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
+
+    model, _ = small_target
+    generate = importlib.import_module("mlx_lm.generate")
+    monkeypatch.setattr(generate, "generation_stream", generate.generation_stream)
+
+    def load_tiny(*args, **kwargs):
+        target = TextModel(model.args)
+        target.eval()
+        target.lm_head.weight = mx.zeros_like(target.lm_head.weight)
+        tokenizer = TokenizerWrapper(
+            SimpleNamespace(
+                decode=lambda tokens: "x" * len(tokens),
+                encode=lambda *args, **kwargs: [1, 2, 3],
+                apply_chat_template=lambda *args, **kwargs: "prompt",
+                bos_token=None,
+                clean_up_tokenization_spaces=False,
+                eos_token_id=127,
+                get_vocab=lambda: {},
+                chat_template=None,
+            )
+        )
+        return target, tokenizer
+
+    monkeypatch.setattr(mlx_lm, "load", load_tiny)
+    first, second = MLXLlamaRunner(), MLXLlamaRunner()
+    first.load("tiny", {"implementation": "mlx_lm", "weights_dir": "/models/tiny"})
+    first_stream = first.stream_model_turn([], [], ModelRequestConfig(max_tokens=8, temperature=0))
+    second_stream = None
+    try:
+        assert next(first_stream).text == "x"
+        # This reassigns MLX-LM's module-global ThreadLocalStream on another
+        # runner's worker, while the first runner has live lookahead/cache state.
+        second.load("tiny", {"implementation": "mlx_lm", "weights_dir": "/models/tiny"})
+        assert isinstance(generate.generation_stream, mx.ThreadLocalStream)
+        assert first._worker_thread is not second._worker_thread
+        second_stream = second.stream_model_turn(
+            [], [], ModelRequestConfig(max_tokens=8, temperature=0)
+        )
+        assert next(second_stream).text == "x"
+        assert next(first_stream).text == "x"
+        second_stream.close()
+        second.cleanup()
+        remaining = list(first_stream)
+        assert remaining[-1].turn.text == "x" * 8
+    finally:
+        first_stream.close()
+        if second_stream is not None:
+            second_stream.close()
+        first.cleanup()
+        second.cleanup()
 
 
 def test_rollback_rejects_incomplete_attention_trim(small_target, monkeypatch):
