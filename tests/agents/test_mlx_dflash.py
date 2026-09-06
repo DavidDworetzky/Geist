@@ -162,6 +162,45 @@ def test_lab_source_rewrites_reject_missing_or_ambiguous_targets(source):
         _replace_once(source, "match", "replacement")
 
 
+@pytest.mark.parametrize("split_k", [0, 3, 32])
+def test_lab_rejects_invalid_split_before_constructing_kernel(split_k, monkeypatch):
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=64, bits=4)
+    monkeypatch.setattr(
+        "agents.architectures.llama.qwen_kernel_lab.experimental_kernel",
+        lambda *args: pytest.fail("Invalid split must not construct a kernel"),
+    )
+    with pytest.raises(ValueError, match="split-K"):
+        lab_matmul(layer, mx.ones((8, 512), dtype=mx.bfloat16), "fast", split_k=split_k)
+
+
+def test_benchmark_kernel_conflict_fails_before_loading_weights(monkeypatch, capsys):
+    from scripts import benchmark_mlx_dflash as benchmark
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "benchmark",
+            "--weights-dir",
+            "unused",
+            "--drafter-dir",
+            "unused",
+            "--small-m",
+            "--lab-variant",
+            "pad",
+        ],
+    )
+    monkeypatch.setattr(
+        benchmark, "load", lambda *args: pytest.fail("Must validate before loading")
+    )
+    with pytest.raises(SystemExit) as error:
+        benchmark.main()
+    assert error.value.code == 2
+    assert "Select either --small-m or --lab-variant" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("rows", [1, 8, 64, 257])
 def test_expanded_weights_are_bounded_and_preserve_fallback(rows, monkeypatch):
     model = nn.Module()
