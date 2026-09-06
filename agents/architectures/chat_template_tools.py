@@ -17,6 +17,7 @@ _TOOL_CALL_CLOSE = "</tool_call>"
 _TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _FUNCTION_PATTERN = re.compile(r"<function=([A-Za-z0-9_-]+)>(.*?)</function>", re.DOTALL)
 _PARAMETER_PATTERN = re.compile(r"<parameter=([^<>\s]+)>(.*?)</parameter>", re.DOTALL)
+_UNWRAPPED_XML_MARKERS = ("<function=", "<parameter=", "</function>", "</parameter>")
 
 
 @dataclass(frozen=True)
@@ -167,7 +168,7 @@ def parse_tool_response(
                 payloads = [raw_response]
                 text = ""
 
-    if "<function=" in text:
+    if any(marker in text for marker in _UNWRAPPED_XML_MARKERS):
         raise ValueError("Model returned unwrapped function-call markup")
 
     calls: list[ToolCall] = []
@@ -359,8 +360,10 @@ class ToolResponseStream:
 
             opening = remaining.find(_TOOL_CALL_OPEN)
             closing = remaining.find(_TOOL_CALL_CLOSE)
-            function = remaining.find("<function=")
-            if function >= 0 and (opening < 0 or function < opening):
+            if any(
+                (position := remaining.find(marker)) >= 0 and (opening < 0 or position < opening)
+                for marker in _UNWRAPPED_XML_MARKERS
+            ):
                 raise ValueError("Model returned unwrapped function-call markup")
             if closing >= 0 and (opening < 0 or closing < opening):
                 raise ValueError("Model returned malformed tool-call markup")
@@ -370,7 +373,7 @@ class ToolResponseStream:
                 remaining = remaining[opening + len(_TOOL_CALL_OPEN) :]
                 continue
             text, self._pending = self._split_marker_prefix(
-                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE, "<function=")
+                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE, *_UNWRAPPED_XML_MARKERS)
             )
             visible.append(text)
             break

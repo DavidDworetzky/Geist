@@ -159,6 +159,14 @@ Process-scoped test search stubs and test assertions are not production code.
 The first actual-model cross-worker test exposed the deeper Metal affinity bug;
 that fix belongs in #356 and is propagated here before final qualification.
 
+Second-review completeness follow-up: unwrapped parameter opens and stray
+function/parameter closes now use the same fail-closed guard and chunk holdback
+as unwrapped functions. The one-character/chunk-size matrix covers every marker.
+XML parsing preserves typed values; `additionalProperties` validation belongs
+to the registry immediately before dispatch, covered by its contract tests.
+Process-scoped search stubs and assertions remain appropriate for the dedicated
+non-optimized E2E test process and are not production safeguards.
+
 ## Integrated qualification after all parent merges
 
 Final production-code head before this evidence-only update: `71c7345`.

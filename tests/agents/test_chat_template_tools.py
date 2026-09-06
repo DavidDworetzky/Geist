@@ -344,9 +344,17 @@ def test_json_and_xml_tool_calls_can_coexist_in_one_turn():
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2, 7, 13, 10000])
-@pytest.mark.parametrize("name", ["safe", "unknown"])
-def test_unwrapped_xml_function_fails_closed_without_exposing_markup(chunk_size, name):
-    response = f"<function={name}><parameter=query>private args</parameter></function>"
+@pytest.mark.parametrize(
+    "response",
+    [
+        "<function=safe><parameter=query>private args</parameter></function>",
+        "<function=unknown><parameter=query>private args</parameter></function>",
+        "<parameter=query>private args</parameter>",
+        "</function>",
+        "</parameter>",
+    ],
+)
+def test_unwrapped_xml_function_fails_closed_without_exposing_markup(chunk_size, response):
     with pytest.raises(ValueError, match="unwrapped"):
         parse_tool_response(
             response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
