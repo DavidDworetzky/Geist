@@ -167,6 +167,9 @@ def parse_tool_response(
                 payloads = [raw_response]
                 text = ""
 
+    if "<function=" in text:
+        raise ValueError("Model returned unwrapped function-call markup")
+
     calls: list[ToolCall] = []
     for payload in payloads:
         if payload.lstrip().startswith("<function="):
@@ -248,20 +251,24 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
     if function is None:
         raise ValueError("Model returned malformed function-call markup")
     name, body = function.groups()
-    schema: dict[str, Any] = next(
+    schema = next(
         (
             tool["function"].get("parameters", {})
             for tool in tools
             if tool.get("function", {}).get("name") == name
         ),
-        {},
+        None,
     )
+    if not isinstance(schema, dict):
+        raise ValueError(f"Model requested unknown tool or missing function schema: {name!r}")
     arguments: dict[str, Any] = {}
     cursor = 0
     while cursor < len(body):
         if body[cursor].isspace():
             cursor += 1
             continue
+        if body.startswith("</function>", cursor):
+            raise ValueError("Model returned multiple functions in one tool-call wrapper")
         parameter = _PARAMETER_PATTERN.match(body, cursor)
         if parameter is None:
             raise ValueError("Model returned malformed function parameter markup")
@@ -272,11 +279,14 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
         # Preserve user strings (including whitespace and JSON-looking text).
         text = text.removeprefix("\r\n") if text.startswith("\r\n") else text.removeprefix("\n")
         text = text.removesuffix("\r\n") if text.endswith("\r\n") else text.removesuffix("\n")
+        additional = schema.get("additionalProperties", {})
         parameter_schema = schema.get("properties", {}).get(
-            key, schema.get("additionalProperties", {})
+            key, additional if isinstance(additional, dict) else {}
         )
         types = _schema_types(parameter_schema, schema)
-        if "null" in types and text.strip() == "null":
+        # Qwen renders None and literal "null" identically for nullable strings.
+        # Preserve explicit null semantics, but never strip a non-null string.
+        if "null" in types and text == "null":
             arguments[key] = None
         elif "string" in types:
             arguments[key] = text
@@ -349,6 +359,9 @@ class ToolResponseStream:
 
             opening = remaining.find(_TOOL_CALL_OPEN)
             closing = remaining.find(_TOOL_CALL_CLOSE)
+            function = remaining.find("<function=")
+            if function >= 0 and (opening < 0 or function < opening):
+                raise ValueError("Model returned unwrapped function-call markup")
             if closing >= 0 and (opening < 0 or closing < opening):
                 raise ValueError("Model returned malformed tool-call markup")
             if opening >= 0:
@@ -357,7 +370,7 @@ class ToolResponseStream:
                 remaining = remaining[opening + len(_TOOL_CALL_OPEN) :]
                 continue
             text, self._pending = self._split_marker_prefix(
-                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE)
+                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE, "<function=")
             )
             visible.append(text)
             break

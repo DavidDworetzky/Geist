@@ -101,3 +101,28 @@ universal JSON streaming. The reported 'backend failed to start' copy is not the
 orchestrator's mid-stream error path: it already returns 'Chat completion failed'.
 Small explicit iterator cleanup and private-buffer white-box assertions remain
 intentional; neither needs a new abstraction or public parser API.
+
+PR #358 focused Docker validation: **151 passed**. Isolated Docker startup was
+clean; Chrome **5/5 chat tests passed**, including gated streaming and failed-turn
+prose persistence across reload. Its frontend was the existing top-of-stack
+build (no frontend production code changed in this review pass).
+
+## PR #359: XML protocol hardening
+
+Unwrapped `<function=...>` now fails closed in both complete and one-character
+streaming paths, instead of exposing tool arguments as prose. XML requires a
+matching offered schema; missing schema fails loudly instead of silently turning
+numeric-looking strings into integers. The optional argument remains for JSON
+compatibility, where schemas are not needed to preserve JSON types. Boolean
+`additionalProperties` is normalized before type inspection. Nullable strings
+retain whitespace around `null`; exact `null` still represents None, because
+Qwen renders those two values identically and choosing string would break actual
+null round trips. Multiple functions inside one wrapper fail with a clearer
+diagnostic. Regression tests cover these boundaries and actual-model cross-worker
+stream close followed by another generation.
+
+Intent routing remains off for unset existing workspaces as explicitly requested;
+saved true remains an opt-in, even though it is uncommon in historical settings.
+Process-scoped test search stubs and test assertions are not production code.
+The first actual-model cross-worker test exposed the deeper Metal affinity bug;
+that fix belongs in #356 and is propagated here before final qualification.

@@ -3,6 +3,7 @@
 import os
 import re
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from pydantic import BaseModel
@@ -106,3 +107,24 @@ def test_real_mlx_calls_a_tool_and_uses_its_result(runner):
     assert second is not None
     assert not second.tool_calls
     assert "KITE-739" in second.text
+
+
+@pytest.mark.live_model
+def test_real_mlx_stream_resumes_and_closes_across_workers_then_generates_again(runner):
+    messages = [ChatMessage(role="user", content="Write a long explanation of how rain forms.")]
+    stream = runner.stream_model_turn(
+        messages, [], ModelRequestConfig(max_tokens=64, temperature=0.0)
+    )
+    with ThreadPoolExecutor(max_workers=1) as first, ThreadPoolExecutor(max_workers=1) as second:
+        assert first.submit(next, stream).result(timeout=60).kind == "text_delta"
+        assert second.submit(next, stream).result(timeout=60).kind == "text_delta"
+        second.submit(stream.close).result(timeout=60)
+    following = list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="Say hello in one sentence.")],
+            [],
+            ModelRequestConfig(max_tokens=24, temperature=0.0),
+        )
+    )
+    assert following[-1].kind == "turn_complete"
+    assert following[-1].turn.text

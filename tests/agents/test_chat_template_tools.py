@@ -341,3 +341,52 @@ def test_json_and_xml_tool_calls_can_coexist_in_one_turn():
         response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
     )
     assert [call.arguments["query"] for call in turn.tool_calls] == ["news", "more news"]
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 7, 13, 10000])
+@pytest.mark.parametrize("name", ["safe", "unknown"])
+def test_unwrapped_xml_function_fails_closed_without_exposing_markup(chunk_size, name):
+    response = f"<function={name}><parameter=query>private args</parameter></function>"
+    with pytest.raises(ValueError, match="unwrapped"):
+        parse_tool_response(
+            response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+        )
+    parser = ToolResponseStream({"safe": "web.search"}, xml_tool_schema())
+    visible = []
+    with pytest.raises(ValueError, match="unwrapped"):
+        for start in range(0, len(response), chunk_size):
+            visible.append(parser.feed(response[start : start + chunk_size]))
+        parser.finish()
+    assert "".join(visible) == ""
+
+
+@pytest.mark.parametrize("tools", [None, []])
+def test_xml_without_schema_fails_loudly_instead_of_coercing_strings(tools):
+    response = function_call("<parameter=query>123</parameter>")
+    with pytest.raises(ValueError, match="schema"):
+        parse_tool_response(response, provider_to_internal={"safe": "web.search"}, tools=tools)
+    with pytest.raises(ValueError, match="schema"):
+        ToolResponseStream({"safe": "web.search"}, tools).feed(response)
+
+
+@pytest.mark.parametrize(
+    "value,expected", [("null", None), ("  null  ", "  null  "), ("\nnull\n", "\nnull\n")]
+)
+def test_nullable_xml_strings_preserve_whitespace(value, expected):
+    response = function_call(f"<parameter=recency>\n{value}\n</parameter>")
+    turn = parse_tool_response(
+        response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+    )
+    assert turn.tool_calls[0].arguments["recency"] == expected
+
+
+@pytest.mark.parametrize("additional", [True, False])
+def test_boolean_additional_properties_does_not_break_parameter_parsing(additional):
+    tools = xml_tool_schema()
+    tools[0]["function"]["parameters"]["additionalProperties"] = additional
+    turn = parse_tool_response(
+        function_call("<parameter=extra>123</parameter>"),
+        provider_to_internal={"safe": "web.search"},
+        tools=tools,
+    )
+    assert turn.tool_calls[0].arguments["extra"] == 123

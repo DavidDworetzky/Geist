@@ -550,6 +550,7 @@ def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn(markup
     backend.supports_native_tool_calling = True
     closed = []
     produced = []
+    markup = markup.replace("<function=safe>", f"<function={provider_tool_name('web.search')}>")
 
     def responses(*args):
         try:
