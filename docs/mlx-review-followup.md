@@ -78,6 +78,37 @@ coverage must stay while these PRs target those bases; removing it before merge
 would reopen the verification gap. Existing workflow indentation was normalized
 because the repository YAML hook requires it. No dependency versions changed.
 
+Third-review follow-up: worker-side iterator finalization now executes inline
+instead of waiting on its own single-thread queue. Worker creation has its own
+lock, failed initial loads release the executor, and a public-load regression
+compares constructor, decode, close and cleanup thread identities. Load and
+non-streaming completions share the explicit busy policy; streamed contention
+fails on first advance. Cleanup remains a safe wait, but stale-agent phase-out
+and new-model construction no longer hold the shared agent-cache lock. A
+separate nonblocking local-model creation lock prevents duplicate loads while
+allowing online lookups; a stalled-cleanup regression pins both behaviors.
+Focused Docker: **90 passed**; native Metal/runner: **156 passed**.
+
+The reported process-global generation-stream collision did not reproduce.
+`new_thread_local_stream` returns a `ThreadLocalStream` dispatcher, not a concrete
+stream tied to its construction thread (see the [MLX API reference](https://ml-explore.github.io/mlx/build/html/python/devices_and_streams.html)).
+A new real-Metal regression loads two actual adapters through public `load()` on
+distinct workers, suspends runner A, loads/advances/closes/cleans up B, and resumes
+A to completion with live lookahead/cache state. It passes without changing the
+backend's stream configuration. The original affinity failure involved moving
+live lazy-array/DFlash state between consumer threads, which worker pinning fixes.
+The sentinel-based generator advance is safe under PEP 479; changing it would
+not fix an established defect. Cosmetic dependency spacing remains untouched.
+
+Hook exception for this follow-up: the isolated mypy hook reports the unchanged
+`adapters/whisper_adapter.py:38` returning Any, and Bandit reports the unchanged
+`app/main.py` script entrypoint's `0.0.0.0` bind. Both reproduce on the committed
+`0b5438f` version of `app/main.py` with the same cached hook executables. The
+changed runner and app pass mypy with the installed project dependencies; Bandit
+reports no new finding. Those two hooks were skipped only for this commit after
+baseline comparison; all other applicable hooks ran, and no hook configuration,
+adapter, dependency, or bind address was changed to silence them.
+
 ## PR #357: measured policy and experimental safeguards
 
 Accepted: independently disable adaptation with `GEIST_MLX_DFLASH_ADAPTIVE=off`
@@ -102,6 +133,15 @@ historical machine commands are intentionally retained as research provenance.
 The opt-in n-gram index is O(prompt + output tokens), not an unbounded cross-run
 cache. Review tooling permissions were not widened to bypass denied commands;
 Docker/native evidence and the newly enabled CI provide verification instead.
+
+Third-review follow-up: explicit profiling now fences native hidden/cache state
+even after calibration; default unprofiled fallback still avoids that extra
+fence. A real-Metal regression asserts zero such fences in ordinary fallback,
+one per token in profiling, and no re-calibration. Added help for the three
+documented hands-on flags (`--small-m`, `--autotune`, `--split-k`). Native
+Metal/policy follow-up: **165 passed**. Unsupported macOS 14 `relaxed` experiments
+continue to report Metal's capability error rather than silently changing the
+requested math variant; this is an explicit research mode, not the default path.
 
 PR #357 integration validation: **88 passed** in the focused Docker runner,
 artifact, policy, n-gram and orchestrator suites; **218 passed** in the native
@@ -134,6 +174,24 @@ orchestrator's mid-stream error path: it already returns 'Chat completion failed
 Small explicit iterator cleanup and private-buffer white-box assertions remain
 intentional; neither needs a new abstraction or public parser API.
 
+Second-review follow-up: historical tool names are serialized but no longer
+included in the output parser's offered-name map. This covers both empty and
+narrowed tool catalogs across adapters, not just MLX. Orchestration independently
+rejects any completed call that was not offered before persisting or dispatching
+it. Tests cover history-bearing no-tools/narrowed-tool requests and a malicious
+structured backend under disabled tools and privacy-sensitive routing.
+Model-message snapshots now use the same lock as cancellation writes; probe
+start/state are locked, and the malformed-output fixture fails explicitly if the
+expected parser error disappears.
+
+The persistence lock still spans the final database write intentionally: moving
+that write outside requires an in-flight persistence state and retry semantics
+to preserve exactly-once behavior. The write occurs when ending/cancelling the
+turn, not during ordinary steady-state token production. Incremental early
+rejection and whole-response incomplete-markup diagnostics can retain different
+wording without relaxing either fail-closed contract. Shared prefix-holdback
+logic for different stop/protocol markers is not refactored here.
+
 PR #358 focused Docker validation: **151 passed**. Isolated Docker startup was
 clean; Chrome **5/5 chat tests passed**, including gated streaming and failed-turn
 prose persistence across reload. Its frontend was the existing top-of-stack
@@ -164,8 +222,9 @@ function/parameter closes now use the same fail-closed guard and chunk holdback
 as unwrapped functions. The one-character/chunk-size matrix covers every marker.
 XML parsing preserves typed values; `additionalProperties` validation belongs
 to the registry immediately before dispatch, covered by its contract tests.
-Process-scoped search stubs and assertions remain appropriate for the dedicated
-non-optimized E2E test process and are not production safeguards.
+Process-scoped search stubs remain confined to the dedicated E2E process. Its
+critical XML protocol checks now use explicit raises, and XML probe state is
+read/written under the same lock as resets.
 
 ## Integrated qualification after all parent merges
 
@@ -214,4 +273,6 @@ implicit setup/install steps and local secret-file reads. Existing frontend
 assets were reused because this review pass did not change frontend production
 code. Ports 3000/5587 and the user's existing database were not replaced.
 Missing optional SendGrid/Twilio credentials produced adapter warnings, not chat
-or model failures. All review-fix commits passed the applicable local hooks.
+or model failures. Hook results at that qualification point were green; the
+later foundational follow-up and its top-stack merge use the two documented
+baseline-only hook exceptions described above.

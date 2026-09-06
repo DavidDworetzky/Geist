@@ -81,6 +81,25 @@ def test_payload_maps_dotted_names_and_preserves_tool_round_trip():
     }
 
 
+@pytest.mark.parametrize("offer_other_tool", [False, True])
+def test_historical_tool_names_do_not_expand_current_availability(offer_other_tool):
+    history = [
+        ChatMessage(
+            role="assistant", tool_calls=[ToolCall(id="old", name="past.lookup", arguments={})]
+        )
+    ]
+    payload = build_tool_payload(history, [search_tool()] if offer_other_tool else [])
+    historical_name = payload.messages[0]["tool_calls"][0]["function"]["name"]
+    assert historical_name not in payload.provider_to_internal
+    response = f'<tool_call>{{"name":"{historical_name}","arguments":{{}}}}</tool_call>'
+    with pytest.raises(ValueError, match="unknown tool"):
+        parse_tool_response(response, provider_to_internal=payload.provider_to_internal)
+    parser = ToolResponseStream(payload.provider_to_internal)
+    with pytest.raises(ValueError, match="unknown tool"):
+        for char in response:
+            assert parser.feed(char) == ""
+
+
 def test_qwen_tool_markup_parses_to_internal_call():
     payload = build_tool_payload([ChatMessage(role="user", content="news")], [search_tool()])
     provider_name = next(iter(payload.provider_to_internal))

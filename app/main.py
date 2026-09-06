@@ -96,6 +96,7 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
     agent_type: None for agent_type in agent_cache
 }
 _agent_cache_lock = threading.RLock()
+_local_agent_creation_lock = threading.Lock()
 
 # mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
@@ -183,12 +184,19 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 _set_local_agent_cache(cached_agent, signature)
                 return cached_agent
 
+        # Do not hold the shared cache lock while a local model waits for an
+        # active stream to close. Other model switches fail busy, not queued.
+        if not _local_agent_creation_lock.acquire(blocking=False):
+            raise RuntimeError("Local model is loading or switching; retry when it is ready")
         stale_agents = _clear_local_agent_cache()
+
+    try:
         for stale_agent in stale_agents:
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
-        _set_local_agent_cache(new_agent, signature)
+        with _agent_cache_lock:
+            _set_local_agent_cache(new_agent, signature)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
             factory_config.model,
@@ -196,6 +204,8 @@ def _get_or_create_local_agent(agent_type: AgentType):
             factory_config.runner_type or "auto",
         )
         return new_agent
+    finally:
+        _local_agent_creation_lock.release()
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:

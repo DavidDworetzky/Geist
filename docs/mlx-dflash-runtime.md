@@ -77,14 +77,17 @@ Each decoder retains at most 32,768 prefix tokens between requests, and cleanup
 releases its cached state. This does not reduce the generation/context limit.
 Prefix reuse is a single-slot optimization: interposed requests with a different
 system prefix, including an enabled intent classifier, can evict conversation
-state. The top of this stack disables that extra classifier pass by default;
-explicit opt-in does not promise the same cache-hit rate as direct chat.
+state. Follow-up PR #359 changes the classifier default to off; until that PR
+lands, this branch still defaults it on. Explicit opt-in does not promise the
+same cache-hit rate as direct chat.
 
-Only one streamed request may be active per runner. Model work and generator
+Only one request may be active per runner. Model work and generator
 cleanup stay on one dedicated worker because Metal streams are thread-local.
-Consumer backpressure pauses generation; another stream fails as busy instead
-of waiting forever on an interleaved consumer. Load and cleanup wait for the
-active request to close. Tool markup stays private, but preceding ordinary prose
+Consumer backpressure pauses generation; another stream fails busy on its first
+advance, and load/non-streaming completion also fail busy during contention.
+There is no request queue. Cleanup waits for the active request to close, outside
+the shared agent-cache lock; other local model switches fail busy while it waits,
+and online-agent cache lookups remain available. Tool markup stays private, but preceding ordinary prose
 can be visible before a later protocol error; the streaming follow-up persists
 that prose with a failed/cancelled status.
 

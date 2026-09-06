@@ -33,6 +33,7 @@ class BrowserE2EAgent:
             parser = ToolResponseStream({"safe": "web.search"})
             yield ModelEvent.text_delta(parser.feed("Working on it. "))
             parser.feed("<tool_call>{bad}</tool_call>")
+            raise AssertionError("Expected malformed tool markup to fail")
         if prompt == "Remember cobalt.":
             response = "I will remember cobalt."
         elif prompt == "What should you remember?":

@@ -24,6 +24,7 @@ from agents.models.tool_calling import (
     ModelEvent,
     ModelRequestConfig,
     ModelTurn,
+    ToolCall,
     ToolDefinition,
     ToolExecutionOutput,
 )
@@ -389,6 +390,73 @@ def test_mlx_runner_stream_can_resume_and_close_on_different_workers():
     assert runner._worker is None
 
 
+def test_public_load_stream_and_worker_side_close_share_one_thread(monkeypatch):
+    threads = []
+
+    class Backend:
+        def __init__(self, **kwargs):
+            threads.append(threading.current_thread())
+
+        def stream_model_turn(self, *args):
+            try:
+                threads.append(threading.current_thread())
+                yield ModelEvent.text_delta("first")
+            finally:
+                threads.append(threading.current_thread())
+
+        def cleanup(self):
+            threads.append(threading.current_thread())
+
+    module = _backend_module("mlx_lm_backend", "MLXLMBackend", Backend)
+    monkeypatch.setitem(sys.modules, "agents.architectures.llama.mlx_lm_backend", module)
+    runner = MLXLlamaRunner()
+    runner.load("tiny", {"implementation": "mlx_lm", "weights_dir": "/models/tiny"})
+    stream = runner.stream_model_turn([], [], ModelRequestConfig())
+    try:
+        assert next(stream).text == "first"
+        submit = runner._worker.submit
+
+        def guarded_submit(*args, **kwargs):
+            # A broken reentrancy guard fails instead of hanging the test process.
+            assert threading.current_thread() is not runner._worker_thread
+            return submit(*args, **kwargs)
+
+        monkeypatch.setattr(runner._worker, "submit", guarded_submit)
+        runner._on_worker(stream.close)
+        assert not runner._request_lock.locked()
+        runner.cleanup()
+        assert len(set(threads)) == 1
+        assert threads[0] is not threading.current_thread()
+    finally:
+        stream.close()
+        runner.cleanup()
+
+
+def test_failed_initial_load_releases_worker():
+    runner = MLXLlamaRunner()
+    with pytest.raises(ValueError, match="Unknown MLX implementation"):
+        runner.load("tiny", {"implementation": "invalid"})
+    assert runner._worker is runner._worker_thread is None
+    assert not runner._request_lock.locked()
+
+
+@pytest.mark.parametrize("operation", ["load", "complete", "complete_messages"])
+def test_nonstreaming_requests_fail_busy_during_active_stream(operation):
+    runner = MLXLlamaRunner()
+    runner._request_lock.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="busy"):
+            if operation == "load":
+                runner.load("tiny")
+            elif operation == "complete":
+                runner.complete("", "hello", GenerationConfig())
+            else:
+                runner.complete_messages([], GenerationConfig())
+        assert runner._worker is None
+    finally:
+        runner._request_lock.release()
+
+
 @pytest.mark.parametrize("markup", ["<tool_call>", "</tool_call>"])
 def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
     backend = MLXLMBackend.__new__(MLXLMBackend)
@@ -399,6 +467,26 @@ def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
         for event in stream:
             visible.append(event.text)
     assert "".join(visible) == "Hello."
+
+
+@pytest.mark.parametrize("offer_other_tool", [False, True])
+def test_mlx_lm_rejects_historical_unoffered_tool_without_exposing_it(offer_other_tool):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.supports_native_tool_calling = True
+    name = provider_tool_name("past.lookup")
+    response = f'<tool_call>{{"name":"{name}","arguments":{{}}}}</tool_call>'
+    backend.stream_messages = lambda *args: iter(response)
+    history = [
+        ChatMessage(
+            role="assistant", tool_calls=[ToolCall(id="old", name="past.lookup", arguments={})]
+        )
+    ]
+    stream = backend.stream_model_turn(
+        history, [_search_tool()] if offer_other_tool else [], ModelRequestConfig()
+    )
+    with pytest.raises(ValueError, match="unknown tool"):
+        for event in stream:
+            pytest.fail(f"Unavailable tool exposed an event: {event.kind}")
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():

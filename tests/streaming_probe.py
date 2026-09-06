@@ -26,37 +26,37 @@ class StreamingProbe:
 
     def reset(self) -> None:
         with self._lock:
-            self._generation += 1
-            self.active = False
-            self.stage = 0
-            self.closed = False
-            self.tools_seen = False
-            self.search_calls = []
-            self.tool_result_seen = False
-            for gate in self.gates:
-                gate.set()
+            self._reset()
 
-    def start(self, scenario: str = "text") -> None:
-        self.reset()
-        self.gates = [Event(), Event()]
+    def _reset(self) -> None:
+        self._generation += 1
+        self.active = False
         self.stage = 0
         self.closed = False
         self.tools_seen = False
-        self.scenario = scenario
         self.search_calls = []
         self.tool_result_seen = False
-        self.active = True
+        for gate in self.gates:
+            gate.set()
+
+    def start(self, scenario: str = "text") -> None:
+        with self._lock:
+            self._reset()
+            self.gates = [Event(), Event()]
+            self.scenario = scenario
+            self.active = True
 
     def state(self) -> dict[str, Any]:
-        return {
-            "active": self.active,
-            "stage": self.stage,
-            "closed": self.closed,
-            "tools_seen": self.tools_seen,
-            "released": [gate.is_set() for gate in self.gates],
-            "search_calls": self.search_calls,
-            "tool_result_seen": self.tool_result_seen,
-        }
+        with self._lock:
+            return {
+                "active": self.active,
+                "stage": self.stage,
+                "closed": self.closed,
+                "tools_seen": self.tools_seen,
+                "released": [gate.is_set() for gate in self.gates],
+                "search_calls": list(self.search_calls),
+                "tool_result_seen": self.tool_result_seen,
+            }
 
     def segments(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
@@ -66,10 +66,12 @@ class StreamingProbe:
         with self._lock:
             self.tools_seen = True
             gates, generation = self.gates, self._generation
-        if self.scenario == "xml_tool":
+            scenario = self.scenario
+        if scenario == "xml_tool":
             if messages[-1]["role"] != "tool":
                 name = provider_tool_name("web.search")
-                assert any(tool["function"]["name"] == name for tool in tools or [])
+                if not any(tool["function"]["name"] == name for tool in tools or []):
+                    raise AssertionError("Expected the search tool to be offered")
                 call = (
                     f"<tool_call>\n<function={name}>\n"
                     "<parameter=query>\nrecent celebrity headlines\n</parameter>\n"
@@ -77,12 +79,17 @@ class StreamingProbe:
                     "</function>\n</tool_call>"
                 )
                 for index in range(0, len(call), 7):
-                    if generation != self._generation:
-                        return
+                    with self._lock:
+                        if generation != self._generation:
+                            return
                     yield call[index : index + 7]
                 return
-            self.tool_result_seen = "Fixture celebrity headline" in messages[-1]["content"]
-            assert self.tool_result_seen
+            with self._lock:
+                if generation != self._generation:
+                    return
+                self.tool_result_seen = "Fixture celebrity headline" in messages[-1]["content"]
+                if not self.tool_result_seen:
+                    raise AssertionError("Expected the search result in model history")
         try:
             for index, segment in enumerate(("STREAM-FIRST", " STREAM-SECOND", " STREAM-FINAL")):
                 with self._lock:
