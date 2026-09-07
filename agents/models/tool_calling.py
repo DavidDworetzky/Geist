@@ -30,6 +30,8 @@ ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"
 #   require_approval — every tool call waits for approval unless the tool is
 #                      on the user's always-allow list.
 PermissionMode = Literal["default", "auto_approve", "require_approval"]
+MAX_ALWAYS_ALLOWED_TOOLS = 256
+MAX_PERMISSION_TOOL_NAME_LENGTH = 256
 PERMISSION_MODE_DEFAULT: PermissionMode = "default"
 PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
 PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
@@ -143,6 +145,7 @@ class ToolExecutionOutput:
     content: str
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    error: str | None = None
 
 
 # Argument models are validated by ToolRegistry immediately before dispatch.
@@ -160,6 +163,7 @@ class ToolDefinition:
     handler: ToolHandler
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
@@ -192,11 +196,14 @@ class ToolDefinition:
 def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
     """Effective approval requirement for one call under the user's permissions.
 
-    The user's always-allow list is a standing grant, so it wins over both the
+    Fresh per-call approval cannot be waived. Otherwise, the user's always-allow
+    list is a standing grant, so it wins over both the
     per-tool flag and require_approval mode; auto_approve waives everything
     else; require_approval asks for every remaining tool; default falls back
     to the tool's own requires_approval flag.
     """
+    if definition.requires_per_call_approval:
+        return True
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
     if definition.name in context.always_allow_tools:

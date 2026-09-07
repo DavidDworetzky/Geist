@@ -4,13 +4,18 @@ DTO models for user settings API.
 
 import sys
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from agents.model_catalog import default_local_model_id
 from agents.model_ids import canonicalize_local_model_id
-from agents.models.tool_calling import PERMISSION_MODE_DEFAULT, PermissionMode
+from agents.models.tool_calling import (
+    MAX_ALWAYS_ALLOWED_TOOLS,
+    MAX_PERMISSION_TOOL_NAME_LENGTH,
+    PERMISSION_MODE_DEFAULT,
+    PermissionMode,
+)
 
 
 class AgentPermissionsSettings(BaseModel):
@@ -23,8 +28,13 @@ class AgentPermissionsSettings(BaseModel):
             "(never ask), or 'require_approval' (always ask)"
         ),
     )
-    always_allow: list[str] = Field(
+    always_allow: list[
+        Annotated[
+            str, Field(min_length=1, max_length=MAX_PERMISSION_TOOL_NAME_LENGTH, pattern=r"\S")
+        ]
+    ] = Field(
         default=[],
+        max_length=MAX_ALWAYS_ALLOWED_TOOLS,
         description="Tool names that never require approval, regardless of mode",
     )
 
@@ -161,9 +171,7 @@ class AgentFactoryConfig(BaseModel):
         agent_type = overrides.agent_type or settings.default_agent_type
 
         if agent_type == "local":
-            model = canonicalize_local_model_id(
-                overrides.model or settings.default_local_model
-            )
+            model = canonicalize_local_model_id(overrides.model or settings.default_local_model)
             # Leave unset so AgentFactory can select a backend from catalog
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type

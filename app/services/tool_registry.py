@@ -193,10 +193,11 @@ class ToolRegistry:
             content = f"{content[:definition.max_result_chars]}\n[tool result truncated]"
         return ToolResult(
             call=call,
-            status="succeeded",
+            status="failed" if output.error else "succeeded",
             content=content,
             summary=(output.summary or content[:500])[:500],
             artifacts=output.artifacts,
+            error=output.error,
         )
 
 
@@ -410,7 +411,8 @@ def build_default_tool_registry() -> ToolRegistry:
                 arguments.command, timeout_seconds=arguments.timeout_seconds
             )
             summary = (
-                f"exit {result.exit_code}"
+                ("blocked by policy; " if result.blocked else "")
+                + f"exit {result.exit_code}"
                 + (" (timed out)" if result.timed_out else "")
                 + f" in {result.duration_seconds:.1f}s"
             )
@@ -422,10 +424,12 @@ def build_default_tool_registry() -> ToolRegistry:
                         "stderr": result.stderr,
                         "timed_out": result.timed_out,
                         "truncated": result.truncated,
+                        "blocked": result.blocked,
                     },
                     ensure_ascii=False,
                 ),
                 summary=summary,
+                error="policy_blocked" if result.blocked else None,
             )
 
         def _execution_available(context: ToolContext) -> bool:
@@ -444,7 +448,8 @@ def build_default_tool_registry() -> ToolRegistry:
                 arguments_model=TerminalRunArguments,
                 handler=terminal_run,
                 side_effect="process",
-                requires_approval=not execution_environment.is_sandboxed,
+                requires_approval=execution_environment.requires_per_call_approval,
+                requires_per_call_approval=execution_environment.requires_per_call_approval,
                 enabled_by_default=False,
                 timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
                 source_adapter=f"execution.{execution_environment.name}",

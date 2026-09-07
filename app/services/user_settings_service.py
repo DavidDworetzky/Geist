@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 def _permissions_from_stored(raw: object) -> AgentPermissionsSettings:
     """Tolerantly hydrate stored agent permissions; malformed rows fall back to defaults."""
     try:
-        return AgentPermissionsSettings.model_validate(raw or {})
+        return AgentPermissionsSettings.model_validate(normalize_agent_permissions(raw))
     except Exception:
-        logger.warning("Malformed stored agent_permissions %r; using defaults", raw)
+        logger.warning("Malformed stored agent_permissions; using defaults")
         return AgentPermissionsSettings()
 
 
@@ -46,6 +46,7 @@ def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSetting
     return response.model_copy(
         update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
     )
+
 
 class UserSettingsService:
     """Service for managing user settings and agent configuration."""

@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from app.services.execution.hardline import detect_hardline_command
+
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 30
 MAX_COMMAND_TIMEOUT_SECONDS = 120
@@ -21,13 +23,17 @@ class ExecutionResult:
     duration_seconds: float
     timed_out: bool = False
     truncated: bool = False
+    blocked: bool = False
 
 
 def truncate_output(text: str, limit: int = MAX_OUTPUT_CHARS) -> tuple[str, bool]:
     """Bound one output stream, marking whether anything was dropped."""
+    limit = max(0, limit)
     if len(text) <= limit:
         return text, False
     marker = "\n[output truncated]"
+    if limit < len(marker):
+        return marker[:limit], True
     return f"{text[: limit - len(marker)]}{marker}", True
 
 
@@ -45,6 +51,13 @@ class ExecutionEnvironment(ABC):
     @abstractmethod
     def is_sandboxed(self) -> bool:
         """True when command effects are contained away from the host."""
+
+    @property
+    def requires_per_call_approval(self) -> bool:
+        return not self.is_sandboxed
+
+    def command_rejection_reason(self, command: str) -> str | None:
+        return None if self.is_sandboxed else detect_hardline_command(command)
 
     @abstractmethod
     def run(

@@ -218,7 +218,9 @@ const Settings: React.FC = () => {
         default_presence_penalty: localSettings.default_presence_penalty,
         backup_providers: localSettings.backup_providers,
         ui_preferences: localSettings.ui_preferences,
-        agent_permissions: localSettings.agent_permissions
+        ...(dirtyKeys.has('agent_permissions')
+          ? { agent_permissions: localSettings.agent_permissions }
+          : {})
       };
 
       await updateSettings(updates);

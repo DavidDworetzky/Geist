@@ -42,6 +42,11 @@ def create_execution_environment() -> ExecutionEnvironment | None:
     """Build the configured execution backend, or None when disabled."""
     backend = os.getenv("GEIST_EXEC_BACKEND", "").strip().lower()
     workspace = os.getenv("GEIST_EXEC_WORKSPACE", "").strip() or None
+    if workspace:
+        workspace = os.path.abspath(workspace)
+        if not os.path.isdir(workspace) or (backend in ("docker", "podman") and "," in workspace):
+            logger.warning("Invalid execution workspace; execution disabled")
+            return None
 
     if backend in ("docker", "podman"):
         runtime_preference = os.getenv("GEIST_EXEC_RUNTIME", "").strip() or None

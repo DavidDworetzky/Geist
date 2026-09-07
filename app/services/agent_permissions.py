@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 
 from agents.models.tool_calling import (
+    MAX_ALWAYS_ALLOWED_TOOLS,
+    MAX_PERMISSION_TOOL_NAME_LENGTH,
     PERMISSION_MODE_DEFAULT,
     VALID_PERMISSION_MODES,
 )
@@ -39,13 +41,16 @@ def normalize_agent_permissions(raw: object) -> dict:
 
     mode = raw.get("mode", PERMISSION_MODE_DEFAULT)
     if not isinstance(mode, str) or mode not in VALID_PERMISSION_MODES:
-        raise ValueError(
-            f"agent_permissions.mode must be one of {sorted(VALID_PERMISSION_MODES)}"
-        )
+        raise ValueError(f"agent_permissions.mode must be one of {sorted(VALID_PERMISSION_MODES)}")
 
     always_allow = raw.get("always_allow", [])
+    if isinstance(always_allow, list) and len(always_allow) > MAX_ALWAYS_ALLOWED_TOOLS:
+        raise ValueError(
+            f"agent_permissions.always_allow supports at most {MAX_ALWAYS_ALLOWED_TOOLS} tools"
+        )
     if not isinstance(always_allow, list) or any(
-        not isinstance(name, str) or not name.strip() for name in always_allow
+        not isinstance(name, str) or not name.strip() or len(name) > MAX_PERMISSION_TOOL_NAME_LENGTH
+        for name in always_allow
     ):
         raise ValueError("agent_permissions.always_allow must be a list of tool names")
 

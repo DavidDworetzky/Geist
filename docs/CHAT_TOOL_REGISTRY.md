@@ -18,6 +18,7 @@ The default registry is intentionally explicit:
 | `workspace.write_markdown` | `MarkdownFileAdapter.write_file` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.email.send` | `SendGridAdapter.send_email` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.sms.send` | `SMSAdapter.send_text` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
+| `terminal.run` | Configured execution backend | no | Mount-free, network-disabled Docker is isolated; local, mounted, or networked execution requires fresh approval regardless of standing grants. |
 
 The optional read-only Markdown list/read tools can be selected by the operator
 with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. Reads and writes accept
@@ -68,3 +69,28 @@ remain unavailable.
 A future authenticated approve/reject-and-resume endpoint plus durable
 idempotency is required before filesystem writes, email, or SMS can become
 operational chat tools.
+
+## Terminal execution
+
+Set `GEIST_EXEC_BACKEND` to `docker`, `podman`, or `local`, and explicitly include
+`terminal.run` in `GEIST_ENABLED_CHAT_TOOLS`. `GEIST_EXEC_RUNTIME` pins a CLI and
+fails closed when missing. `GEIST_EXEC_DOCKER_IMAGE` must provide bash and GNU
+timeout (default `python:3.11-slim`). `GEIST_EXEC_DOCKER_NETWORK` defaults off;
+enabling it exposes egress, potentially including LAN/metadata endpoints, and
+requires fresh approval. `GEIST_EXEC_WORKSPACE` must identify an existing host
+directory; relative paths are resolved at startup and Docker uses a fail-closed
+bind mount. Commas in Docker paths are rejected. The path must exist on both the
+backend and daemon hosts; a missing daemon-side directory is not auto-created.
+
+Local execution is not sandboxed. Environment scrubbing cannot hide secrets in
+host files or inside a mounted workspace, and regex command checks are only a
+best-effort defense. Host/network approval cannot be waived by auto-approve or an
+always-allow grant. Interactive resume is supplied by #308: ship these stacked
+layers together, not #307 alone as a complete approval experience.
+
+Timeouts kill the local POSIX process group or attempt bounded removal of this
+invocation's uniquely named container. Cleanup cannot be guaranteed if the daemon
+is unavailable or a host descendant deliberately escapes its process group.
+Docker exit codes124/137 are treated as timeouts; a command deliberately exiting
+with those codes is indistinguishable. Policy refusals have `policy_blocked` tool
+errors, distinct from ordinary shell exit codes in the result body.

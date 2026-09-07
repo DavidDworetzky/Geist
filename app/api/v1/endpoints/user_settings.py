@@ -1,6 +1,7 @@
 """
 API endpoints for user settings management.
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 def get_current_user():
     """
     Get current user (placeholder - should integrate with actual auth system).
@@ -27,8 +29,9 @@ def get_current_user():
     """
     return get_default_user()
 
+
 @router.get("/", response_model=UserSettingsResponse)
-async def get_user_settings(current_user = Depends(get_current_user)):
+async def get_user_settings(current_user=Depends(get_current_user)):
     """
     Get user settings for the current user.
 
@@ -42,8 +45,9 @@ async def get_user_settings(current_user = Depends(get_current_user)):
         logger.error(f"Error getting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.get("/{user_id}", response_model=UserSettingsResponse)
-async def get_user_settings_by_id(user_id: int):
+async def get_user_settings_by_id(user_id: int, current_user=Depends(get_current_user)):
     """
     Get user settings by user ID.
 
@@ -53,6 +57,8 @@ async def get_user_settings_by_id(user_id: int):
     Returns:
         UserSettingsResponse: User settings
     """
+    if user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot access another user's settings")
     try:
         settings = UserSettingsService.get_user_settings_by_id(user_id)
         if not settings:
@@ -64,11 +70,9 @@ async def get_user_settings_by_id(user_id: int):
         logger.error(f"Error getting user settings for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.put("/", response_model=UserSettingsResponse)
-def update_user_settings(
-    updates: UserSettingsUpdate,
-    current_user = Depends(get_current_user)
-):
+def update_user_settings(updates: UserSettingsUpdate, current_user=Depends(get_current_user)):
     """
     Update user settings for the current user.
 
@@ -98,10 +102,12 @@ def update_user_settings(
         logger.error(f"Error updating user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.put("/{user_id}", response_model=UserSettingsResponse)
 def update_user_settings_by_id(
     user_id: int,
-    updates: UserSettingsUpdate
+    updates: UserSettingsUpdate,
+    current_user=Depends(get_current_user),
 ):
     """
     Update user settings by user ID.
@@ -113,6 +119,8 @@ def update_user_settings_by_id(
     Returns:
         UserSettingsResponse: Updated user settings
     """
+    if user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot update another user's settings")
     try:
         settings = UserSettingsService.update_user_settings_by_id(user_id, updates)
         if not settings:
@@ -126,8 +134,9 @@ def update_user_settings_by_id(
         logger.error(f"Error updating user settings for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.post("/reset", response_model=UserSettingsResponse)
-async def reset_user_settings(current_user = Depends(get_current_user)):
+async def reset_user_settings(current_user=Depends(get_current_user)):
     """
     Reset user settings to defaults for the current user.
 
@@ -153,7 +162,7 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
             default_presence_penalty=0.0,
             backup_providers=[],
             ui_preferences={},
-            agent_permissions=AgentPermissionsSettings()
+            agent_permissions=AgentPermissionsSettings(),
         )
 
         settings = UserSettingsService.update_user_settings_by_id(
@@ -170,13 +179,14 @@ async def reset_user_settings(current_user = Depends(get_current_user)):
         logger.error(f"Error resetting user settings: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+
 @router.get("/agent-config/preview")
 async def preview_agent_config(
     agent_type: str | None = None,
     model: str | None = None,
     endpoint: str | None = None,
     runner_type: str | None = None,
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
     """
     Preview agent configuration with optional overrides.
@@ -196,14 +206,12 @@ async def preview_agent_config(
 
         # Create overrides
         overrides = AgentConfigRequest(
-            agent_type=agent_type,
-            model=model,
-            endpoint=endpoint,
-            runner_type=runner_type
+            agent_type=agent_type, model=model, endpoint=endpoint, runner_type=runner_type
         )
 
         # Generate config preview
         from app.models.user_settings import AgentFactoryConfig
+
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
 
         return {
@@ -212,7 +220,7 @@ async def preview_agent_config(
             "endpoint": factory_config.endpoint,
             "runner_type": factory_config.runner_type,
             "backup_providers": [provider.dict() for provider in factory_config.backup_providers],
-            "generation_config": factory_config.generation_config
+            "generation_config": factory_config.generation_config,
         }
     except Exception as e:
         logger.error(f"Error previewing agent config: {e}")

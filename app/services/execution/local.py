@@ -3,17 +3,18 @@
 Runs commands directly on the host via bash. Not an isolation boundary —
 the tool built on this backend must register with ``requires_approval=True``.
 Mitigations mirror Hermes-agent's local mode: secrets are scrubbed from the
-child environment so agent commands never see provider credentials, the
-hardline blocklist refuses unrecoverable commands outright, and output and
-runtime are bounded.
+child environment to reduce accidental exposure. Host files remain readable,
+and regex hardline checks are best-effort, not an isolation boundary.
 """
 
 from __future__ import annotations
 
 import os
 import re
-import subprocess
+import signal
+import subprocess  # nosec B404 - explicitly enabled host runner
 import time
+from contextlib import suppress
 
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -22,7 +23,6 @@ from app.services.execution.base import (
     clamp_timeout,
     truncate_output,
 )
-from app.services.execution.hardline import detect_hardline_command
 
 
 # Environment variables whose names match any of these fragments are withheld
@@ -31,6 +31,9 @@ from app.services.execution.hardline import detect_hardline_command
 _SECRET_NAME_FRAGMENTS = (
     "API_KEY",
     "APIKEY",
+    "ACCESS_KEY",
+    "_PAT",
+    "SSH_AUTH_SOCK",
     "SECRET",
     "TOKEN",
     "PASSWORD",
@@ -66,7 +69,7 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
-        hardline = detect_hardline_command(command)
+        hardline = self.command_rejection_reason(command)
         if hardline is not None:
             return ExecutionResult(
                 exit_code=126,
@@ -74,40 +77,63 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
                 stderr=f"BLOCKED: refusing unrecoverable command ({hardline})",
                 duration_seconds=0.0,
                 timed_out=False,
+                blocked=True,
             )
 
+        if os.name != "posix":
+            return ExecutionResult(127, "", "Local execution requires POSIX process groups", 0.0)
         timeout = clamp_timeout(timeout_seconds)
         started = time.monotonic()
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(  # nosec B603 B607 - intentional approved bash runner
                 ["bash", "-c", command],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
+                start_new_session=True,
                 cwd=self.workdir,
                 env=scrub_environment(dict(os.environ)),
             )
+        except OSError as error:
+            return ExecutionResult(127, "", str(error), time.monotonic() - started)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as expired:
-            stdout = expired.stdout or ""
-            stderr = expired.stderr or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode(errors="replace")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="replace")
-            stdout, _ = truncate_output(stdout)
-            stderr, _ = truncate_output(stderr)
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            # A descendant can escape the group; do not wait forever on its pipes.
+            with suppress(subprocess.TimeoutExpired):
+                process.communicate(timeout=1)
+            stdout = (
+                expired.stdout.decode(errors="replace")
+                if isinstance(expired.stdout, bytes)
+                else expired.stdout or ""
+            )
+            stderr = (
+                expired.stderr.decode(errors="replace")
+                if isinstance(expired.stderr, bytes)
+                else expired.stderr or ""
+            )
+            stdout, stdout_truncated = truncate_output(stdout)
+            stderr, stderr_truncated = truncate_output(stderr)
             return ExecutionResult(
                 exit_code=124,
                 stdout=stdout,
                 stderr=stderr or f"Command timed out after {timeout} seconds",
                 duration_seconds=time.monotonic() - started,
                 timed_out=True,
+                truncated=stdout_truncated or stderr_truncated,
             )
+        finally:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
 
-        stdout, stdout_truncated = truncate_output(completed.stdout)
-        stderr, stderr_truncated = truncate_output(completed.stderr)
+        stdout, stdout_truncated = truncate_output(stdout)
+        stderr, stderr_truncated = truncate_output(stderr)
         return ExecutionResult(
-            exit_code=completed.returncode,
+            exit_code=process.returncode,
             stdout=stdout,
             stderr=stderr,
             duration_seconds=time.monotonic() - started,

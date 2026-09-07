@@ -151,32 +151,28 @@ def test_docker_run_args_hardening_posture():
 
 
 def test_docker_run_args_workspace_mount_replaces_tmpfs():
-    args = build_docker_run_args(
-        image=DEFAULT_IMAGE, command="ls", workspace="/home/user/project"
-    )
+    args = build_docker_run_args(image=DEFAULT_IMAGE, command="ls", workspace="/home/user/project")
     joined = " ".join(args)
-    assert "--volume /home/user/project:/workspace" in joined
+    assert "--mount type=bind,source=/home/user/project,target=/workspace" in joined
     assert "/workspace:rw,nosuid" not in joined
 
 
 def test_docker_run_args_network_opt_in():
     args = build_docker_run_args(image=DEFAULT_IMAGE, command="curl x", network=True)
-    assert "none" not in args
+    assert "--network" not in args
 
 
-def test_docker_sandbox_posture_flips_with_workspace():
+def test_docker_sandbox_posture_flips_with_workspace(tmp_path):
     sandboxed = DockerExecutionEnvironment()
     assert sandboxed.is_sandboxed is True
-    host_reaching = DockerExecutionEnvironment(workspace="/home/user/project")
+    host_reaching = DockerExecutionEnvironment(workspace=str(tmp_path))
     assert host_reaching.is_sandboxed is False
     assert host_reaching.has_host_access is True
 
 
 def test_docker_reports_missing_runtime():
     env = DockerExecutionEnvironment(runtime_path=None)
-    with patch(
-        "app.services.execution.docker.find_container_runtime", return_value=None
-    ):
+    with patch("app.services.execution.docker.find_container_runtime", return_value=None):
         result = env.run("echo hi")
     assert result.exit_code == 127
     assert "container runtime" in result.stderr
@@ -184,9 +180,7 @@ def test_docker_reports_missing_runtime():
 
 def test_docker_run_invokes_runtime_with_bounded_command():
     env = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    completed = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout="hi\n", stderr=""
-    )
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="hi\n", stderr="")
     with patch("subprocess.run", return_value=completed) as mock_run:
         result = env.run("echo hi", timeout_seconds=10)
 
@@ -194,7 +188,7 @@ def test_docker_run_invokes_runtime_with_bounded_command():
     assert result.stdout == "hi\n"
     argv = mock_run.call_args.args[0]
     assert argv[0] == "/usr/bin/docker"
-    assert argv[-1].startswith("timeout 10 bash -c ")
+    assert argv[-1].startswith("timeout --kill-after=1 10 bash -c ")
     assert mock_run.call_args.kwargs["timeout"] == 30  # command bound + overhead
 
 
@@ -221,16 +215,16 @@ def test_factory_unknown_backend_disables(monkeypatch):
     assert create_execution_environment() is None
 
 
-def test_factory_builds_docker_with_options(monkeypatch):
+def test_factory_builds_docker_with_options(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.setenv("GEIST_EXEC_DOCKER_IMAGE", "alpine:3")
     monkeypatch.setenv("GEIST_EXEC_DOCKER_NETWORK", "true")
-    monkeypatch.setenv("GEIST_EXEC_WORKSPACE", "/srv/work")
+    monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path))
     env = create_execution_environment()
     assert isinstance(env, DockerExecutionEnvironment)
     assert env.image == "alpine:3"
     assert env.network is True
-    assert env.workspace == "/srv/work"
+    assert env.workspace == str(tmp_path)
     assert env.is_sandboxed is False
 
 
@@ -289,9 +283,7 @@ def test_find_runtime_prefers_pinned_name_on_path():
 def test_find_runtime_pinned_missing_fails_closed():
     from app.services.execution.docker import find_container_runtime
 
-    with patch("shutil.which", return_value=None), patch(
-        "os.path.isfile", return_value=False
-    ):
+    with patch("shutil.which", return_value=None), patch("os.path.isfile", return_value=False):
         # A pinned-but-missing runtime must NOT fall back to docker.
         assert find_container_runtime("podman") is None
 
@@ -299,9 +291,11 @@ def test_find_runtime_pinned_missing_fails_closed():
 def test_find_runtime_accepts_absolute_binary_path():
     from app.services.execution.docker import find_container_runtime
 
-    with patch("shutil.which", return_value=None), patch(
-        "os.path.isfile", return_value=True
-    ), patch("os.access", return_value=True):
+    with (
+        patch("shutil.which", return_value=None),
+        patch("os.path.isfile", return_value=True),
+        patch("os.access", return_value=True),
+    ):
         assert find_container_runtime("/opt/podman/bin/podman") == "/opt/podman/bin/podman"
 
 

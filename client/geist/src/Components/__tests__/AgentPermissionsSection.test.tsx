@@ -47,6 +47,7 @@ describe('AgentPermissionsSection', () => {
 
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: ['web.search'] });
+    expect(screen.getByRole('button', { name: 'web.search' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('changes the approval mode', async () => {
@@ -97,10 +98,59 @@ describe('AgentPermissionsSection', () => {
 
     await waitFor(() => screen.getByText('web.search'));
 
+    expect(screen.getByRole('button', { name: 'web.search' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
 
     fireEvent.click(screen.getByText(/Clear All/i));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
+  });
+
+  it('labels high-impact tools and prevents new grants for disabled tools', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({
+      tools: toolsResponse.tools.map(tool => ({ ...tool, enabled: false }))
+    }) });
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['web.search'] }} onChange={() => {}} />);
+    const granted = await screen.findByRole('button', { name: /web.search/ });
+    expect(granted).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /communication.email.send/ })).toBeDisabled();
+    expect(screen.getByText(/can affect external systems/)).toBeInTheDocument();
+  });
+
+  it('surfaces unavailable saved grants and lets the user revoke them', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => toolsResponse });
+    const onChange = jest.fn();
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['old.tool'] }} onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove unavailable grant: old.tool' }));
+    expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: [] });
+  });
+
+  it.each(['rejected', 'non-ok', 'invalid-json', 'missing-tools', 'invalid-tool'])('preserves grants when the catalog response is %s', async (failure) => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const fetchMock = global.fetch as jest.Mock;
+    if (failure === 'rejected') {
+      fetchMock.mockRejectedValueOnce(new Error('offline'));
+    } else if (failure === 'non-ok') {
+      fetchMock.mockResolvedValueOnce({ ok: false });
+    } else if (failure === 'invalid-json') {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => { throw new Error('invalid JSON'); } });
+    } else {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => failure === 'missing-tools' ? {} : { tools: [null] } });
+    }
+    const onChange = jest.fn();
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['web.search'] }} onChange={onChange} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your saved grants are unchanged');
+    expect(screen.queryByText(/Unavailable saved grants/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove unavailable grant/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('No agent tools are available.')).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes a successfully loaded empty catalog from a failed request', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({ tools: [] }) });
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['old.tool'] }} onChange={() => {}} />);
+    expect(await screen.findByText('No agent tools are available.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove unavailable grant: old.tool' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

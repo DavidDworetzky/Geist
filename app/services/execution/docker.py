@@ -4,13 +4,13 @@ Each run is a fresh ``docker run --rm`` with the hardening posture ported
 from Hermes-agent's Docker environment: all capabilities dropped, privilege
 escalation blocked, a non-root user, size-limited tmpfs for every writable
 path, no network by default, and PID/memory/CPU ceilings. The container
-receives an empty environment, so host credentials cannot leak by
-construction.
+does not inherit host environment variables. Secrets inside an explicitly
+mounted workspace remain readable; this is not a secret-filtering boundary.
 
 The sandbox claim only holds while nothing is bind-mounted: configuring a
-host ``workspace`` flips ``is_sandboxed`` to False, which in turn makes the
-terminal tool register with ``requires_approval=True`` (the Hermes
-"host access" rule).
+host ``workspace`` flips ``is_sandboxed`` to False. Either a workspace or network
+access requires fresh approval regardless of permission mode or standing grants.
+Custom images must provide bash and GNU timeout.
 """
 
 from __future__ import annotations
@@ -18,8 +18,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - argv-only calls to the configured runtime
 import time
+import uuid
 
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -42,17 +43,30 @@ _DOCKER_OVERHEAD_SECONDS = 20
 _SANDBOX_USER = "65534:65534"
 
 _BASE_SECURITY_ARGS = [
-    "--cap-drop", "ALL",
-    "--security-opt", "no-new-privileges",
-    "--user", _SANDBOX_USER,
-    "--pids-limit", "256",
-    "--memory", "512m",
-    "--cpus", "1",
-    "--tmpfs", "/tmp:rw,nosuid,size=256m",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--user",
+    _SANDBOX_USER,
+    "--pids-limit",
+    "256",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--tmpfs",
+    "/tmp:rw,nosuid,size=256m",  # nosec B108 - isolated container mount, not host temp files
 ]
 
 
 logger = logging.getLogger(__name__)
+
+
+def workspace_mount_args(workspace: str) -> list[str]:
+    if not os.path.isabs(workspace) or "," in workspace:
+        raise ValueError("Docker workspace must be absolute and cannot contain commas")
+    return ["--mount", f"type=bind,source={workspace},target=/workspace"]
 
 
 def find_container_runtime(preferred: str | None = None) -> str | None:
@@ -90,6 +104,7 @@ def build_docker_run_args(
     command: str,
     network: bool = False,
     workspace: str | None = None,
+    container_name: str | None = None,
 ) -> list[str]:
     """Assemble the argv (after the runtime executable) for one sandboxed run.
 
@@ -97,10 +112,12 @@ def build_docker_run_args(
     a container runtime present.
     """
     args = ["run", "--rm", *_BASE_SECURITY_ARGS]
+    if container_name:
+        args += ["--name", container_name]
     if not network:
         args += ["--network", "none"]
     if workspace:
-        args += ["--volume", f"{workspace}:/workspace"]
+        args += workspace_mount_args(workspace)
     else:
         # mode=0777 lets the non-root sandbox user write; the tmpfs is
         # per-run and size-bounded so this grants nothing on the host.
@@ -123,7 +140,11 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
     ):
         self.image = image
         self.network = network
-        self.workspace = workspace
+        self.workspace = os.path.abspath(workspace) if workspace else None
+        if self.workspace:
+            workspace_mount_args(self.workspace)
+            if not os.path.isdir(self.workspace):
+                raise ValueError("Docker workspace must be an existing directory")
         self._runtime_path = runtime_path
         self.runtime_preference = runtime_preference
 
@@ -134,6 +155,13 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
     @property
     def is_sandboxed(self) -> bool:
         return not self.has_host_access
+
+    @property
+    def requires_per_call_approval(self) -> bool:
+        return self.has_host_access or self.network
+
+    def describe(self) -> str:
+        return super().describe() + ("; network enabled" if self.network else "")
 
     def runtime(self) -> str | None:
         if self._runtime_path is None:
@@ -148,6 +176,9 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
+        hardline = self.command_rejection_reason(command)
+        if hardline is not None:
+            return ExecutionResult(126, "", f"BLOCKED: {hardline}", 0.0, blocked=True)
         runtime = self.runtime()
         if runtime is None:
             return ExecutionResult(
@@ -160,23 +191,36 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         timeout = clamp_timeout(timeout_seconds)
         # ``timeout`` inside the container bounds the command itself; the
         # outer subprocess timeout only guards a wedged runtime.
-        bounded_command = f"timeout {timeout} bash -c {_shell_quote(command)}"
+        bounded_command = f"timeout --kill-after=1 {timeout} bash -c {_shell_quote(command)}"
+        container_name = f"geist-exec-{uuid.uuid4().hex}"
         args = build_docker_run_args(
             image=self.image,
             command=bounded_command,
             network=self.network,
             workspace=self.workspace,
+            container_name=container_name,
         )
 
         started = time.monotonic()
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # nosec B603 - resolved runtime and argv
                 [runtime, *args],
                 capture_output=True,
                 text=True,
                 timeout=timeout + _DOCKER_OVERHEAD_SECONDS,
             )
         except subprocess.TimeoutExpired:
+            try:
+                subprocess.run(  # nosec B603 - only this invocation's random container
+                    [runtime, "rm", "--force", container_name],
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                logger.warning(
+                    "Could not confirm cleanup of execution container %s", container_name
+                )
             return ExecutionResult(
                 exit_code=124,
                 stdout="",
@@ -184,11 +228,13 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
                 duration_seconds=time.monotonic() - started,
                 timed_out=True,
             )
+        except OSError as error:
+            return ExecutionResult(127, "", str(error), time.monotonic() - started)
 
         stdout, stdout_truncated = truncate_output(completed.stdout)
         stderr, stderr_truncated = truncate_output(completed.stderr)
-        # GNU timeout reports 124 when the inner command exceeded its bound.
-        timed_out = completed.returncode == 124
+        # GNU timeout uses124/137; an explicit command exit with either is ambiguous.
+        timed_out = completed.returncode in (124, 137)
         return ExecutionResult(
             exit_code=completed.returncode,
             stdout=stdout,

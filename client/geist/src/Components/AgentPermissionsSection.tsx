@@ -12,6 +12,7 @@ interface ChatTool {
   description: string;
   requires_approval: boolean;
   side_effect: string;
+  enabled?: boolean;
 }
 
 const DEFAULT_PERMISSIONS: AgentPermissions = { mode: 'default', always_allow: [] };
@@ -38,6 +39,8 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
   const permissions = agentPermissions ?? DEFAULT_PERMISSIONS;
   const [tools, setTools] = useState<ChatTool[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const unavailableGrants = loading || loadError ? [] : permissions.always_allow.filter(name => !tools.some(tool => tool.name === name));
 
   useEffect(() => {
     void fetchTools();
@@ -46,11 +49,18 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
   const fetchTools = async () => {
     try {
       const response = await fetch('/agent/tools');
-      if (response.ok) {
-        const data = await response.json();
-        setTools(data.tools || []);
+      if (!response.ok) {
+        throw new Error('Tool catalog request failed');
       }
+      const data = await response.json();
+      if (!Array.isArray(data.tools) || data.tools.some((tool: unknown) =>
+        !tool || typeof tool !== 'object' || !('name' in tool) || typeof tool.name !== 'string'
+      )) {
+        throw new Error('Invalid tool catalog response');
+      }
+      setTools(data.tools);
     } catch (err) {
+      setLoadError(true);
       console.error('Failed to fetch agent tools:', err);
     } finally {
       setLoading(false);
@@ -114,8 +124,22 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
           </p>
         )}
 
+        {!loading && unavailableGrants.length > 0 && (
+          <div>
+            <p className="settings-description">Unavailable saved grants — these names are not in the current tool catalog.</p>
+            {unavailableGrants.map(name => (
+              <button key={name} type="button" onClick={() => toggleAlwaysAllow(name)}>
+                Remove unavailable grant: {name}
+              </button>
+            ))}
+          </div>
+        )}
         {loading ? (
           <div className="empty-state compact">Loading tools...</div>
+        ) : loadError ? (
+          <div role="alert" className="empty-state compact">
+            Could not load the tool catalog. Your saved grants are unchanged. Reload settings to try again.
+          </div>
         ) : tools.length === 0 ? (
           <div className="empty-state compact">No agent tools are available.</div>
         ) : (
@@ -128,12 +152,18 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   type="button"
                   className={`settings-file-option ${selected ? 'selected' : ''}`}
                   onClick={() => toggleAlwaysAllow(tool.name)}
+                  aria-pressed={selected}
+                  disabled={tool.enabled === false && !selected}
                   title={tool.description}
                 >
                   <span className="settings-checkbox" aria-hidden="true">
                   </span>
                   <span>
                     {tool.name}
+                    {tool.enabled === false && <span className="settings-description"> — unavailable</span>}
+                    {(tool.side_effect === 'external_write' || tool.side_effect === 'process') && (
+                      <span className="settings-description"> — can affect external systems or run commands</span>
+                    )}
                     {tool.requires_approval && (
                       <span className="settings-description"> — asks by default</span>
                     )}
