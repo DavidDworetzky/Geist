@@ -145,7 +145,7 @@ class ToolContext:
     chat_id: int | None
     run_id: str
     approved_call_ids: frozenset[str] = frozenset()
-    permission_mode: str = PERMISSION_MODE_DEFAULT
+    permission_mode: PermissionMode = PERMISSION_MODE_DEFAULT
     always_allow_tools: frozenset[str] = frozenset()
     cancellation: threading.Event | None = None
 
@@ -172,6 +172,7 @@ class ToolDefinition:
     handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
@@ -212,6 +213,7 @@ class ToolDefinition:
                 "side_effect": self.side_effect,
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
+                "allows_standing_grant": self.allows_standing_grant,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -240,14 +242,15 @@ class ToolDefinition:
 def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
     """Effective approval requirement for one call under the user's permissions.
 
-    The user's always-allow list is a standing grant, so it wins over both the
-    per-tool flag and require_approval mode; auto_approve waives everything
+    Name-only standing grants apply to static built-ins, never mutable sources.
+    Eligible grants win over the per-tool flag and require_approval mode;
+    auto_approve explicitly waives everything
     else; require_approval asks for every remaining tool; default falls back
     to the tool's own requires_approval flag.
     """
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
-    if definition.name in context.always_allow_tools:
+    if definition.allows_standing_grant and definition.name in context.always_allow_tools:
         return False
     if context.permission_mode == PERMISSION_MODE_REQUIRE_APPROVAL:
         return True

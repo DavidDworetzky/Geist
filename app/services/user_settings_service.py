@@ -233,14 +233,9 @@ class UserSettingsService:
 
     @staticmethod
     def get_default_workspace_settings() -> UserSettingsResponse:
-        """
-        Get default user settings (for the default user).
-
-        Returns:
-            UserSettingsResponse for default user
-        """
-        default_user = get_default_workspace()
-        return UserSettingsService.get_or_create_workspace_settings_by_id(default_user.workspace_id)
+        """Return settings for the singleton local workspace."""
+        workspace = get_default_workspace()
+        return UserSettingsService.get_or_create_workspace_settings_by_id(workspace.workspace_id)
 
     @staticmethod
     def create_agent_from_workspace_settings(

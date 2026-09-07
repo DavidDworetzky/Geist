@@ -486,7 +486,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     assert coalesced_refresh.error == ordinary.error
     assert coalesced_refresh.discovery_in_progress is True
     assert polled_while_refreshing.devices == ordinary.devices
-    assert polled_while_refreshing.discovery_in_progress is True
+    assert polled_while_refreshing is ordinary
     assert len(first_results) == 1
     refreshed = first_results[0]
     assert refreshed is not ordinary
@@ -602,16 +602,50 @@ def test_wedged_probe_bounds_first_and_subsequent_trusted_callers(tmp_path: Path
     )
     try:
         started = time.monotonic()
-        for _ in range(2):
+        for _ in range(4):
             result = service.inventory()
-            assert result.discovery_in_progress
-            assert result.selection_detection_error == DISCOVERY_IN_PROGRESS_ERROR
-        assert time.monotonic() - started < 1.0
-        assert calls == [True]
+            assert not result.discovery_in_progress
+            assert "timed out" in result.selection_detection_error
+        assert time.monotonic() - started < 5.0
+        assert calls == [True, True]
         assert not probe_finished.is_set()
     finally:
         release_probe.set()
         assert probe_finished.wait(timeout=2)
+
+
+def test_replacement_probe_recovers_and_discards_late_result(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def run(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(timeout=3)
+            return subprocess.CompletedProcess([], 1, stdout="", stderr="old probe failed")
+        return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
+
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(_runtime_tree(tmp_path))},
+        command_runner=run,
+    )
+    first = threading.Thread(target=service.inventory)
+    first.start()
+    try:
+        assert entered.wait(timeout=2)
+        with service._probe_completed:
+            service._probe_started_at -= 100
+        recovered = service.inventory(refresh=True)
+        assert recovered.recommended_backend == "gpu"
+        assert len(calls) == 2
+    finally:
+        release.set()
+        first.join(timeout=2)
+    with service._probe_completed:
+        assert service._probe_completed.wait_for(lambda: not service._active_probes, timeout=2)
+    assert service.inventory() is recovered
 
 
 @pytest.mark.parametrize(

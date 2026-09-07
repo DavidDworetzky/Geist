@@ -330,7 +330,11 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
-        permissions = self.permissions_loader(workspace_id)
+        try:
+            permissions = self.permissions_loader(workspace_id)
+        except Exception:
+            logger.exception("Could not load run permissions; requiring approval for every tool")
+            permissions = AgentPermissions(mode="require_approval")
         approved_call_ids: set[str] = set()
         cancellation = threading.Event()
         context = ToolContext(

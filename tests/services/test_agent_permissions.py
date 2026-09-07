@@ -193,3 +193,31 @@ def test_unknown_runtime_mode_cannot_auto_approve_side_effects():
     )
     assert result.status == "awaiting_approval"
     handler.assert_not_called()
+
+
+def test_dynamic_definitions_cannot_redeem_name_only_grants():
+    handler = Mock(return_value=ToolExecutionOutput(content="sent"))
+    definition = _definition("mcp.weather.forecast", handler, requires_approval=True)
+
+    class MutableSource:
+        name = "weather"
+
+        def definitions(self, context=None):
+            return [definition]
+
+    registry = ToolRegistry()
+    registry.add_source(MutableSource())
+    context = _context(always_allow=frozenset({definition.name}))
+    for revision in ("original", "changed"):
+        definition.source_revision = revision
+        catalogued = registry.get(definition.name, context)
+        assert catalogued.allows_standing_grant is False
+        assert definition.allows_standing_grant is True
+        result = registry.execute(ToolCall.create(definition.name, {"query": "hi"}), context)
+        assert result.status == "awaiting_approval"
+    handler.assert_not_called()
+    result = registry.execute(
+        ToolCall.create(definition.name, {"query": "hi"}),
+        _context(mode=PERMISSION_MODE_AUTO_APPROVE),
+    )
+    assert result.status == "succeeded"

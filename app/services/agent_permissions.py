@@ -15,6 +15,7 @@ from agents.models.tool_calling import (
     MAX_PERMISSION_TOOL_NAME_LENGTH,
     PERMISSION_MODE_DEFAULT,
     VALID_PERMISSION_MODES,
+    PermissionMode,
 )
 
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AgentPermissions:
-    mode: str = PERMISSION_MODE_DEFAULT
+    mode: PermissionMode = PERMISSION_MODE_DEFAULT
     always_allow: frozenset[str] = field(default_factory=frozenset)
 
 

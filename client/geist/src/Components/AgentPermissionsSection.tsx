@@ -13,6 +13,7 @@ interface ChatTool {
   requires_approval: boolean;
   side_effect: string;
   enabled?: boolean;
+  allows_standing_grant?: boolean;
 }
 
 const DEFAULT_PERMISSIONS: AgentPermissions = { mode: 'default', always_allow: [] };
@@ -102,7 +103,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
           <div>
             <span className="settings-label">Always-Allowed Tools</span>
             <p className="settings-description">
-              Tools on this list never wait for approval, in any mode (
+              Eligible built-in tools on this list skip approval. Runtime-discovered tools cannot receive name-only grants (
               {permissions.always_allow.length} selected).
             </p>
           </div>
@@ -138,7 +139,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
           <div className="empty-state compact">Loading tools...</div>
         ) : loadError ? (
           <div role="alert" className="empty-state compact">
-            Could not load the tool catalog. Your saved grants are unchanged. Reload settings to try again.
+            Could not load the tool catalog. Your saved grants are unchanged. Switch tabs and return to try again.
           </div>
         ) : tools.length === 0 ? (
           <div className="empty-state compact">No agent tools are available.</div>
@@ -153,7 +154,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   className={`settings-file-option ${selected ? 'selected' : ''}`}
                   onClick={() => toggleAlwaysAllow(tool.name)}
                   aria-pressed={selected}
-                  disabled={tool.enabled === false && !selected}
+                  disabled={(tool.enabled === false || tool.allows_standing_grant === false) && !selected}
                   title={tool.description}
                 >
                   <span className="settings-checkbox" aria-hidden="true">
@@ -161,6 +162,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   <span>
                     {tool.name}
                     {tool.enabled === false && <span className="settings-description"> — unavailable</span>}
+                    {tool.allows_standing_grant === false && <span className="settings-description"> — runtime-discovered; standing grants unavailable</span>}
                     {(tool.side_effect === 'external_write' || tool.side_effect === 'process') && (
                       <span className="settings-description"> — can affect external systems or run commands</span>
                     )}

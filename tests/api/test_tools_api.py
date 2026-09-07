@@ -67,6 +67,7 @@ def test_tool_catalogue_reports_redacted_image_configuration(tools_client):
     assert "adapter.JobStatusAdapter.check_async_tool" not in tools
     assert tools["workspace.list_markdown"]["enabled"] is True
     assert tools["workspace.read_markdown"]["enabled"] is True
+    assert tools["workspace.read_markdown"]["allows_standing_grant"] is True
     assert tools["image.generate"]["configuration"] == {
         "kind": "environment",
         "provider": "OpenAI-compatible image API",

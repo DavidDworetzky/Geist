@@ -125,7 +125,7 @@ describe('AgentPermissionsSection', () => {
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: [] });
   });
 
-  it.each(['rejected', 'non-ok', 'invalid-json', 'missing-tools', 'invalid-tool'])('preserves grants when the catalog response is %s', async (failure) => {
+  it.each(['rejected', 'non-ok', 'invalid-json', 'missing-tools', 'invalid-tool', 'missing-name', 'invalid-name'])('preserves grants when the catalog response is %s', async (failure) => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     const fetchMock = global.fetch as jest.Mock;
     if (failure === 'rejected') {
@@ -135,7 +135,8 @@ describe('AgentPermissionsSection', () => {
     } else if (failure === 'invalid-json') {
       fetchMock.mockResolvedValueOnce({ ok: true, json: async () => { throw new Error('invalid JSON'); } });
     } else {
-      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => failure === 'missing-tools' ? {} : { tools: [null] } });
+      const tool = failure === 'missing-name' ? {} : failure === 'invalid-name' ? { name: 4 } : null;
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => failure === 'missing-tools' ? {} : { tools: [tool] } });
     }
     const onChange = jest.fn();
     render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['web.search'] }} onChange={onChange} />);
@@ -152,5 +153,17 @@ describe('AgentPermissionsSection', () => {
     expect(await screen.findByText('No agent tools are available.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove unavailable grant: old.tool' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])('prevents new dynamic grants while allowing revocation (selected=%s)', async (selected) => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({
+      tools: [{ ...toolsResponse.tools[1], name: 'mcp.weather.forecast', allows_standing_grant: false }]
+    }) });
+    const onChange = jest.fn();
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: selected ? ['mcp.weather.forecast'] : [] }} onChange={onChange} />);
+    const tool = await screen.findByRole('button', { name: /mcp.weather.forecast/ });
+    expect(tool).toHaveProperty('disabled', !selected);
+    fireEvent.click(tool);
+    expect(onChange.mock.calls).toEqual(selected ? [[{ mode: 'default', always_allow: [] }]] : []);
   });
 });
