@@ -5,12 +5,14 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import platform
 import secrets
 import socket
 import subprocess
+import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,57 @@ class LlamaServerCandidate:
     detection_error: str | None = None
 
 
+def _server_filename(system: str | None = None) -> str:
+    platform_name = (system or platform.system()).lower()
+    return "llama-server.exe" if platform_name == "windows" else "llama-server"
+
+
+def default_llama_runtime_root(
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the packaged llama.cpp root when no operator override is set."""
+
+    env = environment if environment is not None else os.environ
+    configured = env.get("GEIST_LLAMA_RUNTIME_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "runtimes" / "llama.cpp"
+
+    geist_home = env.get("GEIST_HOME")
+    if geist_home:
+        return Path(geist_home).expanduser().resolve().parent / "geist-runtime" / "llama.cpp"
+
+    return Path(__file__).resolve().parents[2] / "runtime" / "llama.cpp"
+
+
+def llama_server_runtime_available(
+    environment: Mapping[str, str] | None = None,
+    *,
+    system: str | None = None,
+) -> bool:
+    """Return whether the configured or packaged runtime has a usable server."""
+
+    env = environment if environment is not None else os.environ
+    platform_name = (system or platform.system()).lower()
+    explicit = env.get("GEIST_LLAMA_SERVER_PATH")
+    if explicit:
+        candidates = [Path(explicit).expanduser().resolve()]
+    else:
+        root = default_llama_runtime_root(env)
+        acceleration = env.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
+        if acceleration not in {"auto", "cpu", "vulkan"}:
+            return False
+        order = ["vulkan", "cpu"] if acceleration == "auto" else [acceleration]
+        candidates = [root / backend / _server_filename(platform_name) for backend in order]
+
+    return any(
+        candidate.is_file() and (platform_name == "windows" or os.access(candidate, os.X_OK))
+        for candidate in candidates
+    )
+
+
 def _free_loopback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
@@ -83,7 +136,7 @@ class LlamaServerManager:
     def __init__(
         self,
         *,
-        environment: dict[str, str] | None = None,
+        environment: Mapping[str, str] | None = None,
         process_factory: ProcessFactory = subprocess.Popen,
         health_probe: HealthProbe | None = None,
         port_factory: Callable[[], int] = _free_loopback_port,
@@ -147,13 +200,7 @@ class LlamaServerManager:
         if explicit:
             return [LlamaServerCandidate("explicit", Path(explicit).expanduser().resolve())]
 
-        root_value = self.environment.get("GEIST_LLAMA_RUNTIME_ROOT")
-        if not root_value:
-            raise FileNotFoundError(
-                "Set GEIST_LLAMA_SERVER_PATH or GEIST_LLAMA_RUNTIME_ROOT to a verified "
-                "llama.cpp runtime directory."
-            )
-        root = Path(root_value).expanduser().resolve()
+        root = default_llama_runtime_root(self.environment)
         acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
         if acceleration not in {"auto", "cpu", "vulkan"}:
             raise ValueError("GEIST_LLAMA_ACCELERATION must be auto, cpu, or vulkan")

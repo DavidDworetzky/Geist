@@ -245,7 +245,7 @@ describe('LlamaComputeSection', () => {
         /device discovery is in progress.*waiting for the current results/i,
       );
     });
-    expect(await screen.findByText(/device list is current/i)).toHaveAttribute(
+    expect(await screen.findByText(/latest available device snapshot/i)).toHaveAttribute(
       'role',
       'status',
     );

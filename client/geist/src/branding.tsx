@@ -36,6 +36,7 @@ declare global {
 }
 
 const BRANDING_UPDATED_EVENT = 'geist-branding-updated';
+const defaultAssetUrl = (filename: string): string => `${process.env.PUBLIC_URL}/${filename}`;
 
 const neutralTheme: Record<GeistThemeToken, string> = {
   '--geist-brand-name': '"Geist"',
@@ -61,6 +62,8 @@ const neutralTheme: Record<GeistThemeToken, string> = {
 export const defaultBranding: Required<Pick<GeistBranding, 'productName' | 'titleTemplate'>> &
   GeistBranding = {
   productName: 'Geist',
+  logoUrl: defaultAssetUrl('logo192.png'),
+  faviconUrl: defaultAssetUrl('favicon.ico'),
   titleTemplate: '%s',
   theme: neutralTheme,
 };

@@ -1,0 +1,328 @@
+.tools-page {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 100%);
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 22px;
+  overflow: hidden;
+}
+
+.tools-page-header,
+.mcp-catalogue-heading,
+.mcp-catalogue-card-heading,
+.mcp-catalogue-actions,
+.tool-card-title-row,
+.tool-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tools-page-header h1,
+.tools-page-header p,
+.mcp-catalogue-heading h4,
+.mcp-catalogue-card h4,
+.mcp-catalogue-card p,
+.tool-card h3,
+.tool-card p,
+.mcp-profile-summary h4,
+.mcp-profile-summary p {
+  margin: 0;
+}
+
+.tools-page-header > div,
+.mcp-catalogue-card-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.tools-page-header > div > p:last-child {
+  color: var(--geist-color-text-muted);
+}
+
+.tools-tabs {
+  flex: 0 0 auto;
+  margin-top: 20px;
+}
+
+.tools-scroll-region {
+  min-height: 0;
+  padding-top: 18px;
+  padding-bottom: 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tool-card-grid,
+.mcp-catalogue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.tool-card,
+.mcp-catalogue-card,
+.mcp-profile-summary {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: var(--geist-color-surface);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-lg);
+  box-shadow: var(--geist-shadow-panel);
+}
+
+.tool-card h3,
+.mcp-catalogue-card h4,
+.mcp-profile-summary h4 {
+  color: var(--geist-color-text);
+  font-size: 0.94rem;
+  overflow-wrap: anywhere;
+}
+
+.tool-card > p,
+.mcp-catalogue-card > p,
+.mcp-profile-summary p,
+.mcp-profile-summary li {
+  color: var(--geist-color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.tool-category,
+.mcp-catalogue-category {
+  color: var(--geist-color-accent-strong);
+  font-size: 0.69rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tool-status,
+.mcp-catalogue-count,
+.mcp-catalogue-publisher,
+.mcp-catalogue-configured {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--geist-color-surface-strong);
+  border: 1px solid var(--geist-color-border);
+  border-radius: 999px;
+}
+
+.tool-status-ready {
+  color: var(--geist-color-success);
+  background: color-mix(in srgb, var(--geist-color-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-success) 35%, transparent);
+}
+
+.mcp-catalogue-configured {
+  margin-left: auto;
+  color: var(--geist-color-success);
+  background: color-mix(in srgb, var(--geist-color-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-success) 35%, transparent);
+}
+
+.tool-status-opt-in {
+  color: var(--geist-color-accent-strong);
+  background: color-mix(in srgb, var(--geist-color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-accent) 30%, transparent);
+}
+
+.tool-status-unavailable {
+  color: var(--geist-color-warning);
+  background: color-mix(in srgb, var(--geist-color-warning) 9%, transparent);
+  border-color: color-mix(in srgb, var(--geist-color-warning) 28%, transparent);
+}
+
+.tool-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  color: var(--geist-color-text-muted);
+  font-size: 0.76rem;
+  background: var(--geist-color-surface);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.tool-status-legend strong {
+  color: var(--geist-color-text);
+}
+
+.tool-card .tool-status-note {
+  color: var(--geist-color-text-muted);
+  font-size: 0.76rem;
+  font-style: italic;
+}
+
+.tool-meta-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.tool-meta-row span {
+  color: var(--geist-color-text-muted);
+  font-size: 0.72rem;
+}
+
+.tool-source {
+  overflow-wrap: anywhere;
+}
+
+.tool-card details {
+  color: var(--geist-color-text-muted);
+  font-size: 0.8rem;
+}
+
+.tool-card summary {
+  cursor: pointer;
+}
+
+.tool-card pre {
+  max-height: 240px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--geist-color-text);
+  font-size: 0.72rem;
+  background: var(--geist-color-surface-strong);
+  border-radius: var(--geist-radius-md);
+}
+
+.tool-configure-button {
+  justify-self: start;
+}
+
+.tool-configuration-modal {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+}
+
+.tool-configuration-modal > p,
+.tool-configuration-heading h3,
+.tool-configuration-heading p {
+  margin: 0;
+}
+
+.tool-configuration-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tool-configuration-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.tool-configuration-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tool-configuration-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--geist-color-text);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.tool-configuration-fields input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--geist-color-text);
+  background: var(--geist-color-surface-strong);
+  border: 1px solid var(--geist-color-border);
+  border-radius: var(--geist-radius-md);
+}
+
+.tool-configuration-fields small {
+  color: var(--geist-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.tool-configuration-modal .tool-configuration-notice {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.tools-mcp-panel > .settings-section {
+  box-shadow: none;
+}
+
+.mcp-catalogue-block {
+  display: grid;
+  gap: 12px;
+}
+
+.mcp-catalogue-heading h4 {
+  color: var(--geist-color-text);
+  font-size: 0.92rem;
+}
+
+.mcp-catalogue-actions {
+  align-self: end;
+}
+
+.mcp-catalogue-actions a {
+  color: var(--geist-color-accent-strong);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.mcp-catalogue-scope {
+  font-weight: 650;
+}
+
+.mcp-profile-summary ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.mcp-profile-summary .mcp-profile-warning {
+  padding: 10px;
+  color: var(--geist-color-warning);
+  background: color-mix(in srgb, var(--geist-color-warning) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--geist-color-warning) 28%, transparent);
+  border-radius: var(--geist-radius-md);
+}
+
+@media (max-width: 720px) {
+  .tools-page {
+    padding: 16px;
+  }
+
+  .tools-page-header,
+  .mcp-catalogue-heading {
+    align-items: flex-start;
+  }
+
+  .tool-card-grid,
+  .mcp-catalogue-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-configuration-fields {
+    grid-template-columns: 1fr;
+  }
+}

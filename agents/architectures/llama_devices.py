@@ -395,6 +395,7 @@ class LlamaDeviceService:
         self._cached_inventory_expires_at = 0.0
         self._next_refresh_allowed_at = 0.0
         self._probe_in_flight = False
+        self._probe_error: BaseException | None = None
 
     def inventory(
         self,
@@ -402,28 +403,51 @@ class LlamaDeviceService:
         refresh: bool = False,
         allow_in_progress: bool = False,
     ) -> LlamaDeviceInventory:
+        deadline = time.monotonic() + max(0.0, self.timeout_seconds) + 0.1
         with self._probe_completed:
             now = self.clock()
+            joined_probe = self._probe_in_flight
+            if not joined_probe:
+                if self._cached_inventory is not None:
+                    if refresh and now < self._next_refresh_allowed_at:
+                        return self._cached_inventory
+                    if not refresh and now < self._cached_inventory_expires_at:
+                        return self._cached_inventory
+                self._probe_in_flight = True
+                self._probe_error = None
+                # One worker per service, even if the OS cannot reap a wedged probe.
+                # Neither the first caller nor subsequent callers wait indefinitely.
+                try:
+                    threading.Thread(target=self._probe_inventory, daemon=True).start()
+                except RuntimeError:
+                    self._probe_in_flight = False
+                    self._probe_completed.notify_all()
+                    raise
             while self._probe_in_flight:
-                if allow_in_progress:
-                    return self._discovery_in_progress_inventory(self._cached_inventory)
-                self._probe_completed.wait()
-                now = self.clock()
-            if self._cached_inventory is not None:
-                if refresh and now < self._next_refresh_allowed_at:
+                remaining = deadline - time.monotonic()
+                if (joined_probe and allow_in_progress) or remaining <= 0:
+                    break
+                self._probe_completed.wait(timeout=remaining)
+            if not self._probe_in_flight:
+                if self._probe_error is not None:
+                    raise self._probe_error
+                if self._cached_inventory is not None:
                     return self._cached_inventory
-                if not refresh and now < self._cached_inventory_expires_at:
-                    return self._cached_inventory
-            self._probe_in_flight = True
+            cached_inventory = self._cached_inventory
+        # Placeholder construction may inspect runtime paths; never do IO under
+        # the shared condition lock used by all inventory readers.
+        return self._discovery_in_progress_inventory(cached_inventory)
 
+    def _probe_inventory(self) -> None:
         try:
             inventory = self._discover_inventory()
             completed_at = self.clock()
-        except BaseException:
+        except BaseException as error:
             with self._probe_completed:
+                self._probe_error = error
                 self._probe_in_flight = False
                 self._probe_completed.notify_all()
-            raise
+            return
 
         with self._probe_completed:
             try:
@@ -435,7 +459,6 @@ class LlamaDeviceService:
                 self._cached_inventory = inventory
                 self._cached_inventory_expires_at = completed_at + ttl_seconds
                 self._next_refresh_allowed_at = completed_at + self.minimum_refresh_interval_seconds
-                return inventory
             finally:
                 self._probe_in_flight = False
                 self._probe_completed.notify_all()
@@ -448,17 +471,23 @@ class LlamaDeviceService:
             return replace(
                 cached_inventory,
                 reason="GPU discovery is in progress; showing the previous device inventory.",
-                error=DISCOVERY_IN_PROGRESS_ERROR,
                 cache_policy="negative",
                 selection_detection_error=DISCOVERY_IN_PROGRESS_ERROR,
                 discovery_in_progress=True,
             )
 
         acceleration = self.environment.get("GEIST_LLAMA_ACCELERATION", "auto").strip().lower()
+        configured_runner = self.environment.get("GEIST_LOCAL_RUNNER", "").strip()
+        explicit_binary = self.environment.get("GEIST_LLAMA_SERVER_PATH", "").strip()
+        forced_backend = (
+            {"cpu": "cpu", "vulkan": "gpu"}.get(acceleration)
+            if configured_runner in {"", "llama_server"} and not explicit_binary
+            else None
+        )
         return _cpu_inventory(
             available=self._runtime_available_without_probe(),
             managed_by_environment=llama_compute_managed_by_environment(self.environment),
-            forced_backend={"cpu": "cpu", "vulkan": "gpu"}.get(acceleration),
+            forced_backend=forced_backend,
             reason="GPU discovery is already in progress.",
             error=DISCOVERY_IN_PROGRESS_ERROR,
             cache_policy="negative",

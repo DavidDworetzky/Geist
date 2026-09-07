@@ -20,3 +20,11 @@ output and reap children.
 Expose mandatory-approval metadata in the catalog and disable new inert UI grants.
 Reader threads own pipe closure to avoid descriptor-reuse races. Platform guards
 must also type-check under the Windows CI target, without relying on os.name narrowing.
+
+Main integration retains authenticated workspace approval resume and dynamic
+tool sources while preserving all execution hardline/capture/mandatory-approval
+controls. Obsolete disabled email/SMS/Markdown-write registrations removed by
+main stay removed. 475 Docker tests and218 frontend tests/build pass; project
+mypy passes9 files. Normal merge hooks found only baseline cached-mypy Any in
+unchanged whisper_adapter and Bandit's unchanged main all-interface bind. Those
+two hooks alone are skipped for this merge; CI configuration is unchanged.

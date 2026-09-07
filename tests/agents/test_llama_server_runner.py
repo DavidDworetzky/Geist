@@ -146,7 +146,7 @@ def test_auto_cpu_discovery_error_is_exposed_without_changing_selection_contract
     signature = geist_main._local_agent_configuration_signature(factory_config)
     with (
         patch("app.main._llama_selection_managed_by_environment", return_value=False),
-        patch("app.main.get_default_user") as get_user,
+        patch("app.main.get_default_workspace") as get_user,
         patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
     ):
         final_signature = geist_main._persist_first_use_llama_backend(
@@ -229,7 +229,7 @@ def test_auto_vulkan_startup_failure_remains_pending_through_persistence_guard(
 
         with (
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
-            patch("app.main.get_default_user") as get_user,
+            patch("app.main.get_default_workspace") as get_user,
             patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
         ):
             final_signature = geist_main._persist_first_use_llama_backend(
@@ -335,8 +335,8 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
         with (
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
             patch(
-                "app.main.get_default_user",
-                return_value=SimpleNamespace(user_id=1),
+                "app.main.get_default_workspace",
+                return_value=SimpleNamespace(workspace_id=1),
             ) as get_user,
             patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
         ):
