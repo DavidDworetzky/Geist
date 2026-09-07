@@ -1,8 +1,10 @@
+import json
 import threading
 from unittest.mock import Mock
 
 import pytest
 
+from agents.architectures.chat_template_tools import build_tool_payload, parse_tool_response
 from agents.models.tool_calling import (
     ToolCall,
     ToolContext,
@@ -18,7 +20,7 @@ from app.services.tool_registry import (
 
 def _context(*approved_call_ids: str) -> ToolContext:
     return ToolContext(
-        user_id=42,
+        workspace_id=42,
         chat_id=7,
         run_id="run-test",
         approved_call_ids=frozenset(approved_call_ids),
@@ -58,28 +60,84 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "image.generate",
         "workspace.list_markdown",
         "workspace.read_markdown",
-        "workspace.write_markdown",
-        "communication.email.send",
-        "communication.sms.send",
+        "adapter.JobStatusAdapter.check_async_tool",
     }
     assert catalog["web.search"].enabled_by_default is True
+    assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
-    assert catalog["workspace.read_markdown"].enabled_by_default is False
-    assert catalog["workspace.write_markdown"].requires_approval is True
-    assert catalog["communication.email.send"].requires_approval is True
-    assert catalog["communication.sms.send"].requires_approval is True
+    assert catalog["workspace.list_markdown"].enabled_by_default is True
+    assert catalog["workspace.read_markdown"].enabled_by_default is True
+    assert registry.get("workspace.write_markdown") is None
+    assert registry.get("communication.email.send") is None
+    assert registry.get("communication.sms.send") is None
 
     available_names = {
         definition.name for definition in registry.definitions_for_context(_context())
     }
-    assert available_names == {"web.search", "documents.search"}
+    assert available_names == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+
+
+def test_markdown_tools_default_to_the_private_data_workspace(monkeypatch, tmp_path):
+    data_dir = tmp_path / "geist-data"
+    monkeypatch.delenv("GEIST_MARKDOWN_ROOT", raising=False)
+    monkeypatch.setenv("GEIST_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    workspace = data_dir / "workspace"
+    assert workspace.is_dir()
+    (workspace / "note.md").write_text("# Private workspace note", encoding="utf-8")
+
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {}),
+        _context(),
+    )
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": "note.md"}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert '"note.md"' in listed.content
+    assert read.status == "succeeded"
+    assert read.content == "# Private workspace note"
+
+
+def test_markdown_list_paths_can_be_passed_directly_to_read(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    notes = workspace / "notes"
+    notes.mkdir(parents=True)
+    (notes / "a.md").write_text("# Nested note", encoding="utf-8")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(workspace))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {"path": "notes"}),
+        _context(),
+    )
+    listed_path = json.loads(listed.content)["files"][0]
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": listed_path}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert listed_path == "notes/a.md"
+    assert read.status == "succeeded"
+    assert read.content == "# Nested note"
 
 
 def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
-        "workspace.list_markdown, workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
@@ -94,11 +152,51 @@ def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
         "documents.search",
         "workspace.list_markdown",
         "workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
     }
-    assert registry.is_enabled(registry.get("workspace.write_markdown")) is False
 
 
-def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monkeypatch, tmp_path):
+def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monkeypatch, tmp_path):
+    monkeypatch.delenv("GEIST_ENABLED_CHAT_TOOLS", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-catalog-only")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    registry = build_default_tool_registry()
+
+    answer = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "answer")
+    }
+    sensitive = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "sensitive_answer")
+    }
+    action = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "action")
+    }
+    image = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "image_generation")
+    }
+
+    assert answer == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive == {
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive < answer
+    assert image == {"image.generate"}
+    assert "image.generate" not in action
+    assert {"web.search", "documents.search"} <= action
+
+    assert registry.definitions_for_intent(_context(), "answer", include_retrieval=False) == []
+
+
+def test_unfinished_side_effect_mappings_are_not_registered(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
         "workspace.write_markdown,communication.email.send,communication.sms.send",
@@ -106,13 +204,11 @@ def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monk
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
 
     registry = build_default_tool_registry()
-    available_names = {
-        definition.name for definition in registry.definitions_for_context(_context())
-    }
+    catalog_names = {definition.name for definition in registry.catalog()}
 
-    assert "workspace.write_markdown" not in available_names
-    assert "communication.email.send" not in available_names
-    assert "communication.sms.send" not in available_names
+    assert "workspace.write_markdown" not in catalog_names
+    assert "communication.email.send" not in catalog_names
+    assert "communication.sms.send" not in catalog_names
 
 
 @pytest.mark.parametrize(
@@ -121,14 +217,33 @@ def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monk
         {"query": "valid query", "unexpected": True},
         {"query": ""},
         {"query": "valid query", "max_results": 11},
+        {"max_results": 3},
     ],
 )
-def test_execute_rejects_invalid_or_extra_arguments(arguments):
+@pytest.mark.parametrize("protocol", ["json", "xml"])
+def test_execute_rejects_invalid_or_extra_model_arguments(arguments, protocol):
     handler = Mock(return_value=ToolExecutionOutput(content="should not run"))
     registry = ToolRegistry()
-    registry.register(_definition("strict.search", handler))
+    definition = _definition("strict.search", handler)
+    registry.register(definition)
+    payload = build_tool_payload([], [definition])
+    name = next(iter(payload.provider_to_internal))
+    if protocol == "json":
+        body = json.dumps({"name": name, "arguments": arguments})
+    else:
+        parameters = "".join(
+            f"<parameter={key}>\n{value if isinstance(value, str) else json.dumps(value)}\n"
+            "</parameter>\n"
+            for key, value in arguments.items()
+        )
+        body = f"<function={name}>\n{parameters}</function>"
+    turn = parse_tool_response(
+        f"<tool_call>{body}</tool_call>",
+        provider_to_internal=payload.provider_to_internal,
+        tools=payload.tools,
+    )
 
-    result = registry.execute(ToolCall.create("strict.search", arguments), _context())
+    result = registry.execute(turn.tool_calls[0], _context())
 
     assert result.status == "failed"
     assert result.error == "invalid_arguments"
@@ -219,3 +334,111 @@ def test_execute_hides_handler_exception_details(caplog):
     assert result.content == "Tool failed: failing.search"
     assert "provider secret response" not in result.content
     assert "provider secret response" in caplog.text
+
+
+class StaticSource:
+    """Minimal ToolSource for tests."""
+
+    name = "static-source"
+
+    def __init__(self, definitions, fail=False):
+        self._definitions = definitions
+        self.fail = fail
+
+    def definitions(self, context=None):
+        if self.fail:
+            raise RuntimeError("source exploded")
+        return list(self._definitions)
+
+
+def _schema_definition(name: str, handler) -> ToolDefinition:
+    return ToolDefinition(
+        name=name,
+        description=f"Schema definition for {name}",
+        arguments_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}, "count": {"type": "integer"}},
+            "required": ["text"],
+        },
+        handler=handler,
+    )
+
+
+def test_source_tools_merge_into_catalog_and_dispatch():
+    def handler(context, arguments):
+        assert isinstance(arguments, dict)
+        return ToolExecutionOutput(content=f"got {arguments['text']}")
+
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([_schema_definition("source.echo", handler)]))
+
+    assert registry.get("source.echo") is not None
+    assert "source.echo" in [definition.name for definition in registry.catalog()]
+    assert "source.echo" in [
+        definition.name for definition in registry.definitions_for_context(_context())
+    ]
+
+    result = registry.execute(ToolCall.create("source.echo", {"text": "hi"}), _context())
+    assert result.status == "succeeded"
+    assert result.content == "got hi"
+
+
+def test_schema_validation_rejects_missing_and_mistyped_arguments():
+    handler = Mock()
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([_schema_definition("source.echo", handler)]))
+
+    missing = registry.execute(ToolCall.create("source.echo", {}), _context())
+    assert missing.status == "failed"
+    assert missing.error == "invalid_arguments"
+
+    mistyped = registry.execute(
+        ToolCall.create("source.echo", {"text": "ok", "count": "three"}), _context()
+    )
+    assert mistyped.status == "failed"
+    assert mistyped.error == "invalid_arguments"
+    handler.assert_not_called()
+
+
+def test_static_registration_wins_source_collisions():
+    static_handler = Mock(return_value=ToolExecutionOutput(content="static"))
+    registry = ToolRegistry()
+    registry.register(_definition("web.search", static_handler))
+    registry.add_source(StaticSource([_schema_definition("web.search", Mock())]))
+
+    definition = registry.get("web.search")
+    assert definition.arguments_model is WebSearchArguments
+    assert len([d for d in registry.catalog() if d.name == "web.search"]) == 1
+
+
+def test_failing_source_does_not_break_catalog():
+    registry = ToolRegistry()
+    registry.register(_definition("web.search", Mock()))
+    registry.add_source(StaticSource([], fail=True))
+
+    assert [definition.name for definition in registry.catalog()] == ["web.search"]
+    assert registry.get("missing.tool") is None
+
+
+def test_duplicate_source_names_rejected():
+    registry = ToolRegistry()
+    registry.add_source(StaticSource([]))
+    with pytest.raises(ValueError, match="already registered"):
+        registry.add_source(StaticSource([]))
+    registry.remove_source("static-source")
+    registry.add_source(StaticSource([]))
+
+
+def test_tool_definition_requires_exactly_one_argument_contract():
+    with pytest.raises(ValueError, match="exactly one"):
+        ToolDefinition(name="broken", description="broken", handler=Mock())
+    with pytest.raises(ValueError, match="exactly one"):
+        ToolDefinition(
+            name="broken",
+            description="broken",
+            handler=Mock(),
+            arguments_model=WebSearchArguments,
+            arguments_schema={"type": "object"},
+        )
+    with pytest.raises(ValueError, match="requires a handler"):
+        ToolDefinition(name="broken", description="broken", arguments_model=WebSearchArguments)

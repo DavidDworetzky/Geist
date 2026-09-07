@@ -150,7 +150,9 @@ export default function LlamaComputeSection({
       if (mounted.current && !controller.signal.aborted) {
         setInventory(payload);
         if (refresh) {
-          setRefreshFeedback('Device list is current.');
+          setRefreshFeedback('Showing the latest available device snapshot; refresh requests may share a recent probe.');
+        } else {
+          setRefreshFeedback(null);
         }
       }
     } catch (error) {

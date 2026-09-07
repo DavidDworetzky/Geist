@@ -26,7 +26,7 @@ def _context(
     approved_call_ids: frozenset[str] = frozenset(),
 ) -> ToolContext:
     return ToolContext(
-        user_id=42,
+        workspace_id=42,
         chat_id=7,
         run_id="run-test",
         approved_call_ids=approved_call_ids,

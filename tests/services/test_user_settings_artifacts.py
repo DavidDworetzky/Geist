@@ -100,7 +100,7 @@ def test_changing_local_model_clears_stale_artifact_selection():
             return_value=updated,
         ) as update,
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(default_local_model="new/model"),
         )
@@ -116,7 +116,7 @@ def test_changing_local_model_clears_stale_artifact_selection():
     )
 
 
-def test_artifact_selection_must_match_model_and_be_installed():
+def test_artifact_selection_must_match_model():
     current = _settings(default_local_artifact_id=None)
     artifact = MagicMock(id="new-artifact", model_id="other/model")
     manager = MagicMock()
@@ -126,7 +126,7 @@ def test_artifact_selection_must_match_model_and_be_installed():
         patch("app.services.local_models.get_local_model_manager", return_value=manager),
         pytest.raises(ValueError, match="belongs to other/model"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 default_local_model="new/model",
@@ -134,20 +134,35 @@ def test_artifact_selection_must_match_model_and_be_installed():
             ),
         )
 
-    artifact.model_id = "new/model"
+
+def test_artifact_can_be_selected_before_installation():
+    current = _settings(default_local_artifact_id=None)
+    updated = _settings(
+        default_local_model="new/model",
+        default_local_artifact_id="new-artifact",
+    )
+    artifact = MagicMock(id="new-artifact", model_id="new/model")
+    manager = MagicMock()
+    manager.get_artifact.return_value = artifact
     manager.status.return_value = {"status": "not_installed", "supported": True}
     with (
         patch("app.services.user_settings_service.get_user_settings", return_value=current),
         patch("app.services.local_models.get_local_model_manager", return_value=manager),
-        pytest.raises(ValueError, match="must be installed"),
+        patch(
+            "app.services.user_settings_service.update_user_settings",
+            return_value=updated,
+        ),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 default_local_model="new/model",
                 default_local_artifact_id="new-artifact",
             ),
         )
+
+    assert result is not None
+    assert result.default_local_artifact_id == "new-artifact"
 
 
 def test_explicit_gpu_selection_requires_current_inventory_devices():
@@ -166,7 +181,7 @@ def test_explicit_gpu_selection_requires_current_inventory_devices():
             return_value=service,
         ),
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -245,7 +260,7 @@ def test_gpu_selection_save_waits_for_inflight_refresh_snapshot(
     def save_settings() -> None:
         try:
             save_results.append(
-                UserSettingsService.update_user_settings_by_id(
+                UserSettingsService.update_workspace_settings_by_id(
                     1,
                     UserSettingsUpdate(
                         llama_backend="gpu",
@@ -314,7 +329,7 @@ def test_explicit_gpu_selection_canonicalizes_unique_legacy_device_id():
             return_value=service,
         ),
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -349,7 +364,7 @@ def test_resaving_unchanged_legacy_selection_migrates_to_canonical_id():
             return_value=service,
         ),
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -376,7 +391,7 @@ def test_explicit_gpu_selection_rejects_alias_and_canonical_id_for_same_device()
         ),
         pytest.raises(ValueError, match="resolve to unique devices"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -404,7 +419,7 @@ def test_explicit_gpu_selection_rejects_distinct_ids_for_same_runtime_device():
         ),
         pytest.raises(ValueError, match="resolve to unique devices"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -444,7 +459,7 @@ def test_explicit_gpu_selection_rejects_unavailable_or_ambiguous_device_id(
             match="Selected llama[.]cpp GPU devices are unavailable: gpu-legacy",
         ),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(
                 llama_backend="gpu",
@@ -468,7 +483,7 @@ def test_regular_update_cannot_rearm_detection_after_resolution():
         ),
         pytest.raises(ValueError, match="Reset to Defaults"),
     ):
-        UserSettingsService.update_user_settings_by_id(
+        UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(llama_backend=None, llama_gpu_device_ids=[]),
         )
@@ -490,7 +505,7 @@ def test_full_reset_rearms_detection_without_consulting_environment_lock():
             return_value=service,
         ),
     ):
-        result = UserSettingsService.update_user_settings_by_id(
+        result = UserSettingsService.update_workspace_settings_by_id(
             1,
             UserSettingsUpdate(llama_backend=None, llama_gpu_device_ids=[]),
             allow_llama_redetection=True,
@@ -509,7 +524,7 @@ def test_first_use_persistence_does_not_overwrite_a_resolved_choice():
         patch("app.services.user_settings_service.get_user_settings", return_value=resolved),
         patch.object(
             UserSettingsService,
-            "get_user_settings_by_id",
+            "get_workspace_settings_by_id",
             return_value=MagicMock(llama_backend="cpu"),
         ) as get_response,
         patch(

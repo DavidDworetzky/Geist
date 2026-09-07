@@ -6,6 +6,8 @@ export type ToolCallStatus =
   | 'failed'
   | 'cancelled';
 
+export type ToolApprovalDecision = 'approve' | 'deny';
+
 export interface ToolCallResult {
   id: string;
   name: string;

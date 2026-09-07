@@ -23,6 +23,7 @@ const SettingsToggle: React.FC<SettingsToggleProps> = ({
       <button
         type="button"
         className={`settings-toggle ${checked ? 'settings-toggle-on' : ''}`}
+        aria-label={label}
         aria-pressed={checked}
         onClick={() => onChange(!checked)}
       >

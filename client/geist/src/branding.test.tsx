@@ -4,7 +4,12 @@ import { BrandingProvider, GeistBranding, useBranding } from './branding';
 
 function BrandingProbe(): JSX.Element {
   const branding = useBranding();
-  return <span data-testid="product-name">{branding.productName}</span>;
+  return (
+    <>
+      <span data-testid="product-name">{branding.productName}</span>
+      <span data-testid="logo-url">{branding.logoUrl}</span>
+    </>
+  );
 }
 
 describe('BrandingProvider', () => {
@@ -38,6 +43,7 @@ describe('BrandingProvider', () => {
     );
 
     expect(screen.getByTestId('product-name')).toHaveTextContent('Geist');
+    expect(screen.getByTestId('logo-url')).toHaveTextContent('/logo192.png');
 
     const runtimeBranding: GeistBranding = {
       productName: 'Hosted Geist',

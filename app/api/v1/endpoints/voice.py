@@ -53,8 +53,8 @@ async def get_agent_for_session(
         top_p=top_p,
     )
 
-    # Create agent from user settings
-    agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
+    # Create the agent from workspace-owned settings.
+    agent = UserSettingsService.create_agent_from_default_workspace(agent_context, overrides)
     return agent
 
 

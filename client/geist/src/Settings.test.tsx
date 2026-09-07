@@ -380,7 +380,50 @@ describe('Settings page', () => {
     });
   });
 
-  it('selects the stored canonical local model', async () => {
+  it('defaults the intent router off and persists enabling it', async () => {
+    let savedUpdates: any = null;
+    // @ts-ignore
+    global.fetch = jest.fn((_url: string, options?: any) => {
+      if (options?.method === 'PUT') {
+        savedUpdates = JSON.parse(options.body);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...baseSettings, ...savedUpdates }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => baseSettings });
+    });
+
+    renderSettings();
+
+    const intentRouter = await screen.findByRole('button', { name: 'Intent Router' });
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(intentRouter);
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'true');
+    await waitForSettingsRefresh();
+    fireEvent.click(screen.getByText(/Save Changes/i));
+
+    await waitFor(() => {
+      expect(savedUpdates?.ui_preferences?.intentRouterEnabled).toBe(true);
+    });
+    expect(await screen.findByText('Settings saved successfully.')).toBeInTheDocument();
+  });
+
+  it.each([true, false])('honors an explicit intent router preference of %s', async (enabled) => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{
+      ok: true,
+      json: async () => ({ ...baseSettings, ui_preferences: { intentRouterEnabled: enabled } }),
+    }]);
+
+    renderSettings();
+
+    expect(await screen.findByRole('button', { name: 'Intent Router' }))
+      .toHaveAttribute('aria-pressed', String(enabled));
+  });
+
+  it('shows the stored local model without exposing a second local selector', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([{ ok: true, json: async () => baseSettings }]);
 
@@ -392,11 +435,10 @@ describe('Settings page', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Local Model')).toHaveValue(
-        'meta-llama/Meta-Llama-3.1-8B-Instruct'
-      );
-    });
+    expect(await screen.findByText('Meta Llama 3.1 8B Instruct')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Local Model')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Manage local models' }))
+      .toHaveAttribute('href', '/models');
   });
 
   it('shows the FastAPI detail when a settings update is rejected', async () => {
@@ -1097,7 +1139,7 @@ describe('Settings page', () => {
   });
 
   describe('Agent type auto-sync', () => {
-    it('auto-syncs agent_type to online when selecting an online provider', async () => {
+    it('stores the online agent value when selecting an online provider', async () => {
       let savedUpdates: any = null;
       // @ts-ignore
       global.fetch = jest.fn((url: string, options?: any) => {
@@ -1118,13 +1160,12 @@ describe('Settings page', () => {
       });
       await waitForSettingsRefresh();
 
-      // Switch to online agent type first to see the provider dropdown
+      // The UI label and persisted value both use the online inference mode.
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
       fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
 
       fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
-      // Change the online provider
       const providerSelect = screen.getByLabelText('Online Provider');
       fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
 
@@ -1138,7 +1179,7 @@ describe('Settings page', () => {
       });
     });
 
-    it('auto-syncs agent_type to online when selecting an online model', async () => {
+    it('stores the online agent value when selecting an online model', async () => {
       let savedUpdates: any = null;
       // @ts-ignore
       global.fetch = jest.fn((url: string, options?: any) => {
@@ -1159,13 +1200,12 @@ describe('Settings page', () => {
       });
       await waitForSettingsRefresh();
 
-      // Switch to online agent type to see the model dropdown
+      // The UI label and persisted value both use the online inference mode.
       const agentTypeSelect = screen.getByLabelText('Default Agent Type');
       fireEvent.change(agentTypeSelect, { target: { value: 'online' } });
 
       fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
 
-      // Change the online model
       const modelSelect = screen.getByLabelText('Online Model');
       fireEvent.change(modelSelect, { target: { value: 'gpt-4-turbo' } });
 
@@ -1179,7 +1219,7 @@ describe('Settings page', () => {
       });
     });
 
-    it('auto-syncs agent_type to local when selecting a local model', async () => {
+    it('stores local inference mode while local model selection stays on Models', async () => {
       const onlineSettings = { ...baseSettings, default_agent_type: 'online' };
       let savedUpdates: any = null;
       // @ts-ignore
@@ -1206,13 +1246,8 @@ describe('Settings page', () => {
       fireEvent.change(agentTypeSelect, { target: { value: 'local' } });
 
       fireEvent.click(screen.getByRole('tab', { name: 'Models and Providers' }));
-
-      // Change the local model
-      const modelSelect = screen.getByLabelText('Local Model');
-      await waitFor(() => {
-        expect(screen.getByRole('option', { name: 'Qwen 3 4B' })).toBeInTheDocument();
-      });
-      fireEvent.change(modelSelect, { target: { value: 'Qwen/Qwen3-4B' } });
+      expect(screen.getByRole('link', { name: 'Manage local models' }))
+        .toHaveAttribute('href', '/models');
 
       // Save and verify agent_type is 'local'
       fireEvent.click(screen.getByText(/Save Changes/i));
@@ -1220,7 +1255,7 @@ describe('Settings page', () => {
       await waitFor(() => {
         expect(savedUpdates).not.toBeNull();
         expect(savedUpdates.default_agent_type).toBe('local');
-        expect(savedUpdates.default_local_model).toBe('Qwen/Qwen3-4B');
+        expect(savedUpdates.default_local_model).toBe(onlineSettings.default_local_model);
       });
     });
   });

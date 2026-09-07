@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { ChatHistory, ToolCallStatus } from '../chatTypes';
+import { ChatHistory, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
 const statusLabel = (status: ToolCallStatus | string): string =>
@@ -14,6 +14,11 @@ const statusTone = (status: ToolCallStatus): string => {
 
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
+  onToolApproval?: (
+    runId: string,
+    callId: string,
+    decision: ToolApprovalDecision,
+  ) => void;
 }
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
@@ -91,8 +96,34 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 )}
 
                 {needsApproval && (
-                  <div role="status" className="status-badge warning" style={{ marginTop: 8 }}>
-                    Approval required
+                  <div style={{ marginTop: 8 }}>
+                    <div className="input-help">Approval required</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
+                        onClick={() => element.run_id && props.onToolApproval?.(
+                          element.run_id,
+                          toolCall.id,
+                          'approve',
+                        )}
+                      >
+                        Approve once
+                      </button>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
+                        onClick={() => element.run_id && props.onToolApproval?.(
+                          element.run_id,
+                          toolCall.id,
+                          'deny',
+                        )}
+                      >
+                        Deny
+                      </button>
+                    </div>
                   </div>
                 )}
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}
