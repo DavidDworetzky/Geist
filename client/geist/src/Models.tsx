@@ -381,7 +381,10 @@ export default function Models(): JSX.Element {
                   <span>Actions</span>
                 </div>
                 {voiceArtifacts.map(artifact => {
-                  const busy = ['queued', 'downloading', 'cancelling'].includes(artifact.status);
+                  const busy = isArtifactInstalling(artifact);
+                  const anotherArtifactInstalling = Boolean(
+                    installingLocalArtifact && installingLocalArtifact.id !== artifact.id
+                  );
                   const total = artifact.total_bytes ?? 0;
                   return (
                     <div className="model-table-row" key={artifact.id}>
@@ -426,16 +429,16 @@ export default function Models(): JSX.Element {
                         ) : busy ? (
                           <button
                             className="button button-secondary button-small"
-                            disabled={localAction === artifact.id}
+                            disabled={localAction === artifact.id || artifact.status === 'cancelling'}
                             onClick={() => void runArtifactAction(artifact.id, 'cancel')}
                           >
-                            Cancel
+                            {artifact.status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
                           </button>
                         ) : (
                           <>
                             <button
                               className="button button-secondary button-small"
-                              disabled={localAction === artifact.id}
+                              disabled={localAction === artifact.id || anotherArtifactInstalling}
                               onClick={() => void installArtifact(artifact)}
                             >
                               Download

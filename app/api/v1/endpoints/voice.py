@@ -161,11 +161,14 @@ async def voice_stream_websocket(
       - {"type": "text_chunk", "text": "..."}
       - {"type": "text_complete", "text": "..."}
       - {"type": "audio_start", "encoding": "pcm_s16le", "sample_rate": 24000, "channels": 1}
-      - {"type": "audio_chunk"} followed by binary audio data
+      - Raw binary PCM frames follow audio_start (no per-chunk JSON preamble)
       - {"type": "audio_complete"}
       - {"type": "done"}
-      - {"type": "error", "message": "..."}
+      - {"type": "processing"} / {"type": "reset_complete"}
+      - {"type": "error", "message": "...", "fatal": false}
     """
+    import numpy as np
+
     from app.services.voice_session import VoiceSessionService
 
     logger.info(
@@ -281,11 +284,11 @@ async def voice_stream_websocket(
                         last_partial_samples = 0
                         await websocket.send_json({"type": "processing"})
                         response_task = asyncio.create_task(respond(audio))
-                    elif voice_service.buffered_samples - last_partial_samples >= 16000 and (
-                        partial_task is None or partial_task.done()
+                    elif (
+                        voice_service.buffered_samples - last_partial_samples
+                        >= voice_service.sample_rate
+                        and (partial_task is None or partial_task.done())
                     ):
-                        import numpy as np
-
                         last_partial_samples = voice_service.buffered_samples
                         partial_task = asyncio.create_task(
                             transcribe_partial(np.concatenate(list(voice_service.audio_buffer)))
@@ -301,7 +304,7 @@ async def voice_stream_websocket(
     except Exception as e:
         logger.error(f"Voice WebSocket error: {e}", exc_info=True)
         try:
-            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.send_json({"type": "error", "message": str(e), "fatal": True})
         except Exception as send_error:
             logger.debug(f"Failed to send error message to WebSocket: {send_error}")
     finally:
@@ -331,6 +334,8 @@ async def voice_upload(
     HTTP fallback endpoint for voice interaction.
 
     Upload an audio clip, get back transcript, text response, and audio response.
+    This stateless fallback releases TTS after each request; use the WebSocket
+    endpoint to retain a warm TTS engine across conversational turns.
     """
     voice_service = None
     try:

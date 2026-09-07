@@ -32,14 +32,20 @@ export function resolveVoiceSelection(
 export default function useVoiceSelection(enabled: boolean) {
   const catalog = useVoiceModels(enabled);
   const [saved, setSaved] = useState<VoiceSelection | null>(() => {
-    try { return JSON.parse(localStorage.getItem(VOICE_SELECTION_KEY) || 'null'); }
-    catch { return null; }
+    try {
+      return JSON.parse(localStorage.getItem(VOICE_SELECTION_KEY) || 'null');
+    } catch {
+      return null;
+    }
   });
   const resolved = catalog.data ? resolveVoiceSelection(catalog.data, saved) : null;
   const setSelection = useCallback((selection: VoiceSelection) => {
     setSaved(selection);
-    try { localStorage.setItem(VOICE_SELECTION_KEY, JSON.stringify(selection)); }
-    catch { /* Storage can be disabled in private browsers. */ }
+    try {
+      localStorage.setItem(VOICE_SELECTION_KEY, JSON.stringify(selection));
+    } catch {
+      // Storage can be disabled in private browsers.
+    }
   }, []);
   return { selection: resolved || DEFAULT_VOICE_SELECTION, setSelection, catalog,
     ready: !!resolved && !catalog.loading };

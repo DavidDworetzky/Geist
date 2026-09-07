@@ -695,11 +695,18 @@ class MagpieTTSProvider(TTSProvider):
         self._ensure_initialized()
         if self._process is None:
             raise RuntimeError("Magpie TTS failed to initialize")
-        yield from self._process.synthesize(
+        stream = self._process.synthesize(
             {"text": text, "voice": self.voice, "language": self.language}
         )
-        if self._process.sample_rate:
-            self._sample_rate = int(self._process.sample_rate)
+        try:
+            for chunk in stream:
+                if self._process.sample_rate:
+                    self._sample_rate = int(self._process.sample_rate)
+                yield chunk
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
         import numpy as np

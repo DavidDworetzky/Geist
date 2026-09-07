@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import json
 import sys
+import threading
 from pathlib import Path
 
 from app.services.local_tts_process import write_frame
@@ -212,22 +213,38 @@ def _run(args: argparse.Namespace) -> None:
         raise RuntimeError(_last_error(library))
 
     output = sys.stdout.buffer
+    output_lock = threading.Lock()
     sample_rate = int(library.nemo_speech_tts_sample_rate(synthesizer))
     write_frame(output, b"R", json.dumps({"sample_rate": sample_rate}).encode("utf-8"))
 
     @PCMCallback
     def on_pcm(pcm, n_bytes, _user_data):
-        write_frame(output, b"A", ctypes.string_at(pcm, n_bytes))
-        return True
+        try:
+            with output_lock:
+                write_frame(output, b"A", ctypes.string_at(pcm, n_bytes))
+            return True
+        except OSError:
+            return False
 
     try:
         for line in sys.stdin.buffer:
-            request = json.loads(line.decode("utf-8"))
+            try:
+                request = _parse_request(line)
+            except ValueError as error:
+                write_frame(
+                    output,
+                    b"E",
+                    json.dumps(
+                        {
+                            "message": str(error),
+                            "recoverable": True,
+                        }
+                    ).encode("utf-8"),
+                )
+                continue
             if request.get("action") == "shutdown":
                 return
             text = str(request.get("text") or "").strip()
-            if not text:
-                raise ValueError("TTS text must not be empty")
 
             request_language = str(request.get("language") or args.language).encode("utf-8")
             request_voice = str(request.get("voice") or args.voice).encode("utf-8")
@@ -245,6 +262,8 @@ def _run(args: argparse.Namespace) -> None:
                 ctypes.byref(stats),
             )
             if status != 0:
+                # A native failure may leave model state inconsistent; restart
+                # rather than claiming it is safe to reuse the synthesizer.
                 raise RuntimeError(_last_error(library))
             done = {
                 "sample_rate": stats.sample_rate or sample_rate,
@@ -254,6 +273,15 @@ def _run(args: argparse.Namespace) -> None:
             write_frame(output, b"D", json.dumps(done).encode("utf-8"))
     finally:
         library.nemo_speech_tts_destroy(synthesizer)
+
+
+def _parse_request(line: bytes) -> dict:
+    request = json.loads(line.decode("utf-8"))
+    if not isinstance(request, dict):
+        raise ValueError("TTS request must be an object")
+    if request.get("action") != "shutdown" and not str(request.get("text") or "").strip():
+        raise ValueError("TTS text must not be empty")
+    return request
 
 
 def _parser() -> argparse.ArgumentParser:

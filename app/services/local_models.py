@@ -24,6 +24,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -86,6 +87,7 @@ class LocalModelArtifact:
     license_url: str | None = None
     primary_weight: str | None = None
     primary_weight_size_bytes: int | None = None
+    primary_weight_sha256: str | None = None
 
 
 # Official Qwen GGUF metadata verified for the pinned artifact.  Keeping this
@@ -174,7 +176,7 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
         revision="a71e4d38b236d968966a2002c4c895dbd12b1c3c",
         filename="snapshot",
         size_bytes=327_639_823,
-        sha256="4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8",
+        primary_weight_sha256="4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8",
         quantization="BF16",
         license="Apache-2.0",
         license_url="https://huggingface.co/hexgrad/Kokoro-82M",
@@ -200,8 +202,8 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
         repo_id="mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-6bit",
         revision="7dc92af14613355896fcab13b268c19ede233139",
         filename="snapshot",
-        size_bytes=1_830_000_000,
-        sha256="77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513",
+        size_bytes=1_830_000_000,  # Approximate snapshot capacity budget, not a checksum size.
+        primary_weight_sha256="77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513",
         quantization="6-bit",
         license="Apache-2.0",
         license_url="https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
@@ -384,11 +386,23 @@ def resolve_nemo_speech_library(environment: dict[str, str] | None = None) -> st
     """Find the NeMo-Speech.cpp TTS shared library without mutating the host."""
 
     env = environment if environment is not None else os.environ
-    configured = env.get("GEIST_NEMO_SPEECH_LIBRARY")
+    return _resolve_nemo_speech_library(
+        env.get("GEIST_NEMO_SPEECH_LIBRARY"),
+        env.get("GEIST_NEMO_SPEECH_HOME"),
+        int(time.monotonic() // 30),
+    )
+
+
+@lru_cache(maxsize=16)
+def _resolve_nemo_speech_library(
+    configured: str | None,
+    runtime_home: str | None,
+    refresh_window: int,
+) -> str | None:
+    # Cache misses too, but discover a newly installed runtime within 30 seconds.
     if configured and Path(configured).expanduser().is_file():
         return str(Path(configured).expanduser().resolve())
 
-    runtime_home = env.get("GEIST_NEMO_SPEECH_HOME")
     if runtime_home:
         root = Path(runtime_home).expanduser()
         for relative in (
@@ -745,8 +759,11 @@ class LocalModelManager:
                     raise ValueError("Managed Kokoro TTS primary weight has an unexpected size")
                 if (
                     verify_weights
-                    and artifact.sha256
-                    and (_sha256_file(primary_weight).casefold() != artifact.sha256.casefold())
+                    and artifact.primary_weight_sha256
+                    and (
+                        _sha256_file(primary_weight).casefold()
+                        != artifact.primary_weight_sha256.casefold()
+                    )
                 ):
                     raise ValueError(
                         "Managed Kokoro TTS primary weight failed SHA-256 verification"
@@ -773,8 +790,11 @@ class LocalModelManager:
                     raise ValueError("Managed Qwen TTS primary weight has an unexpected size")
                 if (
                     verify_weights
-                    and artifact.sha256
-                    and (_sha256_file(primary_weight).casefold() != artifact.sha256.casefold())
+                    and artifact.primary_weight_sha256
+                    and (
+                        _sha256_file(primary_weight).casefold()
+                        != artifact.primary_weight_sha256.casefold()
+                    )
                 ):
                     raise ValueError("Managed Qwen TTS primary weight failed SHA-256 verification")
         else:
@@ -819,7 +839,7 @@ class LocalModelManager:
                 if (
                     verify_weights
                     and component.sha256
-                    and _sha256_file(component_path).casefold() != component.sha256
+                    and _sha256_file(component_path).casefold() != component.sha256.casefold()
                 ):
                     raise ValueError(f"Voice component {component.id} failed SHA-256 verification")
             for relative in component.required_files:
@@ -836,13 +856,14 @@ class LocalModelManager:
     ) -> list[dict[str, Any]]:
         with self._lock:
             result = []
+            selected_artifacts = []
             state_changed = False
             for artifact in self._artifacts.values():
                 if model_id is not None and artifact.model_id != model_id:
                     continue
                 if modality is not None and artifact.modality != modality:
                     continue
-                runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
+                selected_artifacts.append(artifact)
                 previous_state = dict(self._states.get(artifact.id, {}))
                 state = self._state_for_locked(artifact)
                 state_changed = state_changed or (
@@ -854,8 +875,6 @@ class LocalModelManager:
                         **asdict(artifact),
                         **dict(state),
                         "supported": self._artifact_support(artifact),
-                        "runtime_ready": runtime_ready,
-                        "runtime_detail": runtime_detail,
                     }
                 )
             if state_changed:
@@ -863,7 +882,10 @@ class LocalModelManager:
                     self._save_index_locked()
                 except OSError:
                     logger.warning("Could not persist reconciled local-model state", exc_info=True)
-            return result
+        for artifact, item in zip(selected_artifacts, result, strict=False):
+            runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
+            item.update(runtime_ready=runtime_ready, runtime_detail=runtime_detail)
+        return result
 
     def get_artifact(self, artifact_id: str) -> LocalModelArtifact:
         try:
@@ -883,14 +905,14 @@ class LocalModelManager:
                     self._save_index_locked()
                 except OSError:
                     logger.warning("Could not persist reconciled local-model state", exc_info=True)
-            runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
-            return {
+            result = {
                 **asdict(artifact),
                 **dict(state),
                 "supported": self._artifact_support(artifact),
-                "runtime_ready": runtime_ready,
-                "runtime_detail": runtime_detail,
             }
+        runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
+        result.update(runtime_ready=runtime_ready, runtime_detail=runtime_detail)
+        return result
 
     def find_artifact(self, model_or_artifact_id: str) -> LocalModelArtifact:
         with self._lock:
@@ -1281,6 +1303,16 @@ class LocalModelManager:
         destination.mkdir(parents=True, exist_ok=True)
         if component.filename:
             filename = str(_safe_relative_filename(component.filename))
+            target = destination / filename
+            if target.is_file() and component.size_bytes is not None:
+                size = target.stat().st_size
+                if size == component.size_bytes and (
+                    component.sha256 is None
+                    or _sha256_file(target).casefold() == component.sha256.casefold()
+                ):
+                    return
+                if size >= component.size_bytes:
+                    target.unlink()
             component_artifact = LocalModelArtifact(
                 id=f"{artifact.id}-{component.id}",
                 model_id=artifact.model_id,

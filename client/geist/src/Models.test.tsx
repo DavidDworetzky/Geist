@@ -90,6 +90,20 @@ const voiceArtifact = {
 
 let availableArtifacts: any[] = [artifact];
 
+it('blocks voice downloads while a language model is downloading', async () => {
+  availableArtifacts = [{ ...artifact, status: 'downloading' }, voiceArtifact];
+  render(<Models />);
+  const voices = await screen.findByRole('region', { name: 'Voice models' });
+  expect(within(voices).getByRole('button', { name: 'Download' })).toBeDisabled();
+});
+
+it('does not offer another cancellation while a voice download is cancelling', async () => {
+  availableArtifacts = [{ ...voiceArtifact, status: 'cancelling' }];
+  render(<Models />);
+  const voices = await screen.findByRole('region', { name: 'Voice models' });
+  expect(await within(voices).findByRole('button', { name: 'Cancelling…' })).toBeDisabled();
+});
+
 beforeEach(() => {
   mockUpdateSettings.mockClear();
   mockUseUserSettings.mockReturnValue(defaultUserSettingsHook());

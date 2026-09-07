@@ -154,7 +154,11 @@ def test_voice_catalog_exposes_one_platform_specific_artifact_per_runtime():
         "kokoro-v1_0.safetensors",
         "voices/af_heart.safetensors",
     )
-    assert kokoro.sha256 == "4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8"
+    assert kokoro.sha256 is None
+    assert (
+        kokoro.primary_weight_sha256
+        == "4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8"
+    )
     assert local_artifact_supported(kokoro, system="Darwin", machine="arm64") is True
     assert local_artifact_supported(kokoro, system="Linux", machine="x86_64") is False
 
@@ -163,7 +167,11 @@ def test_voice_catalog_exposes_one_platform_specific_artifact_per_runtime():
     assert qwen.default_voice == "Aiden"
     assert qwen.primary_weight == "model.safetensors"
     assert qwen.primary_weight_size_bytes == 1_146_758_090
-    assert qwen.sha256 == "77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513"
+    assert qwen.sha256 is None
+    assert (
+        qwen.primary_weight_sha256
+        == "77f20155cf00cc7cbafeb6f51863e27bda9051603557d815f0f24e95a5a79513"
+    )
     assert local_artifact_supported(qwen, system="Darwin", machine="arm64") is True
     assert local_artifact_supported(qwen, system="Linux", machine="x86_64") is False
 
@@ -180,7 +188,7 @@ def test_qwen_tts_snapshot_requires_nested_audio_tokenizer(tmp_path):
         validation_profile="qwen_tts_mlx",
         primary_weight="model.safetensors",
         primary_weight_size_bytes=4,
-        sha256=hashlib.sha256(b"test").hexdigest(),
+        primary_weight_sha256=hashlib.sha256(b"test").hexdigest(),
     )
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
@@ -209,7 +217,7 @@ def test_kokoro_snapshot_requires_only_curated_vera_voice(tmp_path):
         validation_profile="kokoro_tts_mlx",
         primary_weight="kokoro-v1_0.safetensors",
         primary_weight_size_bytes=4,
-        sha256=hashlib.sha256(b"test").hexdigest(),
+        primary_weight_sha256=hashlib.sha256(b"test").hexdigest(),
     )
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
@@ -224,6 +232,9 @@ def test_kokoro_snapshot_requires_only_curated_vera_voice(tmp_path):
     voice.parent.mkdir()
     voice.write_bytes(b"test")
     assert LocalModelManager._verify_snapshot(artifact, snapshot) == artifact.revision
+    (snapshot / "kokoro-v1_0.safetensors").write_bytes(b"oops")
+    with pytest.raises(ValueError, match="SHA-256"):
+        LocalModelManager._verify_snapshot(artifact, snapshot)
 
 
 def test_bundle_download_is_atomically_installed_and_verified(tmp_path, managers):
@@ -288,6 +299,91 @@ def test_bundle_download_is_atomically_installed_and_verified(tmp_path, managers
     assert not (tmp_path / ".downloads" / "test-voice-bundle.partial.bundle").exists()
     assert manager.status(artifact.id)["status"] == "installed"
     assert manager.require_installed(artifact.id)[1] == installed
+
+
+def test_bundle_retry_skips_verified_completed_component(tmp_path, managers, monkeypatch):
+    component = LocalModelComponent(
+        id="model",
+        repo_id="test/model",
+        revision="a" * 40,
+        destination="model",
+        filename="model.gguf",
+        size_bytes=len(MODEL_BYTES),
+        sha256=hashlib.sha256(MODEL_BYTES).hexdigest().upper(),
+    )
+    tokenizer = LocalModelComponent(
+        id="tokenizer",
+        repo_id="test/model",
+        revision="a" * 40,
+        destination="tokenizer",
+        required_files=("vocab.txt",),
+    )
+    artifact = _artifact(format="bundle", filename="bundle", components=(component, tokenizer))
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,), artifact_support=lambda _: True)
+    managers.append(manager)
+    downloads = []
+
+    def download(_artifact, destination, progress):
+        downloads.append(destination)
+        destination.write_bytes(MODEL_BYTES)
+
+    attempts = 0
+
+    def snapshot_download(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("network interruption")
+        (Path(kwargs["local_dir"]) / "vocab.txt").write_text("test")
+
+    monkeypatch.setattr(manager, "_download_hugging_face_artifact", download)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
+    with pytest.raises(OSError, match="network interruption"):
+        manager.download_artifact(artifact.id)
+    path = manager.download_artifact(artifact.id)
+    assert len(downloads) == 1
+    assert manager.require_installed(artifact.id)[1] == path
+
+
+def test_nemo_runtime_caches_misses_and_refreshes(monkeypatch):
+    from app.services import local_models
+
+    local_models._resolve_nemo_speech_library.cache_clear()
+    now = [300.0]
+    monkeypatch.setattr(local_models.time, "monotonic", lambda: now[0])
+    with patch("ctypes.util.find_library", return_value=None) as lookup:
+        assert local_models.resolve_nemo_speech_library({}) is None
+        assert local_models.resolve_nemo_speech_library({}) is None
+        assert lookup.call_count == 1
+        local_models.resolve_nemo_speech_library({"GEIST_NEMO_SPEECH_HOME": "/not-installed"})
+        assert lookup.call_count == 2
+        now[0] += 30
+        local_models.resolve_nemo_speech_library({})
+        assert lookup.call_count == 3
+    local_models._resolve_nemo_speech_library.cache_clear()
+
+
+def test_runtime_lookup_does_not_hold_manager_lock(tmp_path, managers, monkeypatch):
+    manager = LocalModelManager(tmp_path, artifacts=(_artifact(),))
+    managers.append(manager)
+
+    def runtime_status(artifact):
+        acquired = []
+
+        def check_lock():
+            if manager._lock.acquire(timeout=0.2):
+                acquired.append(True)
+                manager._lock.release()
+
+        worker = threading.Thread(target=check_lock)
+        worker.start()
+        worker.join()
+        assert acquired == [True]
+        return True, None
+
+    monkeypatch.setattr("app.services.local_models.local_artifact_runtime_status", runtime_status)
+    manager.list_artifacts()
+    manager.status("test-q4")
 
 
 @pytest.fixture

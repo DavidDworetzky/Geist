@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import { createVoicePcmEncoder } from './voicePcm';
 
 interface UseVoiceChatProps {
   sessionId: number;
@@ -22,7 +23,9 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
   const [partialTranscript, setPartialTranscript] = useState('');
   const [assistantText, setAssistantText] = useState('');
   const callbacks = useRef(props);
-  callbacks.current = props;
+  useLayoutEffect(() => {
+    callbacks.current = props;
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -47,7 +50,9 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
 
   const stopRecording = useCallback(() => {
     generationRef.current += 1;
-    activeRef.current = readyRef.current = processingRef.current = false;
+    activeRef.current = false;
+    readyRef.current = false;
+    processingRef.current = false;
     const socket = wsRef.current;
     wsRef.current = null;
     if (socket) {
@@ -93,7 +98,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
       mediaStreamRef.current = stream;
       const capture = new AudioContextClass({ sampleRate: 16000 });
       audioContextRef.current = capture;
-      if (capture.sampleRate !== 16000) throw new Error('Microphone must support 16 kHz audio');
+      const encodePcm = createVoicePcmEncoder(capture.sampleRate);
       const source = capture.createMediaStreamSource(stream);
       const processor = capture.createScriptProcessor(1024, 1, 1);
       processorRef.current = processor;
@@ -102,23 +107,23 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
         if (!readyRef.current || processingRef.current || sourcesRef.current.size
           || !ws || ws.readyState !== WebSocket.OPEN) return;
         const input = event.inputBuffer.getChannelData(0);
-        const pcm = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-          const sample = Math.max(-1, Math.min(1, input[i]));
-          pcm[i] = sample < 0 ? sample * 32768 : sample * 32767;
-        }
-        ws.send(pcm.buffer);
+        const pcm = encodePcm(input);
+        if (pcm.length) ws.send(pcm.buffer);
       };
       source.connect(processor);
       processor.connect(capture.destination);
       const options = callbacks.current;
       const params = new URLSearchParams({
-        session_id: String(options.sessionId), agent_type: options.agentType || 'online',
-        stt_provider: options.sttProvider || 'mms', tts_provider: options.ttsProvider || 'sesame',
+        session_id: String(options.sessionId),
+        agent_type: options.agentType || 'online',
+        stt_provider: options.sttProvider || 'mms',
+        tts_provider: options.ttsProvider || 'sesame',
       });
       for (const [key, value] of Object.entries({
-        tts_model: options.ttsModel, tts_voice: options.ttsVoice,
-        tts_language: options.ttsLanguage, tts_instruct: options.ttsInstruct,
+        tts_model: options.ttsModel,
+        tts_voice: options.ttsVoice,
+        tts_language: options.ttsLanguage,
+        tts_instruct: options.ttsInstruct,
         tts_speed: options.ttsSpeed,
       })) {
         if (value !== undefined) params.set(key, String(value));
@@ -147,7 +152,10 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
             source.buffer = buffer;
             source.connect(playback.destination);
             sourcesRef.current.add(source);
-            source.onended = () => { sourcesRef.current.delete(source); source.disconnect(); };
+            source.onended = () => {
+              sourcesRef.current.delete(source);
+              source.disconnect();
+            };
             const startAt = Math.max(playback.currentTime + 0.02, nextPlaybackTimeRef.current);
             source.start(startAt);
             nextPlaybackTimeRef.current = startAt + buffer.duration;
@@ -155,22 +163,30 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
           }
           const message = JSON.parse(data);
           switch (message.type) {
-            case 'ready': readyRef.current = true; break;
+            case 'ready':
+              readyRef.current = true;
+              break;
             case 'transcript_partial':
               setPartialTranscript(message.text || '');
-              callbacks.current.onTranscriptPartial?.(message.text || ''); break;
+              callbacks.current.onTranscriptPartial?.(message.text || '');
+              break;
             case 'transcript_final':
               setPartialTranscript('');
-              callbacks.current.onTranscriptFinal?.(message.text || ''); break;
+              callbacks.current.onTranscriptFinal?.(message.text || '');
+              break;
             case 'processing':
             case 'text_start':
               processingRef.current = true;
               setIsProcessing(true);
-              setAssistantText(''); break;
+              setAssistantText('');
+              break;
             case 'text_chunk':
               setAssistantText(prev => prev + (message.text || ''));
-              callbacks.current.onAssistantText?.(message.text || ''); break;
-            case 'text_complete': setAssistantText(message.text || ''); break;
+              callbacks.current.onAssistantText?.(message.text || '');
+              break;
+            case 'text_complete':
+              setAssistantText(message.text || '');
+              break;
             case 'audio_start':
               if (message.encoding !== 'pcm_s16le' || message.channels !== 1
                 || !Number.isInteger(message.sample_rate) || message.sample_rate < 8000
@@ -183,11 +199,19 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
               sampleRate = 0;
               processingRef.current = false;
               setIsProcessing(false);
-              setPartialTranscript(''); break;
+              setPartialTranscript('');
+              break;
             case 'done':
               processingRef.current = false;
-              setIsProcessing(false); break;
-            case 'error': throw new Error(message.message || 'Voice processing failed');
+              setIsProcessing(false);
+              break;
+            case 'error':
+              if (message.fatal) throw new Error(message.message || 'Voice processing failed');
+              clearPlayback();
+              processingRef.current = false;
+              setIsProcessing(false);
+              callbacks.current.onError?.(message.message || 'Voice processing failed');
+              break;
           }
         }).catch(error => {
           if (!current()) return;
@@ -201,7 +225,9 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
         stopRecording();
         callbacks.current.onError?.('Voice connection failed');
       };
-      socket.onclose = () => { if (current()) stopRecording(); };
+      socket.onclose = () => {
+        if (current()) stopRecording();
+      };
       setIsRecording(true);
     } catch (error) {
       if (!current()) return;
@@ -215,6 +241,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
     else void startRecording();
   }, [startRecording, stopRecording]);
 
+  // A different chat must never retain the previous chat's microphone/socket.
   useEffect(() => () => stopRecording(), [stopRecording, props.sessionId]);
   return { isRecording, isProcessing, partialTranscript, assistantText,
     startRecording, stopRecording, toggleRecording };

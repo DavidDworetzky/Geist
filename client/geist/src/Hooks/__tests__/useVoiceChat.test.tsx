@@ -154,4 +154,25 @@ describe('useVoiceChat audio playback contract', () => {
     FakeAudioContext.instances.forEach(context => expect(context.close).toHaveBeenCalled());
     unmount();
   });
+
+  it('reports a recoverable server error without closing the microphone session', async () => {
+    const onError = jest.fn();
+    const { result, unmount } = renderHook(() => useVoiceChat({ sessionId: 7, onError }));
+    await act(async () => { await result.current.startRecording(); });
+    const socket = FakeWebSocket.instances[0];
+    await act(async () => {
+      await socket.onmessage?.({ data: JSON.stringify({ type: 'processing' }) } as MessageEvent);
+      await socket.onmessage?.({ data: JSON.stringify({ type: 'error', message: 'Try again' }) } as MessageEvent);
+    });
+    expect(onError).toHaveBeenCalledWith('Try again');
+    expect(result.current.isRecording).toBe(true);
+    expect(result.current.isProcessing).toBe(false);
+    expect(socket.close).not.toHaveBeenCalled();
+    await act(async () => {
+      await socket.onmessage?.({ data: JSON.stringify({ type: 'error', fatal: true }) } as MessageEvent);
+    });
+    expect(result.current.isRecording).toBe(false);
+    expect(socket.close).toHaveBeenCalled();
+    unmount();
+  });
 });

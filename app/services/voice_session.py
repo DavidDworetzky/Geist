@@ -84,7 +84,6 @@ class VoiceSessionService:
         sample_rate: int = 16000,
         vad_threshold: float = 0.01,
         silence_duration_ms: int = 800,
-        chunk_duration_ms: int = 100,
         **provider_kwargs,
     ):
         """
@@ -97,14 +96,12 @@ class VoiceSessionService:
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
-            chunk_duration_ms: Audio chunk duration for processing (ms)
             **provider_kwargs: Additional provider-specific arguments
         """
         self.agent = agent
         self.sample_rate = sample_rate
         self.vad_threshold = vad_threshold
         self.silence_duration_ms = silence_duration_ms
-        self.chunk_duration_ms = chunk_duration_ms
 
         # Initialize STT
         self.stt = create_stt_adapter(stt_provider, **provider_kwargs)
@@ -114,9 +111,9 @@ class VoiceSessionService:
 
         # Audio buffer
         self.audio_buffer: deque[np.ndarray] = deque()
+        self._pre_roll: deque[np.ndarray] = deque(maxlen=2)
         self.transcript_buffer = ""
         self.silence_frames = 0
-        self.silence_threshold_frames = int(silence_duration_ms / chunk_duration_ms)
         self.silence_samples = 0
         self.buffered_samples = 0
         self.has_speech = False
@@ -145,10 +142,16 @@ class VoiceSessionService:
         Returns:
             None. The endpoint schedules partial transcription on the worker.
         """
-        if not audio_chunk or len(audio_chunk) % 2:
+        if not audio_chunk:
+            return None
+        if len(audio_chunk) % 2:
             raise ValueError("Audio must contain complete PCM16 samples")
         audio_np = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
         if self._detect_speech(audio_np):
+            if not self.has_speech:
+                self.audio_buffer.extend(self._pre_roll)
+                self.buffered_samples += sum(len(chunk) for chunk in self._pre_roll)
+                self._pre_roll.clear()
             self.has_speech = True
             self.silence_samples = 0
             self.silence_frames = 0
@@ -158,6 +161,8 @@ class VoiceSessionService:
         if self.has_speech:
             self.audio_buffer.append(audio_np)
             self.buffered_samples += len(audio_np)
+        else:
+            self._pre_roll.append(audio_np)
         return None
 
     def check_phrase_boundary(self) -> bool:
@@ -192,34 +197,6 @@ class VoiceSessionService:
         return await asyncio.get_running_loop().run_in_executor(
             self._worker, functools.partial(function, *args, **kwargs)
         )
-
-    def get_final_transcript(self) -> str:
-        """
-        Get final transcript from buffered audio and clear buffer.
-
-        Returns:
-            str: Final transcript
-        """
-        if not self.audio_buffer:
-            return ""
-
-        try:
-            # Combine all buffered audio
-            combined_audio = self.take_audio()
-
-            # Run final STT
-            transcript = self.stt.transcribe(combined_audio, language="en")
-
-            # Clear buffer
-            self.audio_buffer.clear()
-            self.silence_frames = 0
-
-            return str(transcript)
-        except Exception as e:
-            self.logger.error(f"Final STT failed: {e}")
-            self.audio_buffer.clear()
-            self.silence_frames = 0
-            return ""
 
     async def process_with_agent(
         self,
@@ -278,7 +255,6 @@ class VoiceSessionService:
 
                     full_text = ""
                     pending_tts_text = ""
-                    audio_started = False
                     for chunk in self.agent.stream_complete_text(
                         prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
                     ):
@@ -288,31 +264,13 @@ class VoiceSessionService:
 
                         segments, pending_tts_text = _ready_tts_segments(pending_tts_text)
                         for segment in segments:
-                            if not audio_started:
-                                yield {
-                                    "type": "audio_start",
-                                    "encoding": "pcm_s16le",
-                                    "sample_rate": self.tts.sample_rate,
-                                    "channels": 1,
-                                }
-                                audio_started = True
-                            for audio_chunk in self.tts.synthesize_streaming(segment):
-                                yield {"type": "audio_chunk", "audio": audio_chunk}
+                            yield from self._synthesize_events(segment)
 
                     yield {"type": "text_complete", "text": full_text}
 
                     tail_segments, _ = _ready_tts_segments(pending_tts_text, final=True)
                     for segment in tail_segments:
-                        if not audio_started:
-                            yield {
-                                "type": "audio_start",
-                                "encoding": "pcm_s16le",
-                                "sample_rate": self.tts.sample_rate,
-                                "channels": 1,
-                            }
-                            audio_started = True
-                        for audio_chunk in self.tts.synthesize_streaming(segment):
-                            yield {"type": "audio_chunk", "audio": audio_chunk}
+                        yield from self._synthesize_events(segment)
 
                     yield {"type": "audio_complete"}
 
@@ -342,14 +300,7 @@ class VoiceSessionService:
                 yield {"type": "text_complete", "text": response_text}
 
                 # Generate TTS
-                yield {
-                    "type": "audio_start",
-                    "encoding": "pcm_s16le",
-                    "sample_rate": self.tts.sample_rate,
-                    "channels": 1,
-                }
-                for audio_chunk in self.tts.synthesize_streaming(response_text):
-                    yield {"type": "audio_chunk", "audio": audio_chunk}
+                yield from self._synthesize_events(response_text)
 
                 yield {"type": "audio_complete"}
 
@@ -357,9 +308,30 @@ class VoiceSessionService:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
 
+    def _synthesize_events(self, text: str) -> Generator[dict[str, Any], None, None]:
+        stream = self.tts.synthesize_streaming(text)
+        started = False
+        try:
+            for chunk in stream:
+                if not started:
+                    # Providers learn the actual rate during initialization.
+                    yield {
+                        "type": "audio_start",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": self.tts.sample_rate,
+                        "channels": 1,
+                    }
+                    started = True
+                yield {"type": "audio_chunk", "audio": chunk}
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
     def reset(self):
         """Reset the session state."""
         self.audio_buffer.clear()
+        self._pre_roll.clear()
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.silence_samples = 0

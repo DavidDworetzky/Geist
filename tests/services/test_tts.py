@@ -190,3 +190,21 @@ def test_create_tts_provider_rejects_unlisted_local_model():
 def test_create_tts_provider_rejects_unlisted_openai_model():
     with pytest.raises(ValueError, match="not a supported openai TTS model"):
         create_tts_provider("openai", api_key="k", model="../local/path")
+
+
+def test_magpie_updates_rate_before_first_pcm_and_closes_abandoned_stream():
+    closed = []
+
+    def synthesize(request):
+        try:
+            yield b"pcm"
+        finally:
+            closed.append(True)
+
+    provider = MagpieTTSProvider()
+    provider._process = SimpleNamespace(sample_rate=48000, synthesize=synthesize)
+    stream = provider.synthesize_streaming("hello")
+    assert next(stream) == b"pcm"
+    assert provider.sample_rate == 48000
+    stream.close()
+    assert closed == [True]

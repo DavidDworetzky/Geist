@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services.local_tts_process import LocalTTSProcess
+from app.services.magpie_tts_worker import _parse_request
 
 
 WORKER = r"""
@@ -90,3 +91,35 @@ def test_timeout_invalidates_exchange_before_next_request():
         assert list(process.synthesize({"text": "new"})) == [b"pcm-one", b"pcm-two"]
     finally:
         process.close()
+
+
+def test_recoverable_request_error_keeps_worker_warm():
+    worker = WORKER.replace(
+        "    frame(b'A', b'pcm-one')",
+        "    if not request.get('text'):\n"
+        "        frame(b'E', json.dumps({'message': 'empty', 'recoverable': True}).encode())\n"
+        "        continue\n"
+        "    frame(b'A', b'pcm-one')",
+    )
+    process = LocalTTSProcess((sys.executable, "-c", worker), startup_timeout=5)
+    try:
+        with pytest.raises(RuntimeError, match="empty"):
+            list(process.synthesize({"text": ""}))
+        first_pid = process._process.pid
+        assert list(process.synthesize({"text": "hello"})) == [b"pcm-one", b"pcm-two"]
+        assert process._process.pid == first_pid
+    finally:
+        process.close()
+
+
+def test_closed_process_unregisters_exit_handler():
+    with patch("app.services.local_tts_process.atexit.unregister") as unregister:
+        process = LocalTTSProcess((sys.executable, "-c", WORKER))
+        process.close()
+        unregister.assert_called_with(process.close)
+
+
+@pytest.mark.parametrize("payload", [b"{}", b"[]", b'{"text":"  "}', b"invalid"])
+def test_worker_rejects_invalid_requests_before_native_synthesis(payload):
+    with pytest.raises(ValueError):
+        _parse_request(payload)

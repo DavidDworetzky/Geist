@@ -76,6 +76,35 @@ class TestVoiceSessionService:
         rms_loud = voice_service._calculate_rms(loud)
         assert rms_loud == 0.5
 
+    def test_empty_frames_are_ignored_and_preroll_preserves_soft_onset(self, voice_service):
+        voice_service.add_audio_chunk(b"")
+        assert voice_service.buffered_samples == 0
+        quiet = np.full(1024, 100, dtype=np.int16)
+        for _ in range(3):
+            voice_service.add_audio_chunk(quiet.tobytes())
+        voice_service.add_audio_chunk(np.full(1024, 4000, dtype=np.int16).tobytes())
+        audio = voice_service.take_audio()
+        assert len(audio) == 3072
+        assert audio[0] == pytest.approx(100 / 32768)
+        assert not voice_service._pre_roll
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [True, False])
+    async def test_announces_rate_after_provider_initializes(
+        self, voice_service, mock_tts, streaming
+    ):
+        def synthesize(text):
+            mock_tts.sample_rate = 48000
+            yield b"pcm"
+
+        mock_tts.synthesize_streaming.side_effect = synthesize
+        responses = [
+            event async for event in voice_service.process_with_agent("hi", use_streaming=streaming)
+        ]
+        start = next(i for i, event in enumerate(responses) if event["type"] == "audio_start")
+        assert responses[start]["sample_rate"] == 48000
+        assert responses[start + 1]["type"] == "audio_chunk"
+
     def test_detect_speech(self, voice_service):
         """Test VAD (voice activity detection)."""
         # Silent audio
@@ -114,12 +143,13 @@ class TestVoiceSessionService:
         voice_service.add_audio_chunk(np.full(1600, 4000, dtype=np.int16).tobytes())
 
         # Add enough silent chunks to trigger boundary
-        for _ in range(voice_service.silence_threshold_frames + 1):
+        for _ in range(9):
             voice_service.add_audio_chunk(silent_bytes)
 
         assert voice_service.check_phrase_boundary()
 
-    def test_get_final_transcript(self, voice_service, mock_stt):
+    @pytest.mark.asyncio
+    async def test_get_final_transcript(self, voice_service, mock_stt):
         """Test final transcript extraction."""
         # Add some audio
         audio_np = np.ones(1600) * 0.1
@@ -129,7 +159,7 @@ class TestVoiceSessionService:
         voice_service.add_audio_chunk(audio_bytes)
 
         # Get final transcript
-        transcript = voice_service.get_final_transcript()
+        transcript = await voice_service.transcribe(voice_service.take_audio())
 
         assert mock_stt.transcribe.called
         assert transcript == "test transcript"
@@ -344,7 +374,8 @@ async def test_cancellation_keeps_event_loop_responsive_and_closes_generator(
 class TestVoiceSessionServiceIntegration:
     """Integration tests for voice session workflow."""
 
-    def test_full_audio_to_transcript_flow(self, voice_service, mock_stt):
+    @pytest.mark.asyncio
+    async def test_full_audio_to_transcript_flow(self, voice_service, mock_stt):
         """Test full flow from audio to transcript."""
         # Simulate receiving audio chunks
         audio_np = np.ones(1600) * 0.1
@@ -357,12 +388,12 @@ class TestVoiceSessionServiceIntegration:
 
         # Add silence to trigger boundary
         silent = np.zeros(1600).astype(np.int16)
-        for _ in range(voice_service.silence_threshold_frames + 1):
+        for _ in range(9):
             voice_service.add_audio_chunk(silent.tobytes())
 
         # Check boundary detected
         assert voice_service.check_phrase_boundary()
 
         # Get final transcript
-        transcript = voice_service.get_final_transcript()
+        transcript = await voice_service.transcribe(voice_service.take_audio())
         assert transcript == "test transcript"

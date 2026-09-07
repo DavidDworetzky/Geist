@@ -26,7 +26,6 @@ class LocalTTSProcess:
         self._process: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self.sample_rate: int | None = None
-        atexit.register(self.close)
 
     def _ensure_started(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -39,6 +38,7 @@ class LocalTTSProcess:
             stderr=None,
             bufsize=0,
         )
+        atexit.register(self.close)
         try:
             frame_type, payload = self._read_frame(timeout=self.startup_timeout)
         except Exception:
@@ -54,6 +54,8 @@ class LocalTTSProcess:
         self.sample_rate = int(metadata["sample_rate"])
 
     def synthesize(self, request: dict[str, Any]) -> Iterator[bytes]:
+        # Consume or explicitly close this iterator on the same serial worker.
+        # Its lock spans yields so utterances cannot interleave on the wire.
         with self._lock:
             self._ensure_started()
             process = self._process
@@ -73,6 +75,7 @@ class LocalTTSProcess:
                         completed = True
                         return
                     if frame_type == b"E":
+                        completed = _decode_control(payload).get("recoverable") is True
                         raise RuntimeError(_error_message(payload))
                     raise RuntimeError("Local TTS worker returned an unknown frame")
             finally:
@@ -96,6 +99,7 @@ class LocalTTSProcess:
         return frame_type, _read_exact(process.stdout, length, timeout=timeout)
 
     def close(self) -> None:
+        atexit.unregister(self.close)
         process = self._process
         self._process = None
         self.sample_rate = None
