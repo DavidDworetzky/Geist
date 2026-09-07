@@ -13,6 +13,7 @@ import os
 import re
 import signal
 import subprocess  # nosec B404 - explicitly enabled host runner
+import sys
 import time
 from contextlib import suppress
 
@@ -80,7 +81,7 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
                 blocked=True,
             )
 
-        if os.name != "posix":
+        if sys.platform == "win32":
             return ExecutionResult(127, "", "Local execution requires POSIX process groups", 0.0)
         timeout = clamp_timeout(timeout_seconds)
         started = time.monotonic()

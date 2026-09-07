@@ -1,7 +1,8 @@
 import os
 import subprocess
+import threading
 import tracemalloc
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -13,7 +14,7 @@ from app.services.execution.local import LocalExecutionEnvironment
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX local backend")
 @pytest.mark.parametrize("redirect", ["", " >&2"])
-def test_fifty_megabyte_producer_is_stopped_with_bounded_host_allocation(redirect):
+def test_fifty_megabyte_producer_completes_with_bounded_host_allocation(redirect):
     tracemalloc.start()
     try:
         result = LocalExecutionEnvironment().run("head -c 50000000 /dev/zero" + redirect, 5)
@@ -21,7 +22,7 @@ def test_fifty_megabyte_producer_is_stopped_with_bounded_host_allocation(redirec
     finally:
         tracemalloc.stop()
     assert result.truncated
-    assert result.exit_code == 125
+    assert result.exit_code == 0
     assert len(result.stdout) <= MAX_OUTPUT_CHARS
     assert len(result.stderr) <= MAX_OUTPUT_CHARS
     assert peak < MAX_CAPTURE_BYTES * 32
@@ -38,23 +39,57 @@ def test_capture_reaps_child_and_keeps_output_before_timeout():
     assert result.timed_out
     assert result.stdout == "before"
     assert process.returncode is not None
+    assert process.stdout.closed and process.stderr.closed
 
 
-def test_docker_output_overflow_removes_its_container():
+def test_verbose_docker_output_does_not_trigger_container_cleanup():
     environment = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
     with (
-        patch("subprocess.Popen") as launch,
+        patch("subprocess.Popen"),
         patch(
             "app.services.execution.docker.capture_process",
-            return_value=ExecutionResult(125, "bounded", "", 0.1, truncated=True),
+            return_value=ExecutionResult(3, "bounded", "", 0.1, truncated=True),
         ),
         patch("subprocess.run") as cleanup,
     ):
-        result = environment.run("yes")
-    argv = launch.call_args.args[0]
-    name = argv[argv.index("--name") + 1]
+        result = environment.run("verbose build")
     assert result.truncated
-    assert cleanup.call_args.args[0] == ["/usr/bin/docker", "rm", "--force", name]
+    assert result.exit_code == 3
+    cleanup.assert_not_called()
+
+
+@pytest.mark.parametrize("count", [30000, 1000000])
+def test_verbose_local_command_retains_real_exit_status(count):
+    result = LocalExecutionEnvironment().run(f"head -c {count} /dev/zero; exit 3", 5)
+    assert result.exit_code == 3
+    assert result.truncated and not result.timed_out
+
+
+def test_only_reader_closes_a_pipe_held_by_a_descendant():
+    release = threading.Event()
+    closed = threading.Event()
+    stdout = Mock()
+    stdout.fileno.return_value = 42
+    stdout.close.side_effect = closed.set
+    stderr = Mock()
+    stderr.fileno.return_value = 43
+    process = Mock(stdout=stdout, stderr=stderr, returncode=0)
+    process.poll.return_value = 0
+
+    def delayed_read(descriptor, size):
+        if descriptor == 42:
+            release.wait(2)
+        return b""
+
+    with patch("app.services.execution.capture.os.read", side_effect=delayed_read):
+        try:
+            result = capture_process(process, 0.02, lambda: None)
+            assert result.timed_out
+            stdout.close.assert_not_called()
+        finally:
+            release.set()
+            assert closed.wait(1)
+    stdout.close.assert_called_once()
 
 
 def test_container_args_do_not_inherit_environment():

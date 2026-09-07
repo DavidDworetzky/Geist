@@ -213,7 +213,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         except OSError as error:
             return ExecutionResult(127, "", str(error), time.monotonic() - started)
         result = capture_process(process, timeout + _DOCKER_OVERHEAD_SECONDS, process.kill)
-        if result.timed_out or result.truncated:
+        if result.timed_out:
             try:
                 subprocess.run(  # nosec B603 - only this invocation's random container
                     [runtime, "rm", "--force", container_name],

@@ -13,7 +13,10 @@ Verify with contract/registry tests, Docker backend tests, and harmless real loc
 timeout/cwd checks. No dependencies, user-data migrations, or new approval modes.
 Interactive approval resume remains in #308; ship these layers together.
 
-Follow-up: cap retained subprocess bytes at64KiB per stream and stop the workload
-on overflow, before formatting output for the model. Use the same capture helper
-for Docker and local execution. Preserve drained timeout output and reap children.
+Follow-up: cap retained subprocess bytes at 64 KiB per stream and drain excess
+without retaining it, preserving verbose commands and their exit status. Use the
+same capture helper for Docker and local execution. Preserve drained timeout
+output and reap children.
 Expose mandatory-approval metadata in the catalog and disable new inert UI grants.
+Reader threads own pipe closure to avoid descriptor-reuse races. Platform guards
+must also type-check under the Windows CI target, without relying on os.name narrowing.
