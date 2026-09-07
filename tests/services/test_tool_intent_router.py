@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agents.models.tool_calling import ChatMessage, ModelEvent, ModelTurn
@@ -77,3 +79,18 @@ def test_router_runs_tool_free_turn_with_recent_conversation():
     assert classifier_messages[-1].content == "Find my medical notes"
     assert config.temperature == 0.0
     assert config.max_tokens == 128
+
+
+def test_invalid_classifier_event_closes_retained_source():
+    closed = []
+
+    def events():
+        try:
+            yield "invalid event"
+        finally:
+            closed.append(True)
+
+    retained = events()
+    with pytest.raises(TypeError, match="invalid event"):
+        ToolIntentRouter().classify(SimpleNamespace(stream_model_turn=lambda *args: retained), [])
+    assert closed == [True]
