@@ -47,6 +47,7 @@ describe('AgentPermissionsSection', () => {
 
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: ['web.search'] });
+    expect(screen.getByRole('button', { name: 'web.search' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('changes the approval mode', async () => {
@@ -97,10 +98,30 @@ describe('AgentPermissionsSection', () => {
 
     await waitFor(() => screen.getByText('web.search'));
 
+    expect(screen.getByRole('button', { name: 'web.search' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
 
     fireEvent.click(screen.getByText(/Clear All/i));
     expect(onChange).toHaveBeenCalledWith({ mode: 'require_approval', always_allow: [] });
+  });
+
+  it('labels high-impact tools and prevents new grants for disabled tools', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({
+      tools: toolsResponse.tools.map(tool => ({ ...tool, enabled: false }))
+    }) });
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['web.search'] }} onChange={() => {}} />);
+    const granted = await screen.findByRole('button', { name: /web.search/ });
+    expect(granted).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /communication.email.send/ })).toBeDisabled();
+    expect(screen.getByText(/can affect external systems/)).toBeInTheDocument();
+  });
+
+  it('surfaces unavailable saved grants and lets the user revoke them', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => toolsResponse });
+    const onChange = jest.fn();
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['old.tool'] }} onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove unavailable grant: old.tool' }));
+    expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: [] });
   });
 });

@@ -138,9 +138,7 @@ def test_normalize_agent_permissions_defaults_and_errors():
 
 def test_load_agent_permissions_reads_stored_settings():
     stored = Mock(agent_permissions={"mode": "auto_approve", "always_allow": ["web.search"]})
-    with patch(
-        "app.models.database.user_settings.get_user_settings", return_value=stored
-    ):
+    with patch("app.models.database.user_settings.get_user_settings", return_value=stored):
         permissions = load_agent_permissions(1)
     assert permissions == AgentPermissions(
         mode="auto_approve", always_allow=frozenset({"web.search"})
@@ -150,15 +148,48 @@ def test_load_agent_permissions_reads_stored_settings():
 def test_load_agent_permissions_falls_back_on_missing_or_malformed():
     with patch("app.models.database.user_settings.get_user_settings", return_value=None):
         assert load_agent_permissions(1) == AgentPermissions()
-
     stored = Mock(agent_permissions={"mode": "bogus"})
+    with patch("app.models.database.user_settings.get_user_settings", return_value=stored):
+        assert load_agent_permissions(1) == AgentPermissions()
     with patch(
-        "app.models.database.user_settings.get_user_settings", return_value=stored
+        "app.models.database.user_settings.get_user_settings", side_effect=RuntimeError("db down")
     ):
         assert load_agent_permissions(1) == AgentPermissions()
 
-    with patch(
-        "app.models.database.user_settings.get_user_settings",
-        side_effect=RuntimeError("db down"),
-    ):
+
+@pytest.mark.parametrize("names", [["x" * 257], ["web.search"] * 257])
+def test_normalizer_bounds_stored_and_submitted_allowlists(names):
+    with pytest.raises(ValueError):
+        normalize_agent_permissions({"always_allow": names})
+    stored = Mock(agent_permissions={"mode": "auto_approve", "always_allow": names})
+    with patch("app.models.database.user_settings.get_user_settings", return_value=stored):
         assert load_agent_permissions(1) == AgentPermissions()
+
+
+@pytest.mark.parametrize(
+    "raw", [None, {"mode": "unknown"}, {"always_allow": [" "]}, {"always_allow": ["x" * 257]}]
+)
+def test_settings_response_permissions_fall_back_safely(raw):
+    from app.services.user_settings_service import _permissions_from_stored
+
+    result = _permissions_from_stored(raw)
+    assert result.mode == "default"
+    assert result.always_allow == []
+
+
+def test_settings_response_canonicalizes_saved_grants():
+    from app.services.user_settings_service import _permissions_from_stored
+
+    result = _permissions_from_stored({"always_allow": [" web.search ", "web.search"]})
+    assert result.always_allow == ["web.search"]
+
+
+def test_unknown_runtime_mode_cannot_auto_approve_side_effects():
+    handler = Mock(return_value=ToolExecutionOutput(content="sent"))
+    registry = ToolRegistry()
+    registry.register(_definition("email.send", handler, requires_approval=True))
+    result = registry.execute(
+        ToolCall.create("email.send", {"query": "hi"}), _context(mode="bogus")
+    )
+    assert result.status == "awaiting_approval"
+    handler.assert_not_called()

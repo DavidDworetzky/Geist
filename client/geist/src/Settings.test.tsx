@@ -332,6 +332,22 @@ describe('Settings page', () => {
     }
   });
 
+  it('sends permission choices when explicitly edited', async () => {
+    const changed = { mode: 'require_approval', always_allow: [] };
+    global.fetch = createFetchMock([
+      { ok: true, json: async () => baseSettings },
+      { ok: true, json: async () => ({ ...baseSettings, agent_permissions: changed }) },
+    ]) as unknown as typeof fetch;
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Permissions' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(screen.getByLabelText(/Approval Mode/i), { target: { value: 'require_approval' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/Settings saved successfully/i);
+    const mutation = (global.fetch as jest.Mock).mock.calls.find(([, options]) => options?.method === 'PUT');
+    expect(JSON.parse(mutation[1].body).agent_permissions).toEqual(changed);
+  });
+
   it('marks unsaved changes when local values change and saves', async () => {
     // @ts-ignore
     global.fetch = createFetchMock([
@@ -578,6 +594,7 @@ describe('Settings page', () => {
     await waitFor(() => expect(savedUpdates).not.toBeNull());
     expect(savedUpdates).not.toHaveProperty('llama_backend');
     expect(savedUpdates).not.toHaveProperty('llama_gpu_device_ids');
+    expect(savedUpdates).not.toHaveProperty('agent_permissions');
   });
 
   it('describes a dirty invalid compute edit when Models is showing the online agent', async () => {

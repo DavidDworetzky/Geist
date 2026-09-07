@@ -30,6 +30,8 @@ ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"
 #   require_approval — every tool call waits for approval unless the tool is
 #                      on the user's always-allow list.
 PermissionMode = Literal["default", "auto_approve", "require_approval"]
+MAX_ALWAYS_ALLOWED_TOOLS = 256
+MAX_PERMISSION_TOOL_NAME_LENGTH = 256
 PERMISSION_MODE_DEFAULT: PermissionMode = "default"
 PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
 PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
