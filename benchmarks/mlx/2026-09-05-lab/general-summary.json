@@ -1,0 +1,216 @@
+{
+  "protocol": {
+    "hardware": "Apple M2 Max",
+    "memory_size": 103079215104,
+    "mlx": "0.32.2",
+    "mlx_lm": "0.31.3",
+    "prompts": 9,
+    "trials": 2,
+    "tokens": 256,
+    "temperature": 0,
+    "prefix_cache_hits": 0,
+    "adaptive_policy": "cumulative-eight-v2"
+  },
+  "task_types": [
+    {
+      "type": "code",
+      "ordinary": {
+        "median_tps": 17.458417134284904,
+        "range_tps": [
+          15.483289517353674,
+          19.382685288767526
+        ],
+        "measurements": 6
+      },
+      "dflash": {
+        "median_tps": 21.16131239802548,
+        "range_tps": [
+          17.399519205122466,
+          30.880555717088594
+        ],
+        "measurements": 6
+      },
+      "adaptive": {
+        "median_tps": 22.47414111825647,
+        "range_tps": [
+          15.768018114386694,
+          31.235141455199127
+        ],
+        "measurements": 6
+      },
+      "adaptive_paired_speedup_median": 1.2617815196207567
+    },
+    {
+      "type": "math",
+      "ordinary": {
+        "median_tps": 17.22855026617894,
+        "range_tps": [
+          15.095428153536691,
+          18.40173946935113
+        ],
+        "measurements": 6
+      },
+      "dflash": {
+        "median_tps": 27.201610961277062,
+        "range_tps": [
+          24.270889587204337,
+          31.350488531854108
+        ],
+        "measurements": 6
+      },
+      "adaptive": {
+        "median_tps": 27.137366531632175,
+        "range_tps": [
+          23.307736727271084,
+          29.79946218516965
+        ],
+        "measurements": 6
+      },
+      "adaptive_paired_speedup_median": 1.571752904681955
+    },
+    {
+      "type": "prose",
+      "ordinary": {
+        "median_tps": 16.71461353135426,
+        "range_tps": [
+          15.319063157530632,
+          20.69457793494409
+        ],
+        "measurements": 6
+      },
+      "dflash": {
+        "median_tps": 9.973367181087958,
+        "range_tps": [
+          9.162096937244264,
+          22.687329530259117
+        ],
+        "measurements": 6
+      },
+      "adaptive": {
+        "median_tps": 14.960210378287634,
+        "range_tps": [
+          13.510488509848528,
+          20.76460634537231
+        ],
+        "measurements": 6
+      },
+      "adaptive_paired_speedup_median": 0.9005248607557358
+    }
+  ],
+  "tasks": [
+    {
+      "prompt": "code",
+      "ordinary": 18.488339952507907,
+      "dflash": 30.179101780713495,
+      "adaptive": 29.781833010115882,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        215,
+        215
+      ]
+    },
+    {
+      "prompt": "math",
+      "ordinary": 17.77237833091678,
+      "dflash": 29.424862540800575,
+      "adaptive": 29.04656219926194,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        24,
+        24
+      ]
+    },
+    {
+      "prompt": "chat",
+      "ordinary": 18.971560333869974,
+      "dflash": 21.085712097390612,
+      "adaptive": 19.9660311000093,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        89,
+        89
+      ]
+    },
+    {
+      "prompt": "code_jsonl",
+      "ordinary": 17.80540794789692,
+      "dflash": 20.576454338339122,
+      "adaptive": 22.47414111825647,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        182,
+        182
+      ]
+    },
+    {
+      "prompt": "code_threads",
+      "ordinary": 16.396105144466137,
+      "dflash": 18.855566507300267,
+      "adaptive": 16.956597180115452,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        115,
+        115
+      ]
+    },
+    {
+      "prompt": "math_bayes",
+      "ordinary": 16.281607125708316,
+      "dflash": 25.58743748000571,
+      "adaptive": 24.944473357395562,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 2,
+      "adaptive_first_differences": [
+        null,
+        null
+      ]
+    },
+    {
+      "prompt": "math_induction",
+      "ordinary": 16.36714881708548,
+      "dflash": 26.986416322061885,
+      "adaptive": 26.258272836952035,
+      "adaptive_fallbacks": [],
+      "adaptive_exact_matches": 2,
+      "adaptive_first_differences": [
+        null,
+        null
+      ]
+    },
+    {
+      "prompt": "chat_essay",
+      "ordinary": 16.228619749146947,
+      "dflash": 9.464851448085046,
+      "adaptive": 14.219291713071286,
+      "adaptive_fallbacks": [
+        21,
+        21
+      ],
+      "adaptive_exact_matches": 2,
+      "adaptive_first_differences": [
+        null,
+        null
+      ]
+    },
+    {
+      "prompt": "chat_story",
+      "ordinary": 15.835898222711645,
+      "dflash": 9.973367181087958,
+      "adaptive": 14.269036028158009,
+      "adaptive_fallbacks": [
+        23,
+        23
+      ],
+      "adaptive_exact_matches": 0,
+      "adaptive_first_differences": [
+        214,
+        214
+      ]
+    }
+  ]
+}

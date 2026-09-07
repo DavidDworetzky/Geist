@@ -137,6 +137,25 @@ class TestVoiceSessionService:
         assert voice_service.silence_frames == 0
 
     @pytest.mark.asyncio
+    async def test_close_before_response_finalizer(self, voice_service):
+        closed = threading.Event()
+
+        def response(*args):
+            try:
+                yield {"type": "text_start"}
+            finally:
+                closed.set()
+
+        voice_service._process_with_agent = response
+        stream = voice_service.process_with_agent("hello")
+        await anext(stream)
+        voice_service.close()
+        await stream.aclose()
+        voice_service._worker.shutdown(wait=True)
+        assert closed.is_set()
+        assert not voice_service._response_iterators
+
+    @pytest.mark.asyncio
     async def test_process_with_agent_streaming(self, voice_service, mock_agent, mock_tts):
         """Test processing with streaming agent."""
         transcript = "Hello, how are you?"

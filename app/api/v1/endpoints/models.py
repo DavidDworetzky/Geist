@@ -267,9 +267,18 @@ def import_local_artifact(
 def _initialize_configured_local_runtime(model_id: str) -> None:
     try:
         from agents.agent_type import AgentType
-        from app.main import get_active_agent
+        from app.main import LocalModelBusyError, get_active_agent
 
-        get_active_agent(AgentType.LOCALAGENT)
+        try:
+            get_active_agent(AgentType.LOCALAGENT)
+        except LocalModelBusyError as error:
+            if error.model_id != model_id:
+                # A different target is not queued behind the existing load.
+                raise
+            # Keep following the owner to its real result. Do not overwrite a
+            # ready/failed status the owner may have published in this race.
+            logger.info("Local model readiness follows an existing load for %s", model_id)
+            return
         # A repeated readiness request can reuse an already-cached agent. In
         # that case no LocalAgent constructor runs to update the registry, so
         # complete the lifecycle explicitly after every successful lookup.

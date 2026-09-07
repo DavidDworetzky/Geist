@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from agents.architectures.chat_template_tools import (
+    ToolResponseStream,
     build_tool_payload,
     parse_tool_response,
     tokenizer_supports_tools,
@@ -14,6 +15,13 @@ from agents.models.tool_calling import ChatMessage, ToolCall, ToolDefinition, To
 class SearchArguments(BaseModel):
     query: str
     max_results: int = 3
+
+
+def test_leading_prose_streams_before_malformed_tool_failure():
+    parser = ToolResponseStream({"safe": "web.search"})
+    assert parser.feed("Working. ") == "Working."
+    with pytest.raises(ValueError, match="invalid tool-call JSON"):
+        parser.feed("<tool_call>{bad}</tool_call>")
 
 
 def search_tool() -> ToolDefinition:
@@ -71,6 +79,25 @@ def test_payload_maps_dotted_names_and_preserves_tool_round_trip():
         "content": '{"results": []}',
         "tool_call_id": "call-1",
     }
+
+
+@pytest.mark.parametrize("offer_other_tool", [False, True])
+def test_historical_tool_names_do_not_expand_current_availability(offer_other_tool):
+    history = [
+        ChatMessage(
+            role="assistant", tool_calls=[ToolCall(id="old", name="past.lookup", arguments={})]
+        )
+    ]
+    payload = build_tool_payload(history, [search_tool()] if offer_other_tool else [])
+    historical_name = payload.messages[0]["tool_calls"][0]["function"]["name"]
+    assert historical_name not in payload.provider_to_internal
+    response = f'<tool_call>{{"name":"{historical_name}","arguments":{{}}}}</tool_call>'
+    with pytest.raises(ValueError, match="unknown tool"):
+        parse_tool_response(response, provider_to_internal=payload.provider_to_internal)
+    parser = ToolResponseStream(payload.provider_to_internal)
+    with pytest.raises(ValueError, match="unknown tool"):
+        for char in response:
+            assert parser.feed(char) == ""
 
 
 def test_qwen_tool_markup_parses_to_internal_call():
@@ -145,3 +172,248 @@ def test_bare_tool_json_prefers_arguments_over_parameters():
 def test_malformed_tool_calls_fail_closed(response, match):
     with pytest.raises(ValueError, match=match):
         parse_tool_response(response, provider_to_internal={"safe": "web.search"})
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 7, 13, 10000])
+@pytest.mark.parametrize(
+    "response",
+    [
+        "  Ordinary prose with spaces and\nnewlines.  ",
+        "```python\ndef compare(a, b):\n    return a < b\n```",
+        "Literal partial tags: <tool_ and </tool_ end.",
+        "Ends with a prefix <tool_call",
+        '<tool_call>{"name":"safe","arguments":{}}</tool_call>',
+        'Before <tool_call>{"name":"safe","arguments":{}}</tool_call> after.',
+        '<tool_call>{"name":"safe","arguments":{}}</tool_call>\n'
+        '<tool_call>{"name":"safe","parameters":{}}</tool_call> final text.',
+        '  {"name":"safe","parameters":{"query":"hello"}}  ',
+        '{"name":"ordinary data","value":3}',
+        '{"value":3} followed by plain text',
+        "   ",
+    ],
+)
+def test_incremental_tool_text_matches_complete_parser(response, chunk_size):
+    names = {"safe": "web.search"}
+    parser = ToolResponseStream(names)
+    deltas = [
+        parser.feed(response[i : i + chunk_size]) for i in range(0, len(response), chunk_size)
+    ]
+    tail, turn = parser.finish()
+    expected = parse_tool_response(response, provider_to_internal=names)
+
+    assert "".join(deltas) + tail == expected.text == turn.text
+    assert [(call.name, call.arguments) for call in turn.tool_calls] == [
+        (call.name, call.arguments) for call in expected.tool_calls
+    ]
+    assert turn.finish_reason == expected.finish_reason
+
+
+def test_incremental_tool_text_streams_before_and_after_a_call():
+    parser = ToolResponseStream({"safe": "web.search"})
+    assert parser.feed("First sentence. ") == "First sentence."
+    assert parser.feed("<tool_") == ""
+    assert parser.feed('call>{"name":"safe","arguments":{"query":"private payload"}}') == ""
+    assert parser.feed("</tool_") == ""
+    assert parser.feed("call> Second sentence.") == "  Second sentence."
+    tail, turn = parser.finish()
+    assert tail == ""
+    assert turn.text == "First sentence.  Second sentence."
+    assert turn.tool_calls[0].arguments == {"query": "private payload"}
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '<tool_call>{"name":"safe","arguments":{}}',
+        '<tool_call>{"name":"missing","arguments":{}}</tool_call>',
+        '<tool_call>{"name":"safe","arguments":[]}</tool_call>',
+        "<tool_call>{bad}</tool_call>",
+        "</tool_call>",
+        '<tool_call>{"name":"safe","arguments":{}}</tool_call></tool_call>',
+    ],
+)
+def test_incremental_malformed_tools_fail_without_exposing_payload(response):
+    parser = ToolResponseStream({"safe": "web.search"})
+    visible = []
+    with pytest.raises(ValueError):
+        for char in response:
+            visible.append(parser.feed(char))
+        parser.finish()
+    assert "".join(visible) == ""
+
+
+def test_leading_json_is_held_until_tool_or_text_is_known():
+    parser = ToolResponseStream({"safe": "web.search"})
+    assert parser.feed(" \n{") == ""
+    assert parser.feed('"name":"safe","arguments":{}}') == ""
+    tail, turn = parser.finish()
+    assert tail == ""
+    assert turn.tool_calls[0].name == "web.search"
+
+
+def test_tool_markup_lookahead_does_not_grow_with_plain_text():
+    parser = ToolResponseStream({"safe": "web.search"})
+    for _ in range(1000):
+        assert parser.feed("plain text ")
+        assert len(parser._pending) < len("</tool_call>")
+    tail, turn = parser.finish()
+    assert tail == ""
+    assert turn.text == ("plain text " * 1000).strip()
+
+
+def function_call(parameters: str, name: str = "safe") -> str:
+    return f"<tool_call>\n<function={name}>\n{parameters}</function>\n</tool_call>"
+
+
+def xml_tool_schema() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "safe",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {"Text": {"type": "string"}},
+                    "properties": {
+                        "query": {"$ref": "#/$defs/Text"},
+                        "max_results": {"type": "integer"},
+                        "include_images": {"type": "boolean"},
+                        "options": {"type": "object"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "recency": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    },
+                },
+            },
+        }
+    ]
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 7, 13, 10000])
+def test_qwen_xml_call_streams_prose_and_preserves_typed_arguments(chunk_size):
+    response = "Searching now. " + function_call(
+        "<parameter=query>\nrecent celebrity headlines\n</parameter>\n"
+        "<parameter=max_results>\n3\n</parameter>\n"
+        "<parameter=include_images>false</parameter>\n"
+        '<parameter=options>{"region":"us"}</parameter>\n'
+        '<parameter=tags>["news","recent"]</parameter>\n'
+        "<parameter=recency>null</parameter>\n"
+    )
+    parser = ToolResponseStream({"safe": "web.search"}, xml_tool_schema())
+    visible = [
+        parser.feed(response[i : i + chunk_size]) for i in range(0, len(response), chunk_size)
+    ]
+    tail, turn = parser.finish()
+    assert "".join(visible) + tail == turn.text == "Searching now."
+    assert turn.finish_reason == "tool_calls"
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {
+        "query": "recent celebrity headlines",
+        "max_results": 3,
+        "include_images": False,
+        "options": {"region": "us"},
+        "tags": ["news", "recent"],
+        "recency": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["123", "true", "null", '{"x":1}', '"quoted"', "", " \n  indented\ntext & <literal>  \n "],
+)
+def test_qwen_xml_string_parameters_are_not_coerced_or_stripped(value):
+    response = function_call(f"<parameter=query>\n{value}\n</parameter>\n")
+    turn = parse_tool_response(
+        response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+    )
+    assert turn.tool_calls[0].arguments == {"query": value}
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        function_call("<parameter=query>x</parameter>\n<parameter=query>y</parameter>"),
+        function_call("<parameter=query>x"),
+        function_call("garbage<parameter=query>x</parameter>"),
+        function_call("<parameter=query>x</parameter>garbage"),
+        function_call("<parameter=max_results>not a number</parameter>"),
+        function_call("<parameter=options>{bad}</parameter>"),
+        function_call("<parameter=query>x</parameter>", name="unknown"),
+        "<tool_call><function=safe></tool_call>",
+        "<tool_call><function=safe></function><function=safe></function></tool_call>",
+    ],
+)
+def test_malformed_xml_call_fails_closed_without_exposing_arguments(response):
+    parser = ToolResponseStream({"safe": "web.search"}, xml_tool_schema())
+    visible = []
+    with pytest.raises(ValueError):
+        for char in response:
+            visible.append(parser.feed(char))
+        parser.finish()
+    assert "".join(visible) == ""
+
+
+def test_json_and_xml_tool_calls_can_coexist_in_one_turn():
+    response = function_call("<parameter=query>news</parameter>") + (
+        '<tool_call>{"name":"safe","arguments":{"query":"more news"}}</tool_call>'
+    )
+    turn = parse_tool_response(
+        response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+    )
+    assert [call.arguments["query"] for call in turn.tool_calls] == ["news", "more news"]
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 7, 13, 10000])
+@pytest.mark.parametrize(
+    "response",
+    [
+        "<function=safe><parameter=query>private args</parameter></function>",
+        "<function=unknown><parameter=query>private args</parameter></function>",
+        "<parameter=query>private args</parameter>",
+        "</function>",
+        "</parameter>",
+    ],
+)
+def test_unwrapped_xml_function_fails_closed_without_exposing_markup(chunk_size, response):
+    with pytest.raises(ValueError, match="unwrapped"):
+        parse_tool_response(
+            response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+        )
+    parser = ToolResponseStream({"safe": "web.search"}, xml_tool_schema())
+    visible = []
+    with pytest.raises(ValueError, match="unwrapped"):
+        for start in range(0, len(response), chunk_size):
+            visible.append(parser.feed(response[start : start + chunk_size]))
+        parser.finish()
+    assert "".join(visible) == ""
+
+
+@pytest.mark.parametrize("tools", [None, []])
+def test_xml_without_schema_fails_loudly_instead_of_coercing_strings(tools):
+    response = function_call("<parameter=query>123</parameter>")
+    with pytest.raises(ValueError, match="schema"):
+        parse_tool_response(response, provider_to_internal={"safe": "web.search"}, tools=tools)
+    with pytest.raises(ValueError, match="schema"):
+        ToolResponseStream({"safe": "web.search"}, tools).feed(response)
+
+
+@pytest.mark.parametrize(
+    "value,expected", [("null", None), ("  null  ", "  null  "), ("\nnull\n", "\nnull\n")]
+)
+def test_nullable_xml_strings_preserve_whitespace(value, expected):
+    response = function_call(f"<parameter=recency>\n{value}\n</parameter>")
+    turn = parse_tool_response(
+        response, provider_to_internal={"safe": "web.search"}, tools=xml_tool_schema()
+    )
+    assert turn.tool_calls[0].arguments["recency"] == expected
+
+
+@pytest.mark.parametrize("additional", [True, False])
+def test_boolean_additional_properties_does_not_break_parameter_parsing(additional):
+    tools = xml_tool_schema()
+    tools[0]["function"]["parameters"]["additionalProperties"] = additional
+    turn = parse_tool_response(
+        function_call("<parameter=extra>123</parameter>"),
+        provider_to_internal={"safe": "web.search"},
+        tools=tools,
+    )
+    assert turn.tool_calls[0].arguments["extra"] == 123

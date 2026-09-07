@@ -159,14 +159,15 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "qwen",
         backend="mlx_llama",
         context_window=262144,
-        max_output_tokens=8192,
+        max_output_tokens=131072,
         supports_function_calling=True,
         supports_reasoning=True,
         min_transformers_version="5.8.0",
         parameter_count="27B",
         performance_note=(
             "Text-only local inference on Apple Silicon using the curated "
-            "mlx-community/Qwen3.8-27B-4bit snapshot."
+            "mlx-community/Qwen3.8-27B-4bit snapshot; configured output "
+            "ceiling of 131,072 tokens (full-length runs not yet qualified)."
         ),
     ),
     ModelSpec(

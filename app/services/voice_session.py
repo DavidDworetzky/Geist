@@ -122,6 +122,7 @@ class VoiceSessionService:
         self.has_speech = False
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice-session")
         self._closed = False
+        self._response_iterators: set[Generator[dict[str, Any], None, None]] = set()
 
         self.logger = logging.getLogger(__name__)
 
@@ -229,7 +230,10 @@ class VoiceSessionService:
     ) -> AsyncGenerator[dict[str, Any], None]:
         # Advance on one worker thread: bounded to a single event, with no GPU
         # work on the event loop. Closing is queued behind any in-flight step.
+        if self._closed:
+            raise RuntimeError("Voice session is closed")
         iterator = self._process_with_agent(transcript, chat_id, system_prompt, use_streaming)
+        self._response_iterators.add(iterator)
         sentinel = object()
         try:
             while True:
@@ -238,7 +242,9 @@ class VoiceSessionService:
                     return
                 yield event
         finally:
-            self._worker.submit(iterator.close)
+            if iterator in self._response_iterators:
+                self._response_iterators.remove(iterator)
+                self._worker.submit(iterator.close)
 
     def _process_with_agent(
         self,
@@ -367,6 +373,9 @@ class VoiceSessionService:
             return
         self._closed = True
         self.reset()
+        for iterator in self._response_iterators:
+            self._worker.submit(iterator.close)
+        self._response_iterators.clear()
         close = getattr(self.tts, "close", None)
         if callable(close):
             self._worker.submit(close)

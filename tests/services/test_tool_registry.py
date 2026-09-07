@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from agents.architectures.chat_template_tools import build_tool_payload, parse_tool_response
 from agents.models.tool_calling import (
     ToolCall,
     ToolContext,
@@ -216,14 +217,33 @@ def test_unfinished_side_effect_mappings_are_not_registered(monkeypatch, tmp_pat
         {"query": "valid query", "unexpected": True},
         {"query": ""},
         {"query": "valid query", "max_results": 11},
+        {"max_results": 3},
     ],
 )
-def test_execute_rejects_invalid_or_extra_arguments(arguments):
+@pytest.mark.parametrize("protocol", ["json", "xml"])
+def test_execute_rejects_invalid_or_extra_model_arguments(arguments, protocol):
     handler = Mock(return_value=ToolExecutionOutput(content="should not run"))
     registry = ToolRegistry()
-    registry.register(_definition("strict.search", handler))
+    definition = _definition("strict.search", handler)
+    registry.register(definition)
+    payload = build_tool_payload([], [definition])
+    name = next(iter(payload.provider_to_internal))
+    if protocol == "json":
+        body = json.dumps({"name": name, "arguments": arguments})
+    else:
+        parameters = "".join(
+            f"<parameter={key}>\n{value if isinstance(value, str) else json.dumps(value)}\n"
+            "</parameter>\n"
+            for key, value in arguments.items()
+        )
+        body = f"<function={name}>\n{parameters}</function>"
+    turn = parse_tool_response(
+        f"<tool_call>{body}</tool_call>",
+        provider_to_internal=payload.provider_to_internal,
+        tools=payload.tools,
+    )
 
-    result = registry.execute(ToolCall.create("strict.search", arguments), _context())
+    result = registry.execute(turn.tool_calls[0], _context())
 
     assert result.status == "failed"
     assert result.error == "invalid_arguments"

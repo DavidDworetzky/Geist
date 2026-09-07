@@ -23,6 +23,7 @@ from agents.agent_type import AgentType
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
+from agents.model_load_status import model_load_status_registry
 from agents.models.agent_completion import AgentCompletion
 from agents.models.tool_calling import ModelRequestConfig, ToolContext
 from agents.online_agent import OnlineAgent
@@ -96,6 +97,17 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
     agent_type: None for agent_type in agent_cache
 }
 _agent_cache_lock = threading.RLock()
+_local_agent_creation_lock = threading.Lock()
+_local_agent_loading_model_id: str | None = None
+
+
+class LocalModelBusyError(RuntimeError):
+    """An existing load owns the local runtime; this is not that load failing."""
+
+    def __init__(self, model_id: str | None):
+        super().__init__("Local model is loading or switching; retry when it is ready")
+        self.model_id = model_id
+
 
 # mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
@@ -147,6 +159,7 @@ def get_or_create_agent(agent_type: AgentType):
 
 
 def _get_or_create_local_agent(agent_type: AgentType):
+    global _local_agent_loading_model_id
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -167,6 +180,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             return requested_agent
 
         factory_config = _get_local_agent_factory_config()
+        model_id = factory_config.model or DEFAULT_LOCAL_MODEL
         signature = _local_agent_configuration_signature(factory_config)
 
         local_entries = [
@@ -183,12 +197,28 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 _set_local_agent_cache(cached_agent, signature)
                 return cached_agent
 
-        stale_agents = _clear_local_agent_cache()
+        # Do not hold the shared cache lock while a local model waits for an
+        # active stream to close. Other model switches fail busy, not queued.
+        if not _local_agent_creation_lock.acquire(blocking=False):
+            raise LocalModelBusyError(_local_agent_loading_model_id)
+        try:
+            _local_agent_loading_model_id = model_id
+            stale_agents = _clear_local_agent_cache()
+        except BaseException as error:
+            _local_agent_loading_model_id = None
+            _local_agent_creation_lock.release()
+            model_load_status_registry.mark_failed(model_id, str(error))
+            raise
+
+    load_error: BaseException | None = None
+    try:
         for stale_agent in stale_agents:
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
-        _set_local_agent_cache(new_agent, signature)
+        with _agent_cache_lock:
+            _set_local_agent_cache(new_agent, signature)
+            model_load_status_registry.mark_ready(model_id)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
             factory_config.model,
@@ -196,6 +226,15 @@ def _get_or_create_local_agent(agent_type: AgentType):
             factory_config.runner_type or "auto",
         )
         return new_agent
+    except BaseException as error:
+        load_error = error
+        raise
+    finally:
+        with _agent_cache_lock:
+            _local_agent_loading_model_id = None
+            _local_agent_creation_lock.release()
+            if load_error is not None:
+                model_load_status_registry.mark_failed(model_id, str(load_error))
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:
@@ -310,7 +349,7 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
 
 def intent_router_enabled(workspace_id: int) -> bool:
     settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
-    return settings.ui_preferences.get("intentRouterEnabled") is not False
+    return settings.ui_preferences.get("intentRouterEnabled") is True
 
 
 def resolved_memory_settings(
