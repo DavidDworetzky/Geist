@@ -24,6 +24,7 @@ from agents.models.tool_calling import (
     ModelEvent,
     ModelRequestConfig,
     ModelTurn,
+    ToolCall,
     ToolDefinition,
     ToolExecutionOutput,
 )
@@ -465,7 +466,27 @@ def test_mlx_lm_rejects_tool_markup_without_tools_before_exposing_it(markup):
     with pytest.raises(ValueError, match="tool"):
         for event in stream:
             visible.append(event.text)
-    assert "".join(visible) == "Hello. "
+    assert "".join(visible) == "Hello."
+
+
+@pytest.mark.parametrize("offer_other_tool", [False, True])
+def test_mlx_lm_rejects_historical_unoffered_tool_without_exposing_it(offer_other_tool):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.supports_native_tool_calling = True
+    name = provider_tool_name("past.lookup")
+    response = f'<tool_call>{{"name":"{name}","arguments":{{}}}}</tool_call>'
+    backend.stream_messages = lambda *args: iter(response)
+    history = [
+        ChatMessage(
+            role="assistant", tool_calls=[ToolCall(id="old", name="past.lookup", arguments={})]
+        )
+    ]
+    stream = backend.stream_model_turn(
+        history, [_search_tool()] if offer_other_tool else [], ModelRequestConfig()
+    )
+    with pytest.raises(ValueError, match="unknown tool"):
+        for event in stream:
+            pytest.fail(f"Unavailable tool exposed an event: {event.kind}")
 
 
 def test_mlx_lm_prompt_uses_native_roles_for_conversation_history():
@@ -576,8 +597,11 @@ def test_mlx_lm_native_turn_preserves_tool_history_and_parses_call():
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_mlx_lm_plain_turn_streams_lazily_and_closes(cancel):
+@pytest.mark.parametrize("with_tools", [False, True])
+def test_mlx_lm_turn_streams_lazily_and_closes(cancel, with_tools):
     backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.supports_native_tool_calling = True
     produced = []
     closed = []
 
@@ -591,7 +615,9 @@ def test_mlx_lm_plain_turn_streams_lazily_and_closes(cancel):
 
     backend.stream_messages = responses
     events = backend.stream_model_turn(
-        [ChatMessage(role="user", content="Name the code word.")], [], ModelRequestConfig()
+        [ChatMessage(role="user", content="Name the code word.")],
+        [_search_tool()] if with_tools else [],
+        ModelRequestConfig(),
     )
     first = next(events)
     assert first.kind == "text_delta"
@@ -604,6 +630,32 @@ def test_mlx_lm_plain_turn_streams_lazily_and_closes(cancel):
         assert [event.kind for event in remaining] == ["text_delta", "turn_complete"]
         assert remaining[-1].turn.text == "cobalt"
     assert closed == [True]
+
+
+def test_mlx_tool_stream_closes_on_malformed_call_without_completing_turn():
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend.supports_native_tool_calling = True
+    closed = []
+    produced = []
+
+    def responses(*args):
+        try:
+            for part in ("Working.", "<tool_call>{bad}</tool_call>", "Must not be consumed"):
+                produced.append(part)
+                yield part
+        finally:
+            closed.append(True)
+
+    backend.stream_messages = responses
+    events = backend.stream_model_turn(
+        [ChatMessage(role="user", content="Look this up")], [_search_tool()], ModelRequestConfig()
+    )
+    assert next(events).text == "Working."
+    with pytest.raises(ValueError, match="invalid tool-call JSON"):
+        next(events)
+    assert closed == [True]
+    assert len(produced) == 2
 
 
 def test_manual_mlx_stays_tool_disabled():

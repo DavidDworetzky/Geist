@@ -203,6 +203,61 @@ def test_intent_router_filters_catalog_before_assistant_turn(
     ]
 
 
+@pytest.mark.parametrize("tools_disabled", [False, True])
+def test_unoffered_tool_cannot_execute_or_enter_persisted_transcript(tools_disabled):
+    executed, writes = [], []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="public.search",
+            description="Search publicly",
+            arguments_model=LookupArguments,
+            handler=lambda *args: executed.append(True),
+            semantic_tags=frozenset({"public_retrieval"}),
+        )
+    )
+    turns = (
+        []
+        if tools_disabled
+        else [ModelTurn(text='{"intent":"sensitive_answer","needs_retrieval":true}')]
+    )
+    turns.append(
+        ModelTurn(
+            text="Looking into it.",
+            tool_calls=[ToolCall(id="bad", name="public.search", arguments={"query": "private"})],
+        )
+    )
+    backend = ScriptedBackend(turns)
+
+    def write(**snapshot):
+        writes.append(snapshot)
+        return SimpleNamespace(chat_session_id=42)
+
+    orchestrator = ChatOrchestrator(
+        registry,
+        intent_router=ToolIntentRouter(),
+        history_loader=lambda _: [],
+        history_writer=write,
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Private request",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="Assistant",
+            enable_tools=not tools_disabled,
+            enable_intent_router=True,
+        )
+    )
+    assert executed == []
+    assert any(event.event == "error" for event in events)
+    assert not any(event.event == "tool_call" for event in events)
+    assert writes[-1]["transcript"][-1]["content"] == "Looking into it."
+    assert all(not message.get("tool_calls") for message in writes[-1]["transcript"])
+
+
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///tmp/secret", "not-a-url"])
 def test_artifact_urls_reject_unsafe_schemes(url):
     with pytest.raises(ValueError, match="HTTP"):
@@ -466,6 +521,53 @@ def test_disconnect_explicitly_closes_backend_even_if_iterator_is_retained():
         pass
     stream.close()
     assert closed == [True]
+
+
+@pytest.mark.parametrize("ending", ["malformed", "disconnect", "cancel"])
+def test_partial_streamed_prose_is_persisted_once_without_unvalidated_tools(ending):
+    from agents.architectures.chat_template_tools import ToolResponseStream
+
+    def responses(*args):
+        parser = ToolResponseStream({"safe": "web.search"})
+        yield ModelEvent.text_delta(parser.feed("Working. "))
+        parser.feed("<tool_call>{bad}</tool_call>")
+
+    controls = RunControlRegistry()
+    writes = []
+    orchestrator = ChatOrchestrator(
+        ToolRegistry(),
+        run_controls=controls,
+        history_writer=lambda **kwargs: writes.append(kwargs) or SimpleNamespace(chat_session_id=3),
+    )
+    stream = orchestrator.stream(
+        backend=SimpleNamespace(supports_native_tool_calling=False, stream_model_turn=responses),
+        prompt="hello",
+        workspace_id=1,
+        chat_id=None,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+    run_id = next(stream).payload["run_id"]
+    while (event := next(stream)).event != "delta":
+        pass
+    assert event.payload["text"] == "Working."
+    if ending == "malformed":
+        events = list(stream)
+        assert (
+            next(event for event in events if event.event == "error").payload["message"]
+            == "Chat completion failed"
+        )
+    else:
+        if ending == "cancel":
+            assert controls.cancel(run_id, workspace_id=1)
+        stream.close()
+    assert len(writes) == 1
+    assert writes[0]["status"] == ("failed" if ending == "malformed" else "cancelled")
+    assert writes[0]["new_ai_message"] == "Working."
+    assert not writes[0]["tool_calls"]
+    assistant = writes[0]["transcript"][-1]
+    assert assistant["content"] == "Working."
+    assert not assistant.get("tool_calls")
 
 
 def test_backend_without_native_tools_receives_empty_registry():

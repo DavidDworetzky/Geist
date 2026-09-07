@@ -176,3 +176,45 @@ documented hands-on flags (`--small-m`, `--autotune`, `--split-k`). Native
 Metal/policy follow-up: **165 passed**. Unsupported macOS 14 `relaxed` experiments
 continue to report Metal's capability error rather than silently changing the
 requested math variant; this is an explicit research mode, not the default path.
+
+PR #357 integration validation: **88 passed** in the focused Docker runner,
+artifact, policy, n-gram and orchestrator suites; **218 passed** in the native
+Metal, runner, artifact, policy and n-gram suites after the parent merge.
+
+## PR #358: stream failure persistence
+
+Accepted: save already-emitted prose on malformed tool output, disconnect, and
+cancel, exactly once with failed/cancelled status and no unvalidated tool calls.
+Completed turns remain authoritative and do not duplicate the emitted deltas.
+Use the same incremental parser with and without tools, and normalize malformed
+closing-marker errors. Probe reset now clears observable state and invalidates
+old producers so their cleanup cannot mark a new run closed. Gate waits are ten
+seconds, and comments explain worker isolation, constructor bypass and SPA route
+ordering. A browser regression checks failed-turn prose survives reload.
+
+Not adopted: swallowing the final parser mismatch would silently reconcile
+incompatible output after bytes were sent; it remains an explicit failure.
+Bare JSON responses still buffer until EOF for the established whole-response
+tool-call compatibility contract. That limitation is documented, not a claim of
+universal JSON streaming. The reported 'backend failed to start' copy is not the
+orchestrator's mid-stream error path: it already returns 'Chat completion failed'.
+Small explicit iterator cleanup and private-buffer white-box assertions remain
+intentional; neither needs a new abstraction or public parser API.
+
+Second-review follow-up: historical tool names are serialized but no longer
+included in the output parser's offered-name map. This covers both empty and
+narrowed tool catalogs across adapters, not just MLX. Orchestration independently
+rejects any completed call that was not offered before persisting or dispatching
+it. Tests cover history-bearing no-tools/narrowed-tool requests and a malicious
+structured backend under disabled tools and privacy-sensitive routing.
+Model-message snapshots now use the same lock as cancellation writes; probe
+start/state are locked, and the malformed-output fixture fails explicitly if the
+expected parser error disappears.
+
+The persistence lock still spans the final database write intentionally: moving
+that write outside requires an in-flight persistence state and retry semantics
+to preserve exactly-once behavior. The write occurs when ending/cancelling the
+turn, not during ordinary steady-state token production. Incremental early
+rejection and whole-response incomplete-markup diagnostics can retain different
+wording without relaxing either fail-closed contract. Shared prefix-holdback
+logic for different stop/protocol markers is not refactored here.

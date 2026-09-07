@@ -29,6 +29,44 @@ test('completes a chat through the real SSE route', async ({ page }) => {
   await expect(messageInput).toBeEnabled();
 });
 
+test('streams through every local MLX chat layer before generation can finish', async ({ page }) => {
+  const control = '/api/e2e/streaming';
+  expect((await page.request.post(`${control}/start`)).ok()).toBe(true);
+  try {
+    await page.getByPlaceholder('Type your message...').fill('Exercise streaming backpressure');
+    await page.getByRole('button', { name: 'Send' }).click();
+    const answer = page.locator('.chat-message-ai');
+    const responding = page.getByRole('status', { name: 'Geist is responding' });
+
+    // Generation is blocked at a model-source gate, not a timer. Buffering in
+    // any adapter, runner, agent, orchestrator, SSE hop, or UI makes this fail.
+    await expect(answer).toContainText('STREAM-FIRST');
+    await expect(answer).not.toContainText('STREAM-SECOND');
+    await expect(responding).toBeVisible();
+    expect(await (await page.request.get(`${control}/state`)).json()).toMatchObject({
+      stage: 1, closed: false, tools_seen: true, released: [false, false],
+    });
+
+    expect((await page.request.post(`${control}/release/1`)).ok()).toBe(true);
+    await expect(answer).toContainText('STREAM-FIRST STREAM-SECOND');
+    await expect(answer).not.toContainText('STREAM-FINAL');
+    await expect(responding).toBeVisible();
+    expect(await (await page.request.get(`${control}/state`)).json()).toMatchObject({
+      stage: 2, closed: false, released: [true, false],
+    });
+
+    expect((await page.request.post(`${control}/release/2`)).ok()).toBe(true);
+    await expect(answer).toContainText('STREAM-FIRST STREAM-SECOND STREAM-FINAL');
+    await expect(responding).toBeHidden();
+    expect(await (await page.request.get(`${control}/state`)).json()).toMatchObject({
+      stage: 3, closed: true,
+    });
+  } finally {
+    // Also unblock the producer after a failed assertion or an aborted test.
+    await page.request.post(`${control}/reset`);
+  }
+});
+
 test('persists a conversation and hydrates structured follow-up context', async ({ page }) => {
   const messageInput = page.getByPlaceholder('Type your message...');
   await messageInput.fill('Remember cobalt.');
@@ -63,4 +101,16 @@ test('leaves connecting and surfaces a safe model failure', async ({ page }) => 
   await expect(page.getByText('Turn status: failed', { exact: true })).toBeVisible();
   await expect(page.getByRole('status', { name: 'Geist is responding' })).toBeHidden();
   await expect(messageInput).toBeEnabled();
+});
+
+test('preserves streamed prose after a malformed tool failure and reload', async ({ page }) => {
+  await page.getByPlaceholder('Type your message...').fill('Trigger failure after prose');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText(backendFailureMessage, { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
+  await expect(page).toHaveURL(/\/chat\/\d+$/);
+  await page.reload();
+  await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
+  await expect(page.getByText('Turn status: failed', { exact: true })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('<tool_call>');
 });

@@ -11,8 +11,8 @@ from contextlib import closing
 from typing import Any
 
 from agents.architectures.chat_template_tools import (
+    ToolResponseStream,
     build_tool_payload,
-    parse_tool_response,
     tokenizer_supports_tools,
 )
 from agents.model_catalog import infer_model_spec
@@ -21,7 +21,6 @@ from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
     ModelRequestConfig,
-    ModelTurn,
     ToolDefinition,
 )
 
@@ -424,38 +423,18 @@ class MLXLMBackend:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         payload = build_tool_payload(messages, tools)
-        if not tools:
-            segments = []
-            pending = ""
-            markers = ("<tool_call>", "</tool_call>")
-            responses = self.stream_messages(payload.messages, payload.tools)
-            try:
-                for segment in responses:
-                    pending += segment
-                    if any(marker in pending for marker in markers):
-                        raise ValueError("Model returned tool-call markup without available tools")
-                    retained = _stop_prefix_length(pending, markers)
-                    emit_length = len(pending) - retained
-                    if emit_length:
-                        segments.append(pending[:emit_length])
-                        yield ModelEvent.text_delta(pending[:emit_length])
-                        pending = pending[emit_length:]
-                if pending:
-                    segments.append(pending)
-                    yield ModelEvent.text_delta(pending)
-            finally:
-                close = getattr(responses, "close", None)
-                if callable(close):
-                    close()
-            yield ModelEvent.turn_complete(
-                ModelTurn(text="".join(segments).strip(), finish_reason="stop")
-            )
-            return
-        response = "".join(self.stream_messages(payload.messages, payload.tools)).strip()
-        turn = parse_tool_response(
-            response,
-            provider_to_internal=payload.provider_to_internal,
-        )
-        if turn.text:
-            yield ModelEvent.text_delta(turn.text)
-        yield ModelEvent.turn_complete(turn)
+        parser = ToolResponseStream(payload.provider_to_internal)
+        responses = self.stream_messages(payload.messages, payload.tools)
+        try:
+            for segment in responses:
+                text = parser.feed(segment)
+                if text:
+                    yield ModelEvent.text_delta(text)
+            tail, turn = parser.finish()
+            if tail:
+                yield ModelEvent.text_delta(tail)
+            yield ModelEvent.turn_complete(turn)
+        finally:
+            close = getattr(responses, "close", None)
+            if callable(close):
+                close()
