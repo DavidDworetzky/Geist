@@ -124,4 +124,33 @@ describe('AgentPermissionsSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove unavailable grant: old.tool' }));
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: [] });
   });
+
+  it.each(['rejected', 'non-ok', 'invalid-json', 'missing-tools', 'invalid-tool'])('preserves grants when the catalog response is %s', async (failure) => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const fetchMock = global.fetch as jest.Mock;
+    if (failure === 'rejected') {
+      fetchMock.mockRejectedValueOnce(new Error('offline'));
+    } else if (failure === 'non-ok') {
+      fetchMock.mockResolvedValueOnce({ ok: false });
+    } else if (failure === 'invalid-json') {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => { throw new Error('invalid JSON'); } });
+    } else {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => failure === 'missing-tools' ? {} : { tools: [null] } });
+    }
+    const onChange = jest.fn();
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['web.search'] }} onChange={onChange} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your saved grants are unchanged');
+    expect(screen.queryByText(/Unavailable saved grants/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove unavailable grant/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('No agent tools are available.')).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes a successfully loaded empty catalog from a failed request', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({ tools: [] }) });
+    render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: ['old.tool'] }} onChange={() => {}} />);
+    expect(await screen.findByText('No agent tools are available.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove unavailable grant: old.tool' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });

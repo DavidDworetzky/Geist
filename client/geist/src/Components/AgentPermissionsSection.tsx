@@ -39,7 +39,8 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
   const permissions = agentPermissions ?? DEFAULT_PERMISSIONS;
   const [tools, setTools] = useState<ChatTool[]>([]);
   const [loading, setLoading] = useState(true);
-  const unavailableGrants = permissions.always_allow.filter(name => !tools.some(tool => tool.name === name));
+  const [loadError, setLoadError] = useState(false);
+  const unavailableGrants = loading || loadError ? [] : permissions.always_allow.filter(name => !tools.some(tool => tool.name === name));
 
   useEffect(() => {
     void fetchTools();
@@ -48,11 +49,18 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
   const fetchTools = async () => {
     try {
       const response = await fetch('/agent/tools');
-      if (response.ok) {
-        const data = await response.json();
-        setTools(data.tools || []);
+      if (!response.ok) {
+        throw new Error('Tool catalog request failed');
       }
+      const data = await response.json();
+      if (!Array.isArray(data.tools) || data.tools.some((tool: unknown) =>
+        !tool || typeof tool !== 'object' || !('name' in tool) || typeof tool.name !== 'string'
+      )) {
+        throw new Error('Invalid tool catalog response');
+      }
+      setTools(data.tools);
     } catch (err) {
+      setLoadError(true);
       console.error('Failed to fetch agent tools:', err);
     } finally {
       setLoading(false);
@@ -128,6 +136,10 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
         )}
         {loading ? (
           <div className="empty-state compact">Loading tools...</div>
+        ) : loadError ? (
+          <div role="alert" className="empty-state compact">
+            Could not load the tool catalog. Your saved grants are unchanged. Reload settings to try again.
+          </div>
         ) : tools.length === 0 ? (
           <div className="empty-state compact">No agent tools are available.</div>
         ) : (
