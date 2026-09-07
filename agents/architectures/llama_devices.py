@@ -400,6 +400,7 @@ class LlamaDeviceService:
         self._probe_started_at = 0.0
         self._active_probes: set[int] = set()
         self._logged_timeout_generation = -1
+        self._logged_exhausted_generation = -1
 
     def inventory(
         self,
@@ -408,6 +409,8 @@ class LlamaDeviceService:
         allow_in_progress: bool = False,
     ) -> LlamaDeviceInventory:
         probe_budget = max(0.0, self.timeout_seconds) * 1.5 + 1.0
+        # Cache TTLs are injectable; blocking deadlines deliberately use wall
+        # monotonic time so a frozen test/operator clock cannot strand a waiter.
         caller_deadline = time.monotonic() + probe_budget
         with self._probe_completed:
             now = self.clock()
@@ -434,6 +437,8 @@ class LlamaDeviceService:
                 ):
                     return self._cached_inventory
                 if self._probe_error is not None and now < self._next_refresh_allowed_at:
+                    if allow_in_progress:
+                        return self._failed_probe_inventory(self._cached_inventory)
                     raise RuntimeError(self._probe_error)
                 self._probe_in_flight = True
                 self._probe_error = None
@@ -457,16 +462,22 @@ class LlamaDeviceService:
                 remaining = (
                     min(caller_deadline, self._probe_started_at + probe_budget) - time.monotonic()
                 )
-                if (joined_probe and allow_in_progress) or remaining <= 0:
+                if allow_in_progress or remaining <= 0:
                     break
                 self._probe_completed.wait(timeout=remaining)
             if not self._probe_in_flight:
                 if self._probe_error is not None:
+                    if allow_in_progress:
+                        return self._failed_probe_inventory(self._cached_inventory)
                     raise RuntimeError(self._probe_error)
                 if self._cached_inventory is not None:
                     return self._cached_inventory
             cached_inventory = self._cached_inventory
             timed_out = time.monotonic() >= self._probe_started_at + probe_budget
+            recovery_exhausted = timed_out and len(self._active_probes) >= 2
+            if recovery_exhausted and self._logged_exhausted_generation != self._probe_generation:
+                logger.error("GPU discovery recovery exhausted; restart Geist to restore discovery")
+                self._logged_exhausted_generation = self._probe_generation
             if timed_out and self._logged_timeout_generation != self._probe_generation:
                 logger.error(
                     "llama.cpp device discovery exceeded its deadline; recovery is bounded to two workers"
@@ -476,14 +487,37 @@ class LlamaDeviceService:
         # the shared condition lock used by all inventory readers.
         result = self._discovery_in_progress_inventory(cached_inventory)
         if timed_out:
-            message = "GPU discovery timed out. Retry refresh; restart Geist if discovery remains unavailable."
+            message = (
+                "GPU discovery timed out and recovery is exhausted. Restart Geist to restore discovery."
+                if recovery_exhausted
+                else "GPU discovery timed out. Retry refresh."
+            )
             return replace(
                 result,
+                reason=message,
                 error=message,
                 selection_detection_error=message,
                 discovery_in_progress=False,
             )
         return result
+
+    @staticmethod
+    def _failed_probe_inventory(cached: LlamaDeviceInventory | None) -> LlamaDeviceInventory:
+        message = "GPU discovery failed. Retry refresh after a short wait."
+        if cached is None:
+            return _cpu_inventory(
+                available=False,
+                reason=message,
+                error=message,
+                selection_detection_error=message,
+            )
+        return replace(
+            cached,
+            reason=message,
+            error=message,
+            selection_detection_error=message,
+            discovery_in_progress=False,
+        )
 
     def _probe_inventory(self, generation: int) -> None:
         try:

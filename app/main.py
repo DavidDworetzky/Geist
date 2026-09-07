@@ -100,6 +100,7 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
 _agent_cache_lock = threading.RLock()
 _local_agent_creation_lock = threading.Lock()
 _local_agent_loading_model_id: str | None = None
+_pending_detection_warning: tuple[str, str] | None = None
 
 
 class LocalModelBusyError(RuntimeError):
@@ -162,6 +163,7 @@ def get_or_create_agent(agent_type: AgentType):
 def _get_or_create_local_agent(agent_type: AgentType):
     global _local_agent_loading_model_id
     reusable_agent = None
+    stale_agents: list[Any] = []
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -218,6 +220,8 @@ def _get_or_create_local_agent(agent_type: AgentType):
             # Persistence must not resurrect an agent replaced by another request.
             if all(agent_cache[local_type] is reusable_agent for local_type in _LOCAL_AGENT_TYPES):
                 _set_local_agent_cache(reusable_agent, signature)
+        # Like every cache read, reuse is best-effort: a concurrent model switch
+        # can phase the agent out after the lock is released.
         return reusable_agent
 
     load_error: BaseException | None = None
@@ -261,6 +265,7 @@ def _persist_first_use_llama_backend(
     factory_config: AgentFactoryConfig,
     signature: str,
 ) -> str:
+    global _pending_detection_warning
     if (
         factory_config.device_config.get("llama_backend") != "auto"
         or _llama_selection_managed_by_environment()
@@ -276,8 +281,15 @@ def _persist_first_use_llama_backend(
     detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
     detection_error = detection_error_reader() if callable(detection_error_reader) else None
     if backend == "cpu" and detection_error is not None:
-        # Discovery logs failures once; cache hits must not repeat that warning.
+        warning_key = (str(factory_config.model), str(detection_error))
+        with _agent_cache_lock:
+            should_warn = _pending_detection_warning != warning_key
+            _pending_detection_warning = warning_key
+        if should_warn:
+            logger.warning("First-use compute detection remains pending for %s: %s", *warning_key)
         return signature
+    with _agent_cache_lock:
+        _pending_detection_warning = None
 
     try:
         default_user = get_default_workspace()
@@ -872,20 +884,31 @@ def _configured_inference_info() -> dict[str, str | None]:
         "engine": runner_type,
         "model": factory_config.model,
         "provider": None,
-        "acceleration": _llama_acceleration(runner_type, settings.llama_backend),
+        "acceleration": _llama_acceleration(
+            runner_type, settings.llama_backend, factory_config.model
+        ),
     }
 
 
 def _llama_acceleration(
     runner_type: str,
     selected_backend: str | None = None,
+    model_id: str | None = None,
 ) -> str | None:
     if runner_type != "llama_server":
         return None
     if os.getenv("GEIST_LLAMA_SERVER_PATH", "").strip():
         return None
+    if model_id is not None:
+        from agents.architectures.llama_server_process import get_llama_server_manager
+
+        status = get_llama_server_manager().public_status()
+        if status.get("status") == "ready" and status.get("model_id") == model_id:
+            backend = status.get("backend")
+            if backend in {"cpu", "vulkan"}:
+                return str(backend)
     acceleration = (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
-    if acceleration != "auto":
+    if acceleration in {"cpu", "vulkan"}:
         return acceleration
     if selected_backend == "gpu":
         return "vulkan"

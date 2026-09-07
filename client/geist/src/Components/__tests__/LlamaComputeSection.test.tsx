@@ -57,6 +57,17 @@ describe('LlamaComputeSection', () => {
     jest.useRealTimers();
   });
 
+  it('expires settled refresh feedback without relying on its copy', async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => discoveredGpuInventory });
+    render(<LlamaComputeSection {...props} />);
+    await screen.findByLabelText('Compute Backend');
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
+    expect(await screen.findByText(/Showing the latest available device snapshot/)).toBeInTheDocument();
+    act(() => { jest.advanceTimersByTime(5000); });
+    expect(screen.queryByText(/Showing the latest available device snapshot/)).not.toBeInTheDocument();
+  });
+
   it('hides compute settings when the platform has no managed llama.cpp runtime', async () => {
     // @ts-ignore
     global.fetch = jest.fn(() => Promise.resolve({

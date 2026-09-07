@@ -648,6 +648,76 @@ def test_replacement_probe_recovers_and_discards_late_result(tmp_path: Path) -> 
     assert service.inventory() is recovered
 
 
+def test_two_wedges_with_intermediate_recovery_report_restart_required(tmp_path, caplog):
+    release = threading.Event()
+    entered = [threading.Event(), threading.Event()]
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(True)
+        attempt = len(calls)
+        if attempt in (1, 3):
+            entered[0 if attempt == 1 else 1].set()
+            assert release.wait(3)
+        return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
+
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(_runtime_tree(tmp_path))},
+        command_runner=run,
+        cache_ttl_seconds=0,
+        minimum_refresh_interval_seconds=0,
+    )
+    try:
+        started = time.monotonic()
+        assert service.inventory(allow_in_progress=True).discovery_in_progress
+        assert time.monotonic() - started < 0.5
+        assert entered[0].wait(1)
+        with service._probe_completed:
+            service._probe_started_at -= 100
+        assert service.inventory(refresh=True).recommended_backend == "gpu"
+        started = time.monotonic()
+        service.inventory(refresh=True, allow_in_progress=True)
+        assert time.monotonic() - started < 0.5
+        assert entered[1].wait(1)
+        with service._probe_completed:
+            service._probe_started_at -= 100
+        for _ in range(2):
+            result = service.inventory(allow_in_progress=True)
+            assert not result.discovery_in_progress
+            assert "Restart Geist" in result.reason
+        assert len(calls) == 3
+        assert caplog.text.count("GPU discovery recovery exhausted") == 1
+    finally:
+        release.set()
+        with service._probe_completed:
+            assert service._probe_completed.wait_for(lambda: not service._active_probes, timeout=2)
+
+
+def test_http_probe_failure_retains_stale_devices_without_raising(tmp_path, monkeypatch):
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(_runtime_tree(tmp_path))},
+        command_runner=lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=DEVICE_OUTPUT, stderr=""
+        ),
+        cache_ttl_seconds=0,
+        minimum_refresh_interval_seconds=0,
+    )
+    original = service.inventory()
+
+    def fail():
+        raise RuntimeError("unexpected probe failure")
+
+    monkeypatch.setattr(service, "_discover_inventory", fail)
+    service.inventory(allow_in_progress=True)
+    with service._probe_completed:
+        assert service._probe_completed.wait_for(lambda: not service._probe_in_flight, timeout=2)
+    result = service.inventory(allow_in_progress=True)
+    assert result.devices == original.devices
+    assert result.error and not result.discovery_in_progress
+    with pytest.raises(RuntimeError, match="unexpected probe failure"):
+        service.inventory()
+
+
 @pytest.mark.parametrize(
     "environment",
     [
