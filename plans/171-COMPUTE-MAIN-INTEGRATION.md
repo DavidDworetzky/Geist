@@ -29,3 +29,18 @@ the existing subprocess import and main's unchanged 0.0.0.0 bind, and full UI
 eslint reports 84 existing test-style violations. Targeted production ESLint,
 Ruff, project mypy and native Windows-contract mypy are checked separately;
 these three baseline hooks are skipped for this integration commit only.
+
+Claude follow-up5576190108: serve unexpired cached inventories during refresh;
+permit one replacement for an overdue probe, cap all live discovery workers at
+two, and reject stale-generation results. Deadlines include reap/parse slack;
+timeout results are explicit and logged once rather than permanent in-progress
+placeholders. Unexpected failures use fresh exceptions and negative backoff.
+Cache-hit persistence runs outside the shared lock and cannot resurrect an agent
+replaced concurrently. Explicit operator binaries report unknown acceleration;
+workspace wording restored, pre-repair validation named, refresh feedback expires,
+and realistic legacy tests now omit compute columns too. Existing formatting in
+the previously published feature is left alone to avoid further blame churn.
+
+Follow-up verification: 981 Docker tests passed,7 skipped;169 native MLX-mode
+tests passed;204 frontend tests and production build passed. Scoped production
+ESLint, Ruff and project mypy pass. Browser/hardware limitations above remain.

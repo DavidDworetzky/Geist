@@ -195,7 +195,7 @@ def test_explicit_gpu_selection_requires_current_inventory_devices():
     service.inventory.assert_called_once_with()
 
 
-def test_gpu_selection_save_waits_for_inflight_refresh_snapshot(
+def test_gpu_selection_save_uses_unexpired_cache_during_refresh(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
@@ -291,7 +291,7 @@ def test_gpu_selection_save_waits_for_inflight_refresh_snapshot(
             save_thread = threading.Thread(target=save_settings)
             save_thread.start()
             assert settings_inventory_entered.wait(timeout=2)
-            assert settings_returned.wait(timeout=0.1) is False
+            assert settings_returned.wait(timeout=1) is True
 
             release_refresh_probe.set()
             save_thread.join(timeout=2)

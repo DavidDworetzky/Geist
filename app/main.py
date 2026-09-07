@@ -161,6 +161,7 @@ def get_or_create_agent(agent_type: AgentType):
 
 def _get_or_create_local_agent(agent_type: AgentType):
     global _local_agent_loading_model_id
+    reusable_agent = None
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -195,26 +196,29 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 entry_agent is cached_agent and entry_signature == signature
                 for entry_agent, entry_signature in local_entries
             ):
-                signature = _persist_first_use_llama_backend(
-                    cached_agent,
-                    factory_config,
-                    signature,
-                )
-                _set_local_agent_cache(cached_agent, signature)
-                return cached_agent
+                reusable_agent = cached_agent
 
         # Do not hold the shared cache lock while a local model waits for an
         # active stream to close. Other model switches fail busy, not queued.
-        if not _local_agent_creation_lock.acquire(blocking=False):
-            raise LocalModelBusyError(_local_agent_loading_model_id)
-        try:
-            _local_agent_loading_model_id = model_id
-            stale_agents = _clear_local_agent_cache()
-        except BaseException as error:
-            _local_agent_loading_model_id = None
-            _local_agent_creation_lock.release()
-            model_load_status_registry.mark_failed(model_id, str(error))
-            raise
+        if reusable_agent is None:
+            if not _local_agent_creation_lock.acquire(blocking=False):
+                raise LocalModelBusyError(_local_agent_loading_model_id)
+            try:
+                _local_agent_loading_model_id = model_id
+                stale_agents = _clear_local_agent_cache()
+            except BaseException as error:
+                _local_agent_loading_model_id = None
+                _local_agent_creation_lock.release()
+                model_load_status_registry.mark_failed(model_id, str(error))
+                raise
+
+    if reusable_agent is not None:
+        signature = _persist_first_use_llama_backend(reusable_agent, factory_config, signature)
+        with _agent_cache_lock:
+            # Persistence must not resurrect an agent replaced by another request.
+            if all(agent_cache[local_type] is reusable_agent for local_type in _LOCAL_AGENT_TYPES):
+                _set_local_agent_cache(reusable_agent, signature)
+        return reusable_agent
 
     load_error: BaseException | None = None
     try:
@@ -272,10 +276,7 @@ def _persist_first_use_llama_backend(
     detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
     detection_error = detection_error_reader() if callable(detection_error_reader) else None
     if backend == "cpu" and detection_error is not None:
-        logger.warning(
-            "Keeping llama.cpp compute selection automatic after device discovery failed: %s",
-            detection_error,
-        )
+        # Discovery logs failures once; cache hits must not repeat that warning.
         return signature
 
     try:
@@ -880,6 +881,8 @@ def _llama_acceleration(
     selected_backend: str | None = None,
 ) -> str | None:
     if runner_type != "llama_server":
+        return None
+    if os.getenv("GEIST_LLAMA_SERVER_PATH", "").strip():
         return None
     acceleration = (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
     if acceleration != "auto":

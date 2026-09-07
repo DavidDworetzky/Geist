@@ -213,6 +213,8 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
             connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
