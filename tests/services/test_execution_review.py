@@ -71,16 +71,22 @@ def test_mount_free_docker_keeps_hardline_scoped_to_host():
 
 def test_docker_timeout_cleans_up_only_its_named_container():
     environment = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    with patch(
-        "subprocess.run",
-        side_effect=[subprocess.TimeoutExpired("docker", 21), subprocess.CompletedProcess([], 0)],
-    ) as run:
+    with (
+        patch("subprocess.Popen") as launch,
+        patch(
+            "app.services.execution.docker.capture_process",
+            return_value=ExecutionResult(124, "partial", "", 1, timed_out=True),
+        ),
+        patch("subprocess.run") as run,
+    ):
         result = environment.run("sleep 10", timeout_seconds=1)
-    argv = run.call_args_list[0].args[0]
+    argv = launch.call_args.args[0]
     name = argv[argv.index("--name") + 1]
     assert name.startswith("geist-exec-")
-    assert run.call_args_list[1].args[0] == ["/usr/bin/docker", "rm", "--force", name]
-    assert run.call_args_list[1].kwargs["timeout"] == 5
+    assert run.call_args.args[0] == ["/usr/bin/docker", "rm", "--force", name]
+    assert run.call_args.kwargs["timeout"] == 5
+    assert run.call_args.kwargs["stdout"] == subprocess.DEVNULL
+    assert result.stdout == "partial"
     assert result.timed_out
 
 
@@ -89,7 +95,14 @@ def test_docker_timeout_cleans_up_only_its_named_container():
 )
 def test_docker_cleanup_failure_returns_timeout(failure):
     environment = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    with patch("subprocess.run", side_effect=[subprocess.TimeoutExpired("docker", 21), failure]):
+    with (
+        patch("subprocess.Popen"),
+        patch(
+            "app.services.execution.docker.capture_process",
+            return_value=ExecutionResult(124, "", "", 1, timed_out=True),
+        ),
+        patch("subprocess.run", side_effect=failure),
+    ):
         assert environment.run("sleep 10", timeout_seconds=1).timed_out
 
 

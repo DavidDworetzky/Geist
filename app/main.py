@@ -608,6 +608,7 @@ def create_app(
                     "enabled": tool.name in enabled_names,
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
+                    "requires_per_call_approval": tool.requires_per_call_approval,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
                 }

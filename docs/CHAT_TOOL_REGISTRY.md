@@ -94,3 +94,9 @@ is unavailable or a host descendant deliberately escapes its process group.
 Docker exit codes124/137 are treated as timeouts; a command deliberately exiting
 with those codes is indistinguishable. Policy refusals have `policy_blocked` tool
 errors, distinct from ordinary shell exit codes in the result body.
+
+Subprocess output is captured incrementally with at most64KiB retained per stream
+before model-facing truncation. Exceeding the byte cap stops the command (exit125,
+`truncated: true`) and triggers container cleanup. The tool catalog marks fresh-
+approval tools explicitly; the UI cannot create ineffective standing grants for
+them, but existing grants can still be removed.

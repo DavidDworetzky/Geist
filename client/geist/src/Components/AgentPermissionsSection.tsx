@@ -11,6 +11,7 @@ interface ChatTool {
   name: string;
   description: string;
   requires_approval: boolean;
+  requires_per_call_approval?: boolean;
   side_effect: string;
   enabled?: boolean;
 }
@@ -27,9 +28,9 @@ const modeDescriptions: Record<AgentPermissionMode, string> = {
   default:
     'Read-only tools run automatically; tools that send messages or write files wait for your approval.',
   require_approval:
-    'Every agent tool call waits for your approval unless the tool is on your always-allow list.',
+    'Every agent tool call waits for approval. Always-allow grants apply except when a tool requires fresh approval.',
   auto_approve:
-    'The agent runs every tool without asking. Only use this if you trust the agent with all connected tools.'
+    'The agent runs tools without asking, except tools that require fresh approval. Only use this if you trust the agent with all connected tools.'
 };
 
 const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
@@ -102,7 +103,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
           <div>
             <span className="settings-label">Always-Allowed Tools</span>
             <p className="settings-description">
-              Tools on this list never wait for approval, in any mode (
+              These grants skip approval except for tools requiring fresh approval (
               {permissions.always_allow.length} selected).
             </p>
           </div>
@@ -119,7 +120,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
 
         {permissions.mode === 'auto_approve' && (
           <p className="settings-description">
-            Auto-approve is on, so every tool already runs without asking; this list applies when
+            Auto-approve is on, except for tools requiring fresh approval; this list applies when
             you switch back to a stricter mode.
           </p>
         )}
@@ -153,7 +154,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   className={`settings-file-option ${selected ? 'selected' : ''}`}
                   onClick={() => toggleAlwaysAllow(tool.name)}
                   aria-pressed={selected}
-                  disabled={tool.enabled === false && !selected}
+                  disabled={(tool.enabled === false || tool.requires_per_call_approval === true) && !selected}
                   title={tool.description}
                 >
                   <span className="settings-checkbox" aria-hidden="true">
@@ -164,7 +165,9 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                     {(tool.side_effect === 'external_write' || tool.side_effect === 'process') && (
                       <span className="settings-description"> — can affect external systems or run commands</span>
                     )}
-                    {tool.requires_approval && (
+                    {tool.requires_per_call_approval ? (
+                      <span className="settings-description"> — fresh approval required; always-allow does not apply</span>
+                    ) : tool.requires_approval && (
                       <span className="settings-description"> — asks by default</span>
                     )}
                   </span>

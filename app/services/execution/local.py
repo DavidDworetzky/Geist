@@ -21,8 +21,8 @@ from app.services.execution.base import (
     ExecutionEnvironment,
     ExecutionResult,
     clamp_timeout,
-    truncate_output,
 )
+from app.services.execution.capture import capture_process
 
 
 # Environment variables whose names match any of these fragments are withheld
@@ -89,53 +89,16 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
                 ["bash", "-c", command],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                bufsize=0,
                 start_new_session=True,
                 cwd=self.workdir,
                 env=scrub_environment(dict(os.environ)),
             )
         except OSError as error:
             return ExecutionResult(127, "", str(error), time.monotonic() - started)
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired as expired:
+
+        def terminate() -> None:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            # A descendant can escape the group; do not wait forever on its pipes.
-            with suppress(subprocess.TimeoutExpired):
-                process.communicate(timeout=1)
-            stdout = (
-                expired.stdout.decode(errors="replace")
-                if isinstance(expired.stdout, bytes)
-                else expired.stdout or ""
-            )
-            stderr = (
-                expired.stderr.decode(errors="replace")
-                if isinstance(expired.stderr, bytes)
-                else expired.stderr or ""
-            )
-            stdout, stdout_truncated = truncate_output(stdout)
-            stderr, stderr_truncated = truncate_output(stderr)
-            return ExecutionResult(
-                exit_code=124,
-                stdout=stdout,
-                stderr=stderr or f"Command timed out after {timeout} seconds",
-                duration_seconds=time.monotonic() - started,
-                timed_out=True,
-                truncated=stdout_truncated or stderr_truncated,
-            )
-        finally:
-            if process.stdout:
-                process.stdout.close()
-            if process.stderr:
-                process.stderr.close()
 
-        stdout, stdout_truncated = truncate_output(stdout)
-        stderr, stderr_truncated = truncate_output(stderr)
-        return ExecutionResult(
-            exit_code=process.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            duration_seconds=time.monotonic() - started,
-            truncated=stdout_truncated or stderr_truncated,
-        )
+        return capture_process(process, timeout, terminate)

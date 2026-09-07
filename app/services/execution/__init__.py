@@ -5,10 +5,8 @@ Hermes-agent's ``tools/environments`` layer: one abstract interface, a
 hardened Docker sandbox, and an unsandboxed local fallback. Backend selection
 is config-driven via ``GEIST_EXEC_BACKEND`` (unset = execution disabled).
 
-The sandbox/approval coupling follows the Hermes rule: an isolated backend
-runs without per-call approval, while a backend that can reach host files
-(local, or Docker with a bind-mounted workspace) registers its tool with
-``requires_approval=True`` so the user permission gate applies.
+Mount-free, network-disabled Docker can run without per-call approval. Host or
+network access requires fresh approval that standing grants cannot waive.
 """
 
 from app.services.execution.base import ExecutionEnvironment, ExecutionResult

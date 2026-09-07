@@ -1,10 +1,10 @@
-import subprocess
 from unittest.mock import patch
 
 import pytest
 
 from app.services.execution.base import (
     MAX_COMMAND_TIMEOUT_SECONDS,
+    ExecutionResult,
     clamp_timeout,
     truncate_output,
 )
@@ -180,8 +180,13 @@ def test_docker_reports_missing_runtime():
 
 def test_docker_run_invokes_runtime_with_bounded_command():
     env = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="hi\n", stderr="")
-    with patch("subprocess.run", return_value=completed) as mock_run:
+    with (
+        patch("subprocess.Popen") as mock_run,
+        patch(
+            "app.services.execution.docker.capture_process",
+            return_value=ExecutionResult(0, "hi\n", "", 0.1),
+        ) as capture,
+    ):
         result = env.run("echo hi", timeout_seconds=10)
 
     assert result.exit_code == 0
@@ -189,13 +194,19 @@ def test_docker_run_invokes_runtime_with_bounded_command():
     argv = mock_run.call_args.args[0]
     assert argv[0] == "/usr/bin/docker"
     assert argv[-1].startswith("timeout --kill-after=1 10 bash -c ")
-    assert mock_run.call_args.kwargs["timeout"] == 30  # command bound + overhead
+    assert capture.call_args.args[1] == 30  # command bound + overhead
+    assert mock_run.call_args.kwargs["bufsize"] == 0
 
 
 def test_docker_inner_timeout_maps_to_timed_out():
     env = DockerExecutionEnvironment(runtime_path="/usr/bin/docker")
-    completed = subprocess.CompletedProcess(args=[], returncode=124, stdout="", stderr="")
-    with patch("subprocess.run", return_value=completed):
+    with (
+        patch("subprocess.Popen"),
+        patch(
+            "app.services.execution.docker.capture_process",
+            return_value=ExecutionResult(124, "", "", 0.1),
+        ),
+    ):
         result = env.run("sleep 999", timeout_seconds=1)
     assert result.timed_out is True
     assert result.exit_code == 124

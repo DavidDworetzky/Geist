@@ -153,4 +153,17 @@ describe('AgentPermissionsSection', () => {
     expect(screen.getByRole('button', { name: 'Remove unavailable grant: old.tool' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  it('does not offer new standing grants for mandatory-approval tools but lets old grants be removed', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({ tools: [
+      { name: 'terminal.run', description: 'Run commands', requires_approval: true, requires_per_call_approval: true, side_effect: 'process' }
+    ] }) });
+    const onChange = jest.fn();
+    const { rerender } = render(<AgentPermissionsSection agentPermissions={{ mode: 'auto_approve', always_allow: [] }} onChange={onChange} />);
+    expect(await screen.findByRole('button', { name: /terminal.run/ })).toBeDisabled();
+    expect(screen.getByText(/fresh approval required; always-allow does not apply/)).toBeInTheDocument();
+    rerender(<AgentPermissionsSection agentPermissions={{ mode: 'auto_approve', always_allow: ['terminal.run'] }} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal.run/ }));
+    expect(onChange).toHaveBeenCalledWith({ mode: 'auto_approve', always_allow: [] });
+  });
 });

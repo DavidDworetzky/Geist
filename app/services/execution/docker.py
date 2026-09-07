@@ -21,14 +21,15 @@ import shutil
 import subprocess  # nosec B404 - argv-only calls to the configured runtime
 import time
 import uuid
+from dataclasses import replace
 
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
     ExecutionEnvironment,
     ExecutionResult,
     clamp_timeout,
-    truncate_output,
 )
+from app.services.execution.capture import capture_process
 
 
 DEFAULT_IMAGE = "python:3.11-slim"
@@ -203,17 +204,21 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
 
         started = time.monotonic()
         try:
-            completed = subprocess.run(  # nosec B603 - resolved runtime and argv
+            process = subprocess.Popen(  # nosec B603 - resolved runtime and argv
                 [runtime, *args],
-                capture_output=True,
-                text=True,
-                timeout=timeout + _DOCKER_OVERHEAD_SECONDS,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
             )
-        except subprocess.TimeoutExpired:
+        except OSError as error:
+            return ExecutionResult(127, "", str(error), time.monotonic() - started)
+        result = capture_process(process, timeout + _DOCKER_OVERHEAD_SECONDS, process.kill)
+        if result.timed_out or result.truncated:
             try:
                 subprocess.run(  # nosec B603 - only this invocation's random container
                     [runtime, "rm", "--force", container_name],
-                    capture_output=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     timeout=5,
                     check=False,
                 )
@@ -221,27 +226,11 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
                 logger.warning(
                     "Could not confirm cleanup of execution container %s", container_name
                 )
-            return ExecutionResult(
-                exit_code=124,
-                stdout="",
-                stderr=f"Sandbox did not finish within {timeout} seconds",
-                duration_seconds=time.monotonic() - started,
-                timed_out=True,
-            )
-        except OSError as error:
-            return ExecutionResult(127, "", str(error), time.monotonic() - started)
-
-        stdout, stdout_truncated = truncate_output(completed.stdout)
-        stderr, stderr_truncated = truncate_output(completed.stderr)
         # GNU timeout uses124/137; an explicit command exit with either is ambiguous.
-        timed_out = completed.returncode in (124, 137)
-        return ExecutionResult(
-            exit_code=completed.returncode,
-            stdout=stdout,
-            stderr=stderr,
+        return replace(
+            result,
             duration_seconds=time.monotonic() - started,
-            timed_out=timed_out,
-            truncated=stdout_truncated or stderr_truncated,
+            timed_out=result.timed_out or result.exit_code in (124, 137),
         )
 
 
