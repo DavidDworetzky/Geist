@@ -11,7 +11,12 @@ from mlx_lm.generate import wired_limit
 from mlx_lm.sample_utils import apply_top_k, apply_top_p
 
 from agents.architectures.llama.dflash_model import DFlashConfig, DFlashDraftModel
+from agents.architectures.llama.ngram_draft import NgramDraft
 from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
+from agents.architectures.llama.speculation_policy import SpeculationPolicy
+
+
+_DEFERRED_CONTEXT_LIMIT = 64
 
 
 MAX_RETAINED_PREFIX_TOKENS = 32768
@@ -93,6 +98,8 @@ class DFlashDecoder:
         prefill_step_size: int = 2048,
         profile: bool = False,
         experimental_block_size: int | None = None,
+        copy_window: int = 0,
+        adaptive: bool = False,
     ):
         self.block_size = (
             drafter.config.block_size
@@ -112,6 +119,10 @@ class DFlashDecoder:
         self.max_draft = max_draft
         self.prefill_step_size = prefill_step_size
         self.profile = profile
+        if not 0 <= copy_window <= 128:
+            raise ValueError("Copy window must be in 0..128")
+        self.copy_window = copy_window
+        self.adaptive = adaptive
         self.last_stats = {}
         self._cached_tokens = ()
         self._cached_state = None
@@ -129,6 +140,8 @@ class DFlashDecoder:
             raise ValueError("A nonempty prompt and positive output limit are required")
         if temperature < 0 or not 0 <= top_p <= 1 or top_k < 0:
             raise ValueError("Temperature and top_k must be nonnegative; top_p must be in [0, 1]")
+        if self.copy_window and temperature:
+            raise ValueError("Experimental copy proposals currently require greedy decoding")
         cached_count = len(self._cached_tokens)
         hit = (
             self._cached_state is not None
@@ -147,7 +160,12 @@ class DFlashDecoder:
         stream = mx.new_thread_local_stream(mx.default_device())
         output = []
         acceptance = []
-        phases = {"draft": 0.0, "verify": 0.0, "accept": 0.0, "rollback": 0.0}
+        lookup = NgramDraft(prompt_tokens) if self.copy_window else None
+        copy_rounds, copy_accepted, copy_proposed, copy_cooldown = 0, 0, 0, 0
+        policy = SpeculationPolicy() if self.adaptive else None
+        context_tail = []
+        direct_tokens, fallback_at = 0, None
+        phases = {"draft": 0.0, "verify": 0.0, "accept": 0.0, "rollback": 0.0, "native": 0.0}
         started = time.perf_counter()
         with wired_limit(self.model, [stream]), mx.stream(stream):
             if saved is not None:
@@ -169,24 +187,76 @@ class DFlashDecoder:
             prefill_seconds = time.perf_counter() - started
             decode_started = time.perf_counter()
             output.append(pending)
+            if lookup is not None:
+                lookup.extend([pending])
             try:
                 yield pending
                 while len(output) < max_tokens and pending not in self.tokenizer.eos_token_ids:
+                    if policy is not None and (policy.calibrating or policy.fallback):
+                        direct_started = time.perf_counter()
+                        logits, hidden = self.target.forward(
+                            mx.array([[pending]]), cache, last_only=True
+                        )
+                        if temperature == 0:
+                            pending = int(mx.argmax(logits[0, -1]).item())
+                        else:
+                            p = target_probabilities(logits[0, -1], temperature, top_p, top_k)
+                            pending = int(mx.random.categorical(mx.log(p)).item())
+                        if policy.calibrating or self.profile:
+                            mx.eval(hidden, [item.state for item in cache])
+                        if policy.calibrating:
+                            policy.observe_native(time.perf_counter() - direct_started)
+                        context_tail.append(hidden)
+                        if len(context_tail) >= _DEFERRED_CONTEXT_LIMIT:
+                            previous = mx.concatenate([context, *context_tail[:-1]], axis=1)
+                            self.drafter.append_ctx(self.drafter.project_ctx(previous), draft_cache)
+                            mx.eval([item.state for item in draft_cache])
+                            context, context_tail = context_tail[-1], []
+                        direct_tokens += 1
+                        output.append(pending)
+                        if lookup is not None:
+                            lookup.extend([pending])
+                        if self.profile:
+                            phases["native"] += time.perf_counter() - direct_started
+                        yield pending
+                        continue
+                    if context_tail:
+                        context = mx.concatenate([context, *context_tail], axis=1)
+                        context_tail = []
+                    round_started = time.perf_counter() if policy is not None else 0.0
                     phase_start = time.perf_counter() if self.profile else 0.0
                     cap = min(self.max_draft, max_tokens - len(output))
-                    block = mx.array(
-                        [[pending] + [self.drafter.config.mask_token_id] * (self.block_size - 1)]
+                    copied = (
+                        lookup.propose(min(self.copy_window, max_tokens - len(output)), minimum=16)
+                        if lookup is not None and not copy_cooldown
+                        else []
                     )
-                    uniforms = mx.random.uniform(shape=(cap,)) if temperature else None
-                    proposals, candidates, q_rows = self.drafter.select_block(
-                        block,
-                        context,
-                        draft_cache,
-                        cap=cap,
-                        anchor_id=pending,
-                        uniforms=uniforms,
-                        temperature=temperature,
-                    )
+                    copying = len(copied) >= 16
+                    copy_cooldown = max(0, copy_cooldown - 1)
+                    if copying:
+                        cap = len(copied)
+                        proposals = mx.array(copied)
+                        candidates, q_rows = None, None
+                        self.drafter.append_ctx(self.drafter.project_ctx(context), draft_cache)
+                        copy_rounds += 1
+                        copy_proposed += cap
+                    else:
+                        block = mx.array(
+                            [
+                                [pending]
+                                + [self.drafter.config.mask_token_id] * (self.block_size - 1)
+                            ]
+                        )
+                        uniforms = mx.random.uniform(shape=(cap,)) if temperature else None
+                        proposals, candidates, q_rows = self.drafter.select_block(
+                            block,
+                            context,
+                            draft_cache,
+                            cap=cap,
+                            anchor_id=pending,
+                            uniforms=uniforms,
+                            temperature=temperature,
+                        )
                     if self.profile:
                         mx.eval(proposals)
                         phases["draft"] += time.perf_counter() - phase_start
@@ -205,10 +275,16 @@ class DFlashDecoder:
                         accepted = int(accepted_array.item())
                         replacement = int(target_ids[accepted].item())
                     else:
+                        if candidates is None or q_rows is None:
+                            raise ValueError("Sampled proposals require a draft distribution")
                         accepted, replacement = sampled_accept(
                             logits[0], proposals, candidates, q_rows, temperature, top_p, top_k
                         )
                     committed = proposals[:accepted].tolist() + [replacement]
+                    if copying:
+                        copy_accepted += accepted
+                        if accepted < cap // 2:
+                            copy_cooldown = 4
                     if self.profile:
                         phases["accept"] += time.perf_counter() - phase_start
                         phase_start = time.perf_counter()
@@ -225,12 +301,21 @@ class DFlashDecoder:
                         mx.eval([item.state for item in cache])
                         phases["rollback"] += time.perf_counter() - phase_start
                     acceptance.append(accepted)
+                    if policy is not None:
+                        mx.eval([item.state for item in cache])
+                        policy.observe_round(len(committed), time.perf_counter() - round_started)
+                        if policy.fallback and fallback_at is None:
+                            fallback_at = len(output) + len(committed)
                     for token in committed:
                         output.append(token)
+                        if lookup is not None:
+                            lookup.extend([token])
                         yield token
                         if token in self.tokenizer.eos_token_ids:
                             break
                     pending = output[-1]
+                if context_tail:
+                    context = mx.concatenate([context, *context_tail], axis=1)
                 if len(prompt_tokens) + len(output) - 1 <= MAX_RETAINED_PREFIX_TOKENS:
                     self._cached_tokens = tuple(prompt_tokens + output[:-1])
                     self._cached_state = (cache, draft_cache, context)
@@ -249,6 +334,14 @@ class DFlashDecoder:
                     "verify_rounds": len(acceptance),
                     "accepted_drafts_per_round": sum(acceptance) / max(len(acceptance), 1),
                     "peak_memory_gb": mx.get_peak_memory() / 1e9,
+                    "copy_rounds": copy_rounds,
+                    "copy_accepted": copy_accepted,
+                    "copy_proposed": copy_proposed,
+                    "adaptive": self.adaptive,
+                    "adaptation_policy": policy.version if policy is not None else None,
+                    "direct_tokens": direct_tokens,
+                    "fallback_at_token": fallback_at,
+                    "native_calibration_tps": policy.native_tps if policy is not None else 0.0,
                 }
                 self.target.records = {}
                 if self.profile:

@@ -25,8 +25,16 @@ ordinary MLX-LM path. Requests with an output budget below 32 tokens use ordinar
 decoding. Invalid/incompatible artifacts or a failed kernel qualification fall
 back with a warning in automatic mode.
 
+The application baseline is **adaptive DFlash +
+qualified Metal kernels**. No opt-in flag is needed: the existing automatic
+selection constructs the decoder with adaptation enabled. Copy proposals,
+expanded MLP weights, and compiled recurrence remain disabled. This does not
+change your selected model or install missing auxiliary weights.
+
 - `GEIST_MLX_DFLASH=off`: force ordinary MLX-LM decoding.
 - `GEIST_MLX_DFLASH=on`: require DFlash; surface initialization errors.
+- `GEIST_MLX_DFLASH_ADAPTIVE=off`: keep DFlash and qualified kernels but disable
+  adaptation, for independent A/B diagnosis. Adaptation remains on by default.
 - `GEIST_MLX_DFLASH_DIR=/absolute/path`: select an explicit local snapshot.
 - `GEIST_MLX_PREFILL_STEP_SIZE=2048`: configure prompt-processing chunk size.
 
@@ -56,6 +64,14 @@ Draft and target caches survive an exact conversation-prefix match. Branching,
 cancellation, and mismatching tokenization invalidate reuse. Output-limit and
 EOS truncation retain the correct recurrent state, including when either cuts
 through an accepted draft block.
+
+The adaptive baseline emits four native calibration tokens, then compares
+cumulative speculative throughput with that reference. After at least eight
+rounds, it switches the rest of the request to native steps if speculation is
+more than 15% slower. Calibration and failed probes count toward the output
+budget and elapsed time. Target state and deferred drafter context survive
+the switch so exact-prefix follow-ups can still reuse their caches. The gate
+reduces low-acceptance regressions; it does not eliminate them.
 
 Each decoder retains at most 32,768 prefix tokens between requests, and cleanup
 releases its cached state. This does not reduce the generation/context limit.
@@ -104,7 +120,7 @@ not a claim that every prompt is faster. Use `off` for strict control runs.
 .venv/bin/python scripts/benchmark_mlx_dflash.py \
   --weights-dir /absolute/path/to/qwen3.8-27b-4bit/snapshot \
   --drafter-dir /absolute/path/to/dflash2/snapshot \
-  --small-m --autotune --drafter-bits 8 \
+  --small-m --autotune --adaptive --drafter-bits 8 \
   --max-tokens 256 --trials 3 --output /tmp/mlx-dflash.json
 ```
 
@@ -119,6 +135,13 @@ For stochastic testing add `--temperature 0.7 --top-p 0.9 --top-k 20`; token equ
 expected between independently sampled runs. `scripts/benchmark_mlx_small_m.py`
 isolates projection shapes. Half operands and wider column tiles are benchmark
 experiments only; automatic runtime tuning does not enable them.
+
+The benchmark is an explicit ablation harness: unlike application startup,
+its options select each experimental component independently. Include
+`--small-m --autotune --adaptive` to reproduce this branch's application
+baseline, or `--adaptive-sweep` to compare the two drafting policies. The
+[feature log](feature-log.md) records the broader prose/math/code baseline,
+including the remaining prose regression and output-equivalence limitations.
 
 Native correctness tests are in `tests/agents/test_mlx_dflash.py`; routing,
 fallback, and consuming streaming-detokenizer behavior are checked separately

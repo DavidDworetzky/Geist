@@ -1,6 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -82,26 +82,35 @@ def test_dflash_stream_filters_eos_finalizes_and_reports_stats():
     assert detokenizer.tokens == [3, 4]
 
 
-def test_dflash_loading_is_lazy_and_idempotent(monkeypatch):
+@pytest.mark.parametrize("mode,adaptive", [(None, True), ("on", True), ("off", False)])
+def test_default_dflash_is_adaptive_qualified_and_idempotent(monkeypatch, tmp_path, mode, adaptive):
+    monkeypatch.delenv("GEIST_MLX_DFLASH_ADAPTIVE", raising=False)
+    if mode is not None:
+        monkeypatch.setenv("GEIST_MLX_DFLASH_ADAPTIVE", mode)
     backend = MLXLMBackend.__new__(MLXLMBackend)
     backend.model_id = "Qwen/Qwen3.8-27B"
     backend.model, backend.tokenizer = object(), object()
     backend.prefill_step_size = 2048
     import sys
 
+    monkeypatch.delenv("GEIST_MLX_DFLASH", raising=False)
+    monkeypatch.delenv("GEIST_MLX_DFLASH_DIR", raising=False)
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "model.safetensors").touch()
     drafter = MagicMock()
     decoder = MagicMock()
+    make_decoder = MagicMock(return_value=decoder)
     load = MagicMock(return_value=drafter)
     wrappers = [MagicMock(), MagicMock()]
     install = MagicMock(side_effect=[[wrappers[0]], [wrappers[1]]])
     tune = MagicMock(return_value=[{"split_k": 2}])
     monkeypatch.setattr(
-        "agents.architectures.llama.dflash_artifact.find_dflash_path", lambda _: Path("/drafter")
+        "agents.architectures.llama.dflash_artifact.default_dflash_path", lambda: tmp_path
     )
     monkeypatch.setitem(
         sys.modules,
         "agents.architectures.llama.dflash_backend",
-        SimpleNamespace(load_drafter=load, DFlashDecoder=MagicMock(return_value=decoder)),
+        SimpleNamespace(load_drafter=load, DFlashDecoder=make_decoder),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -110,9 +119,38 @@ def test_dflash_loading_is_lazy_and_idempotent(monkeypatch):
     )
     backend._prepare_dflash()
     backend._prepare_dflash()
-    load.assert_called_once_with("/drafter", backend.model)
+    load.assert_called_once_with(str(tmp_path), backend.model)
+    make_decoder.assert_called_once_with(
+        backend.model,
+        backend.tokenizer,
+        drafter,
+        prefill_step_size=2048,
+        adaptive=adaptive,
+    )
     tune.assert_called_once_with(wrappers)
+    assert install.call_args_list == [call(backend.model), call(drafter)]
+    drafter.bind.assert_called_once_with(backend.model)
+    assert backend._small_m_wrappers == wrappers
     assert backend._dflash is decoder
+
+
+@pytest.mark.parametrize("mode", [None, "off"])
+def test_default_or_disabled_dflash_without_artifact_keeps_native(monkeypatch, tmp_path, mode):
+    backend = MLXLMBackend.__new__(MLXLMBackend)
+    backend.model_id = "Qwen/Qwen3.8-27B"
+    backend._dflash = None
+    monkeypatch.delenv("GEIST_MLX_DFLASH", raising=False)
+    monkeypatch.delenv("GEIST_MLX_DFLASH_DIR", raising=False)
+    if mode is not None:
+        monkeypatch.setenv("GEIST_MLX_DFLASH", mode)
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "model.safetensors").touch()
+    monkeypatch.setattr(
+        "agents.architectures.llama.dflash_artifact.default_dflash_path", lambda: tmp_path
+    )
+    backend._prepare_dflash()
+    assert backend._dflash is None
+    assert backend._dflash_checked
 
 
 @pytest.mark.parametrize("mode", ["auto", "on"])

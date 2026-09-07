@@ -2,6 +2,7 @@
 
 import importlib
 import itertools
+import platform
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
@@ -28,6 +29,9 @@ from agents.architectures.llama.dflash_model import (
     DFlashConfig,
     DFlashDraftModel,
 )
+from agents.architectures.llama.qwen_compiled_verifier import CompiledQwenTarget
+from agents.architectures.llama.qwen_expanded_mlp import install_expanded_mlp
+from agents.architectures.llama.qwen_kernel_lab import install_lab, lab_matmul
 from agents.architectures.llama.qwen_small_m import (
     install_small_m,
     make_dequant_table,
@@ -36,6 +40,7 @@ from agents.architectures.llama.qwen_small_m import (
     tune_small_m,
 )
 from agents.architectures.llama.qwen_speculative import QwenSpeculativeTarget
+from agents.architectures.llama.speculation_policy import SpeculationPolicy
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.models.tool_calling import ModelEvent, ModelRequestConfig
 
@@ -83,6 +88,176 @@ def test_partial_verify_recovers_recurrent_and_attention_state(small_target, kee
     expected = model(next_id, cache=expected_cache)
     actual = model(next_id, cache=actual_cache)
     assert bool(mx.allclose(expected, actual, atol=3e-5, rtol=3e-4).item())
+
+
+@pytest.mark.parametrize("keep", [1, 8, 17, 33])
+def test_compiled_verifier_restores_state_across_different_widths(small_target, keep):
+    model, ordinary = small_target
+    compiled = CompiledQwenTarget(model, (0, 2))
+    expected_cache, actual_cache = model.make_cache(), model.make_cache()
+    prefix = mx.array([[1, 2, 3]])
+    mx.eval(model(prefix, cache=expected_cache), model(prefix, cache=actual_cache))
+    block = mx.arange(4, 44).reshape(1, -1)
+    expected, _ = ordinary.forward(block, expected_cache, capture=True)
+    actual, _ = compiled.forward(block, actual_cache, capture=True)
+    assert bool(mx.allclose(expected, actual, atol=3e-5, rtol=3e-4).item())
+    ordinary.rollback(expected_cache, keep)
+    compiled.rollback(actual_cache, keep)
+    for expected, actual in zip(expected_cache, actual_cache, strict=True):
+        for a, b in zip(expected.state, actual.state, strict=True):
+            assert bool(mx.allclose(a, b, atol=3e-5, rtol=3e-4).item())
+    next_block = mx.array([[44, 45, 46]])
+    expected, _ = ordinary.forward(next_block, expected_cache, capture=True)
+    actual, _ = compiled.forward(next_block, actual_cache, capture=True)
+    assert bool(mx.allclose(expected, actual, atol=3e-5, rtol=3e-4).item())
+
+
+def _macos_before_15() -> bool:
+    major = platform.mac_ver()[0].split(".")[0]
+    return major.isdigit() and int(major) < 15
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["pad", "fp16_native", "relaxed", "fast", "half_acc", "chunked_half_acc", "affine_fold"],
+)
+def test_laboratory_projections_have_finite_bounded_errors(variant):
+    if variant == "relaxed" and _macos_before_15():
+        pytest.skip("Metal math mode `relaxed` requires macOS 15")
+    mx.random.seed(42)
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=64, bits=4)
+    x = mx.random.normal((8, 512)).astype(mx.bfloat16)
+    expected, actual = layer(x), lab_matmul(layer, x, variant)
+    assert bool(mx.all(mx.isfinite(actual)).item())
+    error = mx.max(mx.abs(expected.astype(mx.float32) - actual.astype(mx.float32)))
+    assert error.item() <= 0.02 * mx.max(mx.abs(expected.astype(mx.float32))).item()
+
+
+def test_lab_install_is_idempotent_and_preserves_single_row():
+    model = nn.Sequential(nn.Linear(512, 4096, bias=False))
+    model.set_dtype(mx.bfloat16)
+    nn.quantize(model, group_size=64, bits=4)
+    x = mx.ones((1, 512), dtype=mx.bfloat16)
+    expected = model(x)
+    assert len(install_lab(model, "pad")) == 1
+    assert install_lab(model, "pad") == []
+    assert bool(mx.array_equal(expected, model(x)).item())
+
+
+@pytest.mark.parametrize("variant", ["pad", "fp16_native", "affine_fold"])
+def test_lab_direct_call_preserves_unsupported_quantization(variant, monkeypatch):
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=32, bits=4)
+    x = mx.ones((8, 512), dtype=mx.bfloat16)
+    monkeypatch.setattr(
+        "agents.architectures.llama.qwen_kernel_lab.experimental_kernel",
+        lambda *args: pytest.fail("Unsupported grouping must not construct a kernel"),
+    )
+    assert bool(mx.array_equal(layer(x), lab_matmul(layer, x, variant)).item())
+
+
+@pytest.mark.parametrize("source", ["absent", "match match"])
+def test_lab_source_rewrites_reject_missing_or_ambiguous_targets(source):
+    from agents.architectures.llama.qwen_kernel_lab import _replace_once
+
+    with pytest.raises(ValueError, match="source drift"):
+        _replace_once(source, "match", "replacement")
+
+
+@pytest.mark.parametrize("split_k", [0, 3, 32])
+def test_lab_rejects_invalid_split_before_constructing_kernel(split_k, monkeypatch):
+    layer = nn.Linear(512, 4096, bias=False)
+    layer.set_dtype(mx.bfloat16)
+    layer = layer.to_quantized(group_size=64, bits=4)
+    monkeypatch.setattr(
+        "agents.architectures.llama.qwen_kernel_lab.experimental_kernel",
+        lambda *args: pytest.fail("Invalid split must not construct a kernel"),
+    )
+    with pytest.raises(ValueError, match="split-K"):
+        lab_matmul(layer, mx.ones((8, 512), dtype=mx.bfloat16), "fast", split_k=split_k)
+
+
+def test_benchmark_kernel_conflict_fails_before_loading_weights(monkeypatch, capsys):
+    from scripts import benchmark_mlx_dflash as benchmark
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "benchmark",
+            "--weights-dir",
+            "unused",
+            "--drafter-dir",
+            "unused",
+            "--small-m",
+            "--lab-variant",
+            "pad",
+        ],
+    )
+    monkeypatch.setattr(
+        benchmark, "load", lambda *args: pytest.fail("Must validate before loading")
+    )
+    with pytest.raises(SystemExit) as error:
+        benchmark.main()
+    assert error.value.code == 2
+    assert "Select either --small-m or --lab-variant" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("rows", [1, 8, 64, 257])
+def test_expanded_weights_are_bounded_and_preserve_fallback(rows, monkeypatch):
+    model = nn.Module()
+    model.mlp = nn.Module()
+    model.mlp.gate_proj = nn.Linear(512, 4096, bias=True)
+    model.set_dtype(mx.bfloat16)
+    nn.quantize(model, group_size=64, bits=4)
+    x = mx.random.normal((rows, 512)).astype(mx.bfloat16)
+    original = model.mlp.gate_proj
+    expected = original(x)
+    with pytest.raises(ValueError, match="needs"):
+        install_expanded_mlp(model, budget_gb=0.0001)
+    assert model.mlp.gate_proj is original
+    wrappers = install_expanded_mlp(model, budget_gb=0.01)
+    assert len(wrappers) == 1
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 10**15)
+    assert install_expanded_mlp(model, budget_gb=0.01) == []
+    actual = model.mlp.gate_proj(x)
+    assert bool(mx.allclose(expected, actual, atol=0.01, rtol=0.01).item())
+    if rows != 64:
+        assert bool(mx.array_equal(expected, actual).item())
+    wrappers[0].enabled = False
+    assert bool(mx.array_equal(expected, model.mlp.gate_proj(x)).item())
+
+
+@pytest.mark.parametrize("count", [19, 33, 65, 100])
+@pytest.mark.parametrize("reject_copy", [False, True])
+def test_long_copy_proposals_are_verified_and_cache_is_recoverable(
+    small_target, count, reject_copy
+):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+        project_ctx=lambda h: h,
+        append_ctx=lambda *_: None,
+        select_block=lambda *_, cap, **kwargs: (mx.zeros((cap,), dtype=mx.int32), None, None),
+    )
+    decoder = DFlashDecoder(model, SimpleNamespace(eos_token_ids=set()), drafter, copy_window=64)
+    prompt = [0] * 16 + ([1] * 64 if reject_copy else [0] * 64) + [0] * 7
+    assert list(decoder.generate(prompt, max_tokens=count)) == [0] * count
+    assert decoder.last_stats["copy_rounds"] > 0
+    if reject_copy:
+        assert decoder.last_stats["copy_accepted"] < decoder.last_stats["copy_proposed"]
+    expected_cache = model.make_cache()
+    mx.eval(model(mx.array([prompt + [0] * (count - 1)]), cache=expected_cache))
+    for expected, actual in zip(expected_cache, decoder._cached_state[0], strict=True):
+        for a, b in zip(expected.state, actual.state, strict=True):
+            assert bool(mx.allclose(a, b, atol=3e-5, rtol=3e-4).item())
+    assert list(decoder.generate(prompt + [0] * count + [9], max_tokens=3)) == [0, 0, 0]
+    assert decoder.last_stats["cached_prompt_tokens"] == len(prompt) + count - 1
 
 
 def test_hidden_capture_preserves_target_forward(small_target):
@@ -316,6 +491,184 @@ def test_generator_close_invalidates_cache(small_target):
     assert decoder.target.records == {}
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_copy_block_eos_or_cancellation_preserves_emitted_prefix(small_target, cancel):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+        project_ctx=lambda h: h,
+        append_ctx=lambda *_: None,
+    )
+    decoder = DFlashDecoder(model, SimpleNamespace(eos_token_ids={1}), drafter, copy_window=64)
+    forward = decoder.target.forward
+
+    def with_eos(ids, cache, **kwargs):
+        logits, hidden = forward(ids, cache, **kwargs)
+        if kwargs.get("capture"):
+            logits = logits.at[0, 8, 1].add(1)
+        return logits, hidden
+
+    decoder.target.forward = with_eos
+    prompt = [0] * 80
+    stream = decoder.generate(prompt, max_tokens=100)
+    if cancel:
+        assert [next(stream), next(stream), next(stream)] == [0, 0, 0]
+        stream.close()
+        assert decoder._cached_state is None
+        assert decoder._cached_tokens == ()
+    else:
+        assert list(stream) == [0] * 9 + [1]
+        assert decoder._cached_tokens == tuple(prompt + [0] * 9)
+        expected_cache = model.make_cache()
+        mx.eval(model(mx.array([list(decoder._cached_tokens)]), cache=expected_cache))
+        for expected, actual in zip(expected_cache, decoder._cached_state[0], strict=True):
+            for a, b in zip(expected.state, actual.state, strict=True):
+                assert bool(mx.allclose(a, b, atol=3e-5, rtol=3e-4).item())
+    assert decoder.last_stats["copy_rounds"] == 1
+    assert decoder.target.records == {}
+
+
+def test_copy_proposals_reject_sampling_before_generation(small_target):
+    model, _ = small_target
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8)
+    )
+    decoder = DFlashDecoder(model, SimpleNamespace(eos_token_ids=set()), drafter, copy_window=64)
+    with pytest.raises(ValueError, match="greedy"):
+        list(decoder.generate([1, 2, 3], max_tokens=10, temperature=0.7))
+
+
+@pytest.mark.parametrize("count", [1, 3, 5, 16, 41])
+@pytest.mark.parametrize("temperature", [0.0, 0.7])
+def test_adaptive_transition_preserves_target_and_drafter_cache(
+    small_target, count, temperature, monkeypatch
+):
+    model, _ = small_target
+    config = DFlashConfig(
+        hidden_size=128,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=64,
+        intermediate_size=256,
+        vocab_size=128,
+        rms_norm_eps=1e-6,
+        rope_theta=10000,
+        max_position_embeddings=4096,
+        block_size=8,
+        target_layer_ids=(0, 2),
+        num_target_layers=4,
+        mask_token_id=127,
+        selector_rank=8,
+        selector_top_k=8,
+        conv_kernel_size=2,
+        conv_group_size=16,
+        layer_types=("sliding_attention", "sliding_attention"),
+        sliding_window=16,
+    )
+    drafter = DFlashDraftModel(config).bind(model)
+    drafter.eval()
+
+    def force_fallback(policy, emitted, seconds):
+        policy.fallback = True
+
+    monkeypatch.setattr(SpeculationPolicy, "observe_round", force_fallback)
+    monkeypatch.setattr("agents.architectures.llama.dflash_backend._DEFERRED_CONTEXT_LIMIT", 8)
+    decoder = DFlashDecoder(
+        model, SimpleNamespace(eos_token_ids=set()), drafter, prefill_step_size=7, adaptive=True
+    )
+    prompt = list(range(1, 38))
+    output = list(decoder.generate(prompt, max_tokens=count, temperature=temperature))
+    expected_cache = model.make_cache()
+    mx.eval(model(mx.array([prompt + output[:-1]]), cache=expected_cache))
+    actual_cache, draft_cache, previous = decoder._cached_state
+    for expected, actual in zip(expected_cache, actual_cache, strict=True):
+        for a, b in zip(expected.state, actual.state, strict=True):
+            assert bool(mx.allclose(a, b, atol=3e-5, rtol=3e-4).item())
+    assert all(
+        item.offset + previous.shape[1] == len(decoder._cached_tokens) for item in draft_cache
+    )
+    if temperature == 0:
+        reference_cache = model.make_cache()
+        logits = model(mx.array([prompt]), cache=reference_cache)
+        expected = [int(mx.argmax(logits[0, -1]).item())]
+        for _ in range(count - 1):
+            logits = model(mx.array([[expected[-1]]]), cache=reference_cache)
+            expected.append(int(mx.argmax(logits[0, -1]).item()))
+        assert output == expected
+    if count > 12:
+        assert decoder.last_stats["fallback_at_token"] is not None
+        assert decoder.last_stats["direct_tokens"] > 4
+    followup = prompt + output + [9, 8]
+    assert len(list(decoder.generate(followup, max_tokens=3))) == 3
+    assert decoder.last_stats["cached_prompt_tokens"] == len(prompt) + count - 1
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_adaptive_native_step_respects_eos_and_close(small_target, cancel):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+    )
+    tokenizer = SimpleNamespace(eos_token_ids=set())
+    decoder = DFlashDecoder(model, tokenizer, drafter, adaptive=True, profile=True)
+    stream = decoder.generate([1, 2], max_tokens=20)
+    assert next(stream) == 0
+    assert next(stream) == 0
+    if cancel:
+        stream.close()
+        assert decoder._cached_state is None
+    else:
+        tokenizer.eos_token_ids.add(0)
+        assert list(stream) == []
+        assert decoder._cached_tokens == (1, 2, 0)
+    assert decoder.target.records == {}
+    assert decoder.last_stats["profile_seconds"]["native"] > 0
+
+
+@pytest.mark.parametrize("profile", [False, True])
+def test_profiled_fallback_fences_hidden_state_without_recalibration(
+    small_target, monkeypatch, profile
+):
+    model, _ = small_target
+    model.lm_head.weight = mx.zeros_like(model.lm_head.weight)
+    initialize = SpeculationPolicy.__init__
+
+    def fallback_only(policy):
+        initialize(policy)
+        policy.native_seconds = [1.0] * 4
+        policy.fallback = True
+
+    monkeypatch.setattr(SpeculationPolicy, "__init__", fallback_only)
+    monkeypatch.setattr(
+        SpeculationPolicy,
+        "observe_native",
+        lambda *args: pytest.fail("fallback must not recalibrate"),
+    )
+    drafter = SimpleNamespace(
+        config=SimpleNamespace(target_layer_ids=(0, 2), mask_token_id=127, block_size=8),
+        make_cache=lambda: [],
+    )
+    decoder = DFlashDecoder(
+        model, SimpleNamespace(eos_token_ids=set()), drafter, adaptive=True, profile=profile
+    )
+    evaluate = mx.eval
+    fences = []
+
+    def record_eval(*args, **kwargs):
+        if len(args) == 2 and getattr(args[0], "shape", None) == (1, 1, 256):
+            fences.append(True)
+        return evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(mx, "eval", record_eval)
+    assert list(decoder.generate([1, 2], max_tokens=4)) == [0] * 4
+    assert len(fences) == (3 if profile else 0)
+
+
 def test_real_dflash_stream_survives_consumer_worker_changes(small_target):
     model, _ = small_target
     drafter = SimpleNamespace(
@@ -378,8 +731,9 @@ def test_nucleus_temperature_order_matches_mlx_lm(top_k, monkeypatch):
 
 @pytest.mark.parametrize("profile", [False, True])
 @pytest.mark.parametrize("strategy", ["local", "prefix", "sequence"])
+@pytest.mark.parametrize("copying", [False, True])
 def test_chunked_prefill_and_rotating_draft_cache_match_greedy_target(
-    small_target, profile, strategy
+    small_target, profile, strategy, copying, monkeypatch
 ):
     model, _ = small_target
     config = DFlashConfig(
@@ -408,8 +762,18 @@ def test_chunked_prefill_and_rotating_draft_cache_match_greedy_target(
     drafter.greedy_strategy = strategy
     drafter.eval()
     prompt = list(range(1, 38))
+    if copying:
+        monkeypatch.setattr(
+            "agents.architectures.llama.ngram_draft.NgramDraft.propose",
+            lambda self, limit, minimum: [0] * limit,
+        )
     decoder = DFlashDecoder(
-        model, SimpleNamespace(eos_token_ids=set()), drafter, prefill_step_size=7, profile=profile
+        model,
+        SimpleNamespace(eos_token_ids=set()),
+        drafter,
+        prefill_step_size=7,
+        profile=profile,
+        copy_window=64 if copying else 0,
     )
     actual = list(decoder.generate(prompt, max_tokens=19))
     cache = model.make_cache()
@@ -420,6 +784,7 @@ def test_chunked_prefill_and_rotating_draft_cache_match_greedy_target(
         expected.append(int(mx.argmax(logits[0, -1]).item()))
     assert actual == expected
     assert decoder.last_stats["verify_rounds"] > 1
+    assert (decoder.last_stats["copy_rounds"] > 0) is copying
     assert ("profile_seconds" in decoder.last_stats) is profile
 
 

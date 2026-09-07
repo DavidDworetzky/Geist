@@ -1,0 +1,112 @@
+{
+  "device": {
+    "device_name": "Apple M2 Max",
+    "max_recommended_working_set_size": 83494174720,
+    "memory_size": 103079215104,
+    "architecture": "applegpu_g14s",
+    "max_buffer_length": 62620631040,
+    "resource_limit": 499000
+  },
+  "compiled": true,
+  "results": [
+    {
+      "rows": 8,
+      "verify_ms": 152.63341693207622,
+      "graph_build_ms": 3.0078748241066933,
+      "perfect_target_only_tps": 52.413161945788715
+    },
+    {
+      "rows": 32,
+      "verify_ms": 273.7285830080509,
+      "graph_build_ms": 2.2321250289678574,
+      "perfect_target_only_tps": 116.90412323165687
+    },
+    {
+      "rows": 64,
+      "verify_ms": 516.8630830012262,
+      "graph_build_ms": 2.09416588768363,
+      "perfect_target_only_tps": 123.8238947699195
+    },
+    {
+      "rows": 128,
+      "verify_ms": 976.003292016685,
+      "graph_build_ms": 1.8863752484321594,
+      "perfect_target_only_tps": 131.14709862865075
+    }
+  ],
+  "fenced_8row_seconds": {
+    "embedding": 0.0002771671861410141,
+    "normalization": 0.023527919314801693,
+    "gdn_with_projections": 0.05272911814972758,
+    "residual": 0.023448589723557234,
+    "mlp": 0.10935742035508156,
+    "attention_with_projections": 0.018529622815549374,
+    "lm_head": 0.006826166994869709
+  },
+  "fenced_path": "uncompiled; per-phase synchronization overhead included",
+  "tuning": [
+    {
+      "k": 5120,
+      "n": 248320,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8264473305714117,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 2.013695615273645,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 4,
+      "speedup": 1.854048132599028,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 4,
+      "speedup": 1.8618461232572892,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8942898688170098,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8136783299977963,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.947578523378368,
+      "dependent_chain": true,
+      "chain_length": 12
+    }
+  ]
+}

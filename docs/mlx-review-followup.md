@@ -142,3 +142,37 @@ a same-signature follower obtains the cached agent and publishes ready itself.
 The constructor's earlier ready notification predates this work and supports
 direct LocalAgent users; consolidating all such lifecycle notifications is a
 separate contract change, not necessary to close the reviewed owner/follower bug.
+
+## PR #357: measured policy and experimental safeguards
+
+Accepted: independently disable adaptation with `GEIST_MLX_DFLASH_ADAPTIVE=off`
+without disabling DFlash/kernels; materialize native hidden/cache state before
+calibration timing; bound deferred context with a dedicated 64-item limit; avoid
+unused copy-branch allocations and require explicit sampled draft distributions.
+Experimental Metal rewrites now require exactly one source match, unsupported
+quantization falls back before kernel construction, split-K is validated, empty
+expanded-weight reinstall is a no-op even under memory pressure, and conflicting
+benchmark flags fail before loading weights. Added CLI help for new experiment
+controls and removed the temporary branch name from runtime documentation.
+
+Not adopted: discarding first-round costs, periodic re-probes, or narrowing the
+15% deadband would retune a measured policy without new cross-workload evidence.
+These remain research options, not established correctness fixes. The cumulative
+policy **can** switch from initially fast speculation to later fallback: the
+existing 100-slow-round test proves this. Consequently continued round timing is
+necessary; removing it after eight rounds would introduce a bug. Single-row
+fallback still traverses installed wrappers and is not promised to match the
+`GEIST_MLX_DFLASH=off` route's throughput. Archived raw benchmark arrays and exact
+historical machine commands are intentionally retained as research provenance.
+The opt-in n-gram index is O(prompt + output tokens), not an unbounded cross-run
+cache. Review tooling permissions were not widened to bypass denied commands;
+Docker/native evidence and the newly enabled CI provide verification instead.
+
+Third-review follow-up: explicit profiling now fences native hidden/cache state
+even after calibration; default unprofiled fallback still avoids that extra
+fence. A real-Metal regression asserts zero such fences in ordinary fallback,
+one per token in profiling, and no re-calibration. Added help for the three
+documented hands-on flags (`--small-m`, `--autotune`, `--split-k`). Native
+Metal/policy follow-up: **165 passed**. Unsupported macOS 14 `relaxed` experiments
+continue to report Metal's capability error rather than silently changing the
+requested math variant; this is an explicit research mode, not the default path.

@@ -113,7 +113,7 @@ class MLXLMBackend:
         self.weights_dir = weights_dir
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
         self.model, self.tokenizer = load(weights_dir or model_id)
-        self.last_stats: dict[str, int | float | str] = {}
+        self.last_stats: dict[str, int | float | str | None] = {}
         self.prefill_step_size = _prefill_step_size()
         # Starlette may resume/close a synchronous stream on a different worker.
         self._generation_lock = threading.Lock()
@@ -152,6 +152,7 @@ class MLXLMBackend:
                     self.tokenizer,
                     drafter,
                     prefill_step_size=self.prefill_step_size,
+                    adaptive=os.environ.get("GEIST_MLX_DFLASH_ADAPTIVE", "on").casefold() != "off",
                 )
                 self._small_m_wrappers = install_small_m(self.model)
                 # Rebind after wrapping so the drafter shares the wrapped head.
@@ -159,7 +160,7 @@ class MLXLMBackend:
                 self._small_m_wrappers += install_small_m(drafter)
                 self.small_m_tuning = tune_small_m(self._small_m_wrappers)
                 self._dflash = decoder
-                logger.info("Enabled in-process MLX DFlash 2 for Qwen 3.8")
+                logger.info("Enabled MLX DFlash 2 with qualified Metal kernels for Qwen 3.8")
             except Exception as error:
                 for wrapper in self._small_m_wrappers:
                     wrapper.enabled = False
