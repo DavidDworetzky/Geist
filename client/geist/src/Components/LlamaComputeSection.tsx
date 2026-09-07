@@ -94,6 +94,12 @@ export default function LlamaComputeSection({
   const mounted = useRef(true);
   const activeRequest = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    if (!refreshFeedback?.startsWith('Showing the latest')) return;
+    const timer = window.setTimeout(() => setRefreshFeedback(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [refreshFeedback]);
+
   const loadInventory = useCallback(async (refresh: boolean) => {
     activeRequest.current?.abort();
     const controller = new AbortController();

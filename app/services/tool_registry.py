@@ -7,6 +7,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import replace
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -176,7 +177,9 @@ class ToolRegistry:
                         definition.name,
                     )
                     continue
-                merged[definition.name] = definition
+                # A mutable source may redefine a name after it was granted.
+                # Name-only grants are reserved for static built-in definitions.
+                merged[definition.name] = replace(definition, allows_standing_grant=False)
         return merged
 
     def get(self, name: str, context: ToolContext | None = None) -> ToolDefinition | None:

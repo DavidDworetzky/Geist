@@ -28,3 +28,9 @@ main stay removed. 475 Docker tests and218 frontend tests/build pass; project
 mypy passes9 files. Normal merge hooks found only baseline cached-mypy Any in
 unchanged whisper_adapter and Bandit's unchanged main all-interface bind. Those
 two hooks alone are skipped for this merge; CI configuration is unchanged.
+
+Follow-up parent5959d3c brings bounded compute recovery and dynamic-source grant
+eligibility. Keep fresh terminal approval as the strongest predicate, ahead of
+auto-approve and all grants; expose both flags and disable creation of either
+kind of inert grant in the UI.479 Docker tests and222 frontend tests/build pass;
+three-file project mypy passes. Earlier runtime and native evidence remains.

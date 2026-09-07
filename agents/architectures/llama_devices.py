@@ -395,7 +395,11 @@ class LlamaDeviceService:
         self._cached_inventory_expires_at = 0.0
         self._next_refresh_allowed_at = 0.0
         self._probe_in_flight = False
-        self._probe_error: BaseException | None = None
+        self._probe_error: str | None = None
+        self._probe_generation = 0
+        self._probe_started_at = 0.0
+        self._active_probes: set[int] = set()
+        self._logged_timeout_generation = -1
 
     def inventory(
         self,
@@ -403,53 +407,105 @@ class LlamaDeviceService:
         refresh: bool = False,
         allow_in_progress: bool = False,
     ) -> LlamaDeviceInventory:
-        deadline = time.monotonic() + max(0.0, self.timeout_seconds) + 0.1
+        probe_budget = max(0.0, self.timeout_seconds) * 1.5 + 1.0
+        caller_deadline = time.monotonic() + probe_budget
         with self._probe_completed:
             now = self.clock()
+            if (
+                not refresh
+                and self._cached_inventory is not None
+                and now < self._cached_inventory_expires_at
+            ):
+                return self._cached_inventory
+            timed_out = (
+                self._probe_in_flight and time.monotonic() >= self._probe_started_at + probe_budget
+            )
+            if timed_out and self._logged_timeout_generation != self._probe_generation:
+                logger.error(
+                    "llama.cpp device discovery exceeded its deadline; attempting bounded recovery"
+                )
+                self._logged_timeout_generation = self._probe_generation
             joined_probe = self._probe_in_flight
-            if not joined_probe:
-                if self._cached_inventory is not None:
-                    if refresh and now < self._next_refresh_allowed_at:
-                        return self._cached_inventory
-                    if not refresh and now < self._cached_inventory_expires_at:
-                        return self._cached_inventory
+            if not joined_probe or (timed_out and len(self._active_probes) < 2):
+                if (
+                    self._cached_inventory is not None
+                    and refresh
+                    and now < self._next_refresh_allowed_at
+                ):
+                    return self._cached_inventory
+                if self._probe_error is not None and now < self._next_refresh_allowed_at:
+                    raise RuntimeError(self._probe_error)
                 self._probe_in_flight = True
                 self._probe_error = None
-                # One worker per service, even if the OS cannot reap a wedged probe.
-                # Neither the first caller nor subsequent callers wait indefinitely.
+                self._probe_generation += 1
+                generation = self._probe_generation
+                self._probe_started_at = time.monotonic()
+                self._active_probes.add(generation)
+                joined_probe = False
+                # At most two workers, including an abandoned OS probe. Late
+                # results cannot replace the current generation's inventory.
                 try:
-                    threading.Thread(target=self._probe_inventory, daemon=True).start()
+                    threading.Thread(
+                        target=self._probe_inventory, args=(generation,), daemon=True
+                    ).start()
                 except RuntimeError:
+                    self._active_probes.discard(generation)
                     self._probe_in_flight = False
                     self._probe_completed.notify_all()
                     raise
             while self._probe_in_flight:
-                remaining = deadline - time.monotonic()
+                remaining = (
+                    min(caller_deadline, self._probe_started_at + probe_budget) - time.monotonic()
+                )
                 if (joined_probe and allow_in_progress) or remaining <= 0:
                     break
                 self._probe_completed.wait(timeout=remaining)
             if not self._probe_in_flight:
                 if self._probe_error is not None:
-                    raise self._probe_error
+                    raise RuntimeError(self._probe_error)
                 if self._cached_inventory is not None:
                     return self._cached_inventory
             cached_inventory = self._cached_inventory
+            timed_out = time.monotonic() >= self._probe_started_at + probe_budget
+            if timed_out and self._logged_timeout_generation != self._probe_generation:
+                logger.error(
+                    "llama.cpp device discovery exceeded its deadline; recovery is bounded to two workers"
+                )
+                self._logged_timeout_generation = self._probe_generation
         # Placeholder construction may inspect runtime paths; never do IO under
         # the shared condition lock used by all inventory readers.
-        return self._discovery_in_progress_inventory(cached_inventory)
+        result = self._discovery_in_progress_inventory(cached_inventory)
+        if timed_out:
+            message = "GPU discovery timed out. Retry refresh; restart Geist if discovery remains unavailable."
+            return replace(
+                result,
+                error=message,
+                selection_detection_error=message,
+                discovery_in_progress=False,
+            )
+        return result
 
-    def _probe_inventory(self) -> None:
+    def _probe_inventory(self, generation: int) -> None:
         try:
             inventory = self._discover_inventory()
             completed_at = self.clock()
         except BaseException as error:
             with self._probe_completed:
-                self._probe_error = error
-                self._probe_in_flight = False
+                self._active_probes.discard(generation)
+                if generation == self._probe_generation:
+                    self._probe_error = f"GPU discovery failed: {error}"
+                    self._next_refresh_allowed_at = self.clock() + max(
+                        self.minimum_refresh_interval_seconds, self.negative_cache_ttl_seconds
+                    )
+                    self._probe_in_flight = False
                 self._probe_completed.notify_all()
             return
 
         with self._probe_completed:
+            self._active_probes.discard(generation)
+            if generation != self._probe_generation:
+                self._probe_completed.notify_all()
+                return
             try:
                 ttl_seconds = (
                     self.negative_cache_ttl_seconds
@@ -471,7 +527,6 @@ class LlamaDeviceService:
             return replace(
                 cached_inventory,
                 reason="GPU discovery is in progress; showing the previous device inventory.",
-                cache_policy="negative",
                 selection_detection_error=DISCOVERY_IN_PROGRESS_ERROR,
                 discovery_in_progress=True,
             )
@@ -490,7 +545,6 @@ class LlamaDeviceService:
             forced_backend=forced_backend,
             reason="GPU discovery is already in progress.",
             error=DISCOVERY_IN_PROGRESS_ERROR,
-            cache_policy="negative",
             selection_detection_error=DISCOVERY_IN_PROGRESS_ERROR,
             discovery_in_progress=True,
         )

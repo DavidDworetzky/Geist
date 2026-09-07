@@ -63,7 +63,7 @@ def upgrade_database() -> None:
         command.stamp(alembic_config, "head")
     elif not current_heads:
         _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
-        _classify_legacy_schema(Base.metadata, Engine)
+        _reject_unsupported_legacy_schema(Base.metadata, Engine)
         _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
         revisions = [LEGACY_SETTINGS_REVISION]
@@ -123,6 +123,11 @@ def _classify_legacy_schema(metadata, engine) -> str:
         return schema_kind
     _raise_legacy_schema_error(problems)
     raise AssertionError("unreachable")
+
+
+def _reject_unsupported_legacy_schema(metadata, engine) -> None:
+    """Validate the entire legacy schema before any additive repair is allowed."""
+    _classify_legacy_schema(metadata, engine)
 
 
 def _complete_legacy_settings_columns(engine) -> None:

@@ -892,7 +892,13 @@ def test_auto_approve_permissions_execute_approval_gated_tool():
     assert all(state.requires_approval is False for state in tool_states)
 
 
-def test_require_approval_permissions_gate_read_only_tool():
+@pytest.mark.parametrize("loader_fails", [False, True])
+def test_require_approval_permissions_gate_read_only_tool(loader_fails):
+    def load_permissions(_workspace_id):
+        if loader_fails:
+            raise RuntimeError("injected loader failed")
+        return AgentPermissions(mode="require_approval")
+
     registry = ToolRegistry()
     registry.register(
         ToolDefinition(
@@ -917,7 +923,7 @@ def test_require_approval_permissions_gate_read_only_tool():
         registry,
         history_loader=lambda chat_id: [],
         history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
-        permissions_loader=lambda workspace_id: AgentPermissions(mode="require_approval"),
+        permissions_loader=load_permissions,
         approval_timeout_seconds=0,
     )
 

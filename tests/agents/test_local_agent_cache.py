@@ -339,6 +339,52 @@ def test_cached_auto_agent_retries_backend_persistence_after_transient_failure()
                 geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
 
 
+@pytest.mark.parametrize("replace_during_persistence", [False, True])
+def test_cached_persistence_releases_lock_and_cannot_resurrect_agent(
+    monkeypatch, replace_during_persistence
+) -> None:
+    config = _factory_config("cached", backend="auto")
+    agent = RecordingLocalAgent("cached", [])
+    replacement = RecordingLocalAgent("replacement", [])
+    cache = dict(geist_main.agent_cache)
+    signatures = dict(geist_main._agent_cache_signatures)
+    for local_type in geist_main._LOCAL_AGENT_TYPES:
+        cache[local_type] = agent
+        signatures[local_type] = geist_main._local_agent_configuration_signature(config)
+    monkeypatch.setattr(geist_main, "agent_cache", cache)
+    monkeypatch.setattr(geist_main, "_agent_cache_signatures", signatures)
+    monkeypatch.setattr(geist_main, "_get_local_agent_factory_config", lambda: config)
+    acquired = []
+
+    def persist(*_args):
+        def inspect_lock():
+            held = geist_main._agent_cache_lock.acquire(timeout=0.5)
+            acquired.append(held)
+            if held:
+                try:
+                    if replace_during_persistence:
+                        geist_main._set_local_agent_cache(replacement, "replacement")
+                finally:
+                    geist_main._agent_cache_lock.release()
+
+        thread = threading.Thread(target=inspect_lock)
+        thread.start()
+        thread.join(timeout=1)
+        return "persisted"
+
+    monkeypatch.setattr(geist_main, "_persist_first_use_llama_backend", persist)
+    assert geist_main.get_active_agent(AgentType.LLAMA) is agent
+    assert acquired == [True]
+    expected = replacement if replace_during_persistence else agent
+    assert all(cache[local_type] is expected for local_type in geist_main._LOCAL_AGENT_TYPES)
+
+
+def test_explicit_binary_does_not_claim_persisted_gpu_acceleration(monkeypatch):
+    monkeypatch.setenv("GEIST_LLAMA_SERVER_PATH", "/operator/server")
+    monkeypatch.delenv("GEIST_LLAMA_ACCELERATION", raising=False)
+    assert geist_main._llama_acceleration("llama_server", "gpu") is None
+
+
 def test_concurrent_manual_choice_is_not_cached_as_the_auto_runtime() -> None:
     saved_cache = {
         agent_type: geist_main.agent_cache[agent_type]
