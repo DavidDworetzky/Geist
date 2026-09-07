@@ -10,11 +10,12 @@ test('renders the requested sidebar navigation in order', () => {
   const navigationLinks = within(navigation).getAllByRole('link');
 
   expect(within(sidebar).getByText(/Geist/i)).toBeInTheDocument();
-  expect(navigationLinks).toHaveLength(5);
+  expect(navigationLinks).toHaveLength(6);
   expect(navigationLinks[0]).toHaveAccessibleName(/Chat/);
   expect(navigationLinks[1]).toHaveAccessibleName(/Models/);
-  expect(navigationLinks[2]).toHaveAccessibleName(/Settings/);
-  expect(navigationLinks[3]).toHaveAccessibleName('Tools Tools and MCPs');
-  expect(navigationLinks[4]).toHaveAccessibleName(/Files/);
+  expect(navigationLinks[2]).toHaveAccessibleName('Schedules Recurring prompts');
+  expect(navigationLinks[3]).toHaveAccessibleName(/Settings/);
+  expect(navigationLinks[4]).toHaveAccessibleName('Tools Tools and MCPs');
+  expect(navigationLinks[5]).toHaveAccessibleName(/Files/);
   expect(within(navigation).queryByText(/Workflows/i)).not.toBeInTheDocument();
 });

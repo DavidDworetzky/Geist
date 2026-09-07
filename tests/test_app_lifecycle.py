@@ -23,9 +23,13 @@ def _use_test_workspace(monkeypatch):
 
 def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
     _use_test_workspace(monkeypatch)
+    monkeypatch.delenv("GEIST_OPERATOR_TOKEN", raising=False)
+    monkeypatch.delenv("GEIST_OPERATOR_TOKEN_FILE", raising=False)
     events = []
     monkeypatch.setattr(main, "start_worker", lambda: events.append("start"))
+    monkeypatch.setattr(main, "start_scheduler", lambda: events.append("schedule-start"))
     monkeypatch.setattr(main, "stop_worker", lambda: events.append("stop"))
+    monkeypatch.setattr(main, "stop_scheduler", lambda: events.append("schedule-stop"))
     monkeypatch.setattr(
         local_models, "shutdown_local_model_manager", lambda: events.append("models")
     )
@@ -41,7 +45,7 @@ def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
         base_url="http://127.0.0.1",
         client=("127.0.0.1", 50000),
     ) as client:
-        assert events == ["start"]
+        assert events == ["start", "schedule-start"]
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/health/live").json()["status"] == "live"
         ready = client.get("/health/ready")
@@ -63,7 +67,14 @@ def test_app_lifespan_starts_and_stops_the_job_worker(monkeypatch):
         assert system["inference"]["model"]
         assert client.get("/").json() == {"Version": "1.0"}
 
-    assert events == ["start", "stop", "models", "llama"]
+    assert events == [
+        "start",
+        "schedule-start",
+        "schedule-stop",
+        "stop",
+        "models",
+        "llama",
+    ]
 
 
 def test_operator_authentication_wraps_the_application_surface(monkeypatch):

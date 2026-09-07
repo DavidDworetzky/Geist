@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Session
 
 from app.models.database.database import Base, SessionLocal
 
@@ -17,6 +18,7 @@ DEFAULT_RETRY_BACKOFF_SECONDS = 30
 
 class JobStatus(Enum):
     """Lifecycle states of a queued job."""
+
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -24,7 +26,7 @@ class JobStatus(Enum):
 
 
 class Job(Base):
-    '''
+    """
     SqlAlchemy class persisting queued background jobs.
 
     The job table is the whole queue: enqueue is an INSERT, claiming is a
@@ -33,7 +35,8 @@ class Job(Base):
     SQLite (single writer, so a plain transaction is safe) and PostgreSQL
     (claiming adds FOR UPDATE SKIP LOCKED so concurrent workers never
     double-claim).
-    '''
+    """
+
     __tablename__ = "job"
     job_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=True, index=True)
@@ -48,7 +51,9 @@ class Job(Base):
     result = Column(Text)
     error = Column(Text)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
 
     @staticmethod
     def _loads(serialized: str | None) -> Any:
@@ -79,6 +84,30 @@ class Job(Base):
         }
 
 
+def add_job(
+    session: Session,
+    kind: str,
+    payload: dict[str, Any] | None = None,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    run_after: datetime.datetime | None = None,
+    user_id: int | None = None,
+    dedupe_key: str | None = None,
+) -> Job:
+    """Add a queued job to an existing transaction and assign its id."""
+    job = Job(
+        user_id=user_id,
+        kind=kind,
+        dedupe_key=dedupe_key,
+        payload=json.dumps(payload or {}),
+        status=JobStatus.QUEUED.value,
+        max_attempts=max_attempts,
+        run_after=run_after or datetime.datetime.utcnow(),
+    )
+    session.add(job)
+    session.flush()
+    return job
+
+
 def enqueue_job(
     kind: str,
     payload: dict[str, Any] | None = None,
@@ -90,16 +119,15 @@ def enqueue_job(
     """Insert a queued job; delay_seconds hides it from workers until then."""
     run_after = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay_seconds)
     with SessionLocal() as session:
-        job = Job(
-            user_id=user_id,
-            kind=kind,
-            dedupe_key=dedupe_key,
-            payload=json.dumps(payload or {}),
-            status=JobStatus.QUEUED.value,
+        job = add_job(
+            session,
+            kind,
+            payload=payload,
             max_attempts=max_attempts,
             run_after=run_after,
+            user_id=user_id,
+            dedupe_key=dedupe_key,
         )
-        session.add(job)
         session.commit()
         session.refresh(job)
         session.expunge(job)
@@ -151,7 +179,10 @@ def enqueue_or_reschedule_job(
         return job
 
 
-def claim_next_job() -> Job | None:
+def claim_next_job(
+    include_kinds: set[str] | None = None,
+    exclude_kinds: set[str] | None = None,
+) -> Job | None:
     """
     Atomically claim the oldest visible queued job, or None if the queue is
     empty. The claimed row is flipped to running with attempts incremented.
@@ -163,6 +194,10 @@ def claim_next_job() -> Job | None:
             .filter(Job.status == JobStatus.QUEUED.value, Job.run_after <= now)
             .order_by(Job.job_id)
         )
+        if include_kinds is not None:
+            query = query.filter(Job.kind.in_(include_kinds))
+        if exclude_kinds:
+            query = query.filter(Job.kind.notin_(exclude_kinds))
         # PostgreSQL: lock the claimed row and skip rows other workers hold,
         # so multiple workers can share one queue. SQLite has a single writer,
         # so the plain transaction below is already race-free.
@@ -239,6 +274,7 @@ def get_jobs(
     status: str | None = None,
     limit: int = 50,
     user_id: int | None = None,
+    kind: str | None = None,
 ) -> list[Job]:
     """List jobs, newest first, optionally filtered by status."""
     with SessionLocal() as session:
@@ -247,6 +283,8 @@ def get_jobs(
             query = query.filter(Job.status == status)
         if user_id is not None:
             query = query.filter(Job.user_id == user_id)
+        if kind is not None:
+            query = query.filter(Job.kind == kind)
         jobs = query.order_by(Job.job_id.desc()).limit(limit).all()
         for job in jobs:
             session.expunge(job)

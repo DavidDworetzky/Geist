@@ -100,15 +100,29 @@ def enqueue_or_reschedule(
 class JobWorker:
     """Single-threaded queue consumer."""
 
-    def __init__(self, poll_interval: float = 1.0, retry_backoff_seconds: int = 30):
+    def __init__(
+        self,
+        poll_interval: float = 1.0,
+        retry_backoff_seconds: int = 30,
+        *,
+        include_kinds: set[str] | None = None,
+        exclude_kinds: set[str] | None = None,
+        thread_name: str = "geist-job-worker",
+    ):
         self.poll_interval = poll_interval
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.include_kinds = include_kinds
+        self.exclude_kinds = exclude_kinds
+        self.thread_name = thread_name
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
     def run_once(self) -> bool:
         """Claim and execute at most one job. Returns True if one was processed."""
-        job = claim_next_job()
+        job = claim_next_job(
+            include_kinds=self.include_kinds,
+            exclude_kinds=self.exclude_kinds,
+        )
         if job is None:
             return False
 
@@ -155,7 +169,11 @@ class JobWorker:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run_loop, name="geist-job-worker", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name=self.thread_name,
+            daemon=True,
+        )
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -166,6 +184,7 @@ class JobWorker:
 
 
 _worker: JobWorker | None = None
+_inference_worker: JobWorker | None = None
 
 
 def start_worker() -> JobWorker | None:
@@ -174,7 +193,7 @@ def start_worker() -> JobWorker | None:
     GEIST_JOB_WORKER_ENABLED=false. Poll cadence comes from
     GEIST_JOB_POLL_INTERVAL (seconds, default 1.0).
     """
-    global _worker
+    global _worker, _inference_worker
     enabled = os.getenv("GEIST_JOB_WORKER_ENABLED", "true").strip().lower() not in (
         "false",
         "0",
@@ -188,7 +207,15 @@ def start_worker() -> JobWorker | None:
             poll_interval = float(os.getenv("GEIST_JOB_POLL_INTERVAL", "1.0"))
         except ValueError:
             poll_interval = 1.0
-        _worker = JobWorker(poll_interval=poll_interval)
+        _worker = JobWorker(
+            poll_interval=poll_interval,
+            exclude_kinds={"prompt.inference"},
+        )
+        _inference_worker = JobWorker(
+            poll_interval=poll_interval,
+            include_kinds={"prompt.inference"},
+            thread_name="geist-inference-worker",
+        )
         try:
             lease_seconds = int(os.getenv("GEIST_JOB_LEASE_SECONDS", "300"))
         except ValueError:
@@ -197,12 +224,17 @@ def start_worker() -> JobWorker | None:
         if recovered:
             logger.warning("Recovered %s stale jobs", recovered)
     _worker.start()
+    if _inference_worker is not None:
+        _inference_worker.start()
     return _worker
 
 
 def stop_worker() -> None:
     """Stop the process-wide worker thread if it is running."""
-    global _worker
+    global _worker, _inference_worker
+    if _inference_worker is not None:
+        _inference_worker.stop()
+        _inference_worker = None
     if _worker is not None:
         _worker.stop()
         _worker = None
@@ -282,3 +314,15 @@ def _run_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
         "status": run.status,
         "error_message": run.error_message,
     }
+
+
+@job_handler("prompt.inference")
+def _run_prompt_inference_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute a scheduled prompt on the dedicated inference worker."""
+    from app.services.inference import run_prompt_inference
+
+    return run_prompt_inference(
+        prompt=payload["prompt"],
+        inference_config=payload.get("inference_config"),
+        user_id=payload.get("user_id"),
+    )
