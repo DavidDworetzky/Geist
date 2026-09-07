@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from threading import Event, Lock
 from typing import Any
 
+from agents.architectures.chat_template_tools import provider_tool_name
 from agents.architectures.llama.mlx_lm_backend import MLXLMBackend
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
 from agents.local_agent import LocalAgent
@@ -18,6 +19,9 @@ class StreamingProbe:
         self.stage = 0
         self.closed = False
         self.tools_seen = False
+        self.scenario = "text"
+        self.search_calls: list[dict[str, Any]] = []
+        self.tool_result_seen = False
         self.gates = [Event(), Event()]
 
     def reset(self) -> None:
@@ -30,13 +34,16 @@ class StreamingProbe:
         self.stage = 0
         self.closed = False
         self.tools_seen = False
+        self.search_calls = []
+        self.tool_result_seen = False
         for gate in self.gates:
             gate.set()
 
-    def start(self) -> None:
+    def start(self, scenario: str = "text") -> None:
         with self._lock:
             self._reset()
             self.gates = [Event(), Event()]
+            self.scenario = scenario
             self.active = True
 
     def state(self) -> dict[str, Any]:
@@ -47,14 +54,42 @@ class StreamingProbe:
                 "closed": self.closed,
                 "tools_seen": self.tools_seen,
                 "released": [gate.is_set() for gate in self.gates],
+                "search_calls": list(self.search_calls),
+                "tool_result_seen": self.tool_result_seen,
             }
 
-    def segments(self, tools: list[dict[str, Any]] | None) -> Iterator[str]:
+    def segments(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> Iterator[str]:
         if not tools:
             raise AssertionError("The streaming regression must exercise the tool-enabled path")
         with self._lock:
             self.tools_seen = True
             gates, generation = self.gates, self._generation
+            scenario = self.scenario
+        if scenario == "xml_tool":
+            if messages[-1]["role"] != "tool":
+                name = provider_tool_name("web.search")
+                if not any(tool["function"]["name"] == name for tool in tools or []):
+                    raise AssertionError("Expected the search tool to be offered")
+                call = (
+                    f"<tool_call>\n<function={name}>\n"
+                    "<parameter=query>\nrecent celebrity headlines\n</parameter>\n"
+                    "<parameter=max_results>\n3\n</parameter>\n"
+                    "</function>\n</tool_call>"
+                )
+                for index in range(0, len(call), 7):
+                    with self._lock:
+                        if generation != self._generation:
+                            return
+                    yield call[index : index + 7]
+                return
+            with self._lock:
+                if generation != self._generation:
+                    return
+                self.tool_result_seen = "Fixture celebrity headline" in messages[-1]["content"]
+                if not self.tool_result_seen:
+                    raise AssertionError("Expected the search result in model history")
         try:
             for index, segment in enumerate(("STREAM-FIRST", " STREAM-SECOND", " STREAM-FINAL")):
                 with self._lock:
@@ -100,5 +135,4 @@ class ProbeMLXBackend(MLXLMBackend):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> Iterator[str]:
-        del messages
-        yield from self.probe.segments(tools)
+        yield from self.probe.segments(messages, tools)

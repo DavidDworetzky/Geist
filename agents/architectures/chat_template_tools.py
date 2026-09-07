@@ -15,6 +15,9 @@ from agents.models.tool_calling import ChatMessage, ModelTurn, ToolCall, ToolDef
 _TOOL_CALL_OPEN = "<tool_call>"
 _TOOL_CALL_CLOSE = "</tool_call>"
 _TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+_FUNCTION_PATTERN = re.compile(r"<function=([A-Za-z0-9_-]+)>(.*?)</function>", re.DOTALL)
+_PARAMETER_PATTERN = re.compile(r"<parameter=([^<>\s]+)>(.*?)</parameter>", re.DOTALL)
+_UNWRAPPED_XML_MARKERS = ("<function=", "<parameter=", "</function>", "</parameter>")
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,7 @@ def parse_tool_response(
     response: str,
     *,
     provider_to_internal: dict[str, str],
+    tools: list[dict[str, Any]] | None = None,
 ) -> ModelTurn:
     """Parse Qwen-style tool markup into a fail-closed structured model turn."""
 
@@ -166,12 +170,18 @@ def parse_tool_response(
                 payloads = [raw_response]
                 text = ""
 
+    if any(marker in text for marker in _UNWRAPPED_XML_MARKERS):
+        raise ValueError("Model returned unwrapped function-call markup")
+
     calls: list[ToolCall] = []
     for payload in payloads:
-        try:
-            value = json.loads(payload)
-        except json.JSONDecodeError as error:
-            raise ValueError("Model returned invalid tool-call JSON") from error
+        if payload.lstrip().startswith("<function="):
+            value = _parse_function_call(payload, tools or [])
+        else:
+            try:
+                value = json.loads(payload)
+            except json.JSONDecodeError as error:
+                raise ValueError("Model returned invalid tool-call JSON") from error
         if not isinstance(value, dict):
             raise ValueError("Model returned a non-object tool call")
         provider_name = value.get("name")
@@ -208,11 +218,102 @@ def parse_tool_response(
     )
 
 
+def _schema_types(schema: dict[str, Any], root: dict[str, Any]) -> set[str]:
+    pending = [schema]
+    seen: set[int] = set()
+    types: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, dict) or id(current) in seen:
+            continue
+        seen.add(id(current))
+        declared = current.get("type", [])
+        if isinstance(declared, str):
+            types.add(declared)
+        elif isinstance(declared, list):
+            types.update(value for value in declared if isinstance(value, str))
+        for key in ("anyOf", "oneOf", "allOf"):
+            variants = current.get(key, [])
+            if isinstance(variants, list):
+                pending.extend(variants)
+        reference = current.get("$ref", "")
+        if isinstance(reference, str) and reference.startswith("#/"):
+            resolved = root
+            for key in reference[2:].split("/"):
+                if not isinstance(resolved, dict):
+                    break
+                resolved = resolved.get(key.replace("~1", "/").replace("~0", "~"), {})
+            if isinstance(resolved, dict):
+                pending.append(resolved)
+    return types
+
+
+def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
+    """Parse Qwen's XML-like function syntax; its tags are not standard XML."""
+    function = _FUNCTION_PATTERN.fullmatch(payload.strip())
+    if function is None:
+        raise ValueError("Model returned malformed function-call markup")
+    name, body = function.groups()
+    schema = next(
+        (
+            tool["function"].get("parameters", {})
+            for tool in tools
+            if tool.get("function", {}).get("name") == name
+        ),
+        None,
+    )
+    if not isinstance(schema, dict):
+        raise ValueError(f"Model requested unknown tool or missing function schema: {name!r}")
+    arguments: dict[str, Any] = {}
+    cursor = 0
+    while cursor < len(body):
+        if body[cursor].isspace():
+            cursor += 1
+            continue
+        if body.startswith("</function>", cursor):
+            raise ValueError("Model returned multiple functions in one tool-call wrapper")
+        parameter = _PARAMETER_PATTERN.match(body, cursor)
+        if parameter is None:
+            raise ValueError("Model returned malformed function parameter markup")
+        key, text = parameter.groups()
+        if key in arguments:
+            raise ValueError("Model returned a duplicate function parameter")
+        # The template adds one framing newline on each side of the value.
+        # Preserve user strings (including whitespace and JSON-looking text).
+        text = text.removeprefix("\r\n") if text.startswith("\r\n") else text.removeprefix("\n")
+        text = text.removesuffix("\r\n") if text.endswith("\r\n") else text.removesuffix("\n")
+        additional = schema.get("additionalProperties", {})
+        parameter_schema = schema.get("properties", {}).get(
+            key, additional if isinstance(additional, dict) else {}
+        )
+        types = _schema_types(parameter_schema, schema)
+        # Qwen renders None and literal "null" identically for nullable strings.
+        # Preserve explicit null semantics, but never strip a non-null string.
+        if "null" in types and text == "null":
+            arguments[key] = None
+        elif "string" in types:
+            arguments[key] = text
+        else:
+            try:
+                arguments[key] = json.loads(text)
+            except json.JSONDecodeError as error:
+                if types:
+                    raise ValueError("Model returned invalid JSON for a typed parameter") from error
+                arguments[key] = text
+        cursor = parameter.end()
+    return {"name": name, "arguments": arguments}
+
+
 class ToolResponseStream:
     """Expose text incrementally; keep tool markup private until validation."""
 
-    def __init__(self, provider_to_internal: dict[str, str]) -> None:
+    def __init__(
+        self,
+        provider_to_internal: dict[str, str],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.provider_to_internal = provider_to_internal
+        self.tools = tools
         self._raw: list[str] = []
         self._emitted: list[str] = []
         self._tool: list[str] | None = None
@@ -251,7 +352,9 @@ class ToolResponseStream:
                 # Reject bad markup before releasing any following text. Calls
                 # are only returned by finish(), after validating the whole turn.
                 parse_tool_response(
-                    "".join(self._tool), provider_to_internal=self.provider_to_internal
+                    "".join(self._tool),
+                    provider_to_internal=self.provider_to_internal,
+                    tools=self.tools,
                 )
                 self._tool = None
                 remaining = remaining[end:]
@@ -259,6 +362,11 @@ class ToolResponseStream:
 
             opening = remaining.find(_TOOL_CALL_OPEN)
             closing = remaining.find(_TOOL_CALL_CLOSE)
+            if any(
+                (position := remaining.find(marker)) >= 0 and (opening < 0 or position < opening)
+                for marker in _UNWRAPPED_XML_MARKERS
+            ):
+                raise ValueError("Model returned unwrapped function-call markup")
             if closing >= 0 and (opening < 0 or closing < opening):
                 raise ValueError("Model returned malformed tool-call markup")
             if opening >= 0:
@@ -267,7 +375,7 @@ class ToolResponseStream:
                 remaining = remaining[opening + len(_TOOL_CALL_OPEN) :]
                 continue
             text, self._pending = self._split_marker_prefix(
-                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE)
+                remaining, (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE, *_UNWRAPPED_XML_MARKERS)
             )
             visible.append(text)
             break
@@ -288,7 +396,9 @@ class ToolResponseStream:
 
     def finish(self) -> tuple[str, ModelTurn]:
         turn = parse_tool_response(
-            "".join(self._raw), provider_to_internal=self.provider_to_internal
+            "".join(self._raw),
+            provider_to_internal=self.provider_to_internal,
+            tools=self.tools,
         )
         emitted = "".join(self._emitted)
         if not turn.text.startswith(emitted):

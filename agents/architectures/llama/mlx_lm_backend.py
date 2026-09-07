@@ -423,7 +423,7 @@ class MLXLMBackend:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         payload = build_tool_payload(messages, tools)
-        parser = ToolResponseStream(payload.provider_to_internal)
+        parser = ToolResponseStream(payload.provider_to_internal, payload.tools)
         responses = self.stream_messages(payload.messages, payload.tools)
         try:
             for segment in responses:

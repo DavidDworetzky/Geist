@@ -320,7 +320,7 @@ describe('Settings page', () => {
     });
   });
 
-  it('defaults the intent router on and persists disabling it', async () => {
+  it('defaults the intent router off and persists enabling it', async () => {
     let savedUpdates: any = null;
     // @ts-ignore
     global.fetch = jest.fn((_url: string, options?: any) => {
@@ -337,16 +337,29 @@ describe('Settings page', () => {
     renderSettings();
 
     const intentRouter = await screen.findByRole('button', { name: 'Intent Router' });
-    expect(intentRouter).toHaveAttribute('aria-pressed', 'true');
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'false');
 
     fireEvent.click(intentRouter);
-    expect(intentRouter).toHaveAttribute('aria-pressed', 'false');
+    expect(intentRouter).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByText(/Save Changes/i));
 
     await waitFor(() => {
-      expect(savedUpdates?.ui_preferences?.intentRouterEnabled).toBe(false);
+      expect(savedUpdates?.ui_preferences?.intentRouterEnabled).toBe(true);
     });
     expect(await screen.findByText('Settings saved successfully.')).toBeInTheDocument();
+  });
+
+  it.each([true, false])('honors an explicit intent router preference of %s', async (enabled) => {
+    // @ts-ignore
+    global.fetch = createFetchMock([{
+      ok: true,
+      json: async () => ({ ...baseSettings, ui_preferences: { intentRouterEnabled: enabled } }),
+    }]);
+
+    renderSettings();
+
+    expect(await screen.findByRole('button', { name: 'Intent Router' }))
+      .toHaveAttribute('aria-pressed', String(enabled));
   });
 
   it('shows the stored local model without exposing a second local selector', async () => {

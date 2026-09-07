@@ -181,6 +181,13 @@ PR #357 integration validation: **88 passed** in the focused Docker runner,
 artifact, policy, n-gram and orchestrator suites; **218 passed** in the native
 Metal, runner, artifact, policy and n-gram suites after the parent merge.
 
+Second review: native timing materialization is restricted to calibration, so
+latched fallback does not synchronize unnecessarily on every token. Explicit
+invalid split-K and conflicting benchmark-CLI tests were added. The reviewer's
+macOS 14 skip for unsupported experimental `relaxed` Metal math was preserved;
+that variant still executes on this newer local Mac. Follow-up native
+Metal/policy validation: **162 passed**.
+
 ## PR #358: stream failure persistence
 
 Accepted: save already-emitted prose on malformed tool output, disconnect, and
@@ -218,3 +225,129 @@ turn, not during ordinary steady-state token production. Incremental early
 rejection and whole-response incomplete-markup diagnostics can retain different
 wording without relaxing either fail-closed contract. Shared prefix-holdback
 logic for different stop/protocol markers is not refactored here.
+
+PR #358 focused Docker validation: **151 passed**. Isolated Docker startup was
+clean; Chrome **5/5 chat tests passed**, including gated streaming and failed-turn
+prose persistence across reload. Its frontend was the existing top-of-stack
+build (no frontend production code changed in this review pass).
+
+## PR #359: XML protocol hardening
+
+Unwrapped `<function=...>` now fails closed in both complete and one-character
+streaming paths, instead of exposing tool arguments as prose. XML requires a
+matching offered schema; missing schema fails loudly instead of silently turning
+numeric-looking strings into integers. The optional argument remains for JSON
+compatibility, where schemas are not needed to preserve JSON types. Boolean
+`additionalProperties` is normalized before type inspection. Nullable strings
+retain whitespace around `null`; exact `null` still represents None, because
+Qwen renders those two values identically and choosing string would break actual
+null round trips. Multiple functions inside one wrapper fail with a clearer
+diagnostic. Regression tests cover these boundaries and actual-model cross-worker
+stream close followed by another generation.
+
+Intent routing remains off for unset existing workspaces as explicitly requested;
+saved true remains an opt-in, even though it is uncommon in historical settings.
+Process-scoped test search stubs and test assertions are not production code.
+The first actual-model cross-worker test exposed the deeper Metal affinity bug;
+that fix belongs in #356 and is propagated here before final qualification.
+
+Second-review completeness follow-up: unwrapped parameter opens and stray
+function/parameter closes now use the same fail-closed guard and chunk holdback
+as unwrapped functions. The one-character/chunk-size matrix covers every marker.
+XML parsing preserves typed values; `additionalProperties` validation belongs
+to the registry immediately before dispatch, covered by its contract tests.
+Process-scoped search stubs remain confined to the dedicated E2E process. Its
+critical XML protocol checks now use explicit raises, and XML probe state is
+read/written under the same lock as resets.
+
+## Integrated qualification after all parent merges
+
+Final production-code head before this evidence-only update: `71c7345`.
+All tests used existing dependencies; no packages were installed or updated.
+
+- Docker backend: **592 passed, 7 skipped** with isolated SQLite, running
+  `pytest tests/agents tests/services/test_chat_orchestrator.py
+  tests/services/test_tool_intent_router.py tests/test_streaming_probe.py
+  tests/services/test_user_settings_service.py tests/api/test_user_settings_routes.py
+  tests/services/test_tool_registry.py -q --tb=short -p no:cacheprovider`.
+  Docker does not substitute for the skipped native/live-model paths below.
+- Native Apple Silicon: **228 passed**, running `pytest
+  tests/agents/test_mlx_dflash.py tests/agents/test_mlx_llama_runner.py
+  tests/agents/test_dflash_artifact.py tests/agents/test_speculation_policy.py
+  tests/agents/test_ngram_draft.py -q --tb=short -p no:cacheprovider`.
+- Actual installed Qwen 3.8 27B 4-bit with DFlash2: **3 passed** in 19.69 seconds,
+  using `GEIST_RUN_MLX_TOOL_SMOKE=1 pytest tests/agents/test_mlx_tool_live.py -q -s
+  --tb=short -p no:cacheprovider`. This verifies the tokenizer's tool format,
+  generated tool dispatch/result use, and cross-consumer-worker stream
+  advancement/close followed by another generation.
+- Frontend: **42 passed** across `useCompleteText`, `src/__tests__/Chat`,
+  `Settings`, and `useUserSettings`, with the existing React Scripts runner and
+  `--watchAll=false --runInBand --runTestsByPath`. Existing React `act` warnings
+  and intentional error-path console messages remain test-only warnings.
+- Isolated Docker application at port 5592: successful startup and authenticated
+  `curl /chat` HTTP 200. Chrome `playwright test` against all three E2E files:
+  **11 passed**, including source-gated streaming, Qwen XML dispatch,
+  failed-prose reload, memory privacy, and router default/opt-in/opt-out. Repeating
+  memory tests against a reused database caused duplicate-fixture failures;
+  recreating the disposable test container restored a clean full pass without
+  changing production code or weakening assertions.
+- Real native application at port 5593: production `create_app`, existing model
+  artifact, offline weights, router off, fresh SQLite and no model stubs. Chrome
+  verified generated prose while Stop remained visible, cancellation, reopening
+  the persisted partial response, a successful follow-up generation, and saved
+  router opt-in/opt-out. No browser errors. Cancellation aborts the SSE connection
+  before its final navigation event, so this check explicitly reopened the saved
+  chat from persisted history. A single observed first-visible latency was 10.45
+  seconds; this is a smoke result, not a throughput/latency benchmark.
+
+Runtime isolation: Docker used the existing backend image and an explicit
+scratch Compose file. Native used a scratch Python launcher with `MLX_BACKEND=1`
+and dotenv loading disabled; `make run` was not invoked because this pass avoided
+implicit setup/install steps and local secret-file reads. Existing frontend
+assets were reused because this review pass did not change frontend production
+code. Ports 3000/5587 and the user's existing database were not replaced.
+Missing optional SendGrid/Twilio credentials produced adapter warnings, not chat
+or model failures. Hook results at that qualification point were green; the
+later foundational follow-up and its top-stack merge use the two documented
+baseline-only hook exceptions described above.
+
+### Final follow-up qualification
+
+After the worker reentrancy/cache-lock changes, profiling correction, tool-scope
+enforcement, and remaining XML marker guards, production head `20ee353` passed:
+
+- The same integrated Docker selection above: **619 passed, 7 skipped**.
+- One native invocation combining the listed Metal/runner/artifact/policy/ngram
+  suites with `test_mlx_tool_live.py`: **241 passed**, including all three
+  real-Qwen tests and the independent-runner/public-load regression.
+- Full fresh-database Chrome E2E: **11 passed**.
+- Real native Chrome: incremental text while generation is active, cancellation,
+  reopening the partial persisted chat, successful follow-up, and saved router
+  opt-in/opt-out all passed again, with no browser errors. Both Docker and native
+  authenticated chat routes returned HTTP 200. This loaded-app smoke observed
+  22.55 seconds to first visible text; it is not a controlled latency benchmark.
+- Installed-dependency mypy on runner, app, parser, and orchestrator: **passed**.
+
+The new sensitive-route regression explicitly enables routing so it remains
+meaningful after #359 changes the default to off. Its initial integrated failure
+was a fixture assumption, not an availability-guard failure. No production
+default was changed to satisfy the test. The earlier 42-test frontend pass is
+unchanged; this follow-up contains no frontend production edits.
+
+### Concurrent-readiness qualification
+
+After propagating review T's fix through all four branches, production head
+`0c57038` passed the same integrated Docker selection: **626 passed, 7 skipped**
+(633 collected, zero errors/failures). The seven new regressions cover duplicate
+startup and chat-owned load races without queuing conflicting model requests.
+The earlier 241 native tests and real-Qwen browser passes still cover the
+unchanged Metal/decoder code. A fresh native application restart for this last
+readiness-only follow-up was attempted twice, but permission-review requests
+timed out before process startup; this final native rerun is **blocked**, not a
+pass. No package installation, secret-file access, or user-UI replacement was
+used to work around that limitation.
+
+After the additional owner-failure/default-model follow-up, integrated production
+head `684b0dd` passed the same Docker selection: **638 passed, 7 skipped**.
+Installed-project mypy on the app and models endpoint also passed. The native
+restart limitation remains unchanged; no new Metal/decoder behavior was added.

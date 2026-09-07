@@ -349,7 +349,7 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
 
 def intent_router_enabled(workspace_id: int) -> bool:
     settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
-    return settings.ui_preferences.get("intentRouterEnabled") is not False
+    return settings.ui_preferences.get("intentRouterEnabled") is True
 
 
 def resolved_memory_settings(
