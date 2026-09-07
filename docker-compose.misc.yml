@@ -4,14 +4,16 @@ services:
       context: .
       dockerfile: client/geist/Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./client/geist:/app
       - /app/node_modules
+      - ${GEIST_OPERATOR_TOKEN_FILE_HOST:-./data/operator-token}:/run/geist-operator/token:ro
     environment:
       - NODE_ENV=development
       - REACT_APP_BACKEND_HOST=host.docker.internal
       - REACT_APP_BACKEND_PORT=5001
+      - GEIST_OPERATOR_TOKEN_FILE=/run/geist-operator/token
     networks:
       - test_net
 

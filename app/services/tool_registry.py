@@ -7,11 +7,12 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from adapters.image_generation_adapter import ImageGenerationAdapter
+from adapters.job_status_adapter import JobStatusAdapter
 from adapters.markdown_file_adapter import MarkdownFileAdapter
 from adapters.search_adapter import SearchAdapter
 from agents.models.tool_calling import (
@@ -19,8 +20,11 @@ from agents.models.tool_calling import (
     ToolContext,
     ToolDefinition,
     ToolExecutionOutput,
+    ToolIntent,
     ToolResult,
+    ToolSemanticTag,
 )
+from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
 
 
@@ -58,22 +62,59 @@ class MarkdownListArguments(StrictToolArguments):
     limit: int = Field(default=100, ge=1, le=500)
 
 
-class MarkdownWriteArguments(MarkdownPathArguments):
-    content: str = Field(max_length=100_000)
+@runtime_checkable
+class ToolSource(Protocol):
+    """A dynamic provider of tool definitions (MCP servers, adapter bridges).
+
+    Sources are consulted on every catalog/dispatch so their tool lists can
+    change at runtime without rebuilding the registry. A failing source must
+    degrade to an empty list rather than break chat.
+    """
+
+    name: str
+
+    def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]: ...
 
 
-class EmailSendArguments(StrictToolArguments):
-    to_email: str = Field(min_length=3, max_length=320)
-    subject: str = Field(min_length=1, max_length=998)
-    content: str = Field(min_length=1, max_length=100_000)
-    to_name: str | None = Field(default=None, max_length=200)
-    idempotency_key: str = Field(min_length=8, max_length=128)
+_JSON_TYPE_CHECKS: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
 
 
-class SmsSendArguments(StrictToolArguments):
-    number: str = Field(pattern=r"^\+[1-9]\d{7,14}$")
-    message: str = Field(min_length=1, max_length=1600)
-    idempotency_key: str = Field(min_length=8, max_length=128)
+def _schema_argument_errors(arguments: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    """Minimal structural validation for raw-JSON-schema tools.
+
+    Required keys and primitive property types are checked here so obviously
+    malformed calls fail fast with a message the model can act on; full
+    constraint enforcement stays with the tool's own backend.
+    """
+    errors: list[str] = []
+    properties = schema.get("properties") or {}
+    for name in schema.get("required") or []:
+        if name not in arguments:
+            errors.append(f"Missing required argument '{name}'")
+    for name, value in arguments.items():
+        declared = properties.get(name)
+        if not isinstance(declared, dict):
+            continue
+        expected_type = declared.get("type")
+        if not isinstance(expected_type, str):
+            continue
+        expected = _JSON_TYPE_CHECKS.get(expected_type)
+        if expected is None or value is None:
+            continue
+        if (
+            isinstance(value, bool)
+            and expected_type in ("integer", "number")
+            or not isinstance(value, expected)
+        ):
+            errors.append(f"Argument '{name}' must be of type {expected_type}")
+    return errors
 
 
 class ToolRegistry:
@@ -83,6 +124,7 @@ class ToolRegistry:
         max_concurrent_executions: int = 4,
     ):
         self._definitions: dict[str, ToolDefinition] = {}
+        self._sources: list[ToolSource] = []
         self._explicitly_enabled = explicitly_enabled or set()
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent_executions,
@@ -94,32 +136,118 @@ class ToolRegistry:
             raise ValueError(f"Tool already registered: {definition.name}")
         self._definitions[definition.name] = definition
 
-    def get(self, name: str) -> ToolDefinition | None:
-        return self._definitions.get(name)
+    def add_source(self, source: ToolSource) -> None:
+        if any(existing.name == source.name for existing in self._sources):
+            raise ValueError(f"Tool source already registered: {source.name}")
+        self._sources.append(source)
 
-    def catalog(self) -> list[ToolDefinition]:
-        return list(self._definitions.values())
+    def remove_source(self, name: str) -> None:
+        self._sources = [source for source in self._sources if source.name != name]
+
+    def _source_definitions(self, context: ToolContext | None = None) -> dict[str, ToolDefinition]:
+        merged: dict[str, ToolDefinition] = {}
+        for source in self._sources:
+            try:
+                definitions = source.definitions(context)
+            except Exception:
+                logger.exception("Tool source %s failed; skipping its tools", source.name)
+                continue
+            for definition in definitions:
+                if definition.name in self._definitions or definition.name in merged:
+                    logger.warning(
+                        "Tool source %s tool %s collides with an existing tool; skipping",
+                        source.name,
+                        definition.name,
+                    )
+                    continue
+                merged[definition.name] = definition
+        return merged
+
+    def get(self, name: str, context: ToolContext | None = None) -> ToolDefinition | None:
+        definition = self._definitions.get(name)
+        if definition is not None:
+            return definition
+        if not self._sources:
+            return None
+        return self._source_definitions(context).get(name)
+
+    def catalog(self, context: ToolContext | None = None) -> list[ToolDefinition]:
+        return list(self._definitions.values()) + list(self._source_definitions(context).values())
 
     def is_enabled(self, definition: ToolDefinition) -> bool:
         return definition.enabled_by_default or definition.name in self._explicitly_enabled
 
     def definitions_for_context(self, context: ToolContext) -> list[ToolDefinition]:
         definitions = []
-        for definition in self._definitions.values():
+        for definition in self.catalog(context):
             enabled = self.is_enabled(definition)
             available = definition.availability is None or definition.availability(context)
             if enabled and available:
                 definitions.append(definition)
         return definitions
 
-    def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
-        definition = self.get(call.name)
+    def definitions_for_intent(
+        self,
+        context: ToolContext,
+        intent: ToolIntent,
+        *,
+        include_retrieval: bool = True,
+    ) -> list[ToolDefinition]:
+        definitions = self.definitions_for_context(context)
+        if intent in {"answer", "sensitive_answer"} and not include_retrieval:
+            return []
+        if intent == "answer":
+            allowed_tags: frozenset[ToolSemanticTag] = frozenset(
+                {"public_retrieval", "local_retrieval"}
+            )
+            return [
+                definition for definition in definitions if definition.semantic_tags & allowed_tags
+            ]
+        if intent == "sensitive_answer":
+            return [
+                definition
+                for definition in definitions
+                if "local_retrieval" in definition.semantic_tags
+            ]
+        if intent == "image_generation":
+            return [
+                definition
+                for definition in definitions
+                if "image_generation" in definition.semantic_tags
+            ]
+        return [
+            definition
+            for definition in definitions
+            if "image_generation" not in definition.semantic_tags
+        ]
+
+    def execute(
+        self,
+        call: ToolCall,
+        context: ToolContext,
+        *,
+        expected_approval_fingerprint: str | None = None,
+    ) -> ToolResult:
+        definition = self.get(call.name, context)
         if definition is None:
             return ToolResult(
                 call=call,
                 status="failed",
                 content=f"Unknown tool: {call.name}",
                 error="unknown_tool",
+            )
+        if (
+            expected_approval_fingerprint is not None
+            and definition.approval_fingerprint() != expected_approval_fingerprint
+        ):
+            return ToolResult(
+                call=call,
+                status="failed",
+                content=(
+                    "BLOCKED: the tool definition changed after approval. "
+                    "Review the updated tool before trying again."
+                ),
+                error="approval_stale",
             )
         if not self.is_enabled(definition):
             return ToolResult(
@@ -143,17 +271,31 @@ class ToolRegistry:
                 error="approval_required",
             )
 
-        try:
-            arguments = definition.arguments_model.model_validate(call.arguments)
-        except ValidationError as error:
-            return ToolResult(
-                call=call,
-                status="failed",
-                content=f"Invalid arguments for {call.name}: {error}",
-                error="invalid_arguments",
-            )
+        arguments: Any
+        if definition.arguments_model is not None:
+            try:
+                arguments = definition.arguments_model.model_validate(call.arguments)
+            except ValidationError as error:
+                return ToolResult(
+                    call=call,
+                    status="failed",
+                    content=f"Invalid arguments for {call.name}: {error}",
+                    error="invalid_arguments",
+                )
+        else:
+            errors = _schema_argument_errors(call.arguments, definition.parameters_schema())
+            if errors:
+                return ToolResult(
+                    call=call,
+                    status="failed",
+                    content=f"Invalid arguments for {call.name}: {'; '.join(errors)}",
+                    error="invalid_arguments",
+                )
+            arguments = call.arguments
 
-        future = self._executor.submit(definition.handler, context, arguments)
+        handler = definition.handler
+        assert handler is not None  # guaranteed by ToolDefinition.__post_init__
+        future = self._executor.submit(handler, context, arguments)
         try:
             output = future.result(timeout=definition.timeout_seconds)
         except FutureTimeoutError:
@@ -193,7 +335,7 @@ def build_default_tool_registry() -> ToolRegistry:
     registry = ToolRegistry(explicitly_enabled=explicitly_enabled)
     search_adapter = SearchAdapter(base_url=os.getenv("WEB_SEARCH_BASE_URL"))
     image_adapter = ImageGenerationAdapter()
-    markdown_adapter = MarkdownFileAdapter(file_root=os.getenv("GEIST_MARKDOWN_ROOT", "."))
+    markdown_adapter = MarkdownFileAdapter(file_root=str(default_markdown_root()))
 
     def web_search(context: ToolContext, arguments: WebSearchArguments) -> ToolExecutionOutput:
         results = search_adapter.search(
@@ -210,7 +352,7 @@ def build_default_tool_registry() -> ToolRegistry:
         context: ToolContext, arguments: DocumentSearchArguments
     ) -> ToolExecutionOutput:
         results = DocumentSearchService.search(
-            user_id=context.user_id,
+            user_id=context.workspace_id,
             query=arguments.query,
             limit=arguments.limit,
         )
@@ -248,49 +390,6 @@ def build_default_tool_registry() -> ToolRegistry:
         content = markdown_adapter.read_file(arguments.path)
         return ToolExecutionOutput(content=content, summary=f"Read {arguments.path}")
 
-    def markdown_write(
-        context: ToolContext, arguments: MarkdownWriteArguments
-    ) -> ToolExecutionOutput:
-        written = markdown_adapter.write_file(arguments.path, arguments.content)
-        if not written:
-            raise RuntimeError(f"Could not write {arguments.path}")
-        return ToolExecutionOutput(content="File written", summary=f"Wrote {arguments.path}")
-
-    def email_send(context: ToolContext, arguments: EmailSendArguments) -> ToolExecutionOutput:
-        from adapters.sendgrid_adapter import SendGridAdapter
-
-        api_key = os.getenv("SENDGRID_API_KEY")
-        from_email = os.getenv("SENDGRID_FROM_EMAIL")
-        if not api_key or not from_email:
-            raise RuntimeError("SendGrid is not configured")
-        adapter = SendGridAdapter(
-            sendgrid_api_key=api_key,
-            from_email=from_email,
-            from_name=os.getenv("SENDGRID_FROM_NAME"),
-        )
-        result = adapter.send_email(
-            to_email=arguments.to_email,
-            subject=arguments.subject,
-            content=arguments.content,
-            to_name=arguments.to_name,
-        )
-        return ToolExecutionOutput(content=result, summary=result)
-
-    def sms_send(context: ToolContext, arguments: SmsSendArguments) -> ToolExecutionOutput:
-        from adapters.sms_adapter import SMSAdapter
-
-        token = os.getenv("TWILIO_TOKEN")
-        sid = os.getenv("TWILIO_SID")
-        source = os.getenv("TWILIO_SOURCE")
-        if not token or not sid or not source:
-            raise RuntimeError("Twilio is not configured")
-        adapter = SMSAdapter(twilio_key=token, twilio_sid=sid, twilio_source=source)
-        message_id = adapter.send_text(message=arguments.message, number=arguments.number)
-        return ToolExecutionOutput(
-            content=json.dumps({"message_id": message_id}),
-            summary="SMS sent",
-        )
-
     registry.register(
         ToolDefinition(
             name="web.search",
@@ -302,18 +401,20 @@ def build_default_tool_registry() -> ToolRegistry:
             handler=web_search,
             timeout_seconds=20,
             source_adapter="SearchAdapter.search",
+            semantic_tags=frozenset({"public_retrieval"}),
         )
     )
     registry.register(
         ToolDefinition(
             name="documents.search",
             description=(
-                "Search the current user's uploaded documents by filename and extracted content. "
-                "Use when asked to find, list, or inspect the user's files; do not use for public web facts."
+                "Search the current workspace's uploaded documents by filename and extracted content. "
+                "Use when asked to find, list, or inspect workspace files; do not use for public web facts."
             ),
             arguments_model=DocumentSearchArguments,
             handler=document_search,
             source_adapter="DocumentSearchService.search",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
     registry.register(
@@ -326,19 +427,18 @@ def build_default_tool_registry() -> ToolRegistry:
             timeout_seconds=120,
             source_adapter="ImageGenerationAdapter.generate_image",
             availability=lambda context: bool(image_adapter.api_key),
+            semantic_tags=frozenset({"image_generation"}),
         )
     )
 
-    # Reviewed mappings that are intentionally opt-in. They are in the catalog,
-    # but are not sent to models unless the server explicitly enables them.
     registry.register(
         ToolDefinition(
             name="workspace.list_markdown",
             description="List Markdown files under the configured workspace root.",
             arguments_model=MarkdownListArguments,
             handler=markdown_list,
-            enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.get_files",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
     registry.register(
@@ -347,50 +447,15 @@ def build_default_tool_registry() -> ToolRegistry:
             description="Read a Markdown file under the configured workspace root.",
             arguments_model=MarkdownPathArguments,
             handler=markdown_read,
-            enabled_by_default=False,
             source_adapter="MarkdownFileAdapter.read_file",
+            semantic_tags=frozenset({"local_retrieval"}),
         )
     )
-    registry.register(
-        ToolDefinition(
-            name="workspace.write_markdown",
-            description="Write a Markdown file under the configured workspace root.",
-            arguments_model=MarkdownWriteArguments,
-            handler=markdown_write,
-            side_effect="filesystem_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="MarkdownFileAdapter.write_file",
-            # Approval/resume and durable idempotency are not implemented yet.
-            # Keep the reviewed mapping visible in the catalog but unavailable
-            # to model turns even if an operator enables its name.
-            availability=lambda context: False,
-        )
-    )
-    registry.register(
-        ToolDefinition(
-            name="communication.email.send",
-            description="Send an email through the configured SendGrid account.",
-            arguments_model=EmailSendArguments,
-            handler=email_send,
-            side_effect="external_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="SendGridAdapter.send_email",
-            availability=lambda context: False,
-        )
-    )
-    registry.register(
-        ToolDefinition(
-            name="communication.sms.send",
-            description="Send an SMS through the configured Twilio account.",
-            arguments_model=SmsSendArguments,
-            handler=sms_send,
-            side_effect="external_write",
-            requires_approval=True,
-            enabled_by_default=False,
-            source_adapter="SMSAdapter.send_text",
-            availability=lambda context: False,
-        )
-    )
+    # Reflected adapter actions ride through the same registry as the curated
+    # tools above (one registry, several sources) but stay disabled until an
+    # operator opts in by name via GEIST_ENABLED_CHAT_TOOLS, e.g.
+    # adapter.JobStatusAdapter.check_async_tool.
+    from app.services.adapter_tool_source import AdapterToolSource
+
+    registry.add_source(AdapterToolSource([JobStatusAdapter()]))
     return registry

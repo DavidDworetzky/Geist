@@ -19,8 +19,16 @@ from agents.models.tool_calling import (
     ModelRequestConfig,
     ToolCall,
     ToolContext,
+    ToolResult,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.services.tool_approvals import (
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    ToolApprovalRegistry,
+    approval_registry,
+    tool_arguments_fingerprint,
+)
+from app.services.tool_intent_router import ToolIntentDecision, ToolIntentRouter
 from app.services.tool_registry import ToolRegistry
 
 
@@ -35,6 +43,7 @@ class ChatStreamEvent:
 
 @dataclass
 class _RunControl:
+    workspace_id: int
     cancellation: threading.Event
     on_cancel: Callable[[], bool] | None = None
     cancel_callback_claimed: bool = False
@@ -51,22 +60,25 @@ class RunControlRegistry:
         self,
         run_id: str,
         *,
+        workspace_id: int,
+        cancellation: threading.Event | None = None,
         on_cancel: Callable[[], bool] | None = None,
     ) -> threading.Event:
-        cancellation = threading.Event()
+        cancellation = cancellation or threading.Event()
         with self._lock:
             self._runs[run_id] = _RunControl(
+                workspace_id=workspace_id,
                 cancellation=cancellation,
                 on_cancel=on_cancel,
             )
         return cancellation
 
-    def cancel(self, run_id: str) -> bool:
+    def cancel(self, run_id: str, *, workspace_id: int) -> bool:
         callback: Callable[[], bool] | None = None
         control: _RunControl | None = None
         with self._lock:
             control = self._runs.get(run_id)
-            if control is None:
+            if control is None or control.workspace_id != workspace_id:
                 return False
             control.cancellation.set()
             if control.on_cancel is not None and not control.cancel_callback_claimed:
@@ -105,21 +117,29 @@ class ChatOrchestrator:
         run_controls: RunControlRegistry | None = None,
         max_rounds: int = 6,
         max_tool_calls: int = 10,
+        doom_loop_threshold: int = 3,
         max_history_entries: int = 20,
         max_history_chars: int = 80_000,
         max_tool_result_chars_total: int = 40_000,
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
+        approvals: ToolApprovalRegistry = approval_registry,
+        approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        intent_router: ToolIntentRouter | None = None,
     ) -> None:
         self.registry = registry
         self.run_controls = run_controls or RunControlRegistry()
+        self.intent_router = intent_router
         self.max_rounds = max_rounds
         self.max_tool_calls = max_tool_calls
+        self.doom_loop_threshold = doom_loop_threshold
         self.max_history_entries = max_history_entries
         self.max_history_chars = max_history_chars
         self.max_tool_result_chars_total = max_tool_result_chars_total
         self.history_loader = history_loader
         self.history_writer = history_writer
+        self.approvals = approvals
+        self.approval_timeout_seconds = approval_timeout_seconds
 
     @staticmethod
     def _entry_messages(entry: Any) -> list[ChatMessage]:
@@ -276,6 +296,7 @@ class ChatOrchestrator:
                 "Tool call limit exceeded",
                 "Model backend did not complete its turn",
                 "Model backend returned an invalid event",
+                "Doom loop detected",
             )
         ):
             return message
@@ -286,16 +307,18 @@ class ChatOrchestrator:
         *,
         backend: Any,
         prompt: str,
-        user_id: int,
+        workspace_id: int,
         chat_id: int | None,
         config: ModelRequestConfig,
         system_prompt: str | None,
         enable_tools: bool = True,
+        enable_intent_router: bool = False,
         memory_enabled: bool = True,
         memory_mode: str = "public",
         folder_id: int | None = None,
+        interactive: bool = True,
     ) -> Iterator[ChatStreamEvent]:
-        conversation = ConversationState(chat_id=chat_id, user_id=user_id)
+        conversation = ConversationState(chat_id=chat_id, user_id=workspace_id)
         conversation.add_system_prompt(system_prompt)
         if chat_id is not None:
             try:
@@ -303,16 +326,32 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
-        context = ToolContext(user_id=user_id, chat_id=chat_id, run_id=run.run_id)
-        native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
-        tools = (
-            self.registry.definitions_for_context(context) if enable_tools and native_tools else []
+        approved_call_ids: set[str] = set()
+        cancellation = threading.Event()
+        context = ToolContext(
+            workspace_id=workspace_id,
+            chat_id=chat_id,
+            run_id=run.run_id,
+            cancellation=cancellation,
         )
+        native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
+        tools = []
+        pending_text: list[str] = []
 
         def persist_turn(status: RunStatus, ai_message: str | None) -> int | None:
             with run.persistence_lock:
                 if run.persisted:
                     return conversation.chat_id
+
+                if status in {"failed", "cancelled"} and pending_text:
+                    # Persist only emitted prose, never an unvalidated tool call.
+                    # Cancellation can append from its endpoint thread; mutable
+                    # transcript reads/writes therefore share this lock.
+                    run.record_assistant(
+                        ChatMessage(role="assistant", content="".join(pending_text))
+                    )
+                    pending_text.clear()
+                    ai_message = run.assistant_text or None
 
                 # Snapshot mutable run state so a cancellation callback can
                 # safely persist while a provider/tool thread is unwinding.
@@ -353,8 +392,10 @@ class ChatOrchestrator:
         # Register durable cancellation before exposing the run ID. The cancel
         # endpoint therefore cannot acknowledge a run and then lose its terminal
         # record merely because the browser closes the SSE response.
-        cancellation = self.run_controls.start(
+        self.run_controls.start(
             run.run_id,
+            workspace_id=workspace_id,
+            cancellation=cancellation,
             on_cancel=persist_cancelled_state,
         )
 
@@ -364,32 +405,79 @@ class ChatOrchestrator:
                 {"run_id": run.run_id, "chat_id": conversation.chat_id},
             )
 
+            if enable_tools and native_tools:
+                if self.intent_router is None or not enable_intent_router:
+                    tools = self.registry.definitions_for_context(context)
+                else:
+                    try:
+                        route_decision = self.intent_router.classify(backend, run.model_messages)
+                    except Exception:
+                        logger.exception(
+                            "Tool intent classification failed for run %s; using Action",
+                            run.run_id,
+                        )
+                        route_decision = ToolIntentDecision()
+                    tools = self.registry.definitions_for_intent(
+                        context,
+                        route_decision.intent,
+                        include_retrieval=route_decision.needs_retrieval,
+                    )
+                    logger.info(
+                        "Tool intent for run %s: %s, retrieval=%s (%s)",
+                        run.run_id,
+                        route_decision.intent,
+                        route_decision.needs_retrieval,
+                        ", ".join(tool.name for tool in tools) or "no tools",
+                    )
+
+            doom_signature: str | None = None
+            doom_count = 0
+
             for _round_number in range(self.max_rounds):
                 if cancellation.is_set():
                     yield ChatStreamEvent("cancelled", cancelled_payload())
                     return
 
                 completed_turn = None
-                for event in backend.stream_model_turn(run.model_messages, tools, config):
-                    if cancellation.is_set():
-                        yield ChatStreamEvent("cancelled", cancelled_payload())
-                        return
-                    if not isinstance(event, ModelEvent):
-                        raise TypeError("Model backend returned an invalid event")
-                    if event.kind == "text_delta" and event.text:
-                        yield ChatStreamEvent("delta", {"text": event.text})
-                    elif event.kind == "turn_complete":
-                        completed_turn = event.turn
+                with run.persistence_lock:
+                    model_messages = run.model_messages
+                responses = backend.stream_model_turn(model_messages, tools, config)
+                try:
+                    for event in responses:
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+                        if not isinstance(event, ModelEvent):
+                            raise TypeError("Model backend returned an invalid event")
+                        if event.kind == "text_delta" and event.text:
+                            with run.persistence_lock:
+                                if cancellation.is_set() or run.persisted:
+                                    continue
+                                pending_text.append(event.text)
+                            yield ChatStreamEvent("delta", {"text": event.text})
+                        elif event.kind == "turn_complete":
+                            completed_turn = event.turn
+                finally:
+                    close = getattr(responses, "close", None)
+                    if callable(close):
+                        close()
 
                 if completed_turn is None:
                     raise RuntimeError("Model backend did not complete its turn")
+
+                offered_names = {tool.name for tool in tools}
+                if any(call.name not in offered_names for call in completed_turn.tool_calls):
+                    raise ValueError("Model requested a tool not offered for this turn")
 
                 assistant_message = ChatMessage(
                     role="assistant",
                     content=completed_turn.text or None,
                     tool_calls=completed_turn.tool_calls,
                 )
-                run.record_assistant(assistant_message)
+                with run.persistence_lock:
+                    if not run.persisted:
+                        run.record_assistant(assistant_message)
+                    pending_text.clear()
 
                 if not completed_turn.tool_calls:
                     run.mark_model_completed()
@@ -400,7 +488,24 @@ class ChatOrchestrator:
                     raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
 
                 for call in completed_turn.tool_calls:
-                    definition = self.registry.get(call.name)
+                    # Interrupt runs stuck re-issuing the same call: the model
+                    # has stopped making progress and each repeat burns tokens
+                    # (and possibly side effects) for an identical answer.
+                    signature = (
+                        f"{call.name}:" f"{json.dumps(call.arguments, sort_keys=True, default=str)}"
+                    )
+                    if signature == doom_signature:
+                        doom_count += 1
+                    else:
+                        doom_signature = signature
+                        doom_count = 1
+                    if doom_count >= self.doom_loop_threshold:
+                        raise RuntimeError(
+                            f"Doom loop detected: tool '{call.name}' was called "
+                            f"{doom_count} times in a row with identical arguments"
+                        )
+
+                    definition = self.registry.get(call.name, context)
                     requires_approval = bool(definition and definition.requires_approval)
                     proposed = self._tool_state(
                         call,
@@ -416,10 +521,73 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    if not requires_approval:
-                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                    if requires_approval:
+                        assert definition is not None
+                        yield ChatStreamEvent(
+                            "tool_call",
+                            self._tool_state(
+                                call,
+                                "awaiting_approval",
+                                requires_approval=True,
+                            ),
+                        )
+                        if interactive:
+                            pending = self.approvals.request(
+                                run.run_id,
+                                call.id,
+                                call.name,
+                                workspace_id=workspace_id,
+                                arguments_fingerprint=tool_arguments_fingerprint(
+                                    call.name,
+                                    call.arguments,
+                                ),
+                                definition_fingerprint=definition.approval_fingerprint(),
+                            )
+                            decision = self.approvals.wait(
+                                pending,
+                                self.approval_timeout_seconds,
+                                cancellation,
+                            )
+                        else:
+                            decision = "deny"
 
-                    result = self.registry.execute(call, context)
+                        if cancellation.is_set():
+                            yield ChatStreamEvent("cancelled", cancelled_payload())
+                            return
+
+                        if decision == "approve":
+                            approved_call_ids.add(call.id)
+                            context = ToolContext(
+                                workspace_id=workspace_id,
+                                chat_id=chat_id,
+                                run_id=run.run_id,
+                                approved_call_ids=frozenset(approved_call_ids),
+                                cancellation=cancellation,
+                            )
+                            yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                            result = self.registry.execute(
+                                call,
+                                context,
+                                expected_approval_fingerprint=(
+                                    pending.definition_fingerprint
+                                    if pending.arguments_fingerprint
+                                    == tool_arguments_fingerprint(call.name, call.arguments)
+                                    else "invalidated"
+                                ),
+                            )
+                        else:
+                            result = ToolResult(
+                                call=call,
+                                status="failed",
+                                content=(
+                                    "BLOCKED: user approval was denied or timed out. "
+                                    "Do not retry this tool call without a new user request."
+                                ),
+                                error="approval_denied",
+                            )
+                    else:
+                        yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
+                        result = self.registry.execute(call, context)
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
@@ -485,6 +653,9 @@ class ChatOrchestrator:
                 "done",
                 {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
+        except GeneratorExit:
+            persist_turn("cancelled", run.assistant_text or None)
+            raise
         except Exception as error:
             logger.exception("Chat run %s failed", run.run_id)
             persisted_chat_id = persist_turn(
@@ -504,9 +675,11 @@ class ChatOrchestrator:
                 {"run_id": run.run_id, "chat_id": persisted_chat_id},
             )
         finally:
+            self.approvals.cancel_run(run.run_id)
             self.run_controls.finish(run.run_id)
 
     def complete(self, **kwargs: Any) -> AgentCompletion:
+        kwargs.setdefault("interactive", False)
         completion: AgentCompletion | None = None
         error: str | None = None
         for event in self.stream(**kwargs):

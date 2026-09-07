@@ -19,6 +19,7 @@ Produce independent evidence for the riskiest behaviors changed by one open Geis
 8. Keep total interactive browser operation near two to four minutes. Spend setup and focused automated-test time outside the recording when possible.
 9. Include failures and blockers in the evidence. Never stage a demonstration or hide a failed attempt.
 10. Return exactly one overall verdict: `PASS`, `FAIL`, or `BLOCKED`.
+11. Attempt the bounded Docker self-recovery procedure before declaring a Docker lane blocked.
 
 ## Step 1: Establish immutable PR context
 
@@ -88,6 +89,82 @@ Require the subagent to:
 7. Mark an unavailable required lane `BLOCKED`; do not substitute a unit test or another runner and call it passed.
 
 Reuse `.agents/skills/geist-test-loop/SKILL.md` for Geist startup, Docker, browser, chat, settings, and native MLX practices. Use the installed browser-control skill for interactive UI testing.
+
+## Step 4a: Recover blocked Docker lanes
+
+Attempt bounded self-recovery when Docker fails because of stale QA resources,
+build-cache pressure, dangling images, an occupied port, or a supported-platform
+mismatch. Keep cleanup scoped to disposable resources and preserve all named
+volumes and unrelated workloads.
+
+1. Give the QA stack a unique Compose project name such as
+   `geist-qa-<pr>-<short-sha>`. Reuse that name for every Compose command in the
+   run so task-owned containers, networks, and images can be identified.
+2. Capture the original failure and diagnose before deleting anything:
+
+   ```bash
+   docker compose -p geist-qa-<pr>-<short-sha> ps -a
+   docker compose -p geist-qa-<pr>-<short-sha> images
+   docker system df
+   docker buildx du
+   docker image ls --filter dangling=true
+   ```
+
+3. For stale state owned by the current QA project, stop it without deleting
+   volumes, then retry once:
+
+   ```bash
+   docker compose -p geist-qa-<pr>-<short-sha> down --remove-orphans
+   docker compose -p geist-qa-<pr>-<short-sha> up -d --build
+   ```
+
+4. For disk pressure, remove only globally dangling images and rebuildable build
+   cache first. These resources have no tag or runtime state, but record the
+   before/after `docker system df` output in the evidence:
+
+   ```bash
+   docker image prune -f
+   docker builder prune -f --filter until=24h
+   docker system df
+   ```
+
+5. If more space is needed, resolve the exact image IDs produced by the current
+   QA Compose project. Confirm that no running or stopped container uses each ID,
+   then remove only those explicit IDs and rebuild:
+
+   ```bash
+   docker compose -p geist-qa-<pr>-<short-sha> images
+   docker ps -a --filter ancestor=<image-id>
+   docker image rm <explicit-task-owned-image-id>
+   docker compose -p geist-qa-<pr>-<short-sha> up -d --build
+   ```
+
+   Do not use unresolved globs, broad repository-name matches, or guessed image
+   IDs. Skip an image when ownership or container use is ambiguous.
+
+6. When the native Docker platform is excluded by the committed lockfile, verify
+   that the repository supports an alternate platform and Docker Desktop can
+   emulate it, then retry with that explicit platform. Treat this as a runtime
+   fallback, not permission to edit dependency or lockfile configuration:
+
+   ```bash
+   DOCKER_DEFAULT_PLATFORM=linux/amd64 \
+     docker compose -p geist-qa-<pr>-<short-sha> up -d --build
+   ```
+
+7. For port conflicts, inspect the listener and stop it only when it belongs to
+   the current QA project. Otherwise select an explicitly reported alternate
+   port when the application supports one; never kill an unrelated process.
+8. Retry no more than twice after the initial failure. Stop and return `BLOCKED`
+   when the same failure persists, ownership cannot be proven, or sufficient
+   space still cannot be reclaimed safely.
+
+Never run `docker image prune -a`, `docker system prune`, `docker volume prune`,
+`docker compose down -v`, remove named volumes, delete unrelated containers or
+images, or reset Docker Desktop without explicit user approval at action time.
+Those operations can destroy cached environments or persistent application data.
+Report the exact additional cleanup needed, its targets, and the estimated
+reclaimable space when requesting approval.
 
 ## Step 5: Record concise evidence
 

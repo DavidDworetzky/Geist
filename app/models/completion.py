@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 from agents.agent_type import AgentType
@@ -29,3 +31,8 @@ class CompleteTextParams(BaseModel):
 class InitializeAgentParams(BaseModel):
     prompt: str
     agent_type: str | None = None
+
+
+class ToolApprovalParams(BaseModel):
+    call_id: str
+    decision: Literal["approve", "deny"]

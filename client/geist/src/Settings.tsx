@@ -7,6 +7,7 @@ import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
+import SettingsToggle from './Components/SettingsToggle';
 import AboutSection from './Components/AboutSection';
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import {
@@ -17,8 +18,8 @@ import {
 type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
-  { value: 'local', label: 'Local Model' },
-  { value: 'online', label: 'Online Model' }
+  { value: 'local', label: 'Local' },
+  { value: 'online', label: 'Online' }
 ];
 
 const SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'settings-llama-compute-validation';
@@ -179,6 +180,13 @@ const Settings: React.FC = () => {
       return next;
     });
     setSaveStatus('idle');
+  };
+
+  const updateUiPreference = (key: string, value: any) => {
+    updateLocalSetting('ui_preferences', {
+      ...(localSettings?.ui_preferences || {}),
+      [key]: value
+    });
   };
 
   const handleSave = async () => {
@@ -361,7 +369,13 @@ const Settings: React.FC = () => {
                 value={localSettings.default_agent_type}
                 options={agentTypeOptions}
                 onChange={(value) => updateLocalSetting('default_agent_type', value)}
-                description="Choose whether to use a local or online language model by default."
+                description="Choose whether Geist runs inference locally or through an online API."
+              />
+              <SettingsToggle
+                label="Intent Router"
+                checked={localSettings.ui_preferences?.intentRouterEnabled === true}
+                onChange={(value) => updateUiPreference('intentRouterEnabled', value)}
+                description="Off by default. Enable an extra model pass to select a focused tool catalog for each turn. When off, the full enabled catalog is available."
               />
             </section>
           )}
@@ -374,13 +388,6 @@ const Settings: React.FC = () => {
               onlineModel={localSettings.default_online_model}
               llamaBackend={localSettings.llama_backend}
               llamaGpuDeviceIds={localSettings.llama_gpu_device_ids}
-              onLocalModelChange={(value) => {
-                updateLocalSetting('default_local_model', value);
-                updateLocalSetting('default_local_artifact_id', null);
-                if (localSettings.default_agent_type !== 'local') {
-                  updateLocalSetting('default_agent_type', 'local');
-                }
-              }}
               onOnlineProviderChange={(value) => {
                 updateLocalSetting('default_online_provider', value);
                 if (localSettings.default_agent_type !== 'online') {

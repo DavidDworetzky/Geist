@@ -12,6 +12,22 @@ from agents.model_catalog import default_local_model_id
 from agents.model_ids import canonicalize_local_model_id
 
 
+def _installed_local_artifact_id(model_id: str) -> str | None:
+    """Resolve an installed compatible artifact for legacy model-only settings."""
+
+    from app.services.local_models import get_local_model_manager
+
+    manager = get_local_model_manager()
+    try:
+        artifact = manager.find_artifact(model_id)
+        status = manager.status(artifact.id)
+    except (KeyError, OSError, ValueError):
+        return None
+    if status.get("supported") is False or status.get("status") != "installed":
+        return None
+    return artifact.id
+
+
 class UserSettingsBase(BaseModel):
     """Base user settings model."""
 
@@ -139,13 +155,15 @@ class AgentFactoryConfig(BaseModel):
         agent_type = overrides.agent_type or settings.default_agent_type
 
         if agent_type == "local":
-            model = canonicalize_local_model_id(
-                overrides.model or settings.default_local_model
-            )
+            model = canonicalize_local_model_id(overrides.model or settings.default_local_model)
             # Leave unset so AgentFactory can select a backend from catalog
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type
-            artifact_id = overrides.artifact_id or settings.default_local_artifact_id
+            artifact_id = (
+                overrides.artifact_id
+                or settings.default_local_artifact_id
+                or _installed_local_artifact_id(model)
+            )
             device_config: dict[str, Any] = {"artifact_id": artifact_id} if artifact_id else {}
             if sys.platform in {"win32", "linux"}:
                 device_config["llama_backend"] = settings.llama_backend or "auto"

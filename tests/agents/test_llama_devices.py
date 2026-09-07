@@ -7,6 +7,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -482,7 +483,7 @@ def test_concurrent_forced_refreshes_share_one_completion_limited_probe(
     coalesced_refresh = second_results[0]
     assert coalesced_refresh is not ordinary
     assert coalesced_refresh.devices == ordinary.devices
-    assert coalesced_refresh.error == DISCOVERY_IN_PROGRESS_ERROR
+    assert coalesced_refresh.error == ordinary.error
     assert coalesced_refresh.discovery_in_progress is True
     assert polled_while_refreshing.devices == ordinary.devices
     assert polled_while_refreshing.discovery_in_progress is True
@@ -580,6 +581,62 @@ def test_cold_in_progress_inventory_reports_missing_runtime_as_unavailable() -> 
     assert len(discovered) == 1
     assert discovered[0].available is False
     assert discovered[0].discovery_in_progress is False
+
+
+def test_wedged_probe_bounds_first_and_subsequent_trusted_callers(tmp_path: Path) -> None:
+    release_probe = threading.Event()
+    probe_finished = threading.Event()
+    calls = []
+
+    def run(*_args, **_kwargs):
+        calls.append(True)
+        release_probe.wait()
+        probe_finished.set()
+        return subprocess.CompletedProcess([], 0, stdout=DEVICE_OUTPUT, stderr="")
+
+    service = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(_runtime_tree(tmp_path))},
+        command_runner=run,
+        timeout_seconds=0.01,
+        clock=lambda: 100.0,
+    )
+    try:
+        started = time.monotonic()
+        for _ in range(2):
+            result = service.inventory()
+            assert result.discovery_in_progress
+            assert result.selection_detection_error == DISCOVERY_IN_PROGRESS_ERROR
+        assert time.monotonic() - started < 1.0
+        assert calls == [True]
+        assert not probe_finished.is_set()
+    finally:
+        release_probe.set()
+        assert probe_finished.wait(timeout=2)
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"GEIST_LOCAL_RUNNER": "mlx", "GEIST_LLAMA_ACCELERATION": "vulkan"},
+        {"GEIST_LLAMA_SERVER_PATH": "/explicit/server", "GEIST_LLAMA_ACCELERATION": "cpu"},
+    ],
+)
+def test_cold_placeholder_preserves_runtime_override_semantics(environment) -> None:
+    service = LlamaDeviceService(environment=environment)
+    placeholder = service._discovery_in_progress_inventory(None)
+    completed = service.inventory()
+    assert placeholder.forced_backend == completed.forced_backend is None
+    assert placeholder.available == completed.available is False
+
+
+def test_warm_placeholder_preserves_discovery_error(tmp_path: Path) -> None:
+    runtime = _runtime_tree(tmp_path)
+    (runtime / "vulkan" / llama_server_filename()).unlink()
+    service = LlamaDeviceService(environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)})
+    completed = service.inventory()
+    placeholder = service._discovery_in_progress_inventory(completed)
+    assert placeholder.error == completed.error
+    assert placeholder.discovery_in_progress
 
 
 @pytest.mark.parametrize("runner", ["transformers", "mlx_llama"])

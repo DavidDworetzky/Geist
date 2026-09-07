@@ -17,7 +17,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
-from agents.model_catalog import PROVIDERS, get_model_spec
+from agents.model_catalog import PROVIDERS, resolve_request_spec
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -115,6 +115,8 @@ class OnlineAgent(BaseAgent):
 
     def _known_native_tool_provider(self) -> bool:
         normalized_url = self.base_url.lower()
+        if "generativelanguage.googleapis.com" in normalized_url:
+            return "/v1beta/openai" in normalized_url
         return any(
             provider_host in normalized_url
             for provider_host in (
@@ -123,6 +125,7 @@ class OnlineAgent(BaseAgent):
                 "groq.com",
                 "api.x.ai",
                 "openrouter.ai",
+                "api.meta.ai",
             )
         )
 
@@ -144,13 +147,23 @@ class OnlineAgent(BaseAgent):
     @staticmethod
     def _apply_model_request_requirements(payload: dict[str, Any]) -> dict[str, Any]:
         """Apply cataloged request constraints before provider dispatch."""
-        spec = get_model_spec(str(payload.get("model") or ""))
+        model_id = str(payload.get("model") or "")
+        spec = resolve_request_spec(model_id)
         if spec is None:
             return payload
 
         constrained = payload.copy()
+        removed_parameters = [
+            parameter for parameter in spec.unsupported_parameters if parameter in constrained
+        ]
         for parameter in spec.unsupported_parameters:
             constrained.pop(parameter, None)
+        if removed_parameters:
+            logger.debug(
+                "Removed unsupported request parameters for %s: %s",
+                spec.id,
+                ", ".join(removed_parameters),
+            )
         if spec.mandatory_reasoning_effort and "reasoning" not in constrained:
             constrained["reasoning"] = {"effort": spec.mandatory_reasoning_effort}
         return constrained
@@ -678,7 +691,18 @@ class OnlineAgent(BaseAgent):
                         int(index),
                         {"id": "", "name": "", "arguments": ""},
                     )
-                    current["id"] += tool_delta.get("id") or ""
+                    tool_call_id = tool_delta.get("id") or ""
+                    # OpenAI sends the ID once; compatible providers may repeat it.
+                    if tool_call_id and not current["id"]:
+                        current["id"] = tool_call_id
+                    elif tool_call_id and tool_call_id != current["id"]:
+                        self.logger.warning(
+                            "Ignoring conflicting tool-call ID for stream index %s: "
+                            "kept %s, received %s",
+                            index,
+                            current["id"],
+                            tool_call_id,
+                        )
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""
                     current["arguments"] += function.get("arguments") or ""

@@ -81,7 +81,7 @@ class MarkdownFileAdapter(BaseAdapter):
             file_root: Directory to search (optional, defaults to adapter's file_root)
 
         Returns:
-            List of markdown file paths relative to the search directory
+            List of markdown file paths relative to the adapter's file_root
         """
         if file_root:
             search_root = (
@@ -104,9 +104,8 @@ class MarkdownFileAdapter(BaseAdapter):
             for root, _dirs, files in os.walk(search_path):
                 for file in files:
                     if file.lower().endswith((".md", ".markdown")):
-                        # Get relative path from search root
                         full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(full_path, search_path)
+                        relative_path = os.path.relpath(full_path, self.file_root)
                         markdown_files.append(relative_path)
 
             return sorted(markdown_files)

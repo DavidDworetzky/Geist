@@ -7,17 +7,17 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app.api.v1.endpoints.user_settings import get_current_user, router
+from app.api.v1.endpoints.user_settings import get_current_workspace, router
 from app.models.user_settings import UserSettingsResponse
 from app.services.user_settings_service import UserSettingsService
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/api/v1/user-settings/", "/api/v1/user-settings/1"])
+@pytest.mark.parametrize("path", ["/api/v1/user-settings/"])
 async def test_compute_update_routes_run_service_off_event_loop(path: str) -> None:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/user-settings")
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id=1)
+    app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
     response = UserSettingsResponse(
         user_settings_id=1,
         user_id=1,
@@ -34,7 +34,7 @@ async def test_compute_update_routes_run_service_off_event_loop(path: str) -> No
     transport = httpx.ASGITransport(app=app)
     with patch.object(
         UserSettingsService,
-        "update_user_settings_by_id",
+        "update_workspace_settings_by_id",
         side_effect=update_settings,
     ):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
