@@ -65,3 +65,14 @@ cached image lacks the voice/TTS dependency);167 native MLX-mode tests passed;
 205 frontend tests and production build passed. Scoped ESLint and production
 mypy pass. Updated native5510 UI returned200; isolated Docker5511 emitted a
 complete synthetic chat stream. Browser smoke remains blocked by the locked Mac.
+# Final failure-path review
+
+Cold discovery failures preserve environment-managed posture; forced refreshes
+retain the same error during backoff. Failed HTTP snapshots are constructed
+outside the condition lock. Settings convert discovery failures to actionable
+422 validation errors without saving or exposing internal exception text.
+Timeout diagnostics only announce recovery when a worker slot exists; exhausted
+workers remain counted while alive (never drop a live worker to evade the cap).
+Restart advice is conditional because a slow probe may still recover. Cached
+inventory reasons are retained, feedback state clears with its timer, and the
+HTTP nonblocking/runtime-waiting test is named for both behaviors.

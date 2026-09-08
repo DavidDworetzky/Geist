@@ -714,6 +714,8 @@ def test_http_probe_failure_retains_stale_devices_without_raising(tmp_path, monk
     result = service.inventory(allow_in_progress=True)
     assert result.devices == original.devices
     assert result.error and not result.discovery_in_progress
+    assert service.inventory(refresh=True, allow_in_progress=True).error == result.error
+    assert result.reason == original.reason
     with pytest.raises(RuntimeError, match="unexpected probe failure"):
         service.inventory()
 
@@ -731,6 +733,11 @@ def test_cold_placeholder_preserves_runtime_override_semantics(environment) -> N
     completed = service.inventory()
     assert placeholder.forced_backend == completed.forced_backend is None
     assert placeholder.available == completed.available is False
+    failed = service._failed_probe_inventory(None)
+    assert failed.managed_by_environment == completed.managed_by_environment
+    assert failed.forced_backend == completed.forced_backend
+    assert failed.available == completed.available
+    assert failed.error and not failed.discovery_in_progress
 
 
 def test_warm_placeholder_preserves_discovery_error(tmp_path: Path) -> None:
