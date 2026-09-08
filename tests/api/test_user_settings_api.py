@@ -13,6 +13,33 @@ from app.services.user_settings_service import UserSettingsService
 
 
 @pytest.mark.asyncio
+async def test_compute_probe_failure_is_actionable_validation_error() -> None:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/user-settings")
+    app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
+    current = SimpleNamespace(
+        default_local_model="old/model", llama_backend="cpu", llama_gpu_device_ids=[]
+    )
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch("app.services.user_settings_service.update_user_settings") as persist,
+        patch("agents.architectures.llama_devices.get_llama_device_service") as discovery,
+    ):
+        discovery.return_value.inventory.side_effect = RuntimeError("private failure detail")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            result = await client.put(
+                "/api/v1/user-settings/",
+                json={"llama_backend": "gpu", "llama_gpu_device_ids": ["gpu-1"]},
+            )
+    assert result.status_code == 422
+    assert "retry saving compute settings" in result.text
+    assert "private failure detail" not in result.text
+    persist.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["/api/v1/user-settings/"])
 async def test_compute_update_routes_run_service_off_event_loop(path: str) -> None:
     app = FastAPI()

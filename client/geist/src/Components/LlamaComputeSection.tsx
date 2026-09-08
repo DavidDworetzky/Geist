@@ -97,7 +97,10 @@ export default function LlamaComputeSection({
 
   useEffect(() => {
     if (!feedbackSettled) return;
-    const timer = window.setTimeout(() => setRefreshFeedback(null), 5000);
+    const timer = window.setTimeout(() => {
+      setRefreshFeedback(null);
+      setFeedbackSettled(false);
+    }, 5000);
     return () => window.clearTimeout(timer);
   }, [feedbackSettled]);
 

@@ -408,6 +408,16 @@ class LlamaDeviceService:
         refresh: bool = False,
         allow_in_progress: bool = False,
     ) -> LlamaDeviceInventory:
+        try:
+            return self._inventory(refresh=refresh, allow_in_progress=allow_in_progress)
+        except RuntimeError:
+            if not allow_in_progress:
+                raise
+            with self._probe_completed:
+                cached = self._cached_inventory
+            return self._failed_probe_inventory(cached)
+
+    def _inventory(self, *, refresh: bool, allow_in_progress: bool) -> LlamaDeviceInventory:
         probe_budget = max(0.0, self.timeout_seconds) * 1.5 + 1.0
         # Cache TTLs are injectable; blocking deadlines deliberately use wall
         # monotonic time so a frozen test/operator clock cannot strand a waiter.
@@ -423,30 +433,31 @@ class LlamaDeviceService:
             timed_out = (
                 self._probe_in_flight and time.monotonic() >= self._probe_started_at + probe_budget
             )
-            if timed_out and self._logged_timeout_generation != self._probe_generation:
+            if (
+                timed_out
+                and len(self._active_probes) < 2
+                and self._logged_timeout_generation != self._probe_generation
+            ):
                 logger.error(
                     "llama.cpp device discovery exceeded its deadline; attempting bounded recovery"
                 )
                 self._logged_timeout_generation = self._probe_generation
             joined_probe = self._probe_in_flight
             if not joined_probe or (timed_out and len(self._active_probes) < 2):
+                if self._probe_error is not None and now < self._next_refresh_allowed_at:
+                    raise RuntimeError(self._probe_error)
                 if (
                     self._cached_inventory is not None
                     and refresh
                     and now < self._next_refresh_allowed_at
                 ):
                     return self._cached_inventory
-                if self._probe_error is not None and now < self._next_refresh_allowed_at:
-                    if allow_in_progress:
-                        return self._failed_probe_inventory(self._cached_inventory)
-                    raise RuntimeError(self._probe_error)
                 self._probe_in_flight = True
                 self._probe_error = None
                 self._probe_generation += 1
                 generation = self._probe_generation
                 self._probe_started_at = time.monotonic()
                 self._active_probes.add(generation)
-                joined_probe = False
                 # At most two workers, including an abandoned OS probe. Late
                 # results cannot replace the current generation's inventory.
                 try:
@@ -467,8 +478,6 @@ class LlamaDeviceService:
                 self._probe_completed.wait(timeout=remaining)
             if not self._probe_in_flight:
                 if self._probe_error is not None:
-                    if allow_in_progress:
-                        return self._failed_probe_inventory(self._cached_inventory)
                     raise RuntimeError(self._probe_error)
                 if self._cached_inventory is not None:
                     return self._cached_inventory
@@ -476,7 +485,9 @@ class LlamaDeviceService:
             timed_out = time.monotonic() >= self._probe_started_at + probe_budget
             recovery_exhausted = timed_out and len(self._active_probes) >= 2
             if recovery_exhausted and self._logged_exhausted_generation != self._probe_generation:
-                logger.error("GPU discovery recovery exhausted; restart Geist to restore discovery")
+                logger.error(
+                    "GPU discovery recovery exhausted while two probes remain active; restart Geist if discovery does not recover"
+                )
                 self._logged_exhausted_generation = self._probe_generation
             if timed_out and self._logged_timeout_generation != self._probe_generation:
                 logger.error(
@@ -488,7 +499,7 @@ class LlamaDeviceService:
         result = self._discovery_in_progress_inventory(cached_inventory)
         if timed_out:
             message = (
-                "GPU discovery timed out and recovery is exhausted. Restart Geist to restore discovery."
+                "GPU discovery timed out while both probe workers remain active. Restart Geist if discovery does not recover."
                 if recovery_exhausted
                 else "GPU discovery timed out. Retry refresh."
             )
@@ -501,19 +512,13 @@ class LlamaDeviceService:
             )
         return result
 
-    @staticmethod
-    def _failed_probe_inventory(cached: LlamaDeviceInventory | None) -> LlamaDeviceInventory:
+    def _failed_probe_inventory(self, cached: LlamaDeviceInventory | None) -> LlamaDeviceInventory:
         message = "GPU discovery failed. Retry refresh after a short wait."
         if cached is None:
-            return _cpu_inventory(
-                available=False,
-                reason=message,
-                error=message,
-                selection_detection_error=message,
-            )
+            cached = self._discovery_in_progress_inventory(None)
         return replace(
             cached,
-            reason=message,
+            reason=cached.reason if not cached.discovery_in_progress else message,
             error=message,
             selection_detection_error=message,
             discovery_in_progress=False,
