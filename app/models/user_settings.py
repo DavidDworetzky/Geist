@@ -35,7 +35,7 @@ class AgentPermissionsSettings(BaseModel):
     ] = Field(
         default=[],
         max_length=MAX_ALWAYS_ALLOWED_TOOLS,
-        description="Tool names that never require approval, regardless of mode",
+        description="Eligible static built-in tool names that skip approval; runtime-discovered tools and mandatory fresh-approval tools cannot redeem these grants",
     )
 
 

@@ -108,4 +108,5 @@ def test_runtime_source_catalog_never_offers_standing_grants(tools_client, monke
     client, _secret = tools_client
     response = client.get("/agent/tools")
     assert response.status_code == 200
-    assert response.json()["tools"][0]["allows_standing_grant"] is False
+    tools = {tool["name"]: tool for tool in response.json()["tools"]}
+    assert tools[definition.name]["allows_standing_grant"] is False

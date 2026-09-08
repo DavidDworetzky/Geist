@@ -8,7 +8,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel
 
@@ -45,13 +45,7 @@ MAX_PERMISSION_TOOL_NAME_LENGTH = 256
 PERMISSION_MODE_DEFAULT: PermissionMode = "default"
 PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
 PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
-VALID_PERMISSION_MODES: frozenset[str] = frozenset(
-    (
-        PERMISSION_MODE_DEFAULT,
-        PERMISSION_MODE_AUTO_APPROVE,
-        PERMISSION_MODE_REQUIRE_APPROVAL,
-    )
-)
+VALID_PERMISSION_MODES: frozenset[PermissionMode] = frozenset(get_args(PermissionMode))
 
 
 @dataclass(frozen=True)
@@ -243,11 +237,9 @@ class ToolDefinition:
 def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
     """Effective approval requirement for one call under the user's permissions.
 
-    Name-only standing grants apply to static built-ins, never mutable sources.
-    Eligible grants win over the per-tool flag and require_approval mode;
-    auto_approve explicitly waives everything
-    else; require_approval asks for every remaining tool; default falls back
-    to the tool's own requires_approval flag.
+    Auto-approve explicitly waives approval. Otherwise, eligible static built-in
+    grants skip approval; require_approval asks for remaining tools; default
+    falls back to the tool's flag. Mutable sources cannot redeem name-only grants.
     """
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
