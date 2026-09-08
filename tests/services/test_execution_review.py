@@ -81,9 +81,10 @@ def test_container_root_is_read_only_and_podman_posture_is_named():
     )
 
 
-def test_mandatory_approval_changes_definition_fingerprint():
+def test_mandatory_approval_changes_definition_fingerprint(monkeypatch):
     from dataclasses import replace
 
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     definition = build_default_tool_registry().get("terminal.run")
     assert (
         replace(

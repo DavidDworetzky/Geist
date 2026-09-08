@@ -308,6 +308,8 @@ def test_auto_start_waits_for_inflight_http_inventory_and_uses_discovered_gpu(
     http_thread = threading.Thread(target=fetch_http_inventory)
     http_thread.start()
     assert probe_entered.wait(timeout=2)
+    http_thread.join(timeout=0.5)
+    assert not http_thread.is_alive()
 
     processes = []
 
@@ -347,7 +349,8 @@ def test_auto_start_waits_for_inflight_http_inventory_and_uses_discovered_gpu(
     assert http_errors == []
     assert start_errors == []
     assert len(http_results) == 1
-    assert http_results[0].recommended_backend == "gpu"
+    assert http_results[0].discovery_in_progress is True
+    assert device_service.inventory(allow_in_progress=True).recommended_backend == "gpu"
     assert len(connections) == 1
     assert connections[0].backend == "vulkan"
     assert len(processes) == 1

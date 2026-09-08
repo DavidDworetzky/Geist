@@ -34,3 +34,14 @@ eligibility. Keep fresh terminal approval as the strongest predicate, ahead of
 auto-approve and all grants; expose both flags and disable creation of either
 kind of inert grant in the UI.479 Docker tests and222 frontend tests/build pass;
 three-file project mypy passes. Earlier runtime and native evidence remains.
+
+Review5576478990: root filesystem is read-only, with bounded writable tmpfs;
+pending approval arguments are expanded; fingerprints include mandatory approval
+and execution posture; explicit Podman runtimes are named correctly. Mandatory
+terminal tools advertise standing grants as unavailable, with truthful UI copy.
+POSIX pipe polling releases readers when an escaped descendant retains a pipe.
+Windows retains the bounded daemon-reader fallback because select does not support
+Windows anonymous pipes; fresh host approval remains mandatory. Output throughput
+is bounded by deadline, not a byte-kill threshold; signal exit codes remain raw
+subprocess results. Background-pipe timeout behavior is documented. POSIX-only
+tests are marked and the 50MB memory test has a 15-second scheduling allowance.

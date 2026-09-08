@@ -37,7 +37,8 @@ ToolSemanticTag = Literal[
 #                      tools ask, read-only tools run).
 #   auto_approve     — no tool ever waits for approval.
 #   require_approval — every tool call waits for approval unless the tool is
-#                      on the user's always-allow list.
+#                      covered by an eligible standing grant; source-provided
+#                      tools cannot redeem name-only grants.
 PermissionMode = Literal["default", "auto_approve", "require_approval"]
 MAX_ALWAYS_ALLOWED_TOOLS = 256
 MAX_PERMISSION_TOOL_NAME_LENGTH = 256

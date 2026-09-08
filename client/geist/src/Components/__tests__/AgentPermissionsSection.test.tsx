@@ -82,6 +82,7 @@ describe('AgentPermissionsSection', () => {
 
     await waitFor(() => screen.getByText('web.search'));
     expect(screen.getByText(/Auto-approve is on/i)).toBeInTheDocument();
+    expect(screen.getByText(/MCP\/plugin tools whose definitions can change without notice/)).toBeInTheDocument();
   });
 
   it('removes a tool from the allowlist and supports clear all', async () => {
@@ -176,6 +177,7 @@ describe('AgentPermissionsSection', () => {
     render(<AgentPermissionsSection agentPermissions={{ mode: 'default', always_allow: selected ? ['mcp.weather.forecast'] : [] }} onChange={onChange} />);
     const tool = await screen.findByRole('button', { name: /mcp.weather.forecast/ });
     expect(tool).toHaveProperty('disabled', !selected);
+    expect(tool.textContent).toContain(selected ? 'stored grant is not honored' : 'standing grants unavailable');
     fireEvent.click(tool);
     expect(onChange.mock.calls).toEqual(selected ? [[{ mode: 'default', always_allow: [] }]] : []);
   });
