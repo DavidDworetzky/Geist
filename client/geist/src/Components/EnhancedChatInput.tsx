@@ -14,6 +14,7 @@ interface EnhancedChatInputProps {
   rows?: number;
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   sessionId?: number;
+  agentType?: string;
   enableVoice?: boolean;
 }
 
@@ -30,6 +31,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   rows = 3,
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
+  agentType,
   enableVoice = true
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
@@ -48,6 +50,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     toggleRecording
   } = useVoiceChat({
     sessionId,
+    agentType,
     sttProvider: voiceSelection.sttProvider,
     ttsProvider: voiceSelection.ttsProvider,
     ttsModel: voiceSelection.ttsModel,
@@ -200,7 +203,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
                 selection={voiceSelection}
                 onChange={setVoiceSelection}
                 catalog={catalog}
-                disabled={disabled || isRecording}
+                disabled={isRecording}
               />
               <VoiceButton
                 isRecording={isRecording}

@@ -119,6 +119,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
             Speech to text
             <select
               value={selection.sttProvider}
+              disabled={disabled}
               onChange={e => onChange({ ...selection, sttProvider: e.target.value })}
             >
               {STT_PROVIDERS.map(provider => (
@@ -138,6 +139,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                 Voice provider
                 <select
                   value={selection.ttsProvider}
+                  disabled={disabled}
                   onChange={e => handleProviderChange(e.target.value)}
                 >
                   {data.providers.map(provider => {
@@ -156,6 +158,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Model
                   <select
                     value={activeModelId || ''}
+                    disabled={disabled}
                     onChange={e => handleModelChange(e.target.value)}
                   >
                     {providerInfo.models.map(model => {
@@ -183,6 +186,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Voice
                   <select
                     value={selection.ttsVoice || modelInfo.voices[0].id}
+                    disabled={disabled}
                     onChange={e => onChange({ ...selection, ttsVoice: e.target.value })}
                   >
                     {modelInfo.voices.map(voice => (
@@ -199,6 +203,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Language
                   <select
                     value={selection.ttsLanguage || modelInfo.languages[0].code}
+                    disabled={disabled}
                     onChange={e => onChange({ ...selection, ttsLanguage: e.target.value })}
                   >
                     {modelInfo.languages.map(language => (

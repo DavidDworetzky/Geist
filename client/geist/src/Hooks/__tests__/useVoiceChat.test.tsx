@@ -70,6 +70,18 @@ describe('useVoiceChat audio playback contract', () => {
     });
   });
 
+  it.each(['local', 'online'])('routes voice requests to the selected %s runtime', async (agentType) => {
+    const { result, unmount } = renderHook(() => useVoiceChat({
+      sessionId: 7, agentType, sttProvider: 'mms', ttsProvider: 'kokoro',
+    }));
+    await act(async () => { await result.current.startRecording(); });
+    const params = new URL(FakeWebSocket.instances[0].url).searchParams;
+    expect(params.get('agent_type')).toBe(agentType);
+    expect(params.get('stt_provider')).toBe('mms');
+    expect(params.get('tts_provider')).toBe('kokoro');
+    unmount();
+  });
+
   it('uses audio_start sample-rate metadata for streamed PCM playback', async () => {
     const { result, unmount } = renderHook(() => useVoiceChat({
       sessionId: 7,

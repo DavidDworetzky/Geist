@@ -1561,7 +1561,9 @@ textarea:focus-visible {
 .chat-composer-dock textarea,
 .chat-composer-dock button,
 .chat-composer-dock input,
+.chat-composer-dock select,
 .chat-composer-dock a,
+.chat-composer-dock .voice-settings-panel,
 .chat-composer-dock .suggestion-menu {
   pointer-events: auto;
 }
