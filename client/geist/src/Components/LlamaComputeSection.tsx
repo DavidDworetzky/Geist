@@ -161,7 +161,9 @@ export default function LlamaComputeSection({
       if (mounted.current && !controller.signal.aborted) {
         setInventory(payload);
         if (refresh) {
-          setRefreshFeedback('Showing the latest available device snapshot; refresh requests may share a recent probe.');
+          setRefreshFeedback(payload.error
+            ? 'Discovery failed; the displayed device information may be stale. Retry refresh after a short wait.'
+            : 'Showing the latest available device snapshot; refresh requests may share a recent probe.');
           setFeedbackSettled(true);
         } else {
           setRefreshFeedback(null);

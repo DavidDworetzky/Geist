@@ -693,6 +693,21 @@ def test_two_wedges_with_intermediate_recovery_report_restart_required(tmp_path,
             assert service._probe_completed.wait_for(lambda: not service._active_probes, timeout=2)
 
 
+def test_worker_start_failure_is_throttled(monkeypatch):
+    service = LlamaDeviceService(environment={})
+    attempts = []
+
+    def fail_start(_thread):
+        attempts.append(True)
+        raise RuntimeError("thread capacity exhausted")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+    assert service.inventory(allow_in_progress=True).error
+    assert service.inventory(refresh=True, allow_in_progress=True).error
+    assert attempts == [True]
+    assert not service._active_probes
+
+
 def test_http_probe_failure_retains_stale_devices_without_raising(tmp_path, monkeypatch):
     service = LlamaDeviceService(
         environment={"GEIST_LLAMA_RUNTIME_ROOT": str(_runtime_tree(tmp_path))},

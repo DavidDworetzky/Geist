@@ -464,9 +464,14 @@ class LlamaDeviceService:
                     threading.Thread(
                         target=self._probe_inventory, args=(generation,), daemon=True
                     ).start()
-                except RuntimeError:
+                except RuntimeError as error:
                     self._active_probes.discard(generation)
                     self._probe_in_flight = False
+                    self._probe_error = "GPU discovery worker could not start"
+                    self._next_refresh_allowed_at = self.clock() + max(
+                        self.minimum_refresh_interval_seconds, self.negative_cache_ttl_seconds
+                    )
+                    logger.error("GPU discovery worker could not start: %s", error)
                     self._probe_completed.notify_all()
                     raise
             while self._probe_in_flight:
@@ -482,7 +487,9 @@ class LlamaDeviceService:
                 if self._cached_inventory is not None:
                     return self._cached_inventory
             cached_inventory = self._cached_inventory
-            timed_out = time.monotonic() >= self._probe_started_at + probe_budget
+            timed_out = (
+                self._probe_in_flight and time.monotonic() >= self._probe_started_at + probe_budget
+            )
             recovery_exhausted = timed_out and len(self._active_probes) >= 2
             if recovery_exhausted and self._logged_exhausted_generation != self._probe_generation:
                 logger.error(
