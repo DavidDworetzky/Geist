@@ -28,9 +28,9 @@ const modeDescriptions: Record<AgentPermissionMode, string> = {
   default:
     'Read-only tools run automatically; tools that send messages or write files wait for your approval.',
   require_approval:
-    'Every agent tool call waits for your approval unless the tool is on your always-allow list.',
+    'Every agent tool call waits for approval unless it has an eligible always-allow grant. Runtime-discovered tools cannot use standing grants.',
   auto_approve:
-    'The agent runs every tool without asking. Only use this if you trust the agent with all connected tools.'
+    'The agent runs every tool without asking. This includes runtime-discovered MCP/plugin tools whose definitions can change without notice. Only enable this if you trust all connected tools.'
 };
 
 const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
@@ -162,7 +162,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   <span>
                     {tool.name}
                     {tool.enabled === false && <span className="settings-description"> — unavailable</span>}
-                    {tool.allows_standing_grant === false && <span className="settings-description"> — runtime-discovered; standing grants unavailable</span>}
+                    {tool.allows_standing_grant === false && <span className="settings-description"> — runtime-discovered; {selected ? 'stored grant is not honored; click to revoke' : 'standing grants unavailable'}</span>}
                     {(tool.side_effect === 'external_write' || tool.side_effect === 'process') && (
                       <span className="settings-description"> — can affect external systems or run commands</span>
                     )}

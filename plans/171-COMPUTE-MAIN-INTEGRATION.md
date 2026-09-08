@@ -44,3 +44,24 @@ the previously published feature is left alone to avoid further blame churn.
 Follow-up verification: 981 Docker tests passed,7 skipped;169 native MLX-mode
 tests passed;204 frontend tests and production build passed. Scoped production
 ESLint, Ruff and project mypy pass. Browser/hardware limitations above remain.
+
+Follow-up5576357078: a second unrecoverable OS probe now reports an explicit
+restart-required reason and one ERROR for exhausted recovery. The two-live-worker
+cap remains deliberate: aging out a genuinely blocked thread would allow
+unbounded OS probes. HTTP callers return immediately even when initiating a probe;
+unexpected failures return a renderable stale snapshot during backoff. Tests cover
+wedge/recovery/wedge and late results. TTL clocks remain injectable, while blocking
+deadlines intentionally use real monotonic time to remain bounded with a frozen
+clock. Cache reuse is documented best-effort, stale-agent initialization is
+explicit, and pending detection emits one deduplicated warning. Runtime status
+reports matching live acceleration and ignores invalid environment overrides.
+Refresh feedback expiry uses explicit state with a timer test, not copy matching.
+The migration's pre/post-repair validation passes remain intentional: they verify
+both sides of a schema mutation and avoid weakening adoption safety for a minor
+startup-only optimization.
+
+Latest verification: 984 Docker tests passed,3 skipped (live-model tests excluded;
+cached image lacks the voice/TTS dependency);167 native MLX-mode tests passed;
+205 frontend tests and production build passed. Scoped ESLint and production
+mypy pass. Updated native5510 UI returned200; isolated Docker5511 emitted a
+complete synthetic chat stream. Browser smoke remains blocked by the locked Mac.

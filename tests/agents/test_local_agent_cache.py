@@ -228,7 +228,8 @@ def test_first_use_persists_clean_cpu_detection() -> None:
                 geist_main._agent_cache_signatures[agent_type] = saved_signatures[agent_type]
 
 
-def test_failed_auto_cpu_discovery_remains_pending_without_persistence() -> None:
+def test_failed_auto_cpu_discovery_remains_pending_without_persistence(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(geist_main, "_pending_detection_warning", None)
     saved_cache = {
         agent_type: geist_main.agent_cache[agent_type]
         for agent_type in geist_main._LOCAL_AGENT_TYPES
@@ -268,6 +269,7 @@ def test_failed_auto_cpu_discovery_remains_pending_without_persistence() -> None
         assert create.call_count == 1
         get_user.assert_not_called()
         persist.assert_not_called()
+        assert caplog.text.count("First-use compute detection remains pending") == 1
         automatic_config = _factory_config("artifact-a", backend="auto")
         assert geist_main._agent_cache_signatures[AgentType.LLAMA] == (
             geist_main._local_agent_configuration_signature(automatic_config)
@@ -383,6 +385,24 @@ def test_explicit_binary_does_not_claim_persisted_gpu_acceleration(monkeypatch):
     monkeypatch.setenv("GEIST_LLAMA_SERVER_PATH", "/operator/server")
     monkeypatch.delenv("GEIST_LLAMA_ACCELERATION", raising=False)
     assert geist_main._llama_acceleration("llama_server", "gpu") is None
+
+
+def test_acceleration_prefers_matching_live_runtime_and_ignores_invalid_override(monkeypatch):
+    from types import SimpleNamespace
+
+    from agents.architectures import llama_server_process
+
+    monkeypatch.delenv("GEIST_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.setenv("GEIST_LLAMA_ACCELERATION", "cuda")
+    monkeypatch.setattr(
+        llama_server_process,
+        "get_llama_server_manager",
+        lambda: SimpleNamespace(
+            public_status=lambda: {"status": "ready", "model_id": "loaded", "backend": "vulkan"},
+        ),
+    )
+    assert geist_main._llama_acceleration("llama_server", None, "loaded") == "vulkan"
+    assert geist_main._llama_acceleration("llama_server", "cpu", "other") == "cpu"
 
 
 def test_concurrent_manual_choice_is_not_cached_as_the_auto_runtime() -> None:

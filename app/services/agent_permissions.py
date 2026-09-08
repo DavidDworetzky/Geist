@@ -4,11 +4,12 @@ Persisted on ``user_settings.agent_permissions`` as
 ``{"mode": <permission mode>, "always_allow": [tool names]}``. The mode is the
 Hermes-style approval posture (auto-approve everything, require approval for
 everything, or defer to per-tool flags) and ``always_allow`` is the standing
-per-tool allowlist that skips approval even under the strict mode.
+per-tool allowlist honored only for eligible tools, including under strict mode.
 """
 
 import logging
 from dataclasses import dataclass, field
+from typing import TypedDict, cast
 
 from agents.models.tool_calling import (
     MAX_ALWAYS_ALLOWED_TOOLS,
@@ -28,7 +29,12 @@ class AgentPermissions:
     always_allow: frozenset[str] = field(default_factory=frozenset)
 
 
-def normalize_agent_permissions(raw: object) -> dict:
+class NormalizedPermissions(TypedDict):
+    mode: PermissionMode
+    always_allow: list[str]
+
+
+def normalize_agent_permissions(raw: object) -> NormalizedPermissions:
     """Coerce a stored/submitted agent_permissions value into canonical shape.
 
     Raises ValueError on an unknown mode or a non-list allowlist so API
@@ -56,7 +62,7 @@ def normalize_agent_permissions(raw: object) -> dict:
         raise ValueError("agent_permissions.always_allow must be a list of tool names")
 
     deduped = sorted({name.strip() for name in always_allow})
-    return {"mode": mode, "always_allow": deduped}
+    return {"mode": cast(PermissionMode, mode), "always_allow": deduped}
 
 
 def load_agent_permissions(user_id: int) -> AgentPermissions:

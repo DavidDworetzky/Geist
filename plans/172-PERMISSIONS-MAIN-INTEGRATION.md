@@ -29,3 +29,14 @@ Follow-up:393 Docker tests pass,221 frontend tests/build pass; five-file project
 mypy and production component ESLint pass. Includes versioned compute-parent
 upgrade and permissions-only legacy adoption, injected-loader failure, changed
 dynamic definitions, and disabled-new/revocable-old grant UI coverage.
+# Review5576410109 follow-up
+
+Auto-approve copy explicitly covers runtime MCP/plugin definitions changing
+without notice. Require-approval copy explains grant eligibility, and an old
+ineligible grant is labeled as stored but not honored, with revocation available.
+The normalizer now returns a TypedDict so PermissionMode is checked at its
+construction boundary. A catalog contract test pins false eligibility for a
+source-provided tool. Source eligibility deliberately remains fail-closed for
+first-party adapter sources too; registrars do not gain an extra trust override.
+In #307, mandatory per-call approval remains ahead of both global auto-approve
+and standing-grant checks. This ordering is a stack contract, not an optional UI rule.

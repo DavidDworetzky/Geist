@@ -90,21 +90,23 @@ export default function LlamaComputeSection({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null);
+  const [feedbackSettled, setFeedbackSettled] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
   const mounted = useRef(true);
   const activeRequest = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!refreshFeedback?.startsWith('Showing the latest')) return;
+    if (!feedbackSettled) return;
     const timer = window.setTimeout(() => setRefreshFeedback(null), 5000);
     return () => window.clearTimeout(timer);
-  }, [refreshFeedback]);
+  }, [feedbackSettled]);
 
   const loadInventory = useCallback(async (refresh: boolean) => {
     activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
     if (refresh) {
+      setFeedbackSettled(false);
       setRefreshing(true);
       setRefreshFeedback('Refreshing device discovery…');
     } else {
@@ -157,6 +159,7 @@ export default function LlamaComputeSection({
         setInventory(payload);
         if (refresh) {
           setRefreshFeedback('Showing the latest available device snapshot; refresh requests may share a recent probe.');
+          setFeedbackSettled(true);
         } else {
           setRefreshFeedback(null);
         }
