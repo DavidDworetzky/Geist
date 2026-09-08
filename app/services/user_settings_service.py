@@ -148,6 +148,10 @@ class UserSettingsService:
                     ) from error
                 if inventory.managed_by_environment:
                     raise ValueError("llama.cpp compute selection is managed by the environment")
+                if next_backend == "gpu" and getattr(inventory, "selection_detection_error", None):
+                    raise ValueError(
+                        "GPU discovery failed; retry saving compute settings after a short wait"
+                    )
                 if next_backend == "gpu":
                     if not next_device_ids:
                         raise ValueError("Select at least one llama.cpp GPU device")

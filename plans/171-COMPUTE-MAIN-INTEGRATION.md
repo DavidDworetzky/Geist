@@ -67,6 +67,12 @@ mypy pass. Updated native5510 UI returned200; isolated Docker5511 emitted a
 complete synthetic chat stream. Browser smoke remains blocked by the locked Mac.
 # Final failure-path review
 
+Review5577140472: timed-out GPU saves also receive actionable 422 errors, worker
+start failures back off, and the live refresh status explicitly announces stale
+data on failure. Timeout detection includes the in-flight guard. A timestamp
+field is deferred as optional schema/UI expansion; stale data is identified by
+the existing error plus the live status message.
+
 Cold discovery failures preserve environment-managed posture; forced refreshes
 retain the same error during backoff. Failed HTTP snapshots are constructed
 outside the condition lock. Settings convert discovery failures to actionable
