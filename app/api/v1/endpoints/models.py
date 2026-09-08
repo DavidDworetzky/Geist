@@ -185,9 +185,14 @@ async def get_providers():
 
 
 @router.get("/local/artifacts")
-def get_local_artifacts(model_id: str | None = None):
+def get_local_artifacts(model_id: str | None = None, modality: str | None = None):
     """List curated and imported local artifacts with installation progress."""
-    return {"artifacts": get_local_model_manager().list_artifacts(model_id)}
+    return {
+        "artifacts": get_local_model_manager().list_artifacts(
+            model_id,
+            modality=modality,
+        )
+    }
 
 
 @router.get("/local/artifacts/{artifact_id}")

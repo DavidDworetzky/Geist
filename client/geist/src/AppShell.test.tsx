@@ -375,4 +375,18 @@ describe('AppShell runtime model selector', () => {
     expect(homeLink.querySelector('.brand-mark-svg')).not.toBeInTheDocument();
     expect(within(homeLink).getByText('Private Local AI harness')).toBeInTheDocument();
   });
+
+  it('excludes voice artifacts from the chat model selector', async () => {
+    mockSettings();
+    availableArtifacts = [...artifacts, {
+      id: 'kokoro-82m-bf16-mlx', model_id: 'hexgrad/Kokoro-82M',
+      display_name: 'Vera voice', modality: 'tts', status: 'installed', supported: true,
+    }, {
+      id: 'fresh-llm', model_id: 'test/fresh-llm', display_name: 'Fresh language model',
+      modality: 'llm', status: 'installed', supported: true,
+    }];
+    renderShell();
+    await screen.findByRole('option', { name: 'Fresh language model' });
+    expect(screen.queryByRole('option', { name: /Vera voice/ })).not.toBeInTheDocument();
+  });
 });

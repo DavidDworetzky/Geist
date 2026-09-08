@@ -1,7 +1,8 @@
 import React, { useState, useRef, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
-import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
+import VoiceSettings from './VoiceSettings';
+import useVoiceSelection from '../Hooks/useVoiceSelection';
 import useVoiceChat from '../Hooks/useVoiceChat';
 
 interface EnhancedChatInputProps {
@@ -13,6 +14,7 @@ interface EnhancedChatInputProps {
   rows?: number;
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   sessionId?: number;
+  agentType?: string;
   enableVoice?: boolean;
 }
 
@@ -29,6 +31,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   rows = 3,
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
+  agentType,
   enableVoice = true
 }) => {
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
@@ -37,7 +40,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+  const { selection: voiceSelection, setSelection: setVoiceSelection, catalog, ready: voiceReady }
+    = useVoiceSelection(enableVoice);
 
   const {
     isRecording,
@@ -46,6 +50,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     toggleRecording
   } = useVoiceChat({
     sessionId,
+    agentType,
     sttProvider: voiceSelection.sttProvider,
     ttsProvider: voiceSelection.ttsProvider,
     ttsModel: voiceSelection.ttsModel,
@@ -197,13 +202,14 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
               <VoiceSettings
                 selection={voiceSelection}
                 onChange={setVoiceSelection}
-                disabled={disabled || isRecording}
+                catalog={catalog}
+                disabled={isRecording}
               />
               <VoiceButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
                 onClick={toggleRecording}
-                disabled={disabled}
+                disabled={disabled || (!voiceReady && !isRecording)}
               />
             </>
           )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import useVoiceModels, { TTSModelInfo, TTSProviderInfo } from '../Hooks/useVoiceModels';
+import useVoiceModels, { TTSModelInfo, TTSProviderInfo, UseVoiceModelsReturn } from '../Hooks/useVoiceModels';
 
 export interface VoiceSelection {
   sttProvider: string;
@@ -9,8 +9,7 @@ export interface VoiceSelection {
   ttsLanguage?: string;
 }
 
-// Matches the backend defaults in app/api/v1/endpoints/voice.py, so leaving
-// the panel untouched keeps today's behavior (local MMS STT + Sesame CSM TTS).
+// Fallback while the installed-model catalog is loading; recording waits for it.
 export const DEFAULT_VOICE_SELECTION: VoiceSelection = {
   sttProvider: 'mms',
   ttsProvider: 'sesame'
@@ -21,19 +20,35 @@ const STT_PROVIDERS = [
   { id: 'whisper', display_name: 'Whisper (OpenAI API)' }
 ];
 
+export const modelIsReady = (model: TTSModelInfo): boolean => (
+  !model.artifact
+  || (
+    model.artifact.supported !== false
+    && model.artifact.status === 'installed'
+    && model.artifact.runtime_ready === true
+  )
+);
+
+const providerIsReady = (provider: TTSProviderInfo): boolean => (
+  provider.models.some(modelIsReady)
+);
+
 interface VoiceSettingsProps {
   selection: VoiceSelection;
   onChange: (selection: VoiceSelection) => void;
   disabled?: boolean;
+  catalog?: UseVoiceModelsReturn;
 }
 
 const VoiceSettings: React.FC<VoiceSettingsProps> = ({
   selection,
   onChange,
-  disabled = false
+  disabled = false,
+  catalog
 }) => {
   const [expanded, setExpanded] = useState(false);
-  const { data, loading, error } = useVoiceModels(expanded);
+  const localCatalog = useVoiceModels(expanded && !catalog);
+  const { data, loading, error } = catalog || localCatalog;
 
   const providerInfo: TTSProviderInfo | undefined = data?.providers.find(
     p => p.provider === selection.ttsProvider
@@ -56,10 +71,12 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
 
   const handleProviderChange = (providerId: string) => {
     const provider = data?.providers.find(p => p.provider === providerId);
-    if (!provider) {
+    if (!provider || !providerIsReady(provider)) {
       return;
     }
-    const model = provider.models.find(m => m.id === provider.default_model) || provider.models[0];
+    const model = provider.models.find(
+      m => m.id === provider.default_model && modelIsReady(m)
+    ) || provider.models.find(modelIsReady);
     onChange(selectionForModel(provider, model));
   };
 
@@ -68,6 +85,9 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
       return;
     }
     const model = providerInfo.models.find(m => m.id === modelId);
+    if (!model || !modelIsReady(model)) {
+      return;
+    }
     onChange(selectionForModel(providerInfo, model));
   };
 
@@ -99,6 +119,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
             Speech to text
             <select
               value={selection.sttProvider}
+              disabled={disabled}
               onChange={e => onChange({ ...selection, sttProvider: e.target.value })}
             >
               {STT_PROVIDERS.map(provider => (
@@ -118,13 +139,17 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                 Voice provider
                 <select
                   value={selection.ttsProvider}
+                  disabled={disabled}
                   onChange={e => handleProviderChange(e.target.value)}
                 >
-                  {data.providers.map(provider => (
-                    <option key={provider.provider} value={provider.provider}>
-                      {provider.display_name}
-                    </option>
-                  ))}
+                  {data.providers.map(provider => {
+                    const ready = providerIsReady(provider);
+                    return (
+                      <option key={provider.provider} value={provider.provider} disabled={!ready}>
+                        {provider.display_name}{ready ? '' : ' (download or runtime required)'}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
 
@@ -133,15 +158,27 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Model
                   <select
                     value={activeModelId || ''}
+                    disabled={disabled}
                     onChange={e => handleModelChange(e.target.value)}
                   >
-                    {providerInfo.models.map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.display_name}
-                      </option>
-                    ))}
+                    {providerInfo.models.map(model => {
+                      const ready = modelIsReady(model);
+                      return (
+                        <option key={model.id} value={model.id} disabled={!ready}>
+                          {model.display_name}{ready ? '' : ' (not ready)'}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
+              )}
+
+              {modelInfo?.artifact && !modelIsReady(modelInfo) && (
+                <div className="voice-settings-status">
+                  {modelInfo.artifact.status !== 'installed'
+                    ? 'Download this voice model from the Models tab first.'
+                    : modelInfo.artifact.runtime_detail || 'The local voice runtime is not ready.'}
+                </div>
               )}
 
               {modelInfo && modelInfo.voices.length > 1 && (
@@ -149,6 +186,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Voice
                   <select
                     value={selection.ttsVoice || modelInfo.voices[0].id}
+                    disabled={disabled}
                     onChange={e => onChange({ ...selection, ttsVoice: e.target.value })}
                   >
                     {modelInfo.voices.map(voice => (
@@ -165,6 +203,7 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({
                   Language
                   <select
                     value={selection.ttsLanguage || modelInfo.languages[0].code}
+                    disabled={disabled}
                     onChange={e => onChange({ ...selection, ttsLanguage: e.target.value })}
                   >
                     {modelInfo.languages.map(language => (

@@ -1,6 +1,9 @@
 """
 Unit tests for voice session service.
 """
+
+import asyncio
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -8,16 +11,16 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from app.services.voice_session import VoiceSessionService
+from app.services.voice_session import VoiceSessionService, _ready_tts_segments
 
 
 @pytest.fixture
 def mock_agent():
     """Create a mock agent for testing."""
     agent = Mock()
-    agent.complete_text = Mock(return_value=Mock(
-        choices=[Mock(message=Mock(content="Test response"))]
-    ))
+    agent.complete_text = Mock(
+        return_value=Mock(choices=[Mock(message=Mock(content="Test response"))])
+    )
     agent.stream_complete_text = Mock(return_value=iter(["Test ", "response"]))
     return agent
 
@@ -25,8 +28,8 @@ def mock_agent():
 @pytest.fixture
 def mock_stt():
     """Create a mock STT adapter."""
-    with patch('app.services.voice_session.MMSAdapter') as MockSTT:
-        stt = MockSTT.return_value
+    with patch("app.services.voice_session.create_stt_adapter") as mock_create:
+        stt = mock_create.return_value
         stt.transcribe = Mock(return_value="test transcript")
         yield stt
 
@@ -34,7 +37,7 @@ def mock_stt():
 @pytest.fixture
 def mock_tts():
     """Create a mock TTS provider."""
-    with patch('app.services.voice_session.create_tts_provider') as mock_create:
+    with patch("app.services.voice_session.create_tts_provider") as mock_create:
         tts = Mock()
         tts.sample_rate = 24000
         tts.synthesize_streaming = Mock(return_value=iter([b"audio1", b"audio2"]))
@@ -45,12 +48,10 @@ def mock_tts():
 @pytest.fixture
 def voice_service(mock_agent, mock_stt, mock_tts):
     """Create a voice session service for testing."""
-    service = VoiceSessionService(
-        agent=mock_agent,
-        stt_provider="mms",
-        tts_provider="sesame"
-    )
-    return service
+    service = VoiceSessionService(agent=mock_agent, stt_provider="mms", tts_provider="sesame")
+    yield service
+    service.close()
+    service._worker.shutdown(wait=True)
 
 
 class TestVoiceSessionService:
@@ -74,6 +75,35 @@ class TestVoiceSessionService:
         loud = np.ones(1000) * 0.5
         rms_loud = voice_service._calculate_rms(loud)
         assert rms_loud == 0.5
+
+    def test_empty_frames_are_ignored_and_preroll_preserves_soft_onset(self, voice_service):
+        voice_service.add_audio_chunk(b"")
+        assert voice_service.buffered_samples == 0
+        quiet = np.full(1024, 100, dtype=np.int16)
+        for _ in range(3):
+            voice_service.add_audio_chunk(quiet.tobytes())
+        voice_service.add_audio_chunk(np.full(1024, 4000, dtype=np.int16).tobytes())
+        audio = voice_service.take_audio()
+        assert len(audio) == 3072
+        assert audio[0] == pytest.approx(100 / 32768)
+        assert not voice_service._pre_roll
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [True, False])
+    async def test_announces_rate_after_provider_initializes(
+        self, voice_service, mock_tts, streaming
+    ):
+        def synthesize(text):
+            mock_tts.sample_rate = 48000
+            yield b"pcm"
+
+        mock_tts.synthesize_streaming.side_effect = synthesize
+        responses = [
+            event async for event in voice_service.process_with_agent("hi", use_streaming=streaming)
+        ]
+        start = next(i for i, event in enumerate(responses) if event["type"] == "audio_start")
+        assert responses[start]["sample_rate"] == 48000
+        assert responses[start + 1]["type"] == "audio_chunk"
 
     def test_detect_speech(self, voice_service):
         """Test VAD (voice activity detection)."""
@@ -100,8 +130,8 @@ class TestVoiceSessionService:
         for _ in range(10):
             voice_service.add_audio_chunk(audio_bytes)
 
-        # Should have called STT
-        assert mock_stt.transcribe.called
+        # Audio ingestion must stay cheap; transcription runs on the worker.
+        mock_stt.transcribe.assert_not_called()
 
     def test_phrase_boundary_detection(self, voice_service):
         """Test phrase boundary detection."""
@@ -110,14 +140,16 @@ class TestVoiceSessionService:
         silent_bytes = silent.tobytes()
 
         assert not voice_service.check_phrase_boundary()
+        voice_service.add_audio_chunk(np.full(1600, 4000, dtype=np.int16).tobytes())
 
         # Add enough silent chunks to trigger boundary
-        for _ in range(voice_service.silence_threshold_frames + 1):
+        for _ in range(9):
             voice_service.add_audio_chunk(silent_bytes)
 
         assert voice_service.check_phrase_boundary()
 
-    def test_get_final_transcript(self, voice_service, mock_stt):
+    @pytest.mark.asyncio
+    async def test_get_final_transcript(self, voice_service, mock_stt):
         """Test final transcript extraction."""
         # Add some audio
         audio_np = np.ones(1600) * 0.1
@@ -127,12 +159,31 @@ class TestVoiceSessionService:
         voice_service.add_audio_chunk(audio_bytes)
 
         # Get final transcript
-        transcript = voice_service.get_final_transcript()
+        transcript = await voice_service.transcribe(voice_service.take_audio())
 
         assert mock_stt.transcribe.called
         assert transcript == "test transcript"
         assert len(voice_service.audio_buffer) == 0
         assert voice_service.silence_frames == 0
+
+    @pytest.mark.asyncio
+    async def test_close_before_response_finalizer(self, voice_service):
+        closed = threading.Event()
+
+        def response(*args):
+            try:
+                yield {"type": "text_start"}
+            finally:
+                closed.set()
+
+        voice_service._process_with_agent = response
+        stream = voice_service.process_with_agent("hello")
+        await anext(stream)
+        voice_service.close()
+        await stream.aclose()
+        voice_service._worker.shutdown(wait=True)
+        assert closed.is_set()
+        assert not voice_service._response_iterators
 
     @pytest.mark.asyncio
     async def test_process_with_agent_streaming(self, voice_service, mock_agent, mock_tts):
@@ -141,9 +192,7 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript=transcript,
-            chat_id=1,
-            use_streaming=True
+            transcript=transcript, chat_id=1, use_streaming=True
         ):
             responses.append(response)
 
@@ -151,6 +200,7 @@ class TestVoiceSessionService:
         assert any(r["type"] == "text_start" for r in responses)
         assert any(r["type"] == "text_chunk" for r in responses)
         assert any(r["type"] == "text_complete" for r in responses)
+        assert any(r["type"] == "audio_start" for r in responses)
         assert any(r["type"] == "audio_chunk" for r in responses)
         assert any(r["type"] == "audio_complete" for r in responses)
 
@@ -167,15 +217,38 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript=transcript,
-            chat_id=1,
-            use_streaming=True
+            transcript=transcript, chat_id=1, use_streaming=True
         ):
             responses.append(response)
 
         # Should fall back to complete_text
         mock_agent.complete_text.assert_called_once()
         assert any(r["type"] == "text_complete" for r in responses)
+
+    @pytest.mark.asyncio
+    async def test_starts_tts_after_first_complete_sentence(
+        self, voice_service, mock_agent, mock_tts
+    ):
+        mock_agent.stream_complete_text.return_value = iter(["First sentence. ", "Second sentence"])
+
+        responses = [
+            response
+            async for response in voice_service.process_with_agent(
+                transcript="test", chat_id=1, use_streaming=True
+            )
+        ]
+
+        first_audio = next(
+            index for index, item in enumerate(responses) if item["type"] == "audio_chunk"
+        )
+        text_complete = next(
+            index for index, item in enumerate(responses) if item["type"] == "text_complete"
+        )
+        assert first_audio < text_complete
+        assert [call.args[0] for call in mock_tts.synthesize_streaming.call_args_list] == [
+            "First sentence.",
+            "Second sentence",
+        ]
 
     def test_reset(self, voice_service):
         """Test session reset."""
@@ -201,8 +274,7 @@ class TestVoiceSessionService:
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript="test",
-            use_streaming=True
+            transcript="test", use_streaming=True
         ):
             responses.append(response)
 
@@ -212,28 +284,98 @@ class TestVoiceSessionService:
         assert "Test error" in error_response["message"]
 
     @pytest.mark.asyncio
-    async def test_missing_qwen_tts_dependency_returns_contract_error(self, voice_service, mock_tts):
-        """Test missing Qwen runtime dependency returns a legible voice contract error."""
-        mock_tts.synthesize_streaming.side_effect = ModuleNotFoundError(
-            "No module named 'qwen_tts'",
-            name="qwen_tts",
+    async def test_missing_local_tts_runtime_returns_contract_error(self, voice_service, mock_tts):
+        """Test missing local runtime returns a legible voice contract error."""
+        mock_tts.synthesize_streaming.side_effect = RuntimeError(
+            "Qwen3 TTS on Apple Silicon requires the optional MLX Audio runtime."
         )
 
         responses = []
         async for response in voice_service.process_with_agent(
-            transcript="test",
-            use_streaming=True
+            transcript="test", use_streaming=True
         ):
             responses.append(response)
 
         error_response = next(r for r in responses if r["type"] == "error")
-        assert "requires the qwen_tts package" in error_response["message"]
+        assert "requires the optional MLX Audio runtime" in error_response["message"]
+
+    def test_close_releases_tts_provider(self, voice_service, mock_tts):
+        mock_tts.close = Mock()
+
+        voice_service.close()
+        voice_service._worker.shutdown(wait=True)
+
+        mock_tts.close.assert_called_once_with()
+
+
+def test_ready_tts_segments_retains_unfinished_tail():
+    segments, tail = _ready_tts_segments("One sentence. A partial")
+
+    assert segments == ["One sentence."]
+    assert tail == "A partial"
+
+
+def test_decimal_across_tokens_is_not_split():
+    segments, tail = _ready_tts_segments("The value is 3.")
+    assert segments == []
+    segments, tail = _ready_tts_segments(tail + "14 today.", final=True)
+    assert segments == ["The value is 3.14 today."]
+    assert tail == ""
+
+
+@pytest.mark.parametrize("frame_samples", [1024, 1600, 4096])
+def test_vad_uses_sample_duration(voice_service, frame_samples):
+    silent = np.zeros(frame_samples, dtype=np.int16).tobytes()
+    for _ in range(20):
+        voice_service.add_audio_chunk(silent)
+    assert not voice_service.check_phrase_boundary()
+    assert not voice_service.audio_buffer
+    voice_service.add_audio_chunk(np.full(frame_samples, 4000, dtype=np.int16).tobytes())
+    count = 0
+    while not voice_service.check_phrase_boundary():
+        voice_service.add_audio_chunk(silent)
+        count += 1
+    assert 12800 <= count * frame_samples < 12800 + frame_samples
+
+
+@pytest.mark.asyncio
+async def test_cancellation_keeps_event_loop_responsive_and_closes_generator(
+    voice_service, mock_tts
+):
+    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+
+    def slow_tts(text):
+        try:
+            entered.set()
+            release.wait(5)
+            yield b"stale"
+        finally:
+            closed.set()
+
+    mock_tts.synthesize_streaming.side_effect = slow_tts
+    events = []
+
+    async def consume():
+        async for event in voice_service.process_with_agent("hello"):
+            events.append(event)
+
+    task = asyncio.create_task(consume())
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 0.2)
+        assert not any(e["type"] == "audio_chunk" for e in events)
+    finally:
+        release.set()
+    assert await asyncio.to_thread(closed.wait, 2)
 
 
 class TestVoiceSessionServiceIntegration:
     """Integration tests for voice session workflow."""
 
-    def test_full_audio_to_transcript_flow(self, voice_service, mock_stt):
+    @pytest.mark.asyncio
+    async def test_full_audio_to_transcript_flow(self, voice_service, mock_stt):
         """Test full flow from audio to transcript."""
         # Simulate receiving audio chunks
         audio_np = np.ones(1600) * 0.1
@@ -246,12 +388,12 @@ class TestVoiceSessionServiceIntegration:
 
         # Add silence to trigger boundary
         silent = np.zeros(1600).astype(np.int16)
-        for _ in range(voice_service.silence_threshold_frames + 1):
+        for _ in range(9):
             voice_service.add_audio_chunk(silent.tobytes())
 
         # Check boundary detected
         assert voice_service.check_phrase_boundary()
 
         # Get final transcript
-        transcript = voice_service.get_final_transcript()
+        transcript = await voice_service.transcribe(voice_service.take_audio())
         assert transcript == "test transcript"

@@ -1,7 +1,7 @@
 import argparse
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - CLI helper uses an argument list, never a shell
 
 from huggingface_hub import hf_hub_download, snapshot_download
 
@@ -40,7 +40,19 @@ VOICE_MODELS: dict[str, dict] = {
     },
     "mms-1b-all": {
         "description": "Meta MMS 1B speech-to-text (adapters/mms_adapter.py)",
-        "downloads": [{"repo_id": "facebook/mms-1b-all"}],
+        "downloads": [
+            {
+                "repo_id": "facebook/mms-1b-all",
+                "allow_patterns": [
+                    "config.json",
+                    "model.safetensors",
+                    "preprocessor_config.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json",
+                    "vocab.json",
+                ],
+            }
+        ],
     },
 }
 
@@ -70,7 +82,7 @@ def download_model_weights(model_id, weights_dir=None, use_cli=False, revision=N
         command = ["huggingface-cli", "download", model_id, "--local-dir", weights_dir]
         if revision:
             command.extend(["--revision", revision])
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True)  # nosec B603 - model IDs are separate argv values
     else:
         print(f"Downloading model files to {weights_dir}")
         snapshot_download(
@@ -87,8 +99,7 @@ def download_voice_model_weights(voice_model):
     """Pre-fetch a voice (STT/TTS) model into the Hugging Face cache."""
     if voice_model not in VOICE_MODELS:
         raise ValueError(
-            f"Unknown voice model '{voice_model}'. "
-            f"Available: {', '.join(sorted(VOICE_MODELS))}"
+            f"Unknown voice model '{voice_model}'. " f"Available: {', '.join(sorted(VOICE_MODELS))}"
         )
 
     token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
@@ -113,21 +124,35 @@ download_llama_weights = download_model_weights
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download Hugging Face model weights")
-    parser.add_argument("--model_id", type=str, default=DEFAULT_MODEL_ID,
-                        help="Hugging Face model ID")
-    parser.add_argument("--weights_dir", type=str, default=None,
-                        help="Directory to store weights (defaults to a model-specific directory)")
-    parser.add_argument("--revision", type=str, default=None,
-                        help="Optional immutable model revision")
-    parser.add_argument("--use_cli", action="store_true",
-                        help="Use huggingface-cli for downloading instead of transformers")
-    parser.add_argument("--voice_model", type=str, default=None,
-                        choices=[*sorted(VOICE_MODELS), "all"],
-                        help="Pre-fetch a voice (STT/TTS) model into the Hugging Face "
-                             "cache instead of downloading an LLM. Use 'all' for every "
-                             "voice model. Gated repos need HUGGING_FACE_HUB_TOKEN.")
-    parser.add_argument("--list_voice_models", action="store_true",
-                        help="List downloadable voice models and exit")
+    parser.add_argument(
+        "--model_id", type=str, default=DEFAULT_MODEL_ID, help="Hugging Face model ID"
+    )
+    parser.add_argument(
+        "--weights_dir",
+        type=str,
+        default=None,
+        help="Directory to store weights (defaults to a model-specific directory)",
+    )
+    parser.add_argument(
+        "--revision", type=str, default=None, help="Optional immutable model revision"
+    )
+    parser.add_argument(
+        "--use_cli",
+        action="store_true",
+        help="Use huggingface-cli for downloading instead of transformers",
+    )
+    parser.add_argument(
+        "--voice_model",
+        type=str,
+        default=None,
+        choices=[*sorted(VOICE_MODELS), "all"],
+        help="Pre-fetch a voice (STT/TTS) model into the Hugging Face "
+        "cache instead of downloading an LLM. Use 'all' for every "
+        "voice model. Gated repos need HUGGING_FACE_HUB_TOKEN.",
+    )
+    parser.add_argument(
+        "--list_voice_models", action="store_true", help="List downloadable voice models and exit"
+    )
 
     args = parser.parse_args()
 

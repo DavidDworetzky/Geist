@@ -19,6 +19,14 @@ export interface LocalArtifact {
   progress_unit?: 'bytes' | 'files';
   progress_completed?: number | null;
   progress_total?: number | null;
+  modality?: 'llm' | 'tts' | 'stt';
+  runtime?: string | null;
+  runtime_ready?: boolean;
+  runtime_detail?: string | null;
+  sample_rate?: number | null;
+  default_voice?: string | null;
+  license?: string | null;
+  license_url?: string | null;
 }
 
 interface UseLocalArtifactsReturn {
