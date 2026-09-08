@@ -40,3 +40,10 @@ source-provided tool. Source eligibility deliberately remains fail-closed for
 first-party adapter sources too; registrars do not gain an extra trust override.
 In #307, mandatory per-call approval remains ahead of both global auto-approve
 and standing-grant checks. This ordering is a stack contract, not an optional UI rule.
+# Approved follow-up polish
+
+Review5577056580 approves this layer with no blockers. Runtime permission modes
+now derive from the Literal, the OpenAPI grant description matches eligibility,
+and the catalog regression selects by name. Existing pre-Save warnings and
+per-row inert-grant labels are retained; aggregate count/extra repeated warnings
+and pre-existing act noise are optional presentation polish, not safety changes.
