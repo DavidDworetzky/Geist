@@ -158,7 +158,7 @@ describe('AgentPermissionsSection', () => {
 
   it('does not offer new standing grants for mandatory-approval tools but lets old grants be removed', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({ tools: [
-      { name: 'terminal.run', description: 'Run commands', requires_approval: true, requires_per_call_approval: true, side_effect: 'process' }
+      { name: 'terminal.run', description: 'Run commands', requires_approval: true, requires_per_call_approval: true, allows_standing_grant: false, side_effect: 'process' }
     ] }) });
     const onChange = jest.fn();
     const { rerender } = render(<AgentPermissionsSection agentPermissions={{ mode: 'auto_approve', always_allow: [] }} onChange={onChange} />);

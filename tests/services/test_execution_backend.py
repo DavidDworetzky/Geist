@@ -193,7 +193,9 @@ def test_docker_run_invokes_runtime_with_bounded_command():
     assert result.stdout == "hi\n"
     argv = mock_run.call_args.args[0]
     assert argv[0] == "/usr/bin/docker"
-    assert argv[-1].startswith("timeout --kill-after=1 10 bash -c ")
+    assert argv[-1].startswith(
+        "export HOME=/tmp XDG_CACHE_HOME=/tmp; timeout --kill-after=1 10 bash -c "
+    )
     assert capture.call_args.args[1] == 30  # command bound + overhead
     assert mock_run.call_args.kwargs["bufsize"] == 0
 

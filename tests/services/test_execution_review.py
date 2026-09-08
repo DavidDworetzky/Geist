@@ -70,15 +70,22 @@ def test_mount_free_docker_keeps_hardline_scoped_to_host():
     assert environment.command_rejection_reason("rm -rf /") is None
 
 
-def test_container_root_is_read_only_and_podman_posture_is_named():
+def test_container_root_is_read_only():
     args = build_docker_run_args(image="python:3.11-slim", command="true")
     assert "--read-only" in args
     assert "/workspace:rw,nosuid,size=256m,mode=0777" in args
-    assert (
-        DockerExecutionEnvironment(runtime_preference="/usr/bin/podman")
-        .describe()
-        .startswith("podman")
-    )
+
+
+def test_detected_podman_posture_includes_execution_configuration(tmp_path):
+    with patch(
+        "app.services.execution.docker.find_container_runtime",
+        return_value="/usr/bin/podman-remote",
+    ):
+        environment = DockerExecutionEnvironment(image="custom:test", workspace=str(tmp_path))
+        description = environment.describe()
+    assert description.startswith("podman")
+    assert "image=custom:test" in description
+    assert f"workspace={tmp_path}" in description
 
 
 def test_mandatory_approval_changes_definition_fingerprint(monkeypatch):
@@ -106,6 +113,7 @@ def test_docker_timeout_cleans_up_only_its_named_container():
     ):
         result = environment.run("sleep 10", timeout_seconds=1)
     argv = launch.call_args.args[0]
+    assert argv[-1].startswith("export HOME=/tmp XDG_CACHE_HOME=/tmp; ")
     name = argv[argv.index("--name") + 1]
     assert name.startswith("geist-exec-")
     assert run.call_args.args[0] == ["/usr/bin/docker", "rm", "--force", name]

@@ -45,3 +45,8 @@ Windows anonymous pipes; fresh host approval remains mandatory. Output throughpu
 is bounded by deadline, not a byte-kill threshold; signal exit codes remain raw
 subprocess results. Background-pipe timeout behavior is documented. POSIX-only
 tests are marked and the 50MB memory test has a 15-second scheduling allowance.
+
+Review5577159442 confirms all prior findings closed/nonblocking. Its final
+operability details are addressed: writable temporary HOME/cache in the shell,
+runtime labels from the resolved binary, image/mount in posture fingerprints,
+realistic combined UI flags, separate hardening/name tests and scheduling comment.

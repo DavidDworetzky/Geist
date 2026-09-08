@@ -17,6 +17,7 @@ from app.services.execution.local import LocalExecutionEnvironment
 def test_fifty_megabyte_producer_completes_with_bounded_host_allocation(redirect):
     tracemalloc.start()
     try:
+        # Scheduling allowance for the memory regression, not an output-volume cap.
         result = LocalExecutionEnvironment().run("head -c 50000000 /dev/zero" + redirect, 15)
         _, peak = tracemalloc.get_traced_memory()
     finally:

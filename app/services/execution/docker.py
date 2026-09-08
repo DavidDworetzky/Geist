@@ -10,7 +10,8 @@ mounted workspace remain readable; this is not a secret-filtering boundary.
 The sandbox claim only holds while nothing is bind-mounted: configuring a
 host ``workspace`` flips ``is_sandboxed`` to False. Either a workspace or network
 access requires fresh approval regardless of permission mode or standing grants.
-Custom images must provide bash and GNU timeout.
+Custom images must provide bash and GNU timeout and tolerate a read-only root.
+Shell commands use the bounded /tmp mount for their home and user cache.
 """
 
 from __future__ import annotations
@@ -149,7 +150,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
                 raise ValueError("Docker workspace must be an existing directory")
         self._runtime_path = runtime_path
         self.runtime_preference = runtime_preference
-        if os.path.basename(runtime_path or runtime_preference or "") == "podman":
+        if os.path.basename(runtime_path or runtime_preference or "").startswith("podman"):
             self.name = "podman"
 
     @property
@@ -165,7 +166,14 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         return self.has_host_access or self.network
 
     def describe(self) -> str:
-        return super().describe() + ("; network enabled" if self.network else "")
+        runtime = self.runtime()
+        if runtime and os.path.basename(runtime).startswith("podman"):
+            self.name = "podman"
+        return (
+            super().describe()
+            + f"; image={self.image}; workspace={self.workspace or '-'}"
+            + ("; network enabled" if self.network else "")
+        )
 
     def runtime(self) -> str | None:
         if self._runtime_path is None:
@@ -195,7 +203,10 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
         timeout = clamp_timeout(timeout_seconds)
         # ``timeout`` inside the container bounds the command itself; the
         # outer subprocess timeout only guards a wedged runtime.
-        bounded_command = f"timeout --kill-after=1 {timeout} bash -c {_shell_quote(command)}"
+        bounded_command = (
+            "export HOME=/tmp XDG_CACHE_HOME=/tmp; "
+            f"timeout --kill-after=1 {timeout} bash -c {_shell_quote(command)}"
+        )
         container_name = f"geist-exec-{uuid.uuid4().hex}"
         args = build_docker_run_args(
             image=self.image,
