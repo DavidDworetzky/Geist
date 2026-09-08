@@ -13,7 +13,8 @@ from app.services.user_settings_service import UserSettingsService
 
 
 @pytest.mark.asyncio
-async def test_compute_probe_failure_is_actionable_validation_error() -> None:
+@pytest.mark.parametrize("failure", ["exception", "timeout"])
+async def test_compute_probe_failure_is_actionable_validation_error(failure) -> None:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/user-settings")
     app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
@@ -25,7 +26,15 @@ async def test_compute_probe_failure_is_actionable_validation_error() -> None:
         patch("app.services.user_settings_service.update_user_settings") as persist,
         patch("agents.architectures.llama_devices.get_llama_device_service") as discovery,
     ):
-        discovery.return_value.inventory.side_effect = RuntimeError("private failure detail")
+        if failure == "exception":
+            discovery.return_value.inventory.side_effect = RuntimeError("private failure detail")
+        else:
+            discovery.return_value.inventory.return_value = SimpleNamespace(
+                managed_by_environment=False,
+                available=True,
+                devices=(),
+                selection_detection_error="timed out",
+            )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
