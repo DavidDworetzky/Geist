@@ -140,7 +140,12 @@ class UserSettingsService:
             if not resetting_detection:
                 from agents.architectures.llama_devices import get_llama_device_service
 
-                inventory = get_llama_device_service().inventory()
+                try:
+                    inventory = get_llama_device_service().inventory()
+                except RuntimeError as error:
+                    raise ValueError(
+                        "GPU discovery failed; retry saving compute settings after a short wait"
+                    ) from error
                 if inventory.managed_by_environment:
                     raise ValueError("llama.cpp compute selection is managed by the environment")
                 if next_backend == "gpu":

@@ -257,7 +257,7 @@ def test_auto_prefers_vulkan_and_uses_private_authenticated_flags(tmp_path):
     manager.stop()
 
 
-def test_auto_start_waits_for_inflight_http_inventory_and_uses_discovered_gpu(
+def test_auto_start_waits_for_discovery_while_http_returns_progress(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
