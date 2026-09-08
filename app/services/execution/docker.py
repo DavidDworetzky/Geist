@@ -44,6 +44,7 @@ _DOCKER_OVERHEAD_SECONDS = 20
 _SANDBOX_USER = "65534:65534"
 
 _BASE_SECURITY_ARGS = [
+    "--read-only",
     "--cap-drop",
     "ALL",
     "--security-opt",
@@ -148,6 +149,8 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
                 raise ValueError("Docker workspace must be an existing directory")
         self._runtime_path = runtime_path
         self.runtime_preference = runtime_preference
+        if os.path.basename(runtime_path or runtime_preference or "") == "podman":
+            self.name = "podman"
 
     @property
     def has_host_access(self) -> bool:

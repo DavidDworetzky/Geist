@@ -87,7 +87,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 </div>
 
                 {Object.keys(toolCall.arguments ?? {}).length > 0 && (
-                  <details style={{ marginTop: 8 }}>
+                  <details aria-label={`${toolCall.name} arguments`} open={needsApproval} style={{ marginTop: 8 }}>
                     <summary>Arguments</summary>
                     <pre style={{ marginBottom: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                       {JSON.stringify(toolCall.arguments ?? {}, null, 2)}

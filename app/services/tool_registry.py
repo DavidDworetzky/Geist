@@ -524,9 +524,11 @@ def build_default_tool_registry() -> ToolRegistry:
                 side_effect="process",
                 requires_approval=execution_environment.requires_per_call_approval,
                 requires_per_call_approval=execution_environment.requires_per_call_approval,
+                allows_standing_grant=not execution_environment.requires_per_call_approval,
                 enabled_by_default=False,
                 timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
                 source_adapter=f"execution.{execution_environment.name}",
+                source_revision=execution_environment.describe(),
                 availability=_execution_available,
             )
         )

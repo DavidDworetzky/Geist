@@ -216,6 +216,7 @@ class ToolDefinition:
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
                 "allows_standing_grant": self.allows_standing_grant,
+                "requires_per_call_approval": self.requires_per_call_approval,
             },
             ensure_ascii=False,
             sort_keys=True,

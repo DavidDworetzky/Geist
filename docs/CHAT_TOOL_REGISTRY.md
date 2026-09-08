@@ -112,6 +112,12 @@ in host memory; verbose commands retain their real exit status and report
 container cleanup. The tool catalog marks fresh-approval tools explicitly;
 the UI cannot create ineffective standing grants for
 them, but existing grants can still be removed.
+
+The container root filesystem is read-only. Only the size-limited temporary
+mounts (and an explicitly approved host workspace, if configured) are writable.
+Background processes that retain output pipes can keep capture open until the
+command deadline; launch long-running services through a managed job instead.
+
 ## Security and identity model
 
 Geist deliberately separates three identities that older code conflated:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import select
 import subprocess  # nosec B404 - capture only; callers own approved execution
 import threading
 import time
@@ -21,9 +22,8 @@ def capture_process(
 ) -> ExecutionResult:
     """Retain at most 64 KiB per stream; drain excess until completion or deadline.
 
-    Raw pipes and daemon readers keep cleanup bounded even when an approved local
-    descendant escapes its process group while retaining a pipe. Such a reader
-    retains only one bounded chunk and owns its pipe until the descendant closes it.
+    POSIX readers poll pipes so escaped descendants cannot strand reader threads.
+    On Windows, a daemon reader owns its pipe until the descendant closes it.
     """
     started = time.monotonic()
     limit_reached = threading.Event()
@@ -35,6 +35,8 @@ def capture_process(
     def drain(index: int, stream: IO[bytes]) -> None:
         try:
             while not stopping.is_set():
+                if os.name == "posix" and not select.select([stream], [], [], 0.05)[0]:
+                    continue
                 chunk = os.read(stream.fileno(), 8192)
                 if not chunk or stopping.is_set():
                     break
@@ -68,6 +70,7 @@ def capture_process(
             if remaining_time <= 0:
                 timed_out = True
                 terminate()
+                stopping.set()
                 break
             stopping.wait(min(0.02, remaining_time))
         # Reap the direct child even if a detached descendant retains its pipes.

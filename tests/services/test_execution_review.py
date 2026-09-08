@@ -44,6 +44,7 @@ def test_external_access_requires_fresh_approval(
         1, 1, "test", permission_mode=mode, always_allow_tools=frozenset({"terminal.run"})
     )
     definition = registry.get("terminal.run")
+    assert definition.allows_standing_grant is False
     assert tool_requires_approval(definition, context)
     with (
         patch.object(DockerExecutionEnvironment, "is_available", return_value=True),
@@ -67,6 +68,29 @@ def test_docker_host_mount_blocks_before_runtime(tmp_path):
 def test_mount_free_docker_keeps_hardline_scoped_to_host():
     environment = DockerExecutionEnvironment()
     assert environment.command_rejection_reason("rm -rf /") is None
+
+
+def test_container_root_is_read_only_and_podman_posture_is_named():
+    args = build_docker_run_args(image="python:3.11-slim", command="true")
+    assert "--read-only" in args
+    assert "/workspace:rw,nosuid,size=256m,mode=0777" in args
+    assert (
+        DockerExecutionEnvironment(runtime_preference="/usr/bin/podman")
+        .describe()
+        .startswith("podman")
+    )
+
+
+def test_mandatory_approval_changes_definition_fingerprint():
+    from dataclasses import replace
+
+    definition = build_default_tool_registry().get("terminal.run")
+    assert (
+        replace(
+            definition, requires_per_call_approval=not definition.requires_per_call_approval
+        ).approval_fingerprint()
+        != definition.approval_fingerprint()
+    )
 
 
 def test_docker_timeout_cleans_up_only_its_named_container():
@@ -117,12 +141,14 @@ def test_local_timeout_stops_descendant_without_waiting_for_its_pipes(tmp_path):
     assert not (tmp_path / "escaped-marker").exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX local backend")
 def test_local_missing_workdir_returns_structured_error(tmp_path):
     result = LocalExecutionEnvironment(str(tmp_path / "missing")).run("echo hi")
     assert result.exit_code == 127
     assert result.stderr
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX local backend")
 def test_local_honors_relative_workdir(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "project").mkdir()
