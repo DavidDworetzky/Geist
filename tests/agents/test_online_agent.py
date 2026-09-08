@@ -212,6 +212,7 @@ class TestOnlineAgentInitialization:
             "x-ai/grok-4.6",
             "qwen/qwen3.8-flash",
             "tencent/hy4-preview",
+            "z-ai/glm-5.3",
             "z-ai/glm-5.3-flash",
         ],
     )
@@ -417,6 +418,37 @@ class TestOnlineAgentAPIRequests:
                 assert payload["presence_penalty"] == 0.5
                 assert payload["stop"] == "END"
                 assert payload["reasoning"] == {"effort": "max"}
+
+    def test_glm53_applies_max_reasoning_omits_n_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="z-ai/glm-5.3",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "z-ai/glm-5.3",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["reasoning"] == {"effort": "max"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
 
     def test_qwen38_flash_omits_unsupported_n_without_forcing_reasoning(self):
         context = create_mock_agent_context()

@@ -530,6 +530,26 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "z-ai/glm-5.3",
+        "GLM 5.3",
+        "glm",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1310720,
+        max_output_tokens=131072,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="max",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory max reasoning. Endpoint limits "
+            "and supported parameters vary; enable ZDR routing for confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "z-ai/glm-5.3-flash",
         "GLM 5.3 Flash",
         "glm",

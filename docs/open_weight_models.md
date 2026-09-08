@@ -11,7 +11,7 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
+and OpenRouter's GLM 5.3/5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
 intentionally server-backed. For models with published weights, their total
 resident weights make an in-process laptop load impractical even when their
 mixture-of-experts active-parameter count is much smaller.
@@ -130,6 +130,25 @@ change. As of August 28, 2026, OpenRouter identifies the Tencent endpoint as
 zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
+
+## OpenRouter-hosted GLM 5.3
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`z-ai/glm-5.3`. OpenRouter exposes the stable text-only route with a
+1,310,720-token model context window. Geist uses the conservative 131,072-token
+output limit documented by Z.AI and by OpenRouter's model-page FAQ because
+larger limits in the endpoint API vary by upstream. The model always reasons;
+Geist supplies Z.AI's recommended `max` effort, omits the unsupported `n`
+parameter, and retains streaming, native function calling, and structured
+outputs.
+
+As of September 8, 2026, OpenRouter lists 28 upstream endpoints and reports
+99.77% routed three-day availability. Its lowest displayed price is $1.113 per
+million input tokens, $3.498 per million output tokens, and $0.2067 per million
+cached input tokens. OpenRouter's ZDR inventory includes 23 GLM 5.3 endpoint
+records, but default routing may still choose a retaining provider. Enable Zero
+Data Retention routing for confidential workloads and expect provider-specific
+limits, quantization, tool-choice behavior, and latency.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 
