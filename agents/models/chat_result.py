@@ -69,6 +69,7 @@ class ToolCallResult:
     artifact_ids: list[str] = field(default_factory=list)
     error: str | None = None
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
     can_grant: bool = False
 
     @classmethod
@@ -83,6 +84,7 @@ class ToolCallResult:
         artifact_ids: list[str] | None = None,
         error: str | None = None,
         requires_approval: bool = False,
+        requires_per_call_approval: bool = False,
         can_grant: bool = False,
     ) -> "ToolCallResult":
         return cls(
@@ -94,6 +96,7 @@ class ToolCallResult:
             artifact_ids=artifact_ids or [],
             error=error,
             requires_approval=requires_approval,
+            requires_per_call_approval=requires_per_call_approval,
             can_grant=can_grant,
         )
 

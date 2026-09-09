@@ -23,10 +23,12 @@ import hashlib
 import logging
 import math
 import subprocess  # nosec B404 - bounded argv-only calls to the configured runtime
+import tempfile
 import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 
 from app.services.execution.base import (
@@ -42,6 +44,7 @@ from app.services.execution.docker import (
     _shell_quote,
     workspace_mount_args,
 )
+from app.services.execution.hardline import detect_hardline_command
 
 
 logger = logging.getLogger(__name__)
@@ -78,13 +81,24 @@ def build_session_create_args(
     return args
 
 
-def build_session_exec_args(*, name: str, command: str, timeout: int) -> list[str]:
+def build_session_exec_args(
+    *, name: str, command: str, timeout: int, stdin: bool = False
+) -> list[str]:
     """argv (after the runtime executable) that runs one command in a session."""
     bounded = (
         "export HOME=/tmp XDG_CACHE_HOME=/tmp; "
         f"timeout --kill-after=1 {timeout} bash -c {_shell_quote(command)}"
     )
-    return ["exec", "--workdir", "/workspace", name, "bash", "-c", bounded]
+    return [
+        "exec",
+        *(["--interactive"] if stdin else []),
+        "--workdir",
+        "/workspace",
+        name,
+        "bash",
+        "-c",
+        bounded,
+    ]
 
 
 @dataclass
@@ -120,30 +134,58 @@ class DockerSessionManager:
         self._closed = False
 
     @staticmethod
-    def _runtime_call(runtime: str, args: list[str], deadline: float) -> ExecutionResult:
+    def _runtime_call(
+        runtime: str,
+        args: list[str],
+        deadline: float,
+        *,
+        input_text: str | None = None,
+        output_limit: int = 10_000,
+    ) -> ExecutionResult:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return ExecutionResult(
                 124, "", "Container runtime deadline exhausted", 0, timed_out=True
             )
-        try:
-            process = subprocess.Popen(  # nosec B603 - resolved runtime, argv-only invocation
-                [runtime, *args],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,
+        with ExitStack() as stack:
+            stdin = None
+            if input_text is not None:
+                if len(input_text) > 1_500_000:
+                    return ExecutionResult(125, "", "Sandbox input exceeds the size limit", 0)
+                # Bounded file input avoids a pipe writer blocking output capture.
+                stdin = stack.enter_context(tempfile.TemporaryFile())
+                stdin.write(input_text.encode("utf-8"))
+                stdin.seek(0)
+            try:
+                process = subprocess.Popen(  # nosec B603 - resolved runtime, argv-only invocation
+                    [runtime, *args],
+                    stdin=stdin,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+            except OSError as error:
+                return ExecutionResult(127, "", str(error), 0)
+            return capture_process(
+                process,
+                max(0, deadline - time.monotonic()),
+                process.kill,
+                stdout_limit=output_limit,
             )
-        except OSError as error:
-            return ExecutionResult(127, "", str(error), 0)
-        return capture_process(process, remaining, process.kill)
 
     def run_in_session(
         self,
         scope_key: str,
         command: str,
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        *,
+        input_text: str | None = None,
+        output_limit: int = 10_000,
+        workspace: str | None = None,
     ) -> ExecutionResult:
-        rejection = self.environment.command_rejection_reason(command)
+        rejection = self.environment.command_rejection_reason(command) or detect_hardline_command(
+            command
+        )
         if rejection is not None:
             return ExecutionResult(126, "", f"BLOCKED: {rejection}", 0, blocked=True)
         runtime = self.environment.runtime()
@@ -191,11 +233,18 @@ class DockerSessionManager:
                 )
             if session.retired:
                 return ExecutionResult(125, "", "Sandbox session was closed during startup", 0)
-            result = self._runtime_call(
-                runtime,
-                build_session_exec_args(name=session.name, command=command, timeout=timeout),
-                deadline,
+            exec_args = build_session_exec_args(
+                name=session.name,
+                command=command,
+                timeout=timeout,
+                stdin=input_text is not None,
             )
+            if input_text is None and output_limit == 10_000:
+                result = self._runtime_call(runtime, exec_args, deadline)
+            else:
+                result = self._runtime_call(
+                    runtime, exec_args, deadline, input_text=input_text, output_limit=output_limit
+                )
             # A wedged exec can leave descendants running: retire the whole
             # owned sandbox rather than reusing potentially active state.
             if result.timed_out:

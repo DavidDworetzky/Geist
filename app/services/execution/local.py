@@ -24,6 +24,7 @@ from app.services.execution.base import (
     clamp_timeout,
 )
 from app.services.execution.capture import capture_process
+from app.services.execution.hardline import detect_hardline_command
 
 
 # Environment variables whose names match any of these fragments are withheld
@@ -64,6 +65,9 @@ class LocalExecutionEnvironment(ExecutionEnvironment):
     @property
     def is_sandboxed(self) -> bool:
         return False
+
+    def command_rejection_reason(self, command: str) -> str | None:
+        return detect_hardline_command(command)
 
     def run(
         self,

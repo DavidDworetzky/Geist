@@ -48,6 +48,10 @@ PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
 VALID_PERMISSION_MODES: frozenset[PermissionMode] = frozenset(get_args(PermissionMode))
 
 
+class MalformedToolCallError(ValueError):
+    """Invalid model tool syntax; the entire attempted turn must remain unexecuted."""
+
+
 @dataclass(frozen=True)
 class ModelRequestConfig:
     max_tokens: int = 1024
@@ -93,6 +97,7 @@ class ChatMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    preserve_content: bool = False
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ChatMessage:
@@ -139,10 +144,32 @@ class ToolContext:
     workspace_id: int
     chat_id: int | None
     run_id: str
-    approved_call_ids: frozenset[str] = frozenset()
     permission_mode: PermissionMode = PERMISSION_MODE_DEFAULT
     always_allow_tools: frozenset[str] = frozenset()
+    agentic_mode: bool = False
+    coding_workspace_id: str | None = None
     cancellation: threading.Event | None = None
+    invocation_approval: InvocationApproval | None = None
+
+
+class InvocationApproval:
+    """One-use authorization bound to one server-issued call and validated payload."""
+
+    def __init__(self, call: ToolCall) -> None:
+        self._lock = threading.Lock()
+        self._fingerprint = self._digest(call)
+        self._used = False
+
+    @staticmethod
+    def _digest(call: ToolCall) -> str:
+        return hashlib.sha256(json.dumps(call.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def consume(self, call: ToolCall) -> bool:
+        with self._lock:
+            if self._used or self._fingerprint != self._digest(call):
+                return False
+            self._used = True
+            return True
 
 
 @dataclass
@@ -169,6 +196,7 @@ class ToolDefinition:
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
     requires_per_call_approval: bool = False
+    approval_exempt: bool = False
     allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
@@ -211,6 +239,7 @@ class ToolDefinition:
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
                 "allows_standing_grant": self.allows_standing_grant,
+                "approval_exempt": self.approval_exempt,
                 "requires_per_call_approval": self.requires_per_call_approval,
             },
             ensure_ascii=False,
@@ -247,6 +276,8 @@ def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> 
     """
     if definition.requires_per_call_approval:
         return True
+    if definition.approval_exempt:
+        return False
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
     if definition.allows_standing_grant and definition.name in context.always_allow_tools:

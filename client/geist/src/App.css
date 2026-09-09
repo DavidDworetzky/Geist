@@ -480,6 +480,20 @@ textarea:focus-visible {
   background: var(--geist-color-danger);
 }
 
+.chat-stop-button {
+  width: 40px;
+  height: 40px;
+  margin-top: 8px;
+  padding: 0;
+  color: var(--geist-color-accent-strong);
+  background: color-mix(in srgb, var(--geist-color-accent) 12%, var(--geist-color-surface));
+  border-color: var(--geist-color-accent);
+}
+
+.chat-stop-button:hover {
+  background: color-mix(in srgb, var(--geist-color-accent) 24%, var(--geist-color-surface));
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -1972,6 +1986,49 @@ textarea:focus-visible {
 .chat-message-user {
   justify-self: end;
   border-color: color-mix(in srgb, var(--geist-color-accent) 45%, var(--geist-color-border));
+}
+
+.agentic-progress {
+  max-width: min(820px, 92%);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--geist-color-accent) 7%, var(--geist-color-surface-strong));
+  border: 1px solid color-mix(in srgb, var(--geist-color-accent) 35%, var(--geist-color-border));
+  border-radius: var(--geist-radius-lg);
+}
+
+.agentic-progress-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.agentic-task-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agentic-task {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px;
+  color: var(--geist-color-text-muted);
+}
+
+.agentic-task small {
+  display: block;
+  margin-top: 2px;
+}
+
+.agentic-task-completed {
+  color: var(--geist-color-success);
+}
+
+.agentic-task-blocked {
+  color: var(--geist-color-danger);
 }
 
 .chat-speaker {

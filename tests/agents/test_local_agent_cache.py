@@ -8,6 +8,7 @@ from agents.agent_type import AgentType
 from agents.model_load_status import ModelLoadStatusRegistry
 from app import main as geist_main
 from app.api.v1.endpoints import models as models_endpoint
+from app.models.database.geist_user import WorkspaceModel
 from app.models.user_settings import AgentFactoryConfig
 
 
@@ -149,8 +150,7 @@ def test_first_use_persists_effective_backend_and_caches_final_signature() -> No
             ),
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
             patch(
-                "app.main.get_default_workspace",
-                return_value=type("User", (), {"workspace_id": 1})(),
+                "app.main.get_default_workspace", return_value=WorkspaceModel(1, "default", "Test")
             ),
             patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
         ):
@@ -203,8 +203,7 @@ def test_first_use_persists_clean_cpu_detection() -> None:
             ),
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
             patch(
-                "app.main.get_default_workspace",
-                return_value=type("User", (), {"workspace_id": 1})(),
+                "app.main.get_default_workspace", return_value=WorkspaceModel(1, "default", "Test")
             ),
             patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
         ):
@@ -315,8 +314,7 @@ def test_cached_auto_agent_retries_backend_persistence_after_transient_failure()
             ) as create,
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
             patch(
-                "app.main.get_default_workspace",
-                return_value=type("User", (), {"workspace_id": 1})(),
+                "app.main.get_default_workspace", return_value=WorkspaceModel(1, "default", "Test")
             ),
             patch(
                 "app.main.UserSettingsService.persist_detected_llama_backend",
@@ -431,8 +429,7 @@ def test_concurrent_manual_choice_is_not_cached_as_the_auto_runtime() -> None:
             ),
             patch("app.main._llama_selection_managed_by_environment", return_value=False),
             patch(
-                "app.main.get_default_workspace",
-                return_value=type("User", (), {"workspace_id": 1})(),
+                "app.main.get_default_workspace", return_value=WorkspaceModel(1, "default", "Test")
             ),
             patch(
                 "app.main.UserSettingsService.persist_detected_llama_backend",

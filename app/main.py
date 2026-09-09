@@ -43,7 +43,12 @@ from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
 from app.loopback_security import install_loopback_security
-from app.models.completion import CompleteTextParams, InitializeAgentParams, ToolApprovalParams
+from app.models.completion import (
+    CompleteTextParams,
+    InitializeAgentParams,
+    RunInstructionParams,
+    ToolApprovalParams,
+)
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
     get_all_chat_history,
@@ -63,6 +68,7 @@ from app.security.operator import (
     require_operator_capability,
 )
 from app.services.chat_orchestrator import ChatOrchestrator, ChatStreamEvent, RunControlRegistry
+from app.services.goal_runtime import DatabaseGoalStore, GoalRuntimeRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
@@ -127,16 +133,15 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 run_controls = RunControlRegistry()
-_tool_registry = build_default_tool_registry()
-# Enabled MCP servers contribute their tools through the same registry as the
-# curated defaults; configuration lives behind /api/v1/mcp.
+goal_runtime_registry = GoalRuntimeRegistry()
+_tool_registry = build_default_tool_registry(goal_runtime_registry)
 _tool_registry.add_source(get_mcp_tool_source())
-# Installed agent plugins contribute skills (via skills.load) and, for plugins
-# named in GEIST_ENABLED_PLUGINS, their declared MCP servers.
 install_plugin_support(_tool_registry)
 chat_orchestrator = ChatOrchestrator(
     _tool_registry,
     run_controls=run_controls,
+    orchestration_runs=goal_runtime_registry,
+    goal_store=DatabaseGoalStore(),
     intent_router=ToolIntentRouter(),
 )
 
@@ -296,9 +301,9 @@ def _persist_first_use_llama_backend(
         _pending_detection_warning = None
 
     try:
-        default_user = get_default_workspace()
+        workspace = get_default_workspace()
         persisted = UserSettingsService.persist_detected_llama_backend(
-            default_user.workspace_id,
+            workspace.workspace_id,
             backend,
             device_ids,
         )
@@ -452,6 +457,13 @@ def resolved_memory_settings(
     return params.memory_enabled, memory_mode, folder_id
 
 
+def resolved_agentic_mode(params: CompleteTextParams, user_id: int) -> bool:
+    if params.agentic_mode is not None:
+        return params.agentic_mode
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(user_id)
+    return bool(settings.agentic_mode_enabled)
+
+
 def run_chat_completion(
     params: CompleteTextParams,
     chat_id: int | None = None,
@@ -459,6 +471,7 @@ def run_chat_completion(
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
     workspace_id = get_default_workspace().workspace_id
+    agentic_mode = resolved_agentic_mode(params, workspace_id)
     memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, workspace_id)
     memory_context = build_memory_context(
         workspace_id,
@@ -492,8 +505,12 @@ def run_chat_completion(
         workspace_id=workspace_id,
         chat_id=chat_id,
         config=model_request_config(params),
-        system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+        system_prompt=chat_system_prompt(
+            params.enable_tools or agentic_mode,
+            memory_context,
+        ),
         enable_tools=params.enable_tools,
+        agentic_mode=agentic_mode,
         enable_intent_router=intent_router_enabled(workspace_id),
         memory_enabled=memory_enabled,
         memory_mode=memory_mode,
@@ -508,6 +525,7 @@ def stream_chat_events(
         agent = get_active_agent(resolve_agent_type(params.agent_type))
         if hasattr(agent, "stream_model_turn"):
             workspace_id = get_default_workspace().workspace_id
+            agentic_mode = resolved_agentic_mode(params, workspace_id)
             memory_enabled, memory_mode, folder_id = resolved_memory_settings(
                 params, chat_id, workspace_id
             )
@@ -525,8 +543,12 @@ def stream_chat_events(
                 workspace_id=workspace_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
-                system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+                system_prompt=chat_system_prompt(
+                    params.enable_tools or agentic_mode,
+                    memory_context,
+                ),
                 enable_tools=params.enable_tools,
+                agentic_mode=agentic_mode,
                 enable_intent_router=intent_router_enabled(workspace_id),
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
@@ -648,6 +670,7 @@ def run_routine(routine, cancellation: threading.Event | None = None) -> None:
         config=model_request_config(params),
         system_prompt=chat_system_prompt(True, ""),
         enable_tools=True,
+        agentic_mode=False,
         interactive=False,
         cancellation=cancellation,
     ):
@@ -776,6 +799,25 @@ def create_app(
             "decision": params.decision,
         }
 
+    @agent_router.post("/runs/{run_id}/instructions")
+    def add_run_instruction(
+        run_id: str,
+        params: RunInstructionParams,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        try:
+            instruction = run_controls.enqueue(
+                run_id, operator.workspace_id, params.instruction_id, params.text
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if instruction is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This run is no longer accepting instructions. Send a new chat message to resume.",
+            )
+        return {"run_id": run_id, "instruction": instruction}
+
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
         return get_chat_history(session_id)
@@ -839,7 +881,7 @@ def create_app(
                     ),
                 }
                 for tool in catalog
-                if tool.name not in UI_HIDDEN_TOOL_NAMES
+                if not tool.approval_exempt and tool.name not in UI_HIDDEN_TOOL_NAMES
             ]
         }
 

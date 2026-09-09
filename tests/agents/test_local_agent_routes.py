@@ -121,6 +121,8 @@ def test_modern_non_streaming_completion_uses_orchestrator_without_tools():
     assert result == completion
     assert complete.call_args.kwargs["chat_id"] == 8
     assert complete.call_args.kwargs["enable_tools"] is False
+    assert complete.call_args.kwargs["agentic_mode"] is True
+
     assert complete.call_args.kwargs["enable_intent_router"] is False
 
 
@@ -143,6 +145,7 @@ def test_completion(log, local_agent, client):
             "prompt_tokens": [0],
             "response_format": "text",
             "agent_type": "LLAMA",
+            "agentic_mode": False,
         }
 
         response = client.post("agent/complete_text", json=payload)

@@ -13,6 +13,7 @@ from typing import Literal
 
 
 ToolApprovalDecision = Literal["approve", "session", "always", "deny"]
+ApprovalOutcome = ToolApprovalDecision | Literal["interrupted"]
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300.0
 
 
@@ -30,7 +31,7 @@ class PendingToolApproval:
     )
     denial_reason: str | None = None
     event: threading.Event = field(default_factory=threading.Event)
-    decision: ToolApprovalDecision | None = None
+    decision: ApprovalOutcome | None = None
 
 
 class ToolApprovalRegistry:
@@ -97,7 +98,7 @@ class ToolApprovalRegistry:
             return True
 
     def _settle(
-        self, pending: PendingToolApproval, decision: ToolApprovalDecision, reason: str | None
+        self, pending: PendingToolApproval, decision: ApprovalOutcome, reason: str | None
     ) -> None:
         """Caller holds the registry lock; settlement and removal are atomic."""
         key = (pending.run_id, pending.call_id)
@@ -108,11 +109,16 @@ class ToolApprovalRegistry:
             pending.event.set()
 
     def poll(
-        self, pending: PendingToolApproval, cancellation: threading.Event | None = None
-    ) -> ToolApprovalDecision | None:
+        self,
+        pending: PendingToolApproval,
+        cancellation: threading.Event | None = None,
+        interruption: threading.Event | None = None,
+    ) -> ApprovalOutcome | None:
         with self._lock:
             if cancellation is not None and cancellation.is_set():
                 self._settle(pending, "deny", "cancelled")
+            elif interruption is not None and interruption.is_set():
+                self._settle(pending, "interrupted", "superseded")
             elif time.monotonic() >= pending.expires_at:
                 self._settle(pending, "deny", "timeout")
             return pending.decision
@@ -122,14 +128,15 @@ class ToolApprovalRegistry:
         pending: PendingToolApproval,
         timeout_seconds: float,
         cancellation: threading.Event | None = None,
-    ) -> ToolApprovalDecision:
+        interruption: threading.Event | None = None,
+    ) -> ApprovalOutcome:
         if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
             raise ValueError("Approval timeout must be finite and non-negative")
         with self._lock:
             pending.expires_at = min(
                 pending.expires_at, time.monotonic() + max(0.0, timeout_seconds)
             )
-        while (decision := self.poll(pending, cancellation)) is None:
+        while (decision := self.poll(pending, cancellation, interruption)) is None:
             pending.event.wait(min(0.25, max(0.0, pending.expires_at - time.monotonic())))
         return decision
 

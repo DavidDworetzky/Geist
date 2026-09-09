@@ -7,7 +7,7 @@ from alembic.migration import MigrationContext
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
 
 from app.database_upgrade import (
-    PRE_WORKSPACE_REVISION,
+    LEGACY_AGENTIC_REVISION,
     _alembic_config,
     _backup_sqlite_database,
     _classify_legacy_schema,
@@ -197,7 +197,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -218,13 +218,15 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN agentic_mode_enabled"))
+            connection.execute(text("DROP TABLE agent_goal"))
             connection.execute(text("DROP TABLE agent_routine"))
         config = _alembic_config()
         command.stamp(config, "b2c5d7e9f1a3")
         upgrade_database()
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
             connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
@@ -266,7 +268,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -303,7 +305,7 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
                 )
             )
         config = _alembic_config()
-        command.stamp(config, "d4e7f9a1b3c5")
+        command.stamp(config, ["d4e7f9a1b3c5", LEGACY_AGENTIC_REVISION])
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert connection.execute(
@@ -312,7 +314,7 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
                 )
             ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 0)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
     finally:
         Session.remove()
@@ -342,7 +344,7 @@ def test_routine_outcome_upgrade_preserves_existing_schedule(tmp_path):
                 )
             )
         config = _alembic_config()
-        command.stamp(config, "e5f8a0b2c4d6")
+        command.stamp(config, ["e5f8a0b2c4d6", LEGACY_AGENTIC_REVISION])
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert connection.execute(
@@ -373,12 +375,12 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
             connection.execute(text("DROP TABLE mcp_server"))
-            connection.execute(text("DROP TABLE agent_routine"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
 
         alembic_config = _alembic_config()
-        command.stamp(alembic_config, PRE_WORKSPACE_REVISION)
+        # This fixture already contains the complete agentic sibling branch.
+        command.stamp(alembic_config, LEGACY_AGENTIC_REVISION)
         command.upgrade(alembic_config, "head")
 
         with engine.connect() as connection:
@@ -387,7 +389,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -417,7 +419,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "g7b0c2d4e6f8"
+                "f6a9b1c3d5e7"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
@@ -434,3 +436,152 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
         Session.remove()
         engine.dispose()
         configure_database(original_config)
+
+
+@pytest.fixture
+def legacy_database(tmp_path):
+    from app.models.database import database
+
+    original_config = database.DATABASE_CONFIG
+    path = tmp_path / "legacy.sqlite3"
+    engine = configure_database(DatabaseConfig(provider="sqlite", database_url=f"sqlite:///{path}"))
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        yield path, engine
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+@pytest.mark.parametrize("missing_artifact", [False, True])
+@pytest.mark.parametrize("missing_compute", [False, True])
+@pytest.mark.parametrize("main_schema", ["current", "pre_mcp", "pre_workspace"])
+def test_legacy_adoption_preserves_data_and_backup(
+    legacy_database, missing_artifact, missing_compute, main_schema
+):
+    from sqlalchemy import inspect
+
+    from app.models.database.agent_goal import AgentGoal
+    from app.models.database.geist_user import GeistUser
+    from app.models.database.user_settings import UserSettings
+
+    path, engine = legacy_database
+    with engine.begin() as connection:
+        connection.execute(GeistUser.__table__.insert().values(user_id=52, workspace_key="default"))
+        connection.execute(
+            UserSettings.__table__.insert().values(
+                user_id=52,
+                default_local_model="preserved-model",
+                agentic_mode_enabled=False,
+                agent_permissions={"mode": "require_approval"},
+                llama_backend="gpu",
+                llama_gpu_device_ids=["gpu-0"],
+                default_local_artifact_id="preserved-artifact",
+            )
+        )
+        connection.execute(
+            AgentGoal.__table__.insert().values(
+                goal_id="preserved-goal",
+                user_id=52,
+                run_id="preserved-run",
+                objective="Preserve my work",
+                max_turns=12,
+                checkpoint_json='{"turns_used": 3}',
+            )
+        )
+        if missing_artifact:
+            connection.execute(
+                text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
+            )
+        if missing_compute:
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
+        if main_schema != "current":
+            connection.execute(text("DROP TABLE mcp_server"))
+        if main_schema == "pre_workspace":
+            connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
+            connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
+
+    with sqlite3.connect(path) as connection:
+        original_dump = list(connection.iterdump())
+
+    upgrade_database()
+
+    _validate_legacy_schema(Base.metadata, engine)
+    with engine.connect() as connection:
+        assert MigrationContext.configure(connection).get_current_heads() == ("f6a9b1c3d5e7",)
+        assert connection.execute(text("SELECT user_id, workspace_key FROM geist_user")).one() == (
+            52,
+            "default",
+        )
+        settings = connection.execute(UserSettings.__table__.select()).mappings().one()
+        assert settings["default_local_model"] == "preserved-model"
+        assert settings["agentic_mode_enabled"] is False
+        assert settings["agent_permissions"] == {"mode": "require_approval"}
+        assert settings["llama_backend"] == (None if missing_compute else "gpu")
+        assert settings["llama_gpu_device_ids"] == ([] if missing_compute else ["gpu-0"])
+        assert settings["default_local_artifact_id"] == (
+            None if missing_artifact else "preserved-artifact"
+        )
+        goal = connection.execute(AgentGoal.__table__.select()).mappings().one()
+        assert goal["objective"] == "Preserve my work"
+        assert goal["max_turns"] == 12
+        assert goal["checkpoint_json"] == '{"turns_used": 3}'
+        budget_column = next(
+            column
+            for column in inspect(connection).get_columns("agent_goal")
+            if column["name"] == "max_turns"
+        )
+        assert budget_column["default"].strip("'\"") == "48"
+
+    backup_path = path.with_suffix(".sqlite3.pre-upgrade.bak")
+    with sqlite3.connect(backup_path) as connection:
+        assert list(connection.iterdump()) == original_dump
+    backup_bytes = backup_path.read_bytes()
+    upgrade_database()
+    assert backup_path.read_bytes() == backup_bytes
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM geist_user")).scalar_one() == 1
+        assert connection.execute(text("SELECT COUNT(*) FROM agent_goal")).scalar_one() == 1
+
+
+@pytest.mark.parametrize("unsupported_gap", ["llama_backend", "agent_goal"])
+def test_legacy_adoption_rejects_unrecognized_gaps_without_mutating(
+    legacy_database, unsupported_gap
+):
+    path, engine = legacy_database
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id"))
+        if unsupported_gap == "agent_goal":
+            connection.execute(text("DROP TABLE agent_goal"))
+        else:
+            connection.execute(text(f"ALTER TABLE user_settings DROP COLUMN {unsupported_gap}"))
+    with sqlite3.connect(path) as connection:
+        original_dump = list(connection.iterdump())
+
+    with pytest.raises(RuntimeError, match=unsupported_gap):
+        upgrade_database()
+
+    with sqlite3.connect(path) as connection:
+        assert list(connection.iterdump()) == original_dump
+    with sqlite3.connect(path.with_suffix(".sqlite3.pre-upgrade.bak")) as connection:
+        assert list(connection.iterdump()) == original_dump
+
+
+def test_legacy_adoption_aborts_before_writes_if_backup_fails(legacy_database, monkeypatch):
+    path, engine = legacy_database
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id"))
+    with sqlite3.connect(path) as connection:
+        original_dump = list(connection.iterdump())
+
+    def fail_backup(*args):
+        raise OSError("Backup destination unavailable")
+
+    monkeypatch.setattr("app.database_upgrade._backup_sqlite_database", fail_backup)
+    with pytest.raises(OSError, match="Backup destination unavailable"):
+        upgrade_database()
+    with sqlite3.connect(path) as connection:
+        assert list(connection.iterdump()) == original_dump

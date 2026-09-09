@@ -8,7 +8,7 @@ import os
 import platform
 import secrets
 import socket
-import subprocess
+import subprocess  # nosec B404 - argv-only lifecycle of the configured local inference server
 import sys
 import threading
 import time

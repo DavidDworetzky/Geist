@@ -1,3 +1,4 @@
+from agents.architectures.chat_template_tools import provider_tool_name
 from tests.streaming_probe import StreamingProbe
 
 
@@ -27,3 +28,18 @@ def test_reset_clears_observable_state_and_stale_producer_cannot_change_new_run(
         "search_calls": [],
         "tool_result_seen": False,
     }
+
+
+def test_xml_fixture_completes_goal_instead_of_repeating_search():
+    probe = StreamingProbe()
+    probe.start("xml_tool")
+    probe.closed = True
+    tools = [{"function": {"name": provider_tool_name("agent.goal.complete")}}]
+    messages = [
+        {"role": "tool", "tool_call_id": "observation-1", "content": "Fixture celebrity headline"},
+        {"role": "user", "content": "Continue"},
+    ]
+    result = "".join(probe.segments(messages, tools))
+    assert provider_tool_name("agent.goal.complete") in result
+    assert "observation-1" in result
+    assert "recent celebrity headlines" not in result

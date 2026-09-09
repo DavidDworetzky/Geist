@@ -222,27 +222,26 @@ class UserSettingsService:
 
     @staticmethod
     def persist_detected_llama_backend(
-        user_id: int,
+        workspace_id: int,
         backend: Literal["cpu", "gpu"],
         device_ids: tuple[str, ...],
     ) -> UserSettingsResponse | None:
         """Persist a first-use result without overwriting a concurrent user choice."""
 
-        current_settings = get_user_settings(user_id)
+        current_settings = get_user_settings(workspace_id)
         if current_settings is None or current_settings.llama_backend is not None:
-            return UserSettingsService.get_workspace_settings_by_id(user_id)
+            return UserSettingsService.get_workspace_settings_by_id(workspace_id)
         if backend not in {"cpu", "gpu"}:
             raise ValueError("Detected llama.cpp backend must be cpu or gpu")
         update_detected_llama_backend_if_unset(
-            user_id,
+            workspace_id,
             backend,
             list(device_ids) if backend == "gpu" else [],
         )
-        return UserSettingsService.get_workspace_settings_by_id(user_id)
+        return UserSettingsService.get_workspace_settings_by_id(workspace_id)
 
     @staticmethod
     def get_default_workspace_settings() -> UserSettingsResponse:
-        """Return settings for the singleton local workspace."""
         workspace = get_default_workspace()
         return UserSettingsService.get_or_create_workspace_settings_by_id(workspace.workspace_id)
 

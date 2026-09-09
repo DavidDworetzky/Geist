@@ -6,6 +6,7 @@ from agents.models.tool_calling import (
     PERMISSION_MODE_AUTO_APPROVE,
     PERMISSION_MODE_DEFAULT,
     PERMISSION_MODE_REQUIRE_APPROVAL,
+    InvocationApproval,
     ToolCall,
     ToolContext,
     ToolDefinition,
@@ -23,25 +24,32 @@ from app.services.tool_registry import ToolRegistry, WebSearchArguments
 def _context(
     mode: str = PERMISSION_MODE_DEFAULT,
     always_allow: frozenset[str] = frozenset(),
-    approved_call_ids: frozenset[str] = frozenset(),
+    approved_call: ToolCall | None = None,
 ) -> ToolContext:
     return ToolContext(
         workspace_id=42,
         chat_id=7,
         run_id="run-test",
-        approved_call_ids=approved_call_ids,
+        invocation_approval=InvocationApproval(approved_call) if approved_call else None,
         permission_mode=mode,
         always_allow_tools=always_allow,
     )
 
 
-def _definition(name: str, handler: Mock, *, requires_approval: bool = False) -> ToolDefinition:
+def _definition(
+    name: str,
+    handler: Mock,
+    *,
+    requires_approval: bool = False,
+    requires_per_call_approval: bool = False,
+) -> ToolDefinition:
     return ToolDefinition(
         name=name,
         description=f"Test definition for {name}",
         arguments_model=WebSearchArguments,
         handler=handler,
         requires_approval=requires_approval,
+        requires_per_call_approval=requires_per_call_approval,
         timeout_seconds=1.0,
     )
 
@@ -95,7 +103,7 @@ def test_registry_require_approval_gates_read_only_tool():
         call,
         _context(
             mode=PERMISSION_MODE_REQUIRE_APPROVAL,
-            approved_call_ids=frozenset({call.id}),
+            approved_call=call,
         ),
     )
     assert approved.status == "succeeded"
@@ -114,6 +122,30 @@ def test_registry_always_allow_bypasses_per_tool_flag():
 
     assert result.status == "succeeded"
     handler.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        PERMISSION_MODE_DEFAULT,
+        PERMISSION_MODE_AUTO_APPROVE,
+        PERMISSION_MODE_REQUIRE_APPROVAL,
+    ],
+)
+def test_per_call_approval_cannot_be_bypassed(mode):
+    handler = Mock(return_value=ToolExecutionOutput(content="ran"))
+    definition = _definition(
+        "terminal.run",
+        handler,
+        requires_approval=True,
+        requires_per_call_approval=True,
+    )
+    context = _context(
+        mode=mode,
+        always_allow=frozenset({"terminal.run"}),
+    )
+
+    assert tool_requires_approval(definition, context) is True
 
 
 def test_normalize_agent_permissions_canonicalizes():

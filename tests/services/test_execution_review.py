@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
-from agents.models.tool_calling import ToolCall, ToolContext, tool_requires_approval
+from agents.models.tool_calling import (
+    InvocationApproval,
+    ToolCall,
+    ToolContext,
+    tool_requires_approval,
+)
 from app.services.execution.base import ExecutionResult, truncate_output
 from app.services.execution.docker import DockerExecutionEnvironment, build_docker_run_args
 from app.services.execution.factory import create_execution_environment
@@ -36,6 +41,8 @@ def test_external_access_requires_fresh_approval(
     monkeypatch, tmp_path, mode, backend, network, mounted
 ):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", backend)
+    if backend == "local":
+        monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("GEIST_EXEC_DOCKER_NETWORK", str(int(network)))
     if mounted:
         monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path))
@@ -188,7 +195,8 @@ def test_docker_mount_builder_rejects_ambiguous_sources(workspace):
 def test_factory_invalid_workspace_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path / "missing"))
-    assert create_execution_environment() is None
+    with pytest.raises(ValueError, match="existing directory"):
+        create_execution_environment()
 
 
 def test_factory_resolves_relative_mount(monkeypatch, tmp_path):
@@ -199,11 +207,12 @@ def test_factory_resolves_relative_mount(monkeypatch, tmp_path):
     assert create_execution_environment().workspace == str(tmp_path / "project")
 
 
-def test_registry_policy_refusal_is_failed_not_successful(monkeypatch):
+def test_registry_policy_refusal_is_failed_not_successful(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "local")
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     registry = build_default_tool_registry()
     call = ToolCall.create("terminal.run", {"command": "rm -rf /"})
-    context = ToolContext(1, 1, "test", approved_call_ids=frozenset({call.id}))
+    context = ToolContext(1, 1, "test", invocation_approval=InvocationApproval(call))
     result = registry.execute(call, context)
     assert result.status == "failed"
     assert result.error == "policy_blocked"
@@ -211,11 +220,12 @@ def test_registry_policy_refusal_is_failed_not_successful(monkeypatch):
     assert json.loads(result.content)["blocked"] is True
 
 
-def test_registry_preserves_ordinary_exit_status(monkeypatch):
+def test_registry_preserves_ordinary_exit_status(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "local")
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     registry = build_default_tool_registry()
     call = ToolCall.create("terminal.run", {"command": "exit 3"})
-    context = ToolContext(1, 1, "test", approved_call_ids=frozenset({call.id}))
+    context = ToolContext(1, 1, "test", invocation_approval=InvocationApproval(call))
     with patch.object(
         LocalExecutionEnvironment,
         "run",
