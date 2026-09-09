@@ -4,12 +4,39 @@ DTO models for user settings API.
 
 import sys
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from agents.model_catalog import default_local_model_id
 from agents.model_ids import canonicalize_local_model_id
+from agents.models.tool_calling import (
+    MAX_ALWAYS_ALLOWED_TOOLS,
+    MAX_PERMISSION_TOOL_NAME_LENGTH,
+    PERMISSION_MODE_DEFAULT,
+    PermissionMode,
+)
+
+
+class AgentPermissionsSettings(BaseModel):
+    """User-configurable approval posture for agentic tool execution."""
+
+    mode: PermissionMode = Field(
+        default=PERMISSION_MODE_DEFAULT,
+        description=(
+            "Approval posture: 'default' (per-tool flags), 'auto_approve' "
+            "(never ask), or 'require_approval' (always ask)"
+        ),
+    )
+    always_allow: list[
+        Annotated[
+            str, Field(min_length=1, max_length=MAX_PERMISSION_TOOL_NAME_LENGTH, pattern=r"\S")
+        ]
+    ] = Field(
+        default=[],
+        max_length=MAX_ALWAYS_ALLOWED_TOOLS,
+        description="Eligible static built-in tool names that skip approval; runtime-discovered tools and mandatory fresh-approval tools cannot redeem these grants",
+    )
 
 
 def _installed_local_artifact_id(model_id: str) -> str | None:
@@ -63,6 +90,10 @@ class UserSettingsBase(BaseModel):
         default=[], description="Backup provider configurations"
     )
     ui_preferences: dict[str, Any] = Field(default={}, description="UI preferences")
+    agent_permissions: AgentPermissionsSettings = Field(
+        default_factory=AgentPermissionsSettings,
+        description="Agent tool approval settings",
+    )
 
 
 class UserSettingsCreate(UserSettingsBase):
@@ -90,6 +121,7 @@ class UserSettingsUpdate(BaseModel):
     default_presence_penalty: float | None = None
     backup_providers: list[dict[str, Any]] | None = None
     ui_preferences: dict[str, Any] | None = None
+    agent_permissions: AgentPermissionsSettings | None = None
 
 
 class UserSettingsResponse(UserSettingsBase):

@@ -78,3 +78,25 @@ async def test_compute_update_routes_run_service_off_event_loop(path: str) -> No
 
     assert result.status_code == 200
     assert service_threads and service_threads[0] != event_loop_thread
+
+
+def test_settings_routes_cannot_select_a_numeric_owner():
+    paths = {route.path for route in router.routes}
+    assert paths == {"/", "/reset", "/agent-config/preview"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("names", [[" "], ["x" * 257], ["web.search"] * 257])
+async def test_permission_allowlist_dto_limits_reject_before_persistence(names):
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/user-settings")
+    app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
+    with patch.object(UserSettingsService, "update_workspace_settings_by_id") as write:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            result = await client.put(
+                "/api/v1/user-settings/", json={"agent_permissions": {"always_allow": names}}
+            )
+    assert result.status_code == 422
+    write.assert_not_called()

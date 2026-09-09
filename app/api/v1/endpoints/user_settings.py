@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from agents.model_catalog import default_local_model_id
 from app.api.utils import get_current_workspace
 from app.models.database.geist_user import WorkspaceModel
-from app.models.user_settings import AgentConfigRequest, UserSettingsResponse, UserSettingsUpdate
+from app.models.user_settings import (
+    AgentConfigRequest,
+    AgentPermissionsSettings,
+    UserSettingsResponse,
+    UserSettingsUpdate,
+)
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -103,6 +108,7 @@ async def reset_workspace_settings(
             default_presence_penalty=0.0,
             backup_providers=[],
             ui_preferences={},
+            agent_permissions=AgentPermissionsSettings(),
         )
 
         settings = UserSettingsService.update_workspace_settings_by_id(

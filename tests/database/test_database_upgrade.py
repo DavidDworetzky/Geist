@@ -174,7 +174,9 @@ def test_real_metadata_recognizes_pre_mcp_schema():
     assert _classify_legacy_schema(Base.metadata, engine) == "pre_mcp"
 
 
-def test_upgrade_adopts_pre_mcp_schema(tmp_path):
+@pytest.mark.parametrize("missing_permissions", [False, True])
+@pytest.mark.parametrize("missing_mcp", [False, True])
+def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mcp):
     original_config = DATABASE_CONFIG
     engine = configure_database(
         DatabaseConfig(
@@ -186,15 +188,44 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
-            connection.execute(text("DROP TABLE mcp_server"))
+            if missing_mcp:
+                connection.execute(text("DROP TABLE mcp_server"))
+            if missing_permissions:
+                connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
 
         upgrade_database()
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b2c5d7e9f1a3"
+                "c3d6e8f0a2b4"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite", database_url=f"sqlite:///{tmp_path / 'versioned-parent.sqlite3'}"
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
+        config = _alembic_config()
+        command.stamp(config, "b2c5d7e9f1a3")
+        upgrade_database()
+        with engine.connect() as connection:
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "c3d6e8f0a2b4"
+            }
+            connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
         Session.remove()
         engine.dispose()
@@ -234,7 +265,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b2c5d7e9f1a3"
+                "c3d6e8f0a2b4"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -264,6 +295,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
             connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
@@ -278,7 +310,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b2c5d7e9f1a3"
+                "c3d6e8f0a2b4"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -308,7 +340,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b2c5d7e9f1a3"
+                "c3d6e8f0a2b4"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))

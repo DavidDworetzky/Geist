@@ -25,7 +25,8 @@ PRE_MCP_REVISION = "c6d9e2f4a7b1"
 PRE_MCP_TABLE = "mcp_server"
 # Adopt only validated compute columns; workspace/MCP migrations still run
 # when their schema and data transformations have not yet been applied.
-LEGACY_COMPUTE_REVISION = "c7d9e1f3a5b8"
+LEGACY_SETTINGS_REVISION = "b2e5f7a9c3d1"
+PERMISSIONS_GAP = ("user_settings", "agent_permissions")
 MCP_REVISION = "b3e5d7f9a1c3"
 
 
@@ -65,7 +66,7 @@ def upgrade_database() -> None:
         _reject_unsupported_legacy_schema(Base.metadata, Engine)
         _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        revisions = [LEGACY_COMPUTE_REVISION]
+        revisions = [LEGACY_SETTINGS_REVISION]
         if schema_kind == "current":
             revisions.append(MCP_REVISION)
         elif schema_kind == "pre_mcp":
@@ -111,6 +112,7 @@ def _classify_legacy_schema(metadata, engine) -> str:
     schema_kind, problems = _inspect_legacy_schema(metadata, engine)
     if schema_kind in {
         "current",
+        "pre_permissions",
         "pre_llama_compute",
         "pre_local_artifact",
         "pre_local_artifact_and_mcp",
@@ -137,6 +139,10 @@ def _complete_legacy_settings_columns(engine) -> None:
     with engine.begin() as connection:
         columns = {column["name"] for column in sa.inspect(connection).get_columns("user_settings")}
         operations = Operations(MigrationContext.configure(connection))
+        if "agent_permissions" not in columns:
+            operations.add_column(
+                "user_settings", sa.Column("agent_permissions", sa.JSON(), nullable=True)
+            )
         if "default_local_artifact_id" not in columns:
             operations.add_column(
                 "user_settings",
@@ -180,6 +186,10 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
 
     if not missing_tables and not missing_column_gaps:
         return "current", problems
+    if PERMISSIONS_GAP in missing_column_gaps:
+        missing_column_gaps.remove(PERMISSIONS_GAP)
+        if not missing_tables and not missing_column_gaps:
+            return "pre_permissions", problems
     compute_gaps = missing_column_gaps & LLAMA_COMPUTE_GAPS
     if compute_gaps:
         if compute_gaps != LLAMA_COMPUTE_GAPS:

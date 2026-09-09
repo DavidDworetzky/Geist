@@ -29,6 +29,7 @@ const baseSettings = {
   default_presence_penalty: 0,
   backup_providers: [],
   ui_preferences: {},
+  agent_permissions: { mode: 'default', always_allow: [] },
   create_date: '2025-01-01T00:00:00Z',
   update_date: '2025-01-01T00:00:00Z'
 };
@@ -138,6 +139,7 @@ describe('Settings page', () => {
       expect(screen.getByRole('tab', { name: 'Models and Providers' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Generation' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Files and RAG' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Permissions' })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Appearance' })).toBeInTheDocument();
       expect(screen.queryByRole('tab', { name: 'Developer' })).not.toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'About' })).toBeInTheDocument();
@@ -328,6 +330,22 @@ describe('Settings page', () => {
       renderResult.unmount();
       resizeObserver.restore();
     }
+  });
+
+  it('sends permission choices when explicitly edited', async () => {
+    const changed = { mode: 'require_approval', always_allow: [] };
+    global.fetch = createFetchMock([
+      { ok: true, json: async () => baseSettings },
+      { ok: true, json: async () => ({ ...baseSettings, agent_permissions: changed }) },
+    ]) as unknown as typeof fetch;
+    renderSettings();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Permissions' }));
+    await waitForSettingsRefresh();
+    fireEvent.change(screen.getByLabelText(/Approval Mode/i), { target: { value: 'require_approval' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/Settings saved successfully/i);
+    const mutation = (global.fetch as jest.Mock).mock.calls.find(([, options]) => options?.method === 'PUT');
+    expect(JSON.parse(mutation[1].body).agent_permissions).toEqual(changed);
   });
 
   it('marks unsaved changes when local values change and saves', async () => {
@@ -618,6 +636,7 @@ describe('Settings page', () => {
     await waitFor(() => expect(savedUpdates).not.toBeNull());
     expect(savedUpdates).not.toHaveProperty('llama_backend');
     expect(savedUpdates).not.toHaveProperty('llama_gpu_device_ids');
+    expect(savedUpdates).not.toHaveProperty('agent_permissions');
   });
 
   it('describes a dirty invalid compute edit when Models is showing the online agent', async () => {

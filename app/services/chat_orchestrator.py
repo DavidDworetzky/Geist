@@ -20,8 +20,10 @@ from agents.models.tool_calling import (
     ToolCall,
     ToolContext,
     ToolResult,
+    tool_requires_approval,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.services.agent_permissions import AgentPermissions, load_agent_permissions
 from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     ToolApprovalRegistry,
@@ -123,11 +125,13 @@ class ChatOrchestrator:
         max_tool_result_chars_total: int = 40_000,
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
+        permissions_loader: Callable[[int], AgentPermissions] = load_agent_permissions,
         approvals: ToolApprovalRegistry = approval_registry,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         intent_router: ToolIntentRouter | None = None,
     ) -> None:
         self.registry = registry
+        self.permissions_loader = permissions_loader
         self.run_controls = run_controls or RunControlRegistry()
         self.intent_router = intent_router
         self.max_rounds = max_rounds
@@ -326,6 +330,11 @@ class ChatOrchestrator:
             except Exception as error:
                 logger.warning("Could not hydrate chat %s: %s", chat_id, error)
         run = conversation.begin_run(prompt)
+        try:
+            permissions = self.permissions_loader(workspace_id)
+        except Exception:
+            logger.exception("Could not load run permissions; requiring approval for every tool")
+            permissions = AgentPermissions(mode="require_approval")
         approved_call_ids: set[str] = set()
         cancellation = threading.Event()
         context = ToolContext(
@@ -333,6 +342,8 @@ class ChatOrchestrator:
             chat_id=chat_id,
             run_id=run.run_id,
             cancellation=cancellation,
+            permission_mode=permissions.mode,
+            always_allow_tools=frozenset(permissions.always_allow),
         )
         native_tools = bool(getattr(backend, "supports_native_tool_calling", False))
         tools = []
@@ -506,7 +517,9 @@ class ChatOrchestrator:
                         )
 
                     definition = self.registry.get(call.name, context)
-                    requires_approval = bool(definition and definition.requires_approval)
+                    requires_approval = bool(
+                        definition and tool_requires_approval(definition, context)
+                    )
                     proposed = self._tool_state(
                         call,
                         "proposed",
@@ -563,6 +576,8 @@ class ChatOrchestrator:
                                 run_id=run.run_id,
                                 approved_call_ids=frozenset(approved_call_ids),
                                 cancellation=cancellation,
+                                permission_mode=permissions.mode,
+                                always_allow_tools=frozenset(permissions.always_allow),
                             )
                             yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
                             result = self.registry.execute(

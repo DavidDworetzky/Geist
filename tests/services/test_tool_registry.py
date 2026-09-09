@@ -64,6 +64,7 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
     }
     assert catalog["web.search"].enabled_by_default is True
     assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
+    assert catalog["adapter.JobStatusAdapter.check_async_tool"].allows_standing_grant is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
     assert catalog["workspace.list_markdown"].enabled_by_default is True

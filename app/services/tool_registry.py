@@ -7,6 +7,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import replace
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -23,6 +24,7 @@ from agents.models.tool_calling import (
     ToolIntent,
     ToolResult,
     ToolSemanticTag,
+    tool_requires_approval,
 )
 from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
@@ -160,7 +162,9 @@ class ToolRegistry:
                         definition.name,
                     )
                     continue
-                merged[definition.name] = definition
+                # A mutable source may redefine a name after it was granted.
+                # Name-only grants are reserved for static built-in definitions.
+                merged[definition.name] = replace(definition, allows_standing_grant=False)
         return merged
 
     def get(self, name: str, context: ToolContext | None = None) -> ToolDefinition | None:
@@ -263,7 +267,7 @@ class ToolRegistry:
                 content=f"Tool is not configured: {call.name}",
                 error="tool_unavailable",
             )
-        if definition.requires_approval and call.id not in context.approved_call_ids:
+        if tool_requires_approval(definition, context) and call.id not in context.approved_call_ids:
             return ToolResult(
                 call=call,
                 status="awaiting_approval",

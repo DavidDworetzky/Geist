@@ -8,7 +8,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel
 
@@ -31,6 +31,21 @@ ToolSemanticTag = Literal[
     "action",
     "image_generation",
 ]
+
+# User-configurable approval posture for agentic tool execution.
+#   default          — per-tool requires_approval flags decide (side-effecting
+#                      tools ask, read-only tools run).
+#   auto_approve     — no tool ever waits for approval.
+#   require_approval — every tool call waits for approval unless the tool is
+#                      covered by an eligible standing grant; source-provided
+#                      tools cannot redeem name-only grants.
+PermissionMode = Literal["default", "auto_approve", "require_approval"]
+MAX_ALWAYS_ALLOWED_TOOLS = 256
+MAX_PERMISSION_TOOL_NAME_LENGTH = 256
+PERMISSION_MODE_DEFAULT: PermissionMode = "default"
+PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
+PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
+VALID_PERMISSION_MODES: frozenset[PermissionMode] = frozenset(get_args(PermissionMode))
 
 
 @dataclass(frozen=True)
@@ -125,6 +140,8 @@ class ToolContext:
     chat_id: int | None
     run_id: str
     approved_call_ids: frozenset[str] = frozenset()
+    permission_mode: PermissionMode = PERMISSION_MODE_DEFAULT
+    always_allow_tools: frozenset[str] = frozenset()
     cancellation: threading.Event | None = None
 
 
@@ -150,6 +167,7 @@ class ToolDefinition:
     handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
@@ -190,6 +208,7 @@ class ToolDefinition:
                 "side_effect": self.side_effect,
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
+                "allows_standing_grant": self.allows_standing_grant,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -213,6 +232,22 @@ class ToolDefinition:
             "description": self.description,
             "input_schema": self.parameters_schema(),
         }
+
+
+def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
+    """Effective approval requirement for one call under the user's permissions.
+
+    Auto-approve explicitly waives approval. Otherwise, eligible static built-in
+    grants skip approval; require_approval asks for remaining tools; default
+    falls back to the tool's flag. Mutable sources cannot redeem name-only grants.
+    """
+    if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
+        return False
+    if definition.allows_standing_grant and definition.name in context.always_allow_tools:
+        return False
+    if context.permission_mode == PERMISSION_MODE_REQUIRE_APPROVAL:
+        return True
+    return definition.requires_approval
 
 
 @dataclass
