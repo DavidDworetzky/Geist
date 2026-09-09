@@ -6,14 +6,13 @@ export type ToolCallStatus =
   | 'failed'
   | 'cancelled';
 
-export type ToolApprovalDecision = 'approve' | 'deny';
-
 export interface ToolCallResult {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   requires_approval?: boolean;
+  can_grant?: boolean;
   result_summary?: string;
   artifact_ids?: string[];
   error?: string;
@@ -86,3 +85,5 @@ export interface ChatPair {
 export interface ChatHistory {
   chatHistory: ChatPair[];
 }
+
+export type ToolApprovalDecision = 'approve' | 'session' | 'always' | 'deny';

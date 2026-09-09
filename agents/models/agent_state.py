@@ -82,7 +82,14 @@ class AgentRunContext:
         self.transcript.append(message)
 
     def record_tool_call(self, state: ToolCallResult) -> None:
-        self.tool_calls.append(state)
+        with self.persistence_lock:
+            if self.persisted:
+                return
+            for index, existing in enumerate(self.tool_calls):
+                if existing.id == state.id:
+                    self.tool_calls[index] = state
+                    return
+            self.tool_calls.append(state)
 
     def record_tool_message(self, message: ChatMessage) -> None:
         self.transcript.append(message)

@@ -28,6 +28,7 @@ PRE_MCP_TABLE = "mcp_server"
 LEGACY_SETTINGS_REVISION = "b2e5f7a9c3d1"
 PERMISSIONS_GAP = ("user_settings", "agent_permissions")
 MCP_REVISION = "b3e5d7f9a1c3"
+ROUTINE_REVISION = "c7d9e1f3a5b7"
 
 
 def upgrade_database() -> None:
@@ -66,8 +67,12 @@ def upgrade_database() -> None:
         _reject_unsupported_legacy_schema(Base.metadata, Engine)
         _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        revisions = [LEGACY_SETTINGS_REVISION]
-        if schema_kind == "current":
+        revisions = [
+            ROUTINE_REVISION
+            if inspect(Engine).has_table("agent_routine")
+            else LEGACY_SETTINGS_REVISION
+        ]
+        if schema_kind in {"current", "pre_routines"}:
             revisions.append(MCP_REVISION)
         elif schema_kind == "pre_mcp":
             revisions.append(PRE_MCP_REVISION)
@@ -112,6 +117,7 @@ def _classify_legacy_schema(metadata, engine) -> str:
     schema_kind, problems = _inspect_legacy_schema(metadata, engine)
     if schema_kind in {
         "current",
+        "pre_routines",
         "pre_permissions",
         "pre_llama_compute",
         "pre_local_artifact",
@@ -184,8 +190,15 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
                 f"table {table.name} missing columns {', '.join(sorted(missing_columns))}"
             )
 
+    routine_gap = ("agent_routine", "run_once_requested")
+    missing_column_gaps.difference_update(
+        {("agent_routine", "last_status"), ("agent_routine", "last_error")}
+    )
+    routine_missing = "agent_routine" in missing_tables or routine_gap in missing_column_gaps
+    missing_tables.discard("agent_routine")
+    missing_column_gaps.discard(routine_gap)
     if not missing_tables and not missing_column_gaps:
-        return "current", problems
+        return "pre_routines" if routine_missing else "current", problems
     if PERMISSIONS_GAP in missing_column_gaps:
         missing_column_gaps.remove(PERMISSIONS_GAP)
         if not missing_tables and not missing_column_gaps:

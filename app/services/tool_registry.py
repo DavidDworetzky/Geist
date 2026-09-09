@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import replace
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -28,12 +29,16 @@ from agents.models.tool_calling import (
 )
 from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
-from app.services.execution import create_execution_environment
+from app.services.execution import (
+    create_execution_environment,
+    create_session_manager,
+)
 from app.services.execution.base import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
     MAX_COMMAND_TIMEOUT_SECONDS,
 )
 from app.services.execution.docker import DockerExecutionEnvironment
+from app.services.execution.session import DockerSessionManager
 
 
 logger = logging.getLogger(__name__)
@@ -142,7 +147,12 @@ class ToolRegistry:
     ):
         self._definitions: dict[str, ToolDefinition] = {}
         self._sources: list[ToolSource] = []
+        self.session_manager: DockerSessionManager | None = None
         self._explicitly_enabled = explicitly_enabled or set()
+        self._max_concurrent_executions = max_concurrent_executions
+        self._lifecycle_lock = threading.RLock()
+        self._closed = False
+        self._pending_futures: set[Future] = set()
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent_executions,
             thread_name_prefix="geist-tool",
@@ -152,6 +162,38 @@ class ToolRegistry:
         if definition.name in self._definitions:
             raise ValueError(f"Tool already registered: {definition.name}")
         self._definitions[definition.name] = definition
+
+    def shutdown(self) -> None:
+        with self._lifecycle_lock:
+            self._closed = True
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        if self.session_manager is not None:
+            self.session_manager.shutdown()
+
+    def startup(self) -> None:
+        with self._lifecycle_lock:
+            if not self._closed:
+                return
+            if any(not future.done() for future in self._pending_futures):
+                raise RuntimeError("Previous tool execution is still stopping; retry startup later")
+            if self.session_manager is not None:
+                self.session_manager.startup()
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._max_concurrent_executions, thread_name_prefix="geist-tool"
+            )
+            self._closed = False
+
+    def _forget_future(self, future: Future) -> None:
+        with self._lifecycle_lock:
+            self._pending_futures.discard(future)
+
+    def close_chat(self, workspace_id: int, chat_id: int) -> None:
+        from app.services.tool_approvals import session_grants
+
+        scope = f"workspace:{workspace_id}:chat:{chat_id}"
+        session_grants.clear(scope)
+        if self.session_manager is not None:
+            self.session_manager.close_scope(scope)
 
     def add_source(self, source: ToolSource) -> None:
         if any(existing.name == source.name for existing in self._sources):
@@ -314,7 +356,17 @@ class ToolRegistry:
 
         handler = definition.handler
         assert handler is not None  # guaranteed by ToolDefinition.__post_init__
-        future = self._executor.submit(handler, context, arguments)
+        with self._lifecycle_lock:
+            if self._closed:
+                return ToolResult(
+                    call=call,
+                    status="failed",
+                    content="Tool execution is stopped",
+                    error="tool_execution_stopped",
+                )
+            future = self._executor.submit(handler, context, arguments)
+            self._pending_futures.add(future)
+            future.add_done_callback(self._forget_future)
         try:
             output = future.result(timeout=definition.timeout_seconds)
         except FutureTimeoutError:
@@ -477,13 +529,27 @@ def build_default_tool_registry() -> ToolRegistry:
     # budget, so a backend must hold at least one of them.
     execution_environment = create_execution_environment()
     if execution_environment is not None:
+        session_manager = create_session_manager(execution_environment)
+        registry.session_manager = session_manager
 
         def terminal_run(
             context: ToolContext, arguments: TerminalRunArguments
         ) -> ToolExecutionOutput:
-            result = execution_environment.run(
-                arguments.command, timeout_seconds=arguments.timeout_seconds
-            )
+            if session_manager is not None:
+                scope = (
+                    f"workspace:{context.workspace_id}:chat:{context.chat_id}"
+                    if context.chat_id is not None
+                    else f"workspace:{context.workspace_id}:run:{context.run_id}"
+                )
+                result = session_manager.run_in_session(
+                    scope,
+                    arguments.command,
+                    timeout_seconds=arguments.timeout_seconds,
+                )
+            else:
+                result = execution_environment.run(
+                    arguments.command, timeout_seconds=arguments.timeout_seconds
+                )
             summary = (
                 ("blocked by policy; " if result.blocked else "")
                 + f"exit {result.exit_code}"

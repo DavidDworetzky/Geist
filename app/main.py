@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import json
 import logging
@@ -8,11 +9,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
+import anyio
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.concurrency import run_in_threadpool
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
 from adapters.image_generation_adapter import ImageGenerationAdapter
 from agents.agent_context import AgentContext
@@ -35,6 +37,7 @@ from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.plugins import router as plugins_router
+from app.api.v1.endpoints.routines import router as routines_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
@@ -59,13 +62,14 @@ from app.security.operator import (
     OperatorPrincipal,
     require_operator_capability,
 )
-from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.chat_orchestrator import ChatOrchestrator, ChatStreamEvent, RunControlRegistry
 from app.services.job_queue import start_worker, stop_worker
 from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
+from app.services.routine_scheduler import RoutineScheduler
 from app.services.tool_approvals import approval_registry as tool_approval_registry
 from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import build_default_tool_registry
@@ -497,7 +501,9 @@ def run_chat_completion(
     )
 
 
-def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+def stream_chat_events(
+    params: CompleteTextParams, chat_id: int | None = None, *, yield_approval_wait: bool = False
+):
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
         if hasattr(agent, "stream_model_turn"):
@@ -513,7 +519,7 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 memory_mode=memory_mode,
                 folder_id=folder_id,
             )
-            for event in chat_orchestrator.stream(
+            yield from chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,
                 workspace_id=workspace_id,
@@ -525,8 +531,8 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
-            ):
-                yield sse_event(event.event, event.payload)
+                yield_approval_wait=yield_approval_wait,
+            )
             return
 
         # Legacy agents retain text-only behavior. Generate once and adapt the
@@ -553,16 +559,16 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
         for chunk in chunk_completion_text(
             completion_object.message[0] if completion_object.message else ""
         ):
-            yield sse_event("delta", {"text": chunk})
+            yield ChatStreamEvent("delta", {"text": chunk})
 
-        yield sse_event("final", completion_object)
-        yield sse_event(
+        yield ChatStreamEvent("final", completion_object)
+        yield ChatStreamEvent(
             "done",
             {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
         )
     except Exception:
         logger.exception("Chat stream failed before a terminal event")
-        yield sse_event(
+        yield ChatStreamEvent(
             "error",
             {
                 "code": "chat_backend_error",
@@ -573,7 +579,83 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
                 "chat_id": chat_id,
             },
         )
-        yield sse_event("done", {"run_id": None, "chat_id": chat_id})
+        yield ChatStreamEvent("done", {"run_id": None, "chat_id": chat_id})
+
+
+def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+    for event in stream_chat_events(params, chat_id):
+        yield sse_event(event.event, event.payload)
+
+
+async def async_stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+    events = stream_chat_events(params, chat_id, yield_approval_wait=True)
+    run_id: str | None = None
+    completed = False
+    workspace = await run_in_threadpool(get_default_workspace)
+    workspace_id = workspace.workspace_id
+    try:
+        async for event in iterate_in_threadpool(events):
+            if event.event == "run_started":
+                run_id = event.payload["run_id"]
+            elif event.event == "done":
+                completed = True
+            if event.event == "approval_wait":
+                yield ": approval pending\n\n"
+                await asyncio.sleep(1)
+            else:
+                yield sse_event(event.event, event.payload)
+    finally:
+        # Starlette cancels this iterator on disconnect. Shield the durable
+        # cancellation and close only after its threadpool next() has returned.
+        with anyio.CancelScope(shield=True):
+            if run_id is not None and not completed:
+                await run_in_threadpool(run_controls.cancel, run_id, workspace_id=workspace_id)
+            await run_in_threadpool(events.close)
+
+
+def run_routine(routine, cancellation: threading.Event | None = None) -> None:
+    """Execute one scheduled routine through the orchestrator, unattended.
+
+    interactive=False makes the orchestrator deny approval-gated tools
+    immediately instead of waiting for a user who is not present. The run
+    persists as a normal chat session, so results are visible in the UI.
+    """
+    workspace_id = int(routine.user_id)
+    if get_default_workspace().workspace_id != workspace_id:
+        raise ValueError("Routine owner is not the active workspace")
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+    agent = get_active_agent(default_agent_type)
+    if not hasattr(agent, "stream_model_turn"):
+        logger.warning(
+            "Routine %s skipped: active agent has no native tool loop",
+            routine.routine_id,
+        )
+        return
+    params = CompleteTextParams(
+        prompt=f"[Scheduled routine #{routine.routine_id}: {routine.name}]\n\n{routine.prompt}",
+        max_tokens=settings.default_max_tokens,
+        temperature=settings.default_temperature,
+        top_p=settings.default_top_p,
+        frequency_penalty=settings.default_frequency_penalty,
+        presence_penalty=settings.default_presence_penalty,
+        enable_tools=True,
+    )
+    for event in chat_orchestrator.stream(
+        backend=agent,
+        prompt=params.prompt,
+        workspace_id=workspace_id,
+        chat_id=None,
+        config=model_request_config(params),
+        system_prompt=chat_system_prompt(True, ""),
+        enable_tools=True,
+        interactive=False,
+        cancellation=cancellation,
+    ):
+        if event.event in {"error", "cancelled"}:
+            raise RuntimeError("Routine did not complete successfully")
+
+
+routine_scheduler = RoutineScheduler(run_routine)
 
 
 # App factory function
@@ -585,7 +667,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
+            chat_orchestrator.registry.startup()
             app.state.job_worker = start_worker()
+            routine_scheduler.start()
             app.state.ready = True
             yield
         finally:
@@ -598,6 +682,7 @@ def create_app(
         install_loopback_security(app)
     app.state.ready = False
     app.state.job_worker = None
+    app.state.routine_scheduler = routine_scheduler
 
     # agent routes, for agentic flows.
     agent_router = APIRouter()
@@ -636,7 +721,7 @@ def create_app(
     @agent_router.post("/complete_text_stream")
     async def complete_text_stream_endpoint(params: CompleteTextParams):
         return StreamingResponse(
-            stream_chat_completion(params),
+            async_stream_chat_completion(params),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -646,7 +731,7 @@ def create_app(
         params: CompleteTextParams, session_id: int
     ):
         return StreamingResponse(
-            stream_chat_completion(params, chat_id=session_id),
+            async_stream_chat_completion(params, chat_id=session_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -671,12 +756,16 @@ def create_app(
         params: ToolApprovalParams,
         operator: OperatorPrincipal = Depends(_require_tool_operator),
     ):
-        if not tool_approval_registry.resolve(
-            run_id,
-            params.call_id,
-            params.decision,
-            workspace_id=operator.workspace_id,
-        ):
+        try:
+            resolved = tool_approval_registry.resolve(
+                run_id,
+                params.call_id,
+                params.decision,
+                workspace_id=operator.workspace_id,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if not resolved:
             raise HTTPException(
                 status_code=404,
                 detail="No pending approval for this run and call",
@@ -795,6 +884,7 @@ def create_app(
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
+    app.include_router(routines_router, prefix="/api/v1/routines", tags=["routines"])
     app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
     app.include_router(plugins_router, prefix="/api/v1/plugins", tags=["plugins"])
 
@@ -1071,6 +1161,16 @@ def _database_is_ready() -> bool:
 
 def _stop_runtime_services() -> None:
     try:
+        routine_scheduler.stop()
+    except Exception:
+        logger.exception("Failed to stop the routine scheduler")
+
+    try:
+        chat_orchestrator.registry.shutdown()
+    except Exception:
+        logger.exception("Failed to stop tool execution sessions")
+
+    try:
         stop_worker()
     except Exception:
         logger.exception("Failed to stop the job worker")
@@ -1095,6 +1195,7 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        # Container entry point; operator authentication protects exposed routes.
+        host="0.0.0.0",  # nosec B104
         port=8000,  # 1MB (1024 * 1024 bytes)
     )
