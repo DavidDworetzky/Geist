@@ -211,6 +211,7 @@ class TestOnlineAgentInitialization:
         [
             "x-ai/grok-4.6",
             "qwen/qwen3.8-flash",
+            "inception/mercury-2.5",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
         ],
@@ -446,6 +447,47 @@ class TestOnlineAgentAPIRequests:
                 assert "n" not in payload
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_mercury25_omits_unsupported_defaults_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="inception/mercury-2.5",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "inception/mercury-2.5",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.2,
+                        "top_p": 0.8,
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert payload["temperature"] == 0.2
+                assert payload["stop"] == "END"
+                assert "reasoning" not in payload
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
 
     def test_inferred_self_hosted_model_keeps_request_parameters_unchanged(self):
         payload = {

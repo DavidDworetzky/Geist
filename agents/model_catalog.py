@@ -508,6 +508,25 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "inception/mercury-2.5",
+        "Mercury 2.5",
+        "mercury",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=260000,
+        max_output_tokens=65536,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        local=False,
+        performance_note=(
+            "Low-latency text model hosted through a single ZDR OpenRouter endpoint; "
+            "supports optional reasoning, native tools, and structured outputs."
+        ),
+    ),
+    ModelSpec(
         "tencent/hy4-preview",
         "Tencent Hy4 Preview",
         "hy",

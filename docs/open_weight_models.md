@@ -11,8 +11,8 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
-intentionally server-backed. For models with published weights, their total
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, Mercury 2.5, and Qwen 3.8 Flash
+routes are also intentionally server-backed. For models with published weights, their total
 resident weights make an in-process laptop load impractical even when their
 mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -130,6 +130,26 @@ change. As of August 28, 2026, OpenRouter identifies the Tencent endpoint as
 zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
+
+## OpenRouter-hosted Mercury 2.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`inception/mercury-2.5`. OpenRouter released this stable, text-only production
+route on September 8, 2026 with a 260,000-token context window, 65,536-token
+output limit, optional reasoning, streaming, native tool calling, and
+JSON-schema structured outputs. Geist omits unsupported `n`, `top_p`,
+frequency-penalty, and presence-penalty parameters while retaining temperature,
+stop, tools, and OpenRouter's default medium reasoning effort.
+
+As of September 9, 2026, OpenRouter displays an 80%-off launch price of $0.04
+per million input tokens, $0.15 per million output tokens, and $0.004 per
+million cached input tokens; Inception's undiscounted list prices are $0.20,
+$0.75, and $0.02 respectively. The route currently has one Inception endpoint,
+so there is no provider fallback diversity. OpenRouter reports 98.77% routed
+three-day availability and identifies the endpoint as zero retention and not
+used for training. OpenRouter itself does not retain prompt or response content
+unless logging is explicitly enabled. Keep ZDR enabled and re-check the endpoint
+policy before confidential workloads.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 

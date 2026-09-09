@@ -229,6 +229,37 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_mercury25_metadata_is_explicit_and_server_backed():
+    from agents.architectures.registry import get_models_for_provider, provider_from_string
+
+    mercury = get_model_spec("inception/mercury-2.5")
+
+    assert mercury.provider == "openrouter"
+    assert mercury.backend == "openai_compatible"
+    assert mercury.local is False
+    assert mercury.family == "mercury"
+    assert mercury.context_window == 260000
+    assert mercury.max_output_tokens == 65536
+    assert mercury.parameter_count is None
+    assert mercury.activated_parameters is None
+    assert mercury.supports_vision is False
+    assert mercury.supports_function_calling is True
+    assert mercury.supports_reasoning is True
+    assert mercury.supports_streaming is True
+    assert mercury.recommended is True
+    assert mercury.mandatory_reasoning_effort is None
+    assert mercury.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert get_provider_endpoint(mercury.provider) == "https://openrouter.ai/api/v1"
+    assert mercury.id in {
+        model.id for model in get_models_for_provider(provider_from_string("openrouter"))
+    }
+
+
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     hy4 = get_model_spec("tencent/hy4-preview")
 
@@ -467,6 +498,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "inception/mercury-2.5",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -522,6 +554,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "inception/mercury-2.5",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -673,6 +706,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
+    assert any(model.id == "inception/mercury-2.5" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(
