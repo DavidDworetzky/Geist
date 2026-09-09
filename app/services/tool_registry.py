@@ -28,6 +28,12 @@ from agents.models.tool_calling import (
 )
 from app.runtime_config import default_markdown_root
 from app.services.document_search import DocumentSearchService
+from app.services.execution import create_execution_environment
+from app.services.execution.base import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    MAX_COMMAND_TIMEOUT_SECONDS,
+)
+from app.services.execution.docker import DockerExecutionEnvironment
 
 
 logger = logging.getLogger(__name__)
@@ -76,6 +82,15 @@ class ToolSource(Protocol):
     name: str
 
     def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]: ...
+
+
+class TerminalRunArguments(StrictToolArguments):
+    command: str = Field(min_length=1, max_length=8_000)
+    timeout_seconds: int = Field(
+        default=DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        ge=1,
+        le=MAX_COMMAND_TIMEOUT_SECONDS,
+    )
 
 
 _JSON_TYPE_CHECKS: dict[str, type | tuple[type, ...]] = {
@@ -323,10 +338,11 @@ class ToolRegistry:
             content = f"{content[:definition.max_result_chars]}\n[tool result truncated]"
         return ToolResult(
             call=call,
-            status="succeeded",
+            status="failed" if output.error else "succeeded",
             content=content,
             summary=(output.summary or content[:500])[:500],
             artifacts=output.artifacts,
+            error=output.error,
         )
 
 
@@ -455,6 +471,68 @@ def build_default_tool_registry() -> ToolRegistry:
             semantic_tags=frozenset({"local_retrieval"}),
         )
     )
+    # Native tool execution backend (GEIST_EXEC_BACKEND). Sandboxed Docker
+    # runs approval-free; local or host-mounted Docker requires approval —
+    # isolation and approval are two implementations of the same safety
+    # budget, so a backend must hold at least one of them.
+    execution_environment = create_execution_environment()
+    if execution_environment is not None:
+
+        def terminal_run(
+            context: ToolContext, arguments: TerminalRunArguments
+        ) -> ToolExecutionOutput:
+            result = execution_environment.run(
+                arguments.command, timeout_seconds=arguments.timeout_seconds
+            )
+            summary = (
+                ("blocked by policy; " if result.blocked else "")
+                + f"exit {result.exit_code}"
+                + (" (timed out)" if result.timed_out else "")
+                + f" in {result.duration_seconds:.1f}s"
+            )
+            return ToolExecutionOutput(
+                content=json.dumps(
+                    {
+                        "exit_code": result.exit_code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "timed_out": result.timed_out,
+                        "truncated": result.truncated,
+                        "blocked": result.blocked,
+                    },
+                    ensure_ascii=False,
+                ),
+                summary=summary,
+                error="policy_blocked" if result.blocked else None,
+            )
+
+        def _execution_available(context: ToolContext) -> bool:
+            if isinstance(execution_environment, DockerExecutionEnvironment):
+                return execution_environment.is_available()
+            return True
+
+        registry.register(
+            ToolDefinition(
+                name="terminal.run",
+                description=(
+                    "Run a shell command in the configured execution backend "
+                    f"({execution_environment.describe()}). Returns exit code, "
+                    "stdout, and stderr."
+                ),
+                arguments_model=TerminalRunArguments,
+                handler=terminal_run,
+                side_effect="process",
+                requires_approval=execution_environment.requires_per_call_approval,
+                requires_per_call_approval=execution_environment.requires_per_call_approval,
+                allows_standing_grant=not execution_environment.requires_per_call_approval,
+                enabled_by_default=False,
+                timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
+                source_adapter=f"execution.{execution_environment.name}",
+                source_revision=execution_environment.describe(),
+                availability=_execution_available,
+            )
+        )
+
     # Reflected adapter actions ride through the same registry as the curated
     # tools above (one registry, several sources) but stay disabled until an
     # operator opts in by name via GEIST_ENABLED_CHAT_TOOLS, e.g.

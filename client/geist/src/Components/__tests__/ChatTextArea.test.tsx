@@ -117,6 +117,7 @@ describe('ChatTextArea tool activity', () => {
       'filesystem.write (awaiting approval)',
     );
     expect(screen.getByText('Approval required')).toBeInTheDocument();
+    expect(screen.getByLabelText('filesystem.write arguments')).toHaveAttribute('open');
     expect(screen.getByTestId('tool-call-call_approval')).toHaveTextContent('pi framework');
     expect(screen.getByTestId('tool-call-call_running')).toHaveTextContent('search (running)');
     expect(screen.getByTestId('tool-call-call_failed')).toHaveTextContent('Request failed');

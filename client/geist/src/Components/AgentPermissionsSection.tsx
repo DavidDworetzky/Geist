@@ -11,6 +11,7 @@ interface ChatTool {
   name: string;
   description: string;
   requires_approval: boolean;
+  requires_per_call_approval?: boolean;
   side_effect: string;
   enabled?: boolean;
   allows_standing_grant?: boolean;
@@ -28,9 +29,9 @@ const modeDescriptions: Record<AgentPermissionMode, string> = {
   default:
     'Read-only tools run automatically; tools that send messages or write files wait for your approval.',
   require_approval:
-    'Every agent tool call waits for approval unless it has an eligible always-allow grant. Runtime-discovered tools cannot use standing grants.',
+    'Every agent tool call waits for approval unless it has an eligible always-allow grant. Runtime-discovered tools and tools requiring fresh approval cannot use standing grants.',
   auto_approve:
-    'The agent runs every tool without asking. This includes runtime-discovered MCP/plugin tools whose definitions can change without notice. Only enable this if you trust all connected tools.'
+    'The agent runs tools without asking, except tools requiring fresh approval. This includes runtime-discovered MCP/plugin tools whose definitions can change without notice. Only enable this if you trust all connected tools.'
 };
 
 const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
@@ -103,7 +104,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
           <div>
             <span className="settings-label">Always-Allowed Tools</span>
             <p className="settings-description">
-              Eligible built-in tools on this list skip approval. Runtime-discovered tools cannot receive name-only grants (
+              Eligible built-in tools on this list skip approval. Runtime-discovered tools and tools requiring fresh approval cannot receive standing grants (
               {permissions.always_allow.length} selected).
             </p>
           </div>
@@ -120,7 +121,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
 
         {permissions.mode === 'auto_approve' && (
           <p className="settings-description">
-            Auto-approve is on, so every tool already runs without asking; this list applies when
+            Auto-approve is on, except for tools requiring fresh approval; this list applies when
             you switch back to a stricter mode.
           </p>
         )}
@@ -154,7 +155,7 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   className={`settings-file-option ${selected ? 'selected' : ''}`}
                   onClick={() => toggleAlwaysAllow(tool.name)}
                   aria-pressed={selected}
-                  disabled={(tool.enabled === false || tool.allows_standing_grant === false) && !selected}
+                  disabled={(tool.enabled === false || tool.requires_per_call_approval === true || tool.allows_standing_grant === false) && !selected}
                   title={tool.description}
                 >
                   <span className="settings-checkbox" aria-hidden="true">
@@ -162,11 +163,13 @@ const AgentPermissionsSection: React.FC<AgentPermissionsSectionProps> = ({
                   <span>
                     {tool.name}
                     {tool.enabled === false && <span className="settings-description"> — unavailable</span>}
-                    {tool.allows_standing_grant === false && <span className="settings-description"> — runtime-discovered; {selected ? 'stored grant is not honored; click to revoke' : 'standing grants unavailable'}</span>}
+                    {tool.allows_standing_grant === false && !tool.requires_per_call_approval && <span className="settings-description"> — runtime-discovered; {selected ? 'stored grant is not honored; click to revoke' : 'standing grants unavailable'}</span>}
                     {(tool.side_effect === 'external_write' || tool.side_effect === 'process') && (
                       <span className="settings-description"> — can affect external systems or run commands</span>
                     )}
-                    {tool.requires_approval && (
+                    {tool.requires_per_call_approval ? (
+                      <span className="settings-description"> — fresh approval required; always-allow does not apply</span>
+                    ) : tool.requires_approval && (
                       <span className="settings-description"> — asks by default</span>
                     )}
                   </span>

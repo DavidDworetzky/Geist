@@ -24,6 +24,7 @@ The default registry is intentionally explicit:
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
 | `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current workspace's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
+| `terminal.run` | Configured execution backend | no | Mount-free, network-disabled Docker is isolated; local, mounted, or networked execution requires fresh approval regardless of standing grants. |
 | `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | yes | Read-only paths contained under Geist's private workspace directory. |
 | `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | yes | Read-only paths contained under Geist's private workspace directory. |
 
@@ -78,6 +79,44 @@ stdio requests observe the run cancellation event, while HTTP operations are
 bounded by the same end-to-end server deadline and have their connection closed
 when invalidated. Side-effect mappings additionally require an interactive,
 call-specific approval before dispatch.
+
+## Terminal execution
+
+Set `GEIST_EXEC_BACKEND` to `docker`, `podman`, or `local`, and explicitly include
+`terminal.run` in `GEIST_ENABLED_CHAT_TOOLS`. `GEIST_EXEC_RUNTIME` pins a CLI and
+fails closed when missing. `GEIST_EXEC_DOCKER_IMAGE` must provide bash and GNU
+timeout (default `python:3.11-slim`). `GEIST_EXEC_DOCKER_NETWORK` defaults off;
+enabling it exposes egress, potentially including LAN/metadata endpoints, and
+requires fresh approval. `GEIST_EXEC_WORKSPACE` must identify an existing host
+directory; relative paths are resolved at startup and Docker uses a fail-closed
+bind mount. Commas in Docker paths are rejected. The path must exist on both the
+backend and daemon hosts; a missing daemon-side directory is not auto-created.
+
+Local execution is not sandboxed. Environment scrubbing cannot hide secrets in
+host files or inside a mounted workspace, and regex command checks are only a
+best-effort defense. Host/network approval cannot be waived by auto-approve or an
+always-allow grant. Interactive approval resume uses the authenticated, invocation-
+bound path inherited from main; unattended callers deny approval-requiring tools.
+
+Timeouts kill the local POSIX process group or attempt bounded removal of this
+invocation's uniquely named container. Cleanup cannot be guaranteed if the daemon
+is unavailable or a host descendant deliberately escapes its process group.
+Docker exit codes124/137 are treated as timeouts; a command deliberately exiting
+with those codes is indistinguishable. Policy refusals have `policy_blocked` tool
+errors, distinct from ordinary shell exit codes in the result body.
+
+Subprocess output is captured incrementally with at most 64 KiB retained per stream
+before model-facing truncation. Excess bytes are drained and discarded, not held
+in host memory; verbose commands retain their real exit status and report
+`truncated: true`. The deadline, not output volume, stops a workload and triggers
+container cleanup. The tool catalog marks fresh-approval tools explicitly;
+the UI cannot create ineffective standing grants for
+them, but existing grants can still be removed.
+
+The container root filesystem is read-only. Only the size-limited temporary
+mounts (and an explicitly approved host workspace, if configured) are writable.
+Background processes that retain output pipes can keep capture open until the
+command deadline; launch long-running services through a managed job instead.
 
 ## Security and identity model
 

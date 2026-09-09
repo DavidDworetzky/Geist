@@ -150,6 +150,7 @@ class ToolExecutionOutput:
     content: str
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    error: str | None = None
 
 
 # Argument models are validated by ToolRegistry immediately before dispatch.
@@ -167,6 +168,7 @@ class ToolDefinition:
     handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
     allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
@@ -209,6 +211,7 @@ class ToolDefinition:
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
                 "allows_standing_grant": self.allows_standing_grant,
+                "requires_per_call_approval": self.requires_per_call_approval,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -237,10 +240,13 @@ class ToolDefinition:
 def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
     """Effective approval requirement for one call under the user's permissions.
 
-    Auto-approve explicitly waives approval. Otherwise, eligible static built-in
+    Fresh per-call approval cannot be waived by any mode or standing grant.
+    Otherwise, auto-approve waives approval. Eligible static built-in
     grants skip approval; require_approval asks for remaining tools; default
     falls back to the tool's flag. Mutable sources cannot redeem name-only grants.
     """
+    if definition.requires_per_call_approval:
+        return True
     if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
         return False
     if definition.allows_standing_grant and definition.name in context.always_allow_tools:
