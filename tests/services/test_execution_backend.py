@@ -164,6 +164,12 @@ def test_docker_run_args_workspace_mount_replaces_tmpfs():
     assert "/workspace:rw,nosuid" not in joined
 
 
+def test_invalid_one_shot_mount_is_rejected_before_execution():
+    with patch("subprocess.Popen") as execute, pytest.raises(ValueError, match="commas"):
+        DockerExecutionEnvironment(workspace="/data,other", runtime_path="docker")
+    execute.assert_not_called()
+
+
 def test_docker_run_args_network_opt_in():
     args = build_docker_run_args(image=DEFAULT_IMAGE, command="curl x", network=True)
     assert "--network" not in args
@@ -285,15 +291,15 @@ def test_registry_omits_terminal_tool_when_backend_disabled(monkeypatch, tmp_pat
     assert registry.get("terminal.run") is None
 
 
-def test_registry_sandboxed_docker_tool_needs_no_approval(monkeypatch, tmp_path):
+def test_registry_durable_chat_docker_tool_requires_approval(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.delenv("GEIST_EXEC_WORKSPACE", raising=False)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
     registry = build_default_tool_registry()
     definition = registry.get("terminal.run")
     assert definition is not None
-    assert definition.requires_approval is False
-    assert definition.requires_per_call_approval is False
+    assert definition.requires_approval is True
+    assert definition.requires_per_call_approval is True
     assert definition.enabled_by_default is True
     assert definition.side_effect == "process"
 

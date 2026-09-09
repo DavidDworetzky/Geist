@@ -55,6 +55,46 @@ def test_names_are_safe_without_sanitization_collisions():
     assert "/" not in session_container_name("a/b", "owner")
 
 
+def test_session_pins_workspace_and_keeps_mount_ownership(monkeypatch, tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    manager, runtime = _manager(monkeypatch)
+    assert manager.run_in_session("chat", "echo hi", workspace=str(first)).exit_code == 0
+    created = next(args for args in runtime.calls if args[0] == "run")
+    assert f"type=bind,source={first},target=/workspace" in created
+    assert f"org.geist.session-owner={manager.owner}" in created
+    count = len(runtime.calls)
+    result = manager.run_in_session("chat", "echo hi", workspace=str(second))
+    assert result.exit_code == 125
+    assert "workspace changed" in result.stderr
+    assert len(runtime.calls) == count
+
+
+def test_workspace_override_keeps_hardline_rejection(monkeypatch, tmp_path):
+    manager, runtime = _manager(monkeypatch)
+    result = manager.run_in_session("chat", "rm -rf /workspace", workspace=str(tmp_path))
+    assert result.blocked
+    assert result.exit_code == 126
+    assert runtime.calls == []
+
+
+@pytest.mark.parametrize("path", ["relative", "/missing,other"])
+def test_invalid_session_workspace_never_reaches_runtime(monkeypatch, path):
+    manager, runtime = _manager(monkeypatch)
+    assert manager.run_in_session("chat", "echo hi", workspace=path).exit_code == 125
+    assert runtime.calls == []
+
+
+def test_missing_session_workspace_is_not_created(monkeypatch, tmp_path):
+    missing = tmp_path / "missing"
+    manager, runtime = _manager(monkeypatch)
+    assert manager.run_in_session("chat", "echo hi", workspace=str(missing)).exit_code == 125
+    assert not missing.exists()
+    assert runtime.calls == []
+
+
 def test_bounded_file_tool_input_and_output_round_trip():
     payload = "hello \u2603" * 20_000
     result = DockerSessionManager._runtime_call(

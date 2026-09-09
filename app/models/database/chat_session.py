@@ -80,6 +80,28 @@ class ChatHistory(list):
         self.chat_history = list(self)
 
 
+def create_chat_session(
+    user_id: int,
+    *,
+    memory_enabled: bool = True,
+    memory_mode: str = "public",
+    folder_id: int | None = None,
+) -> int:
+    with SessionLocal() as session:
+        chat = ChatSession(
+            user_id=user_id,
+            chat_history="[]",
+            create_date=datetime.now(),
+            update_date=datetime.now(),
+            memory_enabled=memory_enabled,
+            memory_mode=memory_mode,
+            folder_id=folder_id,
+        )
+        session.add(chat)
+        session.commit()
+        return int(chat.chat_session_id)
+
+
 def _serialize_chat_extension(value: Any) -> Any:
     if value is None:
         return None

@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 import subprocess  # nosec B404 - bounded argv-only calls to the configured runtime
 import tempfile
 import threading
@@ -74,6 +75,7 @@ def build_session_create_args(
     if not network:
         args += ["--network", "none"]
     if workspace:
+        # Fail closed if this path is absent on the daemon's host.
         args += workspace_mount_args(workspace)
     else:
         args += ["--tmpfs", "/workspace:rw,nosuid,size=256m,mode=0777"]
@@ -107,6 +109,7 @@ class _Session:
     last_used: float
     lock: threading.Lock = field(default_factory=threading.Lock)
     retired: bool = False
+    workspace: str | None = None
 
 
 class DockerSessionManager:
@@ -188,6 +191,13 @@ class DockerSessionManager:
         )
         if rejection is not None:
             return ExecutionResult(126, "", f"BLOCKED: {rejection}", 0, blocked=True)
+        if workspace is not None:
+            try:
+                workspace_mount_args(workspace)
+                if not os.path.isdir(workspace):
+                    raise ValueError("Sandbox workspace must be an existing directory")
+            except ValueError as error:
+                return ExecutionResult(125, "", str(error), 0)
         runtime = self.environment.runtime()
         if runtime is None:
             return ExecutionResult(
@@ -211,8 +221,13 @@ class DockerSessionManager:
                 session = _Session(
                     f"{session_container_name(scope_key, self.owner)}-{uuid.uuid4().hex[:12]}",
                     self._clock(),
+                    workspace=workspace or self.environment.workspace,
                 )
                 self._sessions[scope_key] = session
+            elif session.workspace != (workspace or self.environment.workspace):
+                return ExecutionResult(
+                    125, "", "Sandbox workspace changed within the same scope", 0
+                )
         if not session.lock.acquire(timeout=max(0, deadline - time.monotonic())):
             return ExecutionResult(
                 124, "", "Sandbox session is busy", time.monotonic() - started, timed_out=True
@@ -222,7 +237,9 @@ class DockerSessionManager:
                 return ExecutionResult(
                     125, "", "Sandbox session is closed", time.monotonic() - started
                 )
-            create_error = self._ensure_container(runtime, session.name, deadline)
+            create_error = self._ensure_container(
+                runtime, session.name, deadline, workspace=session.workspace
+            )
             if create_error is not None:
                 session.retired = True
                 return ExecutionResult(
@@ -264,7 +281,9 @@ class DockerSessionManager:
             finally:
                 session.lock.release()
 
-    def _ensure_container(self, runtime: str, name: str, deadline: float) -> str | None:
+    def _ensure_container(
+        self, runtime: str, name: str, deadline: float, *, workspace: str | None = None
+    ) -> str | None:
         """Start the session container if it isn't already running."""
         inspected = self._inspect(runtime, name, deadline)
         if inspected.timed_out:
@@ -284,7 +303,7 @@ class DockerSessionManager:
                 name=name,
                 image=self.environment.image,
                 network=self.environment.network,
-                workspace=self.environment.workspace,
+                workspace=workspace or self.environment.workspace,
                 owner=self.owner,
             ),
             deadline,

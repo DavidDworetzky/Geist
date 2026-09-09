@@ -237,6 +237,7 @@ class ChatOrchestrator:
         max_tool_result_chars_total: int = 40_000,
         history_loader: Callable[[int], Any] = get_chat_history,
         history_writer: Callable[..., Any] = update_chat_history,
+        chat_creator: Callable[..., int] | None = None,
         permissions_loader: Callable[[int], AgentPermissions] = load_agent_permissions,
         approvals: ToolApprovalRegistry = approval_registry,
         grants: SessionGrantRegistry = session_grants,
@@ -263,6 +264,7 @@ class ChatOrchestrator:
         self.max_tool_result_chars_total = max_tool_result_chars_total
         self.history_loader = history_loader
         self.history_writer = history_writer
+        self.chat_creator = chat_creator
         self.orchestration_runs = orchestration_runs or GoalRuntimeRegistry()
         self.goal_store = goal_store or NullGoalStore()
         self.goal_max_turns = max(1, min(goal_max_turns, 200))
@@ -541,6 +543,26 @@ class ChatOrchestrator:
         yield_approval_wait: bool = False,
         cancellation: threading.Event | None = None,
     ) -> Iterator[ChatStreamEvent]:
+        if chat_id is None and enable_tools and self.chat_creator is not None:
+            try:
+                chat_id = self.chat_creator(
+                    workspace_id,
+                    memory_enabled=memory_enabled,
+                    memory_mode=memory_mode,
+                    folder_id=folder_id,
+                )
+            except Exception:
+                logger.exception("Could not allocate chat identity")
+                yield ChatStreamEvent(
+                    "error",
+                    {
+                        "code": "chat_allocation_failed",
+                        "message": "Could not create the chat workspace. Check database availability and retry.",
+                        "chat_id": None,
+                    },
+                )
+                yield ChatStreamEvent("done", {"run_id": None, "chat_id": None})
+                return
         conversation = ConversationState(chat_id=chat_id, user_id=workspace_id)
         conversation.add_system_prompt(system_prompt)
         if chat_id is not None:
@@ -625,10 +647,24 @@ class ChatOrchestrator:
                 persisted_chat_id = getattr(history, "chat_session_id", conversation.chat_id)
                 if conversation.chat_id is None and persisted_chat_id is not None:
                     self.grants.promote_run(workspace_id, run.run_id, persisted_chat_id)
-                    if self.registry.session_manager is not None:
+                    if (
+                        self.registry.session_manager is not None
+                        and self.registry.coding_workspace is not None
+                    ):
+                        coding_workspace = self.registry.coding_workspace
                         self.registry.session_manager.promote_scope(
-                            f"workspace:{workspace_id}:run:{run.run_id}",
-                            f"workspace:{workspace_id}:chat:{persisted_chat_id}",
+                            coding_workspace.scope(
+                                ToolContext(
+                                    workspace_id=workspace_id, chat_id=None, run_id=run.run_id
+                                )
+                            ),
+                            coding_workspace.scope(
+                                ToolContext(
+                                    workspace_id=workspace_id,
+                                    chat_id=persisted_chat_id,
+                                    run_id=run.run_id,
+                                )
+                            ),
                         )
                 run.mark_persisted(persisted_chat_id)
                 if (
