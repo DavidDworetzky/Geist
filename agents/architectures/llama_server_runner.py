@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -47,24 +47,42 @@ class LlamaServerRunner(BaseRunner):
         self.client: httpx.Client | None = None
         self.base_url: str | None = None
         self.headers: dict[str, str] = {"Content-Type": "application/json"}
+        self.effective_backend: Literal["cpu", "gpu"] | None = None
+        self.effective_device_ids: tuple[str, ...] = ()
+        self.selection_detection_error: str | None = None
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
         config = dict(device_config or {})
         artifact_reference = str(config.pop("artifact_id", model_id))
+        backend = str(config.pop("llama_backend", "auto"))
+        raw_device_ids = config.pop("llama_gpu_device_ids", [])
+        if not isinstance(raw_device_ids, list | tuple) or not all(
+            isinstance(device_id, str) for device_id in raw_device_ids
+        ):
+            raise ValueError("llama_gpu_device_ids must be a list of device IDs")
         if config:
-            # llama.cpp device/runtime selection is process-wide and controlled
-            # by GEIST_LLAMA_ACCELERATION, not untrusted per-request switches.
             unsupported = ", ".join(sorted(config))
             raise ValueError(f"Unsupported llama-server device options: {unsupported}")
         artifact, model_path = self.model_manager.require_installed(artifact_reference)
-        connection = self.server_manager.start(model_path, artifact.model_id)
+        connection = self.server_manager.start(
+            model_path,
+            artifact.model_id,
+            backend=backend,
+            device_ids=tuple(raw_device_ids),
+        )
         if self.client is not None:
             self.client.close()
         self.model_id = artifact.model_id
         self.artifact_id = artifact.id
-        self.supports_native_tool_calling = bool(
-            getattr(artifact, "supports_tool_calling", False)
-        )
+        if connection.backend == "vulkan":
+            self.effective_backend = "gpu"
+        elif connection.backend == "cpu":
+            self.effective_backend = "cpu"
+        else:
+            self.effective_backend = None
+        self.effective_device_ids = connection.device_ids
+        self.selection_detection_error = connection.detection_error
+        self.supports_native_tool_calling = bool(getattr(artifact, "supports_tool_calling", False))
         self.base_url = f"{connection.base_url}/v1"
         self.headers = {
             "Content-Type": "application/json",
@@ -240,9 +258,7 @@ class LlamaServerRunner(BaseRunner):
                     yield ModelEvent.text_delta(str(content))
                 for fallback_index, tool_delta in enumerate(delta.get("tool_calls") or []):
                     index = int(tool_delta.get("index", fallback_index))
-                    current = call_parts.setdefault(
-                        index, {"id": "", "name": "", "arguments": ""}
-                    )
+                    current = call_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
                     current["id"] += tool_delta.get("id") or ""
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""

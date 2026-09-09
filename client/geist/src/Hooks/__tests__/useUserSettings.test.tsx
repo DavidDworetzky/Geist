@@ -20,6 +20,8 @@ const mockSettings: UserSettings = {
   default_agent_type: 'local',
   default_local_model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
   default_local_artifact_id: 'meta-llama-3.1-8b-instruct',
+  llama_backend: 'gpu',
+  llama_gpu_device_ids: ['gpu-nvidia'],
   default_online_model: 'gpt-4',
   default_online_provider: 'openai',
   default_file_archives: [101, 102],
@@ -115,6 +117,31 @@ describe('useUserSettings', () => {
 
     expect(result.current.error).toMatch(/Failed to update settings/i);
 
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('surfaces FastAPI detail from an update error', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    const detail = 'Select at least one llama.cpp GPU device';
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => mockSettings });
+    const { result } = renderHook(() => useUserSettings(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      statusText: 'Unprocessable Entity',
+      json: async () => ({ detail }),
+    });
+
+    await act(async () => {
+      await expect(result.current.updateSettings({
+        llama_backend: 'gpu',
+        llama_gpu_device_ids: [],
+      })).rejects.toThrow(detail);
+    });
+
+    expect(result.current.error).toBe(detail);
     consoleErrorSpy.mockRestore();
   });
 

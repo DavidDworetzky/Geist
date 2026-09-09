@@ -76,6 +76,8 @@ def test_unversioned_pre_artifact_schema_is_adopted_at_previous_revision():
         expected_metadata,
         Column("user_settings_id", Integer, primary_key=True),
         Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
     )
     engine = create_engine("sqlite:///:memory:")
     with engine.begin() as connection:
@@ -93,6 +95,8 @@ def test_unversioned_schema_with_any_additional_gap_is_rejected():
         expected_metadata,
         Column("user_settings_id", Integer, primary_key=True),
         Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
         Column("another_required_column", String),
     )
     engine = create_engine("sqlite:///:memory:")
@@ -103,6 +107,29 @@ def test_unversioned_schema_with_any_additional_gap_is_rejected():
 
     with pytest.raises(RuntimeError, match="another_required_column"):
         _classify_legacy_schema(expected_metadata, engine)
+
+
+def test_unversioned_pre_compute_schema_is_adopted_at_previous_head():
+    expected_metadata = MetaData()
+    Table(
+        "user_settings",
+        expected_metadata,
+        Column("user_settings_id", Integer, primary_key=True),
+        Column("default_local_artifact_id", String),
+        Column("llama_backend", String),
+        Column("llama_gpu_device_ids", String),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE user_settings ("
+                "user_settings_id INTEGER PRIMARY KEY, "
+                "default_local_artifact_id TEXT)"
+            )
+        )
+
+    assert _classify_legacy_schema(expected_metadata, engine) == "pre_llama_compute"
 
 
 @pytest.mark.parametrize(
@@ -165,7 +192,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b3e5d7f9a1c3"
+                "b2c5d7e9f1a3"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -186,6 +213,8 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
             connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
@@ -205,7 +234,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b3e5d7f9a1c3"
+                "b2c5d7e9f1a3"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -233,6 +262,8 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
             connection.execute(text("DROP TABLE mcp_server"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
@@ -247,7 +278,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b3e5d7f9a1c3"
+                "b2c5d7e9f1a3"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -277,7 +308,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b3e5d7f9a1c3"
+                "b2c5d7e9f1a3"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))

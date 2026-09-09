@@ -14,14 +14,19 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 MIGRATIONS_PATH = PROJECT_ROOT / "migrations"
-# An unversioned schema missing only the local-artifact column already contains
-# the hierarchical-memory branch, so resume from that sibling branch head.
-PRE_LOCAL_ARTIFACT_REVISION = "e4b7a9c2d1f0"
 PRE_LOCAL_ARTIFACT_GAP = ("user_settings", "default_local_artifact_id")
+LLAMA_COMPUTE_GAPS = {
+    ("user_settings", "llama_backend"),
+    ("user_settings", "llama_gpu_device_ids"),
+}
 PRE_WORKSPACE_REVISION = "f5c8a1d3e7b9"
 PRE_WORKSPACE_GAP = ("geist_user", "workspace_key")
 PRE_MCP_REVISION = "c6d9e2f4a7b1"
 PRE_MCP_TABLE = "mcp_server"
+# Adopt only validated compute columns; workspace/MCP migrations still run
+# when their schema and data transformations have not yet been applied.
+LEGACY_COMPUTE_REVISION = "c7d9e1f3a5b8"
+MCP_REVISION = "b3e5d7f9a1c3"
 
 
 def upgrade_database() -> None:
@@ -57,38 +62,21 @@ def upgrade_database() -> None:
         command.stamp(alembic_config, "head")
     elif not current_heads:
         _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
+        _reject_unsupported_legacy_schema(Base.metadata, Engine)
+        _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        if schema_kind == "pre_local_artifact":
-            logger.info(
-                "Adopting an unversioned Geist database missing only the local-artifact "
-                "selection column"
-            )
-            _add_default_local_artifact_column(Engine)
-            command.stamp(alembic_config, "head")
-        elif schema_kind == "pre_local_artifact_and_mcp":
-            logger.info(
-                "Adopting an unversioned Geist database missing the local-artifact "
-                "selection column and MCP server table"
-            )
-            _add_default_local_artifact_column(Engine)
-            command.stamp(alembic_config, PRE_MCP_REVISION)
-            command.upgrade(alembic_config, "head")
-        elif schema_kind != "current":
-            if schema_kind == "pre_workspace":
-                previous_revision = PRE_WORKSPACE_REVISION
-            elif schema_kind == "pre_mcp":
-                previous_revision = PRE_MCP_REVISION
-            else:
-                previous_revision = PRE_LOCAL_ARTIFACT_REVISION
-            logger.info(
-                "Adopting an unversioned legacy Geist database at %s before upgrading",
-                previous_revision,
-            )
-            command.stamp(alembic_config, previous_revision)
-            command.upgrade(alembic_config, "head")
-        else:
-            logger.info("Adopting an unversioned legacy Geist database at Alembic head")
-            command.stamp(alembic_config, "head")
+        revisions = [LEGACY_COMPUTE_REVISION]
+        if schema_kind == "current":
+            revisions.append(MCP_REVISION)
+        elif schema_kind == "pre_mcp":
+            revisions.append(PRE_MCP_REVISION)
+        elif schema_kind != "pre_workspace":
+            raise RuntimeError("Legacy settings repair did not produce a supported schema")
+        # The compute branch already includes the shared ancestor. When workspace
+        # identity is absent, its migration must still run (including data adoption).
+        logger.info("Adopting an unversioned Geist database at %s", revisions)
+        command.stamp(alembic_config, revisions)
+        command.upgrade(alembic_config, "head")
     else:
         if current_heads != target_heads:
             _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
@@ -123,6 +111,7 @@ def _classify_legacy_schema(metadata, engine) -> str:
     schema_kind, problems = _inspect_legacy_schema(metadata, engine)
     if schema_kind in {
         "current",
+        "pre_llama_compute",
         "pre_local_artifact",
         "pre_local_artifact_and_mcp",
         "pre_mcp",
@@ -134,18 +123,38 @@ def _classify_legacy_schema(metadata, engine) -> str:
     raise AssertionError("unreachable")
 
 
-def _add_default_local_artifact_column(engine) -> None:
-    """Complete the only migration gap in a schema that already has workspace identity."""
+def _reject_unsupported_legacy_schema(metadata, engine) -> None:
+    """Validate the entire legacy schema before any additive repair is allowed."""
+    _classify_legacy_schema(metadata, engine)
+
+
+def _complete_legacy_settings_columns(engine) -> None:
+    """Fill validated settings gaps without replaying already-present branch tables."""
     import sqlalchemy as sa
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
     with engine.begin() as connection:
+        columns = {column["name"] for column in sa.inspect(connection).get_columns("user_settings")}
         operations = Operations(MigrationContext.configure(connection))
-        operations.add_column(
-            "user_settings",
-            sa.Column("default_local_artifact_id", sa.String(), nullable=True),
-        )
+        if "default_local_artifact_id" not in columns:
+            operations.add_column(
+                "user_settings",
+                sa.Column("default_local_artifact_id", sa.String(), nullable=True),
+            )
+        if "llama_backend" not in columns:
+            operations.add_column(
+                "user_settings", sa.Column("llama_backend", sa.String(), nullable=True)
+            )
+            operations.add_column(
+                "user_settings", sa.Column("llama_gpu_device_ids", sa.JSON(), nullable=True)
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE user_settings SET llama_gpu_device_ids = '[]' "
+                    "WHERE llama_gpu_device_ids IS NULL"
+                )
+            )
 
 
 def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
@@ -171,6 +180,13 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
 
     if not missing_tables and not missing_column_gaps:
         return "current", problems
+    compute_gaps = missing_column_gaps & LLAMA_COMPUTE_GAPS
+    if compute_gaps:
+        if compute_gaps != LLAMA_COMPUTE_GAPS:
+            return "unknown", problems
+        missing_column_gaps -= LLAMA_COMPUTE_GAPS
+        if not missing_tables and not missing_column_gaps:
+            return "pre_llama_compute", problems
     if not missing_tables and missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP}:
         return "pre_local_artifact", problems
     if missing_tables != {PRE_MCP_TABLE}:

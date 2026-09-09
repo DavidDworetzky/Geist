@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,13 @@ from app.services.user_settings_service import UserSettingsService
 
 def _artifact(artifact_id: str, model_id: str, backend: str):
     return SimpleNamespace(id=artifact_id, model_id=model_id, backend=backend)
+
+
+def _expected_settings_device_config(artifact_id: str | None = None):
+    config = {"artifact_id": artifact_id} if artifact_id else {}
+    if sys.platform in {"win32", "linux"}:
+        config.update(llama_backend="auto", llama_gpu_device_ids=[])
+    return config
 
 
 def _settings(**overrides) -> UserSettingsResponse:
@@ -184,7 +192,7 @@ def test_settings_preserve_selected_artifact_for_factory_resolution():
     config = AgentFactoryConfig.from_user_settings(settings)
 
     assert config.runner_type is None
-    assert config.device_config == {"artifact_id": "qwen-gguf"}
+    assert config.device_config == _expected_settings_device_config("qwen-gguf")
 
     with (
         patch.object(
@@ -201,7 +209,9 @@ def test_settings_preserve_selected_artifact_for_factory_resolution():
         )
 
     assert create_agent.call_args.kwargs["runner_type"] is None
-    assert create_agent.call_args.kwargs["device_config"] == {"artifact_id": "qwen-gguf"}
+    assert create_agent.call_args.kwargs["device_config"] == _expected_settings_device_config(
+        "qwen-gguf"
+    )
 
 
 def test_model_only_settings_bind_the_installed_compatible_artifact():
@@ -217,7 +227,7 @@ def test_model_only_settings_bind_the_installed_compatible_artifact():
     with patch("app.services.local_models.get_local_model_manager", return_value=manager):
         config = AgentFactoryConfig.from_user_settings(settings)
 
-    assert config.device_config == {"artifact_id": "qwen-mlx"}
+    assert config.device_config == _expected_settings_device_config("qwen-mlx")
 
 
 @pytest.mark.parametrize(
@@ -240,7 +250,7 @@ def test_model_only_settings_do_not_bind_an_unavailable_artifact(status):
     with patch("app.services.local_models.get_local_model_manager", return_value=manager):
         config = AgentFactoryConfig.from_user_settings(settings)
 
-    assert config.device_config == {}
+    assert config.device_config == _expected_settings_device_config()
 
 
 @pytest.mark.parametrize(

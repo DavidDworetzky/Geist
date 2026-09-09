@@ -38,7 +38,7 @@ async def get_workspace_settings(
 
 
 @router.put("/", response_model=UserSettingsResponse)
-async def update_workspace_settings(
+def update_workspace_settings(
     updates: UserSettingsUpdate,
     current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ):
@@ -90,6 +90,8 @@ async def reset_workspace_settings(
             default_agent_type="local",
             default_local_model=default_local_model_id(),
             default_local_artifact_id=None,
+            llama_backend=None,
+            llama_gpu_device_ids=[],
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
@@ -104,7 +106,9 @@ async def reset_workspace_settings(
         )
 
         settings = UserSettingsService.update_workspace_settings_by_id(
-            current_workspace.workspace_id, default_updates
+            current_workspace.workspace_id,
+            default_updates,
+            allow_llama_redetection=True,
         )
         if not settings:
             settings = UserSettingsService.get_or_create_workspace_settings_by_id(

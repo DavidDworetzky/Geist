@@ -14,6 +14,8 @@ def make_settings_model(local_model: str) -> UserSettingsModel:
         default_agent_type="local",
         default_local_model=local_model,
         default_local_artifact_id=None,
+        llama_backend=None,
+        llama_gpu_device_ids=[],
         default_online_model="gpt-4",
         default_online_provider="openai",
         default_file_archives=[],

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -276,6 +277,31 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
 
 
 @pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen3-4B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "microsoft/Phi-4-mini-instruct",
+        "HuggingFaceTB/SmolLM3-3B",
+        "google/gemma-3-1b-it",
+        "ibm-granite/granite-3.3-8b-instruct",
+        "allenai/Olmo-3-7B-Instruct",
+        "zai-org/glm-4-9b-chat-hf",
+        "openai/gpt-oss-20b",
+    ],
+)
+def test_standard_local_models_use_generic_runner(model_id):
+    if sys.platform in {"win32", "linux"}:
+        expected = "llama_server"
+    elif sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        expected = "mlx_llama"
+    else:
+        expected = "transformers"
+    assert AgentFactory._infer_runner_type(model_id) == expected
+
+
+@pytest.mark.parametrize(
     ("model_id", "recommended"),
     [
         ("muse-spark-1.1", False),
@@ -392,9 +418,15 @@ def test_environment_runner_override_precedes_catalog_inference():
             "local",
             context,
             model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            device_config={
+                "device": "cpu",
+                "llama_backend": "gpu",
+                "llama_gpu_device_ids": ["gpu-inert"],
+            },
         )
 
     assert local_agent.call_args.kwargs["runner_type"] == "transformers"
+    assert local_agent.call_args.kwargs["device_config"] == {"device": "cpu"}
 
 
 def test_explicit_runner_argument_precedes_environment_override():

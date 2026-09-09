@@ -20,6 +20,7 @@ from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
+from agents.architectures.llama_devices import llama_compute_managed_by_environment
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
@@ -99,6 +100,7 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
 _agent_cache_lock = threading.RLock()
 _local_agent_creation_lock = threading.Lock()
 _local_agent_loading_model_id: str | None = None
+_pending_detection_warning: tuple[str, str] | None = None
 
 
 class LocalModelBusyError(RuntimeError):
@@ -160,6 +162,8 @@ def get_or_create_agent(agent_type: AgentType):
 
 def _get_or_create_local_agent(agent_type: AgentType):
     global _local_agent_loading_model_id
+    reusable_agent = None
+    stale_agents: list[Any] = []
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -194,21 +198,31 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 entry_agent is cached_agent and entry_signature == signature
                 for entry_agent, entry_signature in local_entries
             ):
-                _set_local_agent_cache(cached_agent, signature)
-                return cached_agent
+                reusable_agent = cached_agent
 
         # Do not hold the shared cache lock while a local model waits for an
         # active stream to close. Other model switches fail busy, not queued.
-        if not _local_agent_creation_lock.acquire(blocking=False):
-            raise LocalModelBusyError(_local_agent_loading_model_id)
-        try:
-            _local_agent_loading_model_id = model_id
-            stale_agents = _clear_local_agent_cache()
-        except BaseException as error:
-            _local_agent_loading_model_id = None
-            _local_agent_creation_lock.release()
-            model_load_status_registry.mark_failed(model_id, str(error))
-            raise
+        if reusable_agent is None:
+            if not _local_agent_creation_lock.acquire(blocking=False):
+                raise LocalModelBusyError(_local_agent_loading_model_id)
+            try:
+                _local_agent_loading_model_id = model_id
+                stale_agents = _clear_local_agent_cache()
+            except BaseException as error:
+                _local_agent_loading_model_id = None
+                _local_agent_creation_lock.release()
+                model_load_status_registry.mark_failed(model_id, str(error))
+                raise
+
+    if reusable_agent is not None:
+        signature = _persist_first_use_llama_backend(reusable_agent, factory_config, signature)
+        with _agent_cache_lock:
+            # Persistence must not resurrect an agent replaced by another request.
+            if all(agent_cache[local_type] is reusable_agent for local_type in _LOCAL_AGENT_TYPES):
+                _set_local_agent_cache(reusable_agent, signature)
+        # Like every cache read, reuse is best-effort: a concurrent model switch
+        # can phase the agent out after the lock is released.
+        return reusable_agent
 
     load_error: BaseException | None = None
     try:
@@ -216,6 +230,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
+        signature = _persist_first_use_llama_backend(new_agent, factory_config, signature)
         with _agent_cache_lock:
             _set_local_agent_cache(new_agent, signature)
             model_load_status_registry.mark_ready(model_id)
@@ -243,6 +258,56 @@ def _get_local_agent_factory_config() -> AgentFactoryConfig:
         settings,
         AgentConfigRequest(agent_type="local"),
     )
+
+
+def _persist_first_use_llama_backend(
+    agent,
+    factory_config: AgentFactoryConfig,
+    signature: str,
+) -> str:
+    global _pending_detection_warning
+    if (
+        factory_config.device_config.get("llama_backend") != "auto"
+        or _llama_selection_managed_by_environment()
+    ):
+        return signature
+
+    runtime_selection = getattr(agent, "runtime_selection", None)
+    selection = runtime_selection() if callable(runtime_selection) else None
+    if selection is None:
+        return signature
+
+    backend, device_ids = selection
+    detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
+    detection_error = detection_error_reader() if callable(detection_error_reader) else None
+    if backend == "cpu" and detection_error is not None:
+        warning_key = (str(factory_config.model), str(detection_error))
+        with _agent_cache_lock:
+            should_warn = _pending_detection_warning != warning_key
+            _pending_detection_warning = warning_key
+        if should_warn:
+            logger.warning("First-use compute detection remains pending for %s: %s", *warning_key)
+        return signature
+    with _agent_cache_lock:
+        _pending_detection_warning = None
+
+    try:
+        default_user = get_default_workspace()
+        persisted = UserSettingsService.persist_detected_llama_backend(
+            default_user.workspace_id,
+            backend,
+            device_ids,
+        )
+        if persisted is not None and persisted.llama_backend is not None:
+            # A user can save a manual choice while automatic startup is in
+            # flight. Cache this agent under what it actually loaded; a
+            # different persisted choice will force a restart on the next use.
+            factory_config.device_config["llama_backend"] = backend
+            factory_config.device_config["llama_gpu_device_ids"] = list(device_ids)
+            return _local_agent_configuration_signature(factory_config)
+    except Exception:
+        logger.exception("Unable to persist detected llama.cpp compute backend")
+    return signature
 
 
 def _local_agent_configuration_signature(factory_config: AgentFactoryConfig) -> str:
@@ -819,14 +884,39 @@ def _configured_inference_info() -> dict[str, str | None]:
         "engine": runner_type,
         "model": factory_config.model,
         "provider": None,
-        "acceleration": _llama_acceleration(runner_type),
+        "acceleration": _llama_acceleration(
+            runner_type, settings.llama_backend, factory_config.model
+        ),
     }
 
 
-def _llama_acceleration(runner_type: str) -> str | None:
+def _llama_acceleration(
+    runner_type: str,
+    selected_backend: str | None = None,
+    model_id: str | None = None,
+) -> str | None:
     if runner_type != "llama_server":
         return None
-    return (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    if os.getenv("GEIST_LLAMA_SERVER_PATH", "").strip():
+        return None
+    if model_id is not None:
+        from agents.architectures.llama_server_process import get_llama_server_manager
+
+        status = get_llama_server_manager().public_status()
+        if status.get("status") == "ready" and status.get("model_id") == model_id:
+            backend = status.get("backend")
+            if backend in {"cpu", "vulkan"}:
+                return str(backend)
+    acceleration = (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    if acceleration in {"cpu", "vulkan"}:
+        return acceleration
+    if selected_backend == "gpu":
+        return "vulkan"
+    return selected_backend or "auto"
+
+
+def _llama_selection_managed_by_environment() -> bool:
+    return llama_compute_managed_by_environment(os.environ)
 
 
 def _parse_agent_type(agent_type: str) -> AgentType:
