@@ -14,6 +14,7 @@ from agents.models.tool_calling import (
 )
 from app.services.agent_permissions import AgentPermissions
 from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.services.tool_approvals import SessionGrantRegistry, ToolApprovalRegistry
 from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import ToolRegistry
 
@@ -924,6 +925,8 @@ def test_require_approval_permissions_gate_read_only_tool(loader_fails):
         history_loader=lambda chat_id: [],
         history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
         permissions_loader=load_permissions,
+        approvals=ToolApprovalRegistry(),
+        grants=SessionGrantRegistry(),
         approval_timeout_seconds=0,
     )
 
@@ -938,7 +941,9 @@ def test_require_approval_permissions_gate_read_only_tool(loader_fails):
         )
     )
 
+    # No decision arrives, so the approval times out and fails closed.
     tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert tool_states[-1].error == "approval_timeout"
     assert [state.status for state in tool_states] == ["proposed", "awaiting_approval", "failed"]
     assert all(state.requires_approval is True for state in tool_states)
 
@@ -988,3 +993,375 @@ def test_always_allow_permissions_skip_approval_for_listed_tool():
 
     tool_states = [event.payload for event in events if event.event == "tool_call"]
     assert [state.status for state in tool_states] == ["proposed", "running", "succeeded"]
+
+
+def _resolver(approvals: ToolApprovalRegistry, decision: str, decisions_made: list):
+    """Background thread: resolve each pending approval with `decision`."""
+    import threading
+    import time
+
+    def resolve_loop():
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            for pending in approvals.pending():
+                approvals.resolve(
+                    pending.run_id, pending.call_id, decision, workspace_id=pending.workspace_id
+                )
+                decisions_made.append((pending.tool_name, decision))
+                return
+            time.sleep(0.01)
+
+    thread = threading.Thread(target=resolve_loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def _approval_orchestrator(registry, *, approvals, grants=None, persister=None):
+    return ChatOrchestrator(
+        registry,
+        history_loader=lambda chat_id: [],
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=1),
+        permissions_loader=lambda user_id: AgentPermissions(mode="require_approval"),
+        approvals=approvals,
+        grants=grants or SessionGrantRegistry(),
+        approval_timeout_seconds=5.0,
+        always_allow_persister=persister or (lambda user_id, tool_name: None),
+    )
+
+
+def _gated_registry(calls):
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="documents.search",
+            description="Search documents",
+            arguments_model=LookupArguments,
+            handler=lambda context, arguments: (
+                calls.append(arguments.query),
+                ToolExecutionOutput(content="found"),
+            )[1],
+        )
+    )
+    return registry
+
+
+def test_approval_approve_resumes_and_executes():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    registry = _gated_registry(calls)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Found it.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(registry, approvals=approvals)
+    decisions = []
+    _resolver(approvals, "approve", decisions)
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search",
+            workspace_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == [
+        "proposed",
+        "awaiting_approval",
+        "running",
+        "succeeded",
+    ]
+    assert calls == ["q"]
+    assert decisions == [("documents.search", "approve")]
+
+
+def test_approval_deny_blocks_and_tells_model():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    registry = _gated_registry(calls)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Understood.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(registry, approvals=approvals)
+    _resolver(approvals, "deny", [])
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search",
+            workspace_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == [
+        "proposed",
+        "awaiting_approval",
+        "failed",
+    ]
+    assert calls == []
+    tool_message = backend.requests[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert "denied" in tool_message["content"]
+    assert "Do NOT retry" in tool_message["content"]
+
+
+def test_approval_session_grant_skips_second_ask():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    grants = SessionGrantRegistry()
+    registry = _gated_registry(calls)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "a"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_2", name="documents.search", arguments={"query": "b"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Both done.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(registry, approvals=approvals, grants=grants)
+    _resolver(approvals, "session", [])
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search twice",
+            workspace_id=1,
+            chat_id=7,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == [
+        "proposed",
+        "awaiting_approval",
+        "running",
+        "succeeded",
+        # second call: session grant, no awaiting_approval round-trip
+        "proposed",
+        "running",
+        "succeeded",
+    ]
+    assert calls == ["a", "b"]
+    assert "documents.search" in grants.granted("workspace:1:chat:7")
+
+
+def test_approval_always_persists_to_settings():
+    calls = []
+    persisted = []
+    approvals = ToolApprovalRegistry()
+    registry = _gated_registry(calls)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Done.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(
+        registry,
+        approvals=approvals,
+        persister=lambda user_id, tool_name: persisted.append((user_id, tool_name)),
+    )
+    _resolver(approvals, "always", [])
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search",
+            workspace_id=9,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert tool_states[-1].status == "succeeded"
+    assert calls == ["q"]
+    assert persisted == [(9, "documents.search")]
+
+
+def test_non_interactive_runs_deny_gated_tools_immediately():
+    calls = []
+    registry = _gated_registry(calls)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(id="call_1", name="documents.search", arguments={"query": "q"})
+                ],
+                finish_reason="tool_calls",
+            ),
+            ModelTurn(text="Skipped.", finish_reason="stop"),
+        ]
+    )
+    orchestrator = _approval_orchestrator(registry, approvals=ToolApprovalRegistry())
+
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="search",
+            workspace_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+            interactive=False,
+        )
+    )
+
+    tool_states = [event.payload for event in events if event.event == "tool_call"]
+    assert [state.status for state in tool_states] == ["proposed", "failed"]
+    assert calls == []
+    tool_message = backend.requests[1]["messages"][-1]
+    assert "unattended" in tool_message["content"]
+
+
+def test_reused_model_call_id_needs_a_new_invocation_approval():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    orchestrator = _approval_orchestrator(_gated_registry(calls), approvals=approvals)
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall(id="same", name="documents.search", arguments={"query": "a"})]
+            ),
+            ModelTurn(
+                tool_calls=[ToolCall(id="same", name="documents.search", arguments={"query": "b"})]
+            ),
+            ModelTurn(text="done"),
+        ]
+    )
+    stream = orchestrator.stream(
+        backend=backend,
+        prompt="search",
+        workspace_id=1,
+        chat_id=7,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    )
+    approval_ids = []
+    for event in stream:
+        if event.event == "tool_call" and event.payload.status == "awaiting_approval":
+            pending = approvals.pending()[0]
+            approval_ids.append(pending.call_id)
+            if len(approval_ids) == 2:
+                assert not approvals.resolve(pending.run_id, "same", "approve", workspace_id=1)
+            approvals.resolve(
+                pending.run_id,
+                pending.call_id,
+                "approve" if len(approval_ids) == 1 else "deny",
+                workspace_id=1,
+            )
+    assert len(set(approval_ids)) == 2
+    assert calls == ["a"]
+
+
+def test_denial_survives_output_budget_and_prevents_repeat_prompts():
+    calls = []
+    approvals = ToolApprovalRegistry()
+    orchestrator = _approval_orchestrator(_gated_registry(calls), approvals=approvals)
+    orchestrator.max_tool_result_chars_total = 0
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall(id="a", name="documents.search", arguments={"query": "a"})]
+            ),
+            ModelTurn(
+                tool_calls=[ToolCall(id="b", name="documents.search", arguments={"query": "b"})]
+            ),
+            ModelTurn(text="done"),
+        ]
+    )
+    prompts = 0
+    for event in orchestrator.stream(
+        backend=backend,
+        prompt="search",
+        workspace_id=1,
+        chat_id=7,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    ):
+        if event.event == "tool_call" and event.payload.status == "awaiting_approval":
+            prompts += 1
+            pending = approvals.pending()[0]
+            approvals.resolve(pending.run_id, pending.call_id, "deny", workspace_id=1)
+    assert prompts == 1
+    assert calls == []
+    assert "NOT consented" in backend.requests[-1]["messages"][-1]["content"]
+
+
+def test_failed_standing_grant_is_reported_as_once_only():
+    calls = []
+    approvals = ToolApprovalRegistry()
+
+    def broken_persister(workspace_id, tool_name):
+        raise RuntimeError("database unavailable")
+
+    orchestrator = _approval_orchestrator(
+        _gated_registry(calls),
+        approvals=approvals,
+        persister=broken_persister,
+    )
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall(id="a", name="documents.search", arguments={"query": "a"})]
+            ),
+            ModelTurn(text="done"),
+        ]
+    )
+    events = []
+    for event in orchestrator.stream(
+        backend=backend,
+        prompt="search",
+        workspace_id=1,
+        chat_id=7,
+        config=ModelRequestConfig(),
+        system_prompt=None,
+    ):
+        events.append(event)
+        if event.event == "tool_call" and event.payload.status == "awaiting_approval":
+            pending = approvals.pending()[0]
+            approvals.resolve(pending.run_id, pending.call_id, "always", workspace_id=1)
+    final = next(event.payload for event in events if event.event == "final")
+    assert calls == ["a"]
+    assert "Approved once" in final.tool_calls[0].result_summary
+    assert orchestrator.grants.granted("workspace:1:chat:7") == frozenset()

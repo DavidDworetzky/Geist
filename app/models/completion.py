@@ -35,4 +35,4 @@ class InitializeAgentParams(BaseModel):
 
 class ToolApprovalParams(BaseModel):
     call_id: str
-    decision: Literal["approve", "deny"]
+    decision: Literal["approve", "session", "always", "deny"]

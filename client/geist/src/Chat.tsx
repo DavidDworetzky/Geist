@@ -640,12 +640,22 @@ const Chat = () => {
     callId: string,
     decision: ToolApprovalDecision,
   ) => {
-    const response = await fetch(`/agent/runs/${runId}/tool_approval`, {
+    const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/tool_approval`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ call_id: callId, decision }),
     });
     if (!response.ok) {
+      if (response.status === 422) {
+        const error = new Error('Choose an invocation-only approval decision.');
+        error.name = 'ApprovalDecisionRejected';
+        throw error;
+      }
+      if (response.status === 404) {
+        const error = new Error('This approval is no longer pending.');
+        error.name = 'ApprovalUnavailable';
+        throw error;
+      }
       throw new Error(`Tool approval failed (${response.status})`);
     }
   }, []);
@@ -659,9 +669,7 @@ const Chat = () => {
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
-                onToolApproval={(runId, callId, decision) => {
-                  void handleToolApproval(runId, callId, decision);
-                }}
+                onToolApproval={handleToolApproval}
               />
             </div>
           </div>

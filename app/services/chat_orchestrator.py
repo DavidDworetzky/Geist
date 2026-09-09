@@ -7,7 +7,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agents.models.agent_completion import AgentCompletion
@@ -26,12 +26,33 @@ from app.models.database.chat_session import get_chat_history, update_chat_histo
 from app.services.agent_permissions import AgentPermissions, load_agent_permissions
 from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    SessionGrantRegistry,
     ToolApprovalRegistry,
     approval_registry,
+    persist_always_allow,
+    session_grants,
     tool_arguments_fingerprint,
 )
 from app.services.tool_intent_router import ToolIntentDecision, ToolIntentRouter
 from app.services.tool_registry import ToolRegistry
+
+
+UNATTENDED_DENY_MESSAGE = (
+    "BLOCKED: this tool requires user approval, but the run is unattended "
+    "(no user is present to approve it). Find an approach that avoids this "
+    "tool, and do NOT retry the call."
+)
+
+DENIED_MESSAGE = (
+    "BLOCKED: the user denied this tool call. The user has NOT consented to "
+    "this action. Do NOT retry it, and do NOT attempt the same outcome "
+    "through a different tool."
+)
+
+TIMEOUT_MESSAGE = (
+    "BLOCKED: the approval request timed out without a user response. "
+    "Silence is not consent. Do NOT retry the call."
+)
 
 
 logger = logging.getLogger(__name__)
@@ -127,11 +148,17 @@ class ChatOrchestrator:
         history_writer: Callable[..., Any] = update_chat_history,
         permissions_loader: Callable[[int], AgentPermissions] = load_agent_permissions,
         approvals: ToolApprovalRegistry = approval_registry,
+        grants: SessionGrantRegistry = session_grants,
+        always_allow_persister: Callable[[int, str], None] = persist_always_allow,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         intent_router: ToolIntentRouter | None = None,
     ) -> None:
         self.registry = registry
         self.permissions_loader = permissions_loader
+        self.approvals = approvals
+        self.grants = grants
+        self.approval_timeout_seconds = approval_timeout_seconds
+        self.always_allow_persister = always_allow_persister
         self.run_controls = run_controls or RunControlRegistry()
         self.intent_router = intent_router
         self.max_rounds = max_rounds
@@ -267,6 +294,7 @@ class ChatOrchestrator:
         artifact_ids: list[str] | None = None,
         error: str | None = None,
         requires_approval: bool = False,
+        can_grant: bool = False,
     ) -> ToolCallResult:
         return ToolCallResult.create(
             id=call.id,
@@ -277,6 +305,7 @@ class ChatOrchestrator:
             artifact_ids=artifact_ids,
             error=error,
             requires_approval=requires_approval,
+            can_grant=can_grant,
         )
 
     @staticmethod
@@ -321,6 +350,8 @@ class ChatOrchestrator:
         memory_mode: str = "public",
         folder_id: int | None = None,
         interactive: bool = True,
+        yield_approval_wait: bool = False,
+        cancellation: threading.Event | None = None,
     ) -> Iterator[ChatStreamEvent]:
         conversation = ConversationState(chat_id=chat_id, user_id=workspace_id)
         conversation.add_system_prompt(system_prompt)
@@ -335,8 +366,9 @@ class ChatOrchestrator:
         except Exception:
             logger.exception("Could not load run permissions; requiring approval for every tool")
             permissions = AgentPermissions(mode="require_approval")
-        approved_call_ids: set[str] = set()
-        cancellation = threading.Event()
+        denied_tools: set[str] = set()
+        seen_call_ids: set[str] = set()
+        cancellation = cancellation or threading.Event()
         context = ToolContext(
             workspace_id=workspace_id,
             chat_id=chat_id,
@@ -386,6 +418,13 @@ class ChatOrchestrator:
                         raise
                     return conversation.chat_id
                 persisted_chat_id = getattr(history, "chat_session_id", conversation.chat_id)
+                if conversation.chat_id is None and persisted_chat_id is not None:
+                    self.grants.promote_run(workspace_id, run.run_id, persisted_chat_id)
+                    if self.registry.session_manager is not None:
+                        self.registry.session_manager.promote_scope(
+                            f"workspace:{workspace_id}:run:{run.run_id}",
+                            f"workspace:{workspace_id}:chat:{persisted_chat_id}",
+                        )
                 run.mark_persisted(persisted_chat_id)
                 return conversation.chat_id
 
@@ -480,6 +519,16 @@ class ChatOrchestrator:
                 if any(call.name not in offered_names for call in completed_turn.tool_calls):
                     raise ValueError("Model requested a tool not offered for this turn")
 
+                # Local models can reuse IDs. Keep each invocation distinct in
+                # the transcript and approval UI so a late response cannot approve another call.
+                unique_calls = []
+                for call in completed_turn.tool_calls:
+                    if call.id in seen_call_ids:
+                        call = replace(call, id=f"call_{uuid.uuid4().hex}")
+                    seen_call_ids.add(call.id)
+                    unique_calls.append(call)
+                completed_turn.tool_calls = unique_calls
+
                 assistant_message = ChatMessage(
                     role="assistant",
                     content=completed_turn.text or None,
@@ -499,6 +548,11 @@ class ChatOrchestrator:
                     raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls})")
 
                 for call in completed_turn.tool_calls:
+                    grant_scope = (
+                        f"workspace:{workspace_id}:chat:{conversation.chat_id}"
+                        if conversation.chat_id is not None
+                        else f"workspace:{workspace_id}:run:{run.run_id}"
+                    )
                     # Interrupt runs stuck re-issuing the same call: the model
                     # has stopped making progress and each repeat burns tokens
                     # (and possibly side effects) for an identical answer.
@@ -517,8 +571,19 @@ class ChatOrchestrator:
                         )
 
                     definition = self.registry.get(call.name, context)
+                    fingerprint = definition.approval_fingerprint() if definition else ""
+                    can_grant = bool(
+                        definition
+                        and not definition.requires_per_call_approval
+                        and definition.allows_standing_grant
+                    )
+                    session_approved = can_grant and self.grants.allows(
+                        grant_scope, call.name, fingerprint
+                    )
                     requires_approval = bool(
-                        definition and tool_requires_approval(definition, context)
+                        definition
+                        and tool_requires_approval(definition, context)
+                        and not session_approved
                     )
                     proposed = self._tool_state(
                         call,
@@ -534,17 +599,14 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    if requires_approval:
-                        assert definition is not None
-                        yield ChatStreamEvent(
-                            "tool_call",
-                            self._tool_state(
-                                call,
-                                "awaiting_approval",
-                                requires_approval=True,
-                            ),
-                        )
-                        if interactive:
+                    denial_message = DENIED_MESSAGE if call.name in denied_tools else None
+                    approval_warning: str | None = None
+                    invocation_approved = session_approved
+                    expected_fingerprint = fingerprint if session_approved else None
+                    if requires_approval and denial_message is None:
+                        if not interactive:
+                            denial_message = UNATTENDED_DENY_MESSAGE
+                        else:
                             pending = self.approvals.request(
                                 run.run_id,
                                 call.id,
@@ -554,62 +616,97 @@ class ChatOrchestrator:
                                     call.name,
                                     call.arguments,
                                 ),
-                                definition_fingerprint=definition.approval_fingerprint(),
+                                definition_fingerprint=fingerprint,
+                                can_grant=can_grant,
+                                timeout_seconds=self.approval_timeout_seconds,
                             )
-                            decision = self.approvals.wait(
-                                pending,
-                                self.approval_timeout_seconds,
-                                cancellation,
-                            )
-                        else:
-                            decision = "deny"
-
-                        if cancellation.is_set():
-                            yield ChatStreamEvent("cancelled", cancelled_payload())
-                            return
-
-                        if decision == "approve":
-                            approved_call_ids.add(call.id)
-                            context = ToolContext(
-                                workspace_id=workspace_id,
-                                chat_id=chat_id,
-                                run_id=run.run_id,
-                                approved_call_ids=frozenset(approved_call_ids),
-                                cancellation=cancellation,
-                                permission_mode=permissions.mode,
-                                always_allow_tools=frozenset(permissions.always_allow),
-                            )
-                            yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
-                            result = self.registry.execute(
+                            awaiting = self._tool_state(
                                 call,
-                                context,
-                                expected_approval_fingerprint=(
+                                "awaiting_approval",
+                                requires_approval=True,
+                                can_grant=can_grant,
+                            )
+                            run.record_tool_call(awaiting)
+                            yield ChatStreamEvent("tool_call", awaiting)
+                            if yield_approval_wait:
+                                while (
+                                    decision := self.approvals.poll(pending, cancellation)
+                                ) is None:
+                                    yield ChatStreamEvent("approval_wait", {"run_id": run.run_id})
+                            else:
+                                decision = self.approvals.wait(
+                                    pending, self.approval_timeout_seconds, cancellation
+                                )
+                            if cancellation.is_set():
+                                cancelled = self._tool_state(call, "cancelled")
+                                run.record_tool_call(cancelled)
+                                yield ChatStreamEvent("tool_call", cancelled)
+                                yield ChatStreamEvent("cancelled", cancelled_payload())
+                                return
+                            if decision == "deny":
+                                denial_message = (
+                                    TIMEOUT_MESSAGE
+                                    if pending.denial_reason == "timeout"
+                                    else DENIED_MESSAGE
+                                )
+                            else:
+                                invocation_approved = True
+                                expected_fingerprint = (
                                     pending.definition_fingerprint
                                     if pending.arguments_fingerprint
                                     == tool_arguments_fingerprint(call.name, call.arguments)
                                     else "invalidated"
-                                ),
-                            )
-                        else:
-                            result = ToolResult(
-                                call=call,
-                                status="failed",
-                                content=(
-                                    "BLOCKED: user approval was denied or timed out. "
-                                    "Do not retry this tool call without a new user request."
-                                ),
-                                error="approval_denied",
-                            )
+                                )
+                                if decision == "session":
+                                    self.grants.grant(grant_scope, call.name, fingerprint)
+                                elif decision == "always":
+                                    try:
+                                        self.always_allow_persister(workspace_id, call.name)
+                                    except Exception:
+                                        logger.exception(
+                                            "Could not persist always-allow for %s",
+                                            call.name,
+                                        )
+                                        approval_warning = (
+                                            "Approved once; the standing grant could not be saved."
+                                        )
+                                    else:
+                                        self.grants.grant(grant_scope, call.name, fingerprint)
+
+                    if denial_message is not None:
+                        denied_tools.add(call.name)
+                        result = ToolResult(
+                            call=call,
+                            status="failed",
+                            content=denial_message,
+                            summary="Tool call denied",
+                            error="approval_timeout"
+                            if denial_message == TIMEOUT_MESSAGE
+                            else "approval_denied",
+                        )
                     else:
                         yield ChatStreamEvent("tool_call", self._tool_state(call, "running"))
-                        result = self.registry.execute(call, context)
+                        result = self.registry.execute(
+                            call,
+                            replace(
+                                context,
+                                approved_call_ids=(
+                                    frozenset({call.id}) if invocation_approved else frozenset()
+                                ),
+                            ),
+                            expected_approval_fingerprint=expected_fingerprint,
+                        )
+                    if approval_warning:
+                        result.summary = f"{result.summary or ''} {approval_warning}".strip()
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
                     remaining_result_chars = (
                         self.max_tool_result_chars_total - run.tool_result_chars
                     )
-                    if remaining_result_chars <= 0:
+                    if result.error in {"approval_denied", "approval_timeout", "approval_stale"}:
+                        pass  # Bounded consent instructions must survive exhausted output budgets.
+                    elif remaining_result_chars <= 0:
                         result.content = ""
                     elif len(result.content) > remaining_result_chars:
                         truncation_marker = "\n[tool result omitted: aggregate budget exhausted]"
@@ -692,6 +789,7 @@ class ChatOrchestrator:
         finally:
             self.approvals.cancel_run(run.run_id)
             self.run_controls.finish(run.run_id)
+            self.grants.clear(f"workspace:{workspace_id}:run:{run.run_id}")
 
     def complete(self, **kwargs: Any) -> AgentCompletion:
         kwargs.setdefault("interactive", False)

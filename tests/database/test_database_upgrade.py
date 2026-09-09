@@ -197,7 +197,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c3d6e8f0a2b4"
+                "g7b0c2d4e6f8"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -218,12 +218,13 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
+            connection.execute(text("DROP TABLE agent_routine"))
         config = _alembic_config()
         command.stamp(config, "b2c5d7e9f1a3")
         upgrade_database()
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c3d6e8f0a2b4"
+                "g7b0c2d4e6f8"
             }
             connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
@@ -265,7 +266,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c3d6e8f0a2b4"
+                "g7b0c2d4e6f8"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -275,6 +276,81 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
                 )
             ).one()
             assert row == (52, "default", None, None)
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite", database_url=f"sqlite:///{tmp_path / 'routine-migration.sqlite3'}"
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO geist_user (user_id, workspace_key) VALUES (1, 'default')")
+            )
+            connection.execute(text("ALTER TABLE agent_routine DROP COLUMN run_once_requested"))
+            connection.execute(
+                text(
+                    "INSERT INTO agent_routine (user_id, name, prompt, interval_minutes, enabled, next_run_at) VALUES (1, 'Existing', 'Keep this prompt', 60, 0, '2026-01-01 00:00:00')"
+                )
+            )
+        config = _alembic_config()
+        command.stamp(config, "d4e7f9a1b3c5")
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT name, prompt, enabled, next_run_at, run_once_requested FROM agent_routine"
+                )
+            ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 0)
+            assert set(MigrationContext.configure(connection).get_current_heads()) == {
+                "g7b0c2d4e6f8"
+            }
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+def test_routine_outcome_upgrade_preserves_existing_schedule(tmp_path):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(provider="sqlite", database_url=f"sqlite:///{tmp_path / 'outcomes.sqlite3'}")
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE agent_routine DROP COLUMN last_status"))
+            connection.execute(text("ALTER TABLE agent_routine DROP COLUMN last_error"))
+            connection.execute(
+                text("INSERT INTO geist_user (user_id, workspace_key) VALUES (1, 'default')")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_routine (user_id, name, prompt, interval_minutes, "
+                    "enabled, next_run_at, run_once_requested) VALUES "
+                    "(1, 'Existing', 'Keep this prompt', 60, 0, '2026-01-01 00:00:00', 1)"
+                )
+            )
+        config = _alembic_config()
+        command.stamp(config, "e5f8a0b2c4d6")
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT name, prompt, enabled, next_run_at, run_once_requested, "
+                    "last_status, last_error FROM agent_routine"
+                )
+            ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 1, None, None)
     finally:
         Session.remove()
         engine.dispose()
@@ -297,6 +373,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_gpu_device_ids"))
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
             connection.execute(text("DROP TABLE mcp_server"))
+            connection.execute(text("DROP TABLE agent_routine"))
             connection.execute(text("DROP INDEX ix_geist_user_workspace_key"))
             connection.execute(text("ALTER TABLE geist_user DROP COLUMN workspace_key"))
 
@@ -310,7 +387,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c3d6e8f0a2b4"
+                "g7b0c2d4e6f8"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -340,7 +417,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "c3d6e8f0a2b4"
+                "g7b0c2d4e6f8"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))

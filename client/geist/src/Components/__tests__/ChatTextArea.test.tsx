@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ChatTextArea from '../ChatTextArea';
 import { ChatPair } from '../../chatTypes';
 
@@ -130,5 +130,85 @@ describe('ChatTextArea tool activity', () => {
       'href',
       'https://example.com/notes.txt',
     );
+  });
+});
+
+describe('ChatTextArea approval decisions', () => {
+  const awaitingTurn = (): ChatPair => ({
+    run_id: 'run_9',
+    user: 'Write the file',
+    ai: '',
+    status: 'awaiting_approval',
+    tool_calls: [
+      {
+        id: 'call_gated',
+        can_grant: true,
+        name: 'workspace.write_markdown',
+        arguments: { path: 'notes.md' },
+        status: 'awaiting_approval',
+        requires_approval: true,
+      },
+    ],
+  });
+
+  it('offers the four decision tiers and reports the choice', () => {
+    const onToolApproval = jest.fn();
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} onToolApproval={onToolApproval} />);
+
+    const group = screen.getByRole('group', { name: 'Approve workspace.write_markdown' });
+    expect(group).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow for this chat' }));
+    expect(onToolApproval).toHaveBeenCalledWith('run_9', 'call_gated', 'session');
+
+    // Buttons disable after a decision to prevent double submission.
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+  });
+
+  it('renders no decision buttons without a handler', () => {
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} />);
+    expect(screen.queryByRole('button', { name: 'Approve once' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer standing grants for invocation-only tools', () => {
+    const turn = awaitingTurn();
+    turn.tool_calls![0].can_grant = false;
+    render(<ChatTextArea chatHistory={[turn]} onToolApproval={jest.fn()} />);
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow for this chat' })).not.toBeInTheDocument();
+  });
+
+  it('restores controls and reports a failed submission so it can be retried', async () => {
+    const onToolApproval = jest.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(undefined);
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} onToolApproval={onToolApproval} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve once' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please retry');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Approve once' }));
+    expect(onToolApproval).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an expired approval disabled instead of inviting an impossible retry', async () => {
+    const error = new Error('Expired');
+    error.name = 'ApprovalUnavailable';
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} onToolApproval={jest.fn().mockRejectedValue(error)} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve once' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('no longer available');
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeDisabled();
+  });
+
+  it('retains approve and deny when the server rejects a standing grant', async () => {
+    const error = new Error('Standing grant unavailable');
+    error.name = 'ApprovalDecisionRejected';
+    const approve = jest.fn().mockRejectedValueOnce(error).mockResolvedValueOnce(undefined);
+    render(<ChatTextArea chatHistory={[awaitingTurn()]} onToolApproval={approve} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Choose Approve once or Deny');
+    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve once' }));
+    expect(approve).toHaveBeenCalledTimes(2);
   });
 });
