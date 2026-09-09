@@ -18,7 +18,11 @@ MAX_CAPTURE_BYTES = 64 * 1024
 
 
 def capture_process(
-    process: subprocess.Popen[bytes], timeout: float, terminate: Callable[[], None]
+    process: subprocess.Popen[bytes],
+    timeout: float,
+    terminate: Callable[[], None],
+    *,
+    stdout_limit: int = 10_000,
 ) -> ExecutionResult:
     """Retain at most 64 KiB per stream; drain excess until completion or deadline.
 
@@ -26,6 +30,8 @@ def capture_process(
     On Windows, a daemon reader owns its pipe until the descendant closes it.
     """
     started = time.monotonic()
+    stdout_limit = max(1, min(stdout_limit, 1_500_000))
+    capture_limits = (max(MAX_CAPTURE_BYTES, stdout_limit * 4), MAX_CAPTURE_BYTES)
     limit_reached = threading.Event()
     stopping = threading.Event()
     buffers = [bytearray(), bytearray()]
@@ -41,7 +47,7 @@ def capture_process(
                 if not chunk or stopping.is_set():
                     break
                 with lock:
-                    remaining = MAX_CAPTURE_BYTES - len(buffers[index])
+                    remaining = capture_limits[index] - len(buffers[index])
                     buffers[index].extend(chunk[:remaining])
                 if len(chunk) > remaining:
                     limit_reached.set()
@@ -82,7 +88,9 @@ def capture_process(
         stopping.set()
 
     with lock:
-        stdout, stdout_truncated = truncate_output(buffers[0].decode(errors="replace"))
+        stdout, stdout_truncated = truncate_output(
+            buffers[0].decode(errors="replace"), limit=stdout_limit
+        )
         stderr, stderr_truncated = truncate_output(buffers[1].decode(errors="replace"))
     if timed_out:
         stderr = stderr or f"Command timed out after {timeout:g} seconds"

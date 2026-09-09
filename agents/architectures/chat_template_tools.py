@@ -9,7 +9,13 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from agents.models.tool_calling import ChatMessage, ModelTurn, ToolCall, ToolDefinition
+from agents.models.tool_calling import (
+    ChatMessage,
+    MalformedToolCallError,
+    ModelTurn,
+    ToolCall,
+    ToolDefinition,
+)
 
 
 _TOOL_CALL_OPEN = "<tool_call>"
@@ -144,13 +150,13 @@ def parse_tool_response(
     matches = list(_TOOL_CALL_PATTERN.finditer(raw_response))
     has_marker = _TOOL_CALL_OPEN in raw_response or _TOOL_CALL_CLOSE in raw_response
     if has_marker and not matches:
-        raise ValueError("Model returned incomplete tool-call markup")
+        raise MalformedToolCallError("Model returned incomplete tool-call markup")
 
     payloads: list[str]
     if matches:
         without_calls = _TOOL_CALL_PATTERN.sub("", raw_response).strip()
         if _TOOL_CALL_OPEN in without_calls or _TOOL_CALL_CLOSE in without_calls:
-            raise ValueError("Model returned malformed tool-call markup")
+            raise MalformedToolCallError("Model returned malformed tool-call markup")
         payloads = [match.group(1) for match in matches]
         text = without_calls
     else:
@@ -171,7 +177,7 @@ def parse_tool_response(
                 text = ""
 
     if any(marker in text for marker in _UNWRAPPED_XML_MARKERS):
-        raise ValueError("Model returned unwrapped function-call markup")
+        raise MalformedToolCallError("Model returned unwrapped function-call markup")
 
     calls: list[ToolCall] = []
     for payload in payloads:
@@ -181,12 +187,12 @@ def parse_tool_response(
             try:
                 value = json.loads(payload)
             except json.JSONDecodeError as error:
-                raise ValueError("Model returned invalid tool-call JSON") from error
+                raise MalformedToolCallError("Model returned invalid tool-call JSON") from error
         if not isinstance(value, dict):
-            raise ValueError("Model returned a non-object tool call")
+            raise MalformedToolCallError("Model returned a non-object tool call")
         provider_name = value.get("name")
         if not isinstance(provider_name, str) or provider_name not in provider_to_internal:
-            raise ValueError(f"Model requested unknown tool: {provider_name!r}")
+            raise MalformedToolCallError("Model requested unknown tool")
         # This tokenizer path follows the OpenAI-shaped contract, so arguments
         # intentionally wins if a model emits both keys. Parameters remains a
         # compatibility alias for Qwen responses that mirror the tool schema.
@@ -195,9 +201,9 @@ def parse_tool_response(
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError as error:
-                raise ValueError("Model returned invalid tool arguments") from error
+                raise MalformedToolCallError("Model returned invalid tool arguments") from error
         if not isinstance(arguments, dict):
-            raise ValueError("Model returned non-object tool arguments")
+            raise MalformedToolCallError("Model returned non-object tool arguments")
         call_id = value.get("id")
         calls.append(
             ToolCall(
@@ -252,7 +258,7 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
     """Parse Qwen's XML-like function syntax; its tags are not standard XML."""
     function = _FUNCTION_PATTERN.fullmatch(payload.strip())
     if function is None:
-        raise ValueError("Model returned malformed function-call markup")
+        raise MalformedToolCallError("Model returned malformed function-call markup")
     name, body = function.groups()
     schema = next(
         (
@@ -263,7 +269,7 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
         None,
     )
     if not isinstance(schema, dict):
-        raise ValueError(f"Model requested unknown tool or missing function schema: {name!r}")
+        raise MalformedToolCallError("Model requested unknown tool or missing function schema")
     arguments: dict[str, Any] = {}
     cursor = 0
     while cursor < len(body):
@@ -271,13 +277,15 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
             cursor += 1
             continue
         if body.startswith("</function>", cursor):
-            raise ValueError("Model returned multiple functions in one tool-call wrapper")
+            raise MalformedToolCallError(
+                "Model returned multiple functions in one tool-call wrapper"
+            )
         parameter = _PARAMETER_PATTERN.match(body, cursor)
         if parameter is None:
-            raise ValueError("Model returned malformed function parameter markup")
+            raise MalformedToolCallError("Model returned malformed function parameter markup")
         key, text = parameter.groups()
         if key in arguments:
-            raise ValueError("Model returned a duplicate function parameter")
+            raise MalformedToolCallError("Model returned a duplicate function parameter")
         # The template adds one framing newline on each side of the value.
         # Preserve user strings (including whitespace and JSON-looking text).
         text = text.removeprefix("\r\n") if text.startswith("\r\n") else text.removeprefix("\n")
@@ -298,7 +306,10 @@ def _parse_function_call(payload: str, tools: list[dict[str, Any]]) -> dict[str,
                 arguments[key] = json.loads(text)
             except json.JSONDecodeError as error:
                 if types:
-                    raise ValueError("Model returned invalid JSON for a typed parameter") from error
+                    raise MalformedToolCallError(
+                        f"Model returned invalid JSON for a typed parameter: {error.msg} "
+                        f"at character {error.pos}"
+                    ) from error
                 arguments[key] = text
         cursor = parameter.end()
     return {"name": name, "arguments": arguments}
@@ -366,9 +377,9 @@ class ToolResponseStream:
                 (position := remaining.find(marker)) >= 0 and (opening < 0 or position < opening)
                 for marker in _UNWRAPPED_XML_MARKERS
             ):
-                raise ValueError("Model returned unwrapped function-call markup")
+                raise MalformedToolCallError("Model returned unwrapped function-call markup")
             if closing >= 0 and (opening < 0 or closing < opening):
-                raise ValueError("Model returned malformed tool-call markup")
+                raise MalformedToolCallError("Model returned malformed tool-call markup")
             if opening >= 0:
                 visible.append(remaining[:opening])
                 self._tool = [_TOOL_CALL_OPEN]

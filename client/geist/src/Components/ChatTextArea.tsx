@@ -95,6 +95,46 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             </div>
           )}
 
+          {element.orchestration && (
+            <section className="agentic-progress" aria-label="Agentic progress">
+              <div className="agentic-progress-header">
+                <strong>Agentic plan</strong>
+                {element.orchestration.goal_status && (
+                  <span className="status-badge">
+                    {statusLabel(element.orchestration.goal_status)}
+                  </span>
+                )}
+                {typeof element.orchestration.turns_used === 'number'
+                  && typeof element.orchestration.max_turns === 'number'
+                  && (
+                    <span className="input-help">
+                      Model calls {element.orchestration.turns_used}/{element.orchestration.max_turns}
+                    </span>
+                  )}
+              </div>
+              {element.orchestration.decomposition_warning && (
+                <div className="input-help">{element.orchestration.decomposition_warning}</div>
+              )}
+              <ol className="agentic-task-list">
+                {element.orchestration.tasks.map((task) => (
+                  <li key={task.id} className={`agentic-task agentic-task-${task.status}`}>
+                    <span aria-hidden="true">
+                      {task.status === 'completed' ? '✓' : task.status === 'blocked' ? '!' : '○'}
+                    </span>
+                    <span>
+                      <strong>{task.title}</strong>
+                      {task.evidence && <small>{task.evidence}</small>}
+                      {task.skip_reason && <small>Skipped: {task.skip_reason}</small>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {(element.instructions ?? element.orchestration?.instructions)?.map((instruction) => (
+            <p key={instruction.id}>Your instruction ({instruction.status}): {instruction.text}</p>
+          ))}
+
           {element.tool_calls?.map((toolCall) => {
             const needsApproval =
               toolCall.status === 'awaiting_approval' ||

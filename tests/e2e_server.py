@@ -22,19 +22,27 @@ class BrowserE2EAgent:
         _tools: list[Any],
         _config: Any,
     ):
+        retry_prefix = "Your previous generation contained malformed"
+        retry = bool(messages[-1].content and messages[-1].content.startswith(retry_prefix))
         prompt = next(
-            message.content or "" for message in reversed(messages) if message.role == "user"
+            message.content or ""
+            for message in reversed(messages)
+            if message.role == "user" and not (message.content or "").startswith(retry_prefix)
         )
         if prompt == "Trigger backend failure":
             raise RuntimeError("browser e2e injected failure")
-        if prompt == "Trigger failure after prose":
+        if prompt == "Trigger failure after prose" or (
+            prompt == "Trigger recoverable malformed output" and not retry
+        ):
             from agents.architectures.chat_template_tools import ToolResponseStream
 
             parser = ToolResponseStream({"safe": "web.search"})
             yield ModelEvent.text_delta(parser.feed("Working on it. "))
             parser.feed("<tool_call>{bad}</tool_call>")
             raise AssertionError("Expected malformed tool markup to fail")
-        if prompt == "Remember cobalt.":
+        if prompt == "Trigger recoverable malformed output":
+            response = "Recovered after retry."
+        elif prompt == "Remember cobalt.":
             response = "I will remember cobalt."
         elif prompt == "What should you remember?":
             prior_user_messages = [

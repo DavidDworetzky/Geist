@@ -119,6 +119,10 @@ const Chat = () => {
   } = useLocalRuntimeReadiness(userSettings, localArtifactInstalled);
   const {
     completeText,
+    steerRun,
+    steeringError,
+    steeringStatus,
+    isSteering,
     cancelGeneration,
     resetChatSession,
     loading: isLoading,
@@ -240,6 +244,8 @@ const Chat = () => {
         status: h.status,
         tool_calls: h.tool_calls,
         artifacts: h.artifacts,
+        orchestration: h.orchestration,
+        instructions: h.instructions,
       }));
 
       setChatHistory(prev => {
@@ -392,6 +398,8 @@ const Chat = () => {
       ai: completedTurn.message,
       tool_calls: completedTurn.tool_calls,
       artifacts: completedTurn.artifacts,
+      orchestration: completedTurn.orchestration,
+      instructions: completedTurn.instructions,
     };
     setChatHistory(previous => {
       const existingHistory = previous?.chatHistory ?? [];
@@ -409,17 +417,27 @@ const Chat = () => {
     ]);
   }, [completedTurn, refreshChatSessions, refreshFolders, routeChatId, state_chat_id]);
 
+  const submitDisabled = isSteering
+    || (isLoading && (!activeTurn?.run_id || activeTurn.status === 'cancelling'))
+    || isProcessingFiles || isMemoryLoading || localRuntimeBlocking;
+
   const handleSubmit = async (message: string) => {
-    if (message.trim() && !isMemoryLoading) {
-      await chatWithServer(message);
+    if (message.trim() && !submitDisabled) {
+      if (isLoading) {
+        if (await steerRun(message)) {
+          setUserInput(current => current === message ? '' : current);
+        }
+        return;
+      }
       setUserInput('');
+      await chatWithServer(message);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (userInput.trim() && !isLoading && !isMemoryLoading) {
+      if (userInput.trim() && !submitDisabled) {
         void handleSubmit(userInput);
       }
     }
@@ -624,6 +642,8 @@ const Chat = () => {
             model_load: activeTurn!.model_load,
             tool_calls: activeTurn!.tool_calls,
             artifacts: activeTurn!.artifacts,
+            orchestration: activeTurn!.orchestration,
+            instructions: activeTurn!.instructions,
           },
         ]
       : (chatHistory?.chatHistory ?? []),
@@ -1112,23 +1132,29 @@ const Chat = () => {
                 value={userInput}
                 onChange={setUserInput}
                 onSubmit={handleSubmit}
-                disabled={isLoading || isProcessingFiles || isMemoryLoading || localRuntimeBlocking}
-                placeholder={localModelPlaceholder}
+                disabled={submitDisabled}
+                placeholder={isLoading ? 'Add instructions for the agent...' : localModelPlaceholder}
+                submitLabel={isLoading ? 'Add instructions' : 'Send'}
                 handleKeyDown={handleKeyDown}
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}
-                enableVoice={true}
+                enableVoice={!isLoading}
               />
+              {steeringError && <p role="alert">{steeringError}</p>}
+              {steeringStatus && <p role="status">{steeringStatus}</p>}
               {isLoading && (
                 <button
-                  className="button button-danger"
+                  className="button chat-stop-button"
                   type="button"
                   onClick={() => void cancelGeneration()}
                   disabled={activeTurn?.status === 'cancelling'}
-                  aria-label="Stop generating"
-                  style={{ marginTop: 8 }}
+                  aria-label="Stop"
+                  title={activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                  aria-busy={activeTurn?.status === 'cancelling'}
                 >
-                  {activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+                  </svg>
                 </button>
               )}
             </div>

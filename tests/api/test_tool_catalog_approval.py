@@ -9,6 +9,7 @@ def test_catalog_exposes_non_waivable_approval(monkeypatch, tmp_path):
 
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "local")
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.delenv("GEIST_EXEC_WORKSPACE", raising=False)
     monkeypatch.setattr(main, "get_default_workspace", lambda: SimpleNamespace(workspace_id=1))
     monkeypatch.setattr(

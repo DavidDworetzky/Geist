@@ -23,12 +23,10 @@ PRE_WORKSPACE_REVISION = "f5c8a1d3e7b9"
 PRE_WORKSPACE_GAP = ("geist_user", "workspace_key")
 PRE_MCP_REVISION = "c6d9e2f4a7b1"
 PRE_MCP_TABLE = "mcp_server"
-# Adopt only validated compute columns; workspace/MCP migrations still run
-# when their schema and data transformations have not yet been applied.
-LEGACY_SETTINGS_REVISION = "b2e5f7a9c3d1"
+# Validate goal tables before adoption; leave the budget data migration pending.
+LEGACY_AGENTIC_REVISION = "e9f2a4b6c8d0"
 PERMISSIONS_GAP = ("user_settings", "agent_permissions")
 MCP_REVISION = "b3e5d7f9a1c3"
-ROUTINE_REVISION = "c7d9e1f3a5b7"
 
 
 def upgrade_database() -> None:
@@ -67,18 +65,14 @@ def upgrade_database() -> None:
         _reject_unsupported_legacy_schema(Base.metadata, Engine)
         _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        revisions = [
-            ROUTINE_REVISION
-            if inspect(Engine).has_table("agent_routine")
-            else LEGACY_SETTINGS_REVISION
-        ]
+        revisions = [LEGACY_AGENTIC_REVISION]
         if schema_kind in {"current", "pre_routines"}:
             revisions.append(MCP_REVISION)
         elif schema_kind == "pre_mcp":
             revisions.append(PRE_MCP_REVISION)
         elif schema_kind != "pre_workspace":
             raise RuntimeError("Legacy settings repair did not produce a supported schema")
-        # The compute branch already includes the shared ancestor. When workspace
+        # The agentic branch already includes the shared ancestor. When workspace
         # identity is absent, its migration must still run (including data adoption).
         logger.info("Adopting an unversioned Geist database at %s", revisions)
         command.stamp(alembic_config, revisions)
@@ -195,7 +189,8 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
         {("agent_routine", "last_status"), ("agent_routine", "last_error")}
     )
     routine_missing = "agent_routine" in missing_tables or routine_gap in missing_column_gaps
-    missing_tables.discard("agent_routine")
+    # A goal checkpoint implies its ancestor routine schema already exists.
+    # Never stamp past a missing ancestor table and silently leave it absent.
     missing_column_gaps.discard(routine_gap)
     if not missing_tables and not missing_column_gaps:
         return "pre_routines" if routine_missing else "current", problems

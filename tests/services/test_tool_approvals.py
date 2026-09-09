@@ -35,14 +35,14 @@ def test_resolve_unblocks_waiter_with_decision():
     assert registry.has_pending("run_1") is False
 
 
-def test_wait_times_out_to_deny():
+def test_wait_times_out_to_deny_permission_stack():
     registry = ToolApprovalRegistry()
     pending = _request(registry, "run_1", "call_1", "web.search")
     assert registry.wait(pending, timeout_seconds=0.05) == "deny"
     assert registry.has_pending("run_1") is False
 
 
-def test_wait_cancellation_denies():
+def test_wait_cancellation_denies_permission_stack():
     registry = ToolApprovalRegistry()
     pending = _request(registry, "run_1", "call_1", "web.search")
     cancellation = threading.Event()
@@ -50,7 +50,7 @@ def test_wait_cancellation_denies():
     assert registry.wait(pending, timeout_seconds=5.0, cancellation=cancellation) == "deny"
 
 
-def test_resolve_unknown_call_returns_false_and_bad_decision_raises():
+def test_resolve_unknown_call_returns_false_and_bad_decision_raises_permission_stack():
     registry = ToolApprovalRegistry()
     assert registry.resolve("run_x", "call_x", "approve", workspace_id=1) is False
     _request(registry, "run_1", "call_1", "web.search")
@@ -58,7 +58,7 @@ def test_resolve_unknown_call_returns_false_and_bad_decision_raises():
         registry.resolve("run_1", "call_1", "yolo", workspace_id=1)
 
 
-def test_cancel_run_denies_all_pending():
+def test_cancel_run_denies_only_its_pending_calls():
     registry = ToolApprovalRegistry()
     first = _request(registry, "run_1", "call_1", "a")
     second = _request(registry, "run_1", "call_2", "b")
@@ -71,13 +71,24 @@ def test_cancel_run_denies_all_pending():
     assert registry.has_pending("run_2") is True
 
 
-def test_session_grants_are_scoped():
+def test_session_grants_are_scoped_permission_stack():
     grants = SessionGrantRegistry()
     grants.grant("chat:1", "web.search")
     assert grants.granted("chat:1") == frozenset({"web.search"})
     assert grants.granted("chat:2") == frozenset()
     grants.clear("chat:1")
     assert grants.granted("chat:1") == frozenset()
+
+
+def test_new_instruction_retires_pending_approval_atomically():
+    registry = ToolApprovalRegistry()
+    pending = _request(registry, "run", "call", "tool")
+    interruption = threading.Event()
+    interruption.set()
+    assert registry.wait(pending, 5, interruption=interruption) == "interrupted"
+    assert pending.denial_reason == "superseded"
+    assert not registry.resolve("run", "call", "approve", workspace_id=1)
+    assert registry.pending() == []
 
 
 def test_session_grants_expire_and_bind_the_reviewed_definition():

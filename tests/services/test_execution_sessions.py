@@ -55,6 +55,57 @@ def test_names_are_safe_without_sanitization_collisions():
     assert "/" not in session_container_name("a/b", "owner")
 
 
+def test_bounded_file_tool_input_and_output_round_trip():
+    payload = "hello \u2603" * 20_000
+    result = DockerSessionManager._runtime_call(
+        sys.executable,
+        ["-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+        time.monotonic() + 10,
+        input_text=payload,
+        output_limit=200_000,
+    )
+    assert result.exit_code == 0
+    assert result.stdout == payload
+    assert not result.truncated
+
+
+def test_oversized_stdin_is_rejected_before_starting_process(monkeypatch):
+    started = []
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: started.append(True))
+    result = DockerSessionManager._runtime_call(
+        sys.executable,
+        ["-"],
+        time.monotonic() + 10,
+        input_text="x" * 1_500_001,
+    )
+    assert result.exit_code == 125
+    assert started == []
+
+
+def test_interactive_file_call_retains_hardened_session_lifecycle(monkeypatch):
+    manager, runtime = _manager(monkeypatch)
+    inputs = []
+
+    def capture(binary, args, deadline, **kwargs):
+        if args[0] == "exec":
+            inputs.append((args, kwargs))
+        return runtime(binary, args, deadline)
+
+    monkeypatch.setattr(manager, "_runtime_call", capture)
+    assert (
+        manager.run_in_session(
+            "chat", "python -", input_text="print(1)", output_limit=200_000
+        ).exit_code
+        == 0
+    )
+    assert "--interactive" in inputs[0][0]
+    assert inputs[0][1] == {"input_text": "print(1)", "output_limit": 200_000}
+    creation = next(args for args in runtime.calls if args[0] == "run")
+    assert "--read-only" in creation
+    assert "--cap-drop" in creation
+    assert "none" in creation
+
+
 def test_session_create_args_keep_hardening_and_bound_crash_lifetime():
     args = build_session_create_args(name="test", image="python:3.11-slim", owner="owner")
     joined = " ".join(args)
@@ -187,6 +238,13 @@ def test_hardline_policy_precedes_any_host_reaching_runtime_call(monkeypatch, tm
     )
     result = manager.run_in_session("chat", "rm -rf /")
     assert result.blocked
+    assert runtime.calls == []
+
+
+@pytest.mark.parametrize("command", ["rm -rf /workspace", "git reset --hard", "git clean -fd"])
+def test_persistent_ephemeral_workspace_also_retains_hardline_floor(monkeypatch, command):
+    manager, runtime = _manager(monkeypatch)
+    assert manager.run_in_session("chat", command).blocked
     assert runtime.calls == []
 
 

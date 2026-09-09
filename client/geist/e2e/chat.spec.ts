@@ -132,11 +132,24 @@ test('leaves connecting and surfaces a safe model failure', async ({ page }) => 
 test('preserves streamed prose after a malformed tool failure and reload', async ({ page }) => {
   await page.getByPlaceholder('Type your message...').fill('Trigger failure after prose');
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByText(backendFailureMessage, { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    'Error: The model returned malformed tool calls and exhausted its recovery budget. Please try again.',
+    { exact: true },
+  )).toBeVisible();
   await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
   await expect(page).toHaveURL(/\/chat\/\d+$/);
   await page.reload();
   await expect(page.locator('.chat-message-ai')).toContainText('Working on it.');
   await expect(page.getByText('Turn status: failed', { exact: true })).toBeVisible();
   await expect(page.locator('body')).not.toContainText('<tool_call>');
+});
+
+test('recovers malformed tool output and persists the corrected answer', async ({ page }) => {
+  await page.getByPlaceholder('Type your message...').fill('Trigger recoverable malformed output');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.chat-message-ai')).toContainText('Recovered after retry.');
+  await expect(page.getByRole('status', { name: 'Geist is responding' })).toBeHidden();
+  await expect(page.getByText(backendFailureMessage, { exact: true })).toBeHidden();
+  await page.reload();
+  await expect(page.locator('.chat-message-ai')).toContainText('Recovered after retry.');
 });

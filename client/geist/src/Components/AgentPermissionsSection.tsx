@@ -22,7 +22,7 @@ const DEFAULT_PERMISSIONS: AgentPermissions = { mode: 'default', always_allow: [
 const modeOptions = [
   { value: 'default', label: 'Balanced (side-effecting tools ask)' },
   { value: 'require_approval', label: 'Require approval for every tool' },
-  { value: 'auto_approve', label: 'Auto-approve all tools' }
+  { value: 'auto_approve', label: 'Auto-approve eligible tools' }
 ];
 
 const modeDescriptions: Record<AgentPermissionMode, string> = {

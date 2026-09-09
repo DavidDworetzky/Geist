@@ -58,6 +58,13 @@ def test_truncate_output_marks_dropped_content():
         "kill -9 -1",
         "echo hi; rm -rf /",
         "echo done > /dev/sda",
+        "rm -rf .",
+        "rm -rf /workspace",
+        "rm -rf /workspace/",
+        "git reset --hard HEAD~1",
+        "git clean -fdx",
+        "git checkout -- .",
+        "git restore .",
     ],
 )
 def test_hardline_blocks_unrecoverable_commands(command):
@@ -72,7 +79,6 @@ def test_hardline_blocks_unrecoverable_commands(command):
         "rm -rf /tmp/scratch",
         "echo 'rm -rf /' is dangerous",
         "ddgr search",
-        "git checkout -- .",
         "mkdir -p /tmp/x && rm -r /tmp/x",
     ],
 )
@@ -141,6 +147,7 @@ def test_docker_run_args_hardening_posture():
     joined = " ".join(args)
     assert args[:2] == ["run", "--rm"]
     assert "--cap-drop ALL" in joined
+    assert "--read-only" in args
     assert "no-new-privileges" in joined
     assert "--user 65534:65534" in joined
     assert "--network none" in joined
@@ -168,6 +175,25 @@ def test_docker_sandbox_posture_flips_with_workspace(tmp_path):
     host_reaching = DockerExecutionEnvironment(workspace=str(tmp_path))
     assert host_reaching.is_sandboxed is False
     assert host_reaching.has_host_access is True
+
+
+def test_docker_network_or_workspace_requires_per_call_approval(tmp_path):
+    assert DockerExecutionEnvironment().requires_per_call_approval is False
+    assert DockerExecutionEnvironment(network=True).requires_per_call_approval is True
+    assert DockerExecutionEnvironment(workspace=str(tmp_path)).requires_per_call_approval is True
+
+
+def test_host_mounted_docker_blocks_hardline_before_runtime(tmp_path):
+    env = DockerExecutionEnvironment(
+        workspace=str(tmp_path),
+        runtime_path="/usr/bin/docker",
+    )
+    with patch("subprocess.run") as mock_run:
+        result = env.run("git reset --hard")
+
+    assert result.exit_code == 126
+    assert "BLOCKED" in result.stderr
+    mock_run.assert_not_called()
 
 
 def test_docker_reports_missing_runtime():
@@ -267,19 +293,36 @@ def test_registry_sandboxed_docker_tool_needs_no_approval(monkeypatch, tmp_path)
     definition = registry.get("terminal.run")
     assert definition is not None
     assert definition.requires_approval is False
-    assert definition.enabled_by_default is False
+    assert definition.requires_per_call_approval is False
+    assert definition.enabled_by_default is True
     assert definition.side_effect == "process"
 
 
 def test_registry_host_reaching_backends_require_approval(monkeypatch, tmp_path):
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
 
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "local")
-    assert build_default_tool_registry().get("terminal.run").requires_approval is True
+    local_definition = build_default_tool_registry().get("terminal.run")
+    assert local_definition.requires_approval is True
+    assert local_definition.requires_per_call_approval is True
 
     monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
     monkeypatch.setenv("GEIST_EXEC_WORKSPACE", str(tmp_path))
-    assert build_default_tool_registry().get("terminal.run").requires_approval is True
+    mounted_definition = build_default_tool_registry().get("terminal.run")
+    assert mounted_definition.requires_approval is True
+    assert mounted_definition.requires_per_call_approval is True
+
+
+def test_registry_networked_docker_requires_per_call_approval(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    monkeypatch.setenv("GEIST_EXEC_BACKEND", "docker")
+    monkeypatch.setenv("GEIST_EXEC_DOCKER_NETWORK", "true")
+    monkeypatch.delenv("GEIST_EXEC_WORKSPACE", raising=False)
+
+    definition = build_default_tool_registry().get("terminal.run")
+    assert definition.requires_approval is True
+    assert definition.requires_per_call_approval is True
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@ same as approving it to wipe the disk or power the machine off. Sandboxed
 backends skip this check — inside an isolated container these commands are
 contained away from host files. Shell syntax, interpreters and indirect commands
 can bypass regex checks; fresh approval or sandbox isolation remains essential.
+Persistent chat sessions also enforce this floor to protect their in-container
+workspace state, even when they do not mount a host directory.
 """
 
 from __future__ import annotations
@@ -34,6 +36,16 @@ _HARDLINE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
             "permission change on filesystem root",
         ),
         (r">\s*/dev/(?:sd|hd|nvme|mmcblk)", "redirect onto block device"),
+        (
+            r"(?:^|[;&|]\s*)rm\s+(?:-[a-z]*\s+)*(?:-[a-z]*[rf][a-z]*\s+)+(?:--\S+\s+)*(?:\.|\./|\*|/workspace/?|/workspace/\*)\s*(?:$|[;&|])",
+            "recursive delete of workspace root",
+        ),
+        (r"(?:^|[;&|]\s*)git\s+reset\s+--hard(?:\s|$)", "discarding Git reset"),
+        (r"(?:^|[;&|]\s*)git\s+clean\s+-[a-z]*f[a-z]*(?:\s|$)", "forced Git clean"),
+        (
+            r"(?:^|[;&|]\s*)git\s+(?:checkout\s+--|restore)\s+\.(?:\s|$)",
+            "discarding all workspace changes",
+        ),
     )
 )
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import AgentPermissionsSection from '../AgentPermissionsSection';
 
 const toolsResponse = {
@@ -15,6 +15,13 @@ const toolsResponse = {
       description: 'Send an email',
       requires_approval: true,
       side_effect: 'external_write',
+    },
+    {
+      name: 'terminal.run',
+      description: 'Run a protected host command',
+      requires_approval: true,
+      requires_per_call_approval: true,
+      side_effect: 'process',
     },
   ],
 };
@@ -40,10 +47,8 @@ describe('AgentPermissionsSection', () => {
 
     expect(screen.getByText(/Loading tools/i)).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('web.search')).toBeInTheDocument();
-      expect(screen.getByText('communication.email.send')).toBeInTheDocument();
-    });
+    expect(await screen.findByText('web.search')).toBeInTheDocument();
+    expect(screen.getByText('communication.email.send')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('web.search'));
     expect(onChange).toHaveBeenCalledWith({ mode: 'default', always_allow: ['web.search'] });
@@ -62,7 +67,7 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
 
     fireEvent.change(screen.getByLabelText(/Approval Mode/i), {
       target: { value: 'auto_approve' },
@@ -80,7 +85,7 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
     expect(screen.getByText(/Auto-approve is on/i)).toBeInTheDocument();
     expect(screen.getByText(/MCP\/plugin tools whose definitions can change without notice/)).toBeInTheDocument();
   });
@@ -97,7 +102,7 @@ describe('AgentPermissionsSection', () => {
       />
     );
 
-    await waitFor(() => screen.getByText('web.search'));
+    await screen.findByText('web.search');
 
     expect(screen.getByRole('button', { name: 'web.search' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByText('web.search'));
@@ -115,7 +120,7 @@ describe('AgentPermissionsSection', () => {
     const granted = await screen.findByRole('button', { name: /web.search/ });
     expect(granted).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /communication.email.send/ })).toBeDisabled();
-    expect(screen.getByText(/can affect external systems/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /communication.email.send/ })).toHaveTextContent('can affect external systems');
   });
 
   it('surfaces unavailable saved grants and lets the user revoke them', async () => {
