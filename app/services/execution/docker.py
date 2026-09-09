@@ -148,6 +148,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
             workspace_mount_args(self.workspace)
             if not os.path.isdir(self.workspace):
                 raise ValueError("Docker workspace must be an existing directory")
+        self.managed_workspace = False
         self._runtime_path = runtime_path
         self.runtime_preference = runtime_preference
         if os.path.basename(runtime_path or runtime_preference or "").startswith("podman"):
@@ -155,7 +156,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
 
     @property
     def has_host_access(self) -> bool:
-        return bool(self.workspace)
+        return bool(self.workspace) or self.managed_workspace
 
     @property
     def is_sandboxed(self) -> bool:
@@ -173,6 +174,7 @@ class DockerExecutionEnvironment(ExecutionEnvironment):
             super().describe()
             + f"; image={self.image}; workspace={self.workspace or '-'}"
             + ("; network enabled" if self.network else "")
+            + ("; durable host workspace" if self.has_host_access else "")
         )
 
     def runtime(self) -> str | None:

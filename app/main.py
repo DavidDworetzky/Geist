@@ -51,6 +51,7 @@ from app.models.completion import (
 )
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
+    create_chat_session,
     get_all_chat_history,
     get_chat_history,
     get_paginated_chat_history,
@@ -142,6 +143,7 @@ chat_orchestrator = ChatOrchestrator(
     run_controls=run_controls,
     orchestration_runs=goal_runtime_registry,
     goal_store=DatabaseGoalStore(),
+    chat_creator=create_chat_session,
     intent_router=ToolIntentRouter(),
 )
 
@@ -641,6 +643,8 @@ def run_routine(routine, cancellation: threading.Event | None = None) -> None:
     interactive=False makes the orchestrator deny approval-gated tools
     immediately instead of waiting for a user who is not present. The run
     persists as a normal chat session, so results are visible in the UI.
+    Durable code writes/edits and terminal commands always need fresh approval,
+    so they cannot execute unattended, even under auto-approve or always-allow.
     """
     workspace_id = int(routine.user_id)
     if get_default_workspace().workspace_id != workspace_id:

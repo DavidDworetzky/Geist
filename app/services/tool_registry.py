@@ -229,6 +229,7 @@ class ToolRegistry:
         self._definitions: dict[str, ToolDefinition] = {}
         self._sources: list[ToolSource] = []
         self.session_manager: DockerSessionManager | None = None
+        self.coding_workspace: CodingWorkspace | None = None
         self._explicitly_enabled = explicitly_enabled or set()
         self._max_concurrent_executions = max_concurrent_executions
         self._lifecycle_lock = threading.RLock()
@@ -274,6 +275,10 @@ class ToolRegistry:
         scope = f"workspace:{workspace_id}:chat:{chat_id}"
         session_grants.clear(scope)
         if self.session_manager is not None:
+            if self.coding_workspace is not None:
+                scope = self.coding_workspace.scope(
+                    ToolContext(workspace_id=workspace_id, chat_id=chat_id, run_id="")
+                )
             self.session_manager.close_scope(scope)
 
     def add_source(self, source: ToolSource) -> None:
@@ -502,6 +507,7 @@ def build_default_tool_registry(
     try:
         execution_environment = create_execution_environment()
         workspace = CodingWorkspace(execution_environment)
+        registry.coding_workspace = workspace
         registry.session_manager = workspace.sessions
     except ValueError as error:
         logger.error("Coding tools disabled: %s", error)
@@ -827,9 +833,10 @@ def build_default_tool_registry(
             handler=workspace_write,
             side_effect="filesystem_write",
             requires_approval=True,
+            requires_per_call_approval=True,
             source_adapter="WorkspaceFileAdapter.write_file",
             availability=lambda _: workspace is not None and workspace.available,
-            requires_per_call_approval=workspace.requires_per_call_approval if workspace else True,
+            allows_standing_grant=False,
         )
     )
     registry.register(
@@ -844,9 +851,10 @@ def build_default_tool_registry(
             handler=workspace_edit,
             side_effect="filesystem_write",
             requires_approval=True,
+            requires_per_call_approval=True,
             source_adapter="WorkspaceFileAdapter.edit_file",
             availability=lambda _: workspace is not None and workspace.available,
-            requires_per_call_approval=workspace.requires_per_call_approval if workspace else True,
+            allows_standing_grant=False,
         )
     )
 
@@ -876,7 +884,7 @@ def build_default_tool_registry(
     # runs approval-free; local or host-mounted Docker requires approval —
     # isolation and approval are two implementations of the same safety
     # budget, so a backend must hold at least one of them.
-    if execution_environment is not None and workspace is not None and workspace.available:
+    if execution_environment is not None and workspace is not None:
 
         def terminal_run(
             context: ToolContext, arguments: TerminalRunArguments
@@ -921,9 +929,10 @@ def build_default_tool_registry(
                 arguments_model=TerminalRunArguments,
                 handler=terminal_run,
                 side_effect="process",
-                requires_approval=execution_environment.requires_per_call_approval,
-                requires_per_call_approval=execution_environment.requires_per_call_approval,
-                allows_standing_grant=not execution_environment.requires_per_call_approval,
+                # Chat execution always has a durable host-backed workspace.
+                requires_approval=True,
+                requires_per_call_approval=True,
+                allows_standing_grant=False,
                 enabled_by_default=True,
                 timeout_seconds=MAX_COMMAND_TIMEOUT_SECONDS + 30,
                 source_adapter=f"execution.{execution_environment.name}",
