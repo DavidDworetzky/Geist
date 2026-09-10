@@ -229,6 +229,32 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_glm53_metadata_is_explicit_and_server_backed():
+    from agents.architectures.registry import get_models_for_provider, provider_from_string
+
+    glm = get_model_spec("z-ai/glm-5.3")
+
+    assert glm.provider == "openrouter"
+    assert glm.backend == "openai_compatible"
+    assert glm.local is False
+    assert glm.family == "glm"
+    assert glm.context_window == 1310720
+    assert glm.max_output_tokens == 131072
+    assert glm.parameter_count is None
+    assert glm.activated_parameters is None
+    assert glm.supports_vision is False
+    assert glm.supports_function_calling is True
+    assert glm.supports_reasoning is True
+    assert glm.supports_streaming is True
+    assert glm.recommended is True
+    assert glm.mandatory_reasoning_effort == "max"
+    assert glm.unsupported_parameters == ("n",)
+    assert get_provider_endpoint(glm.provider) == "https://openrouter.ai/api/v1"
+    assert glm.id in {
+        model.id for model in get_models_for_provider(provider_from_string("openrouter"))
+    }
+
+
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     hy4 = get_model_spec("tencent/hy4-preview")
 
@@ -468,6 +494,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
         "tencent/hy4-preview",
+        "z-ai/glm-5.3",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
         "muse-spark-1.1",
@@ -523,6 +550,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
         "tencent/hy4-preview",
+        "z-ai/glm-5.3",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
     ],
