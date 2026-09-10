@@ -101,9 +101,21 @@ def test_heavyweight_models_are_server_backed():
     assert hosted_glm.local is False
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
 
-    qwen_max = get_model_spec("qwen/qwen3.8-max")
+    qwen_max = get_model_spec("qwen/qwen3.8-max-0902")
     assert qwen_max.backend == "openai_compatible"
+    assert qwen_max.provider == "openrouter"
     assert qwen_max.local is False
+    assert qwen_max.context_window == 1000000
+    assert qwen_max.max_output_tokens == 131072
+    assert qwen_max.parameter_count is None
+    assert qwen_max.activated_parameters is None
+    assert qwen_max.supports_vision is True
+    assert qwen_max.supports_function_calling is True
+    assert qwen_max.supports_reasoning is True
+    assert qwen_max.supports_streaming is True
+    assert qwen_max.mandatory_reasoning_effort == "xhigh"
+    assert qwen_max.unsupported_parameters == ("n",)
+    assert resolve_request_spec("qwen/qwen3.8-max") is qwen_max
     assert get_provider_endpoint(qwen_max.provider) == "https://openrouter.ai/api/v1"
 
     glm_flash = get_model_spec("z-ai/glm-5.3-flash")
@@ -464,7 +476,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "zai-org/GLM-5.2",
         "deepseek-ai/DeepSeek-R1",
         "x-ai/grok-4.6",
-        "qwen/qwen3.8-max",
+        "qwen/qwen3.8-max-0902",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
         "tencent/hy4-preview",
@@ -519,7 +531,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
     "model_id",
     [
         "x-ai/grok-4.6",
-        "qwen/qwen3.8-max",
+        "qwen/qwen3.8-max-0902",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
         "tencent/hy4-preview",
