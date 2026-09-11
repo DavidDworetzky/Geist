@@ -211,6 +211,7 @@ class TestOnlineAgentInitialization:
         [
             "x-ai/grok-4.6",
             "qwen/qwen3.8-flash",
+            "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
         ],
@@ -444,6 +445,37 @@ class TestOnlineAgentAPIRequests:
 
                 payload = mock_post.call_args.kwargs["json"]
                 assert "n" not in payload
+                assert "reasoning" not in payload
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="deepseek/deepseek-v4.1-flash",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "deepseek/deepseek-v4.1-flash",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 0.7
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
 

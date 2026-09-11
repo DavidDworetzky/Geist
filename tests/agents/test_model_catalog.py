@@ -229,6 +229,29 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("deepseek/deepseek-v4.1-flash")
+
+    assert flash.provider == "openrouter"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.family == "deepseek"
+    assert flash.context_window == 1048576
+    assert flash.max_output_tokens == 384000
+    assert flash.parameter_count is None
+    assert flash.activated_parameters is None
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.recommended is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n",)
+    assert flash.performance_note is not None
+    assert "enforce OpenRouter ZDR" in flash.performance_note
+    assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     hy4 = get_model_spec("tencent/hy4-preview")
 
@@ -467,6 +490,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -522,6 +546,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -673,6 +698,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
+    )
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(
