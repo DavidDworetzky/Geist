@@ -126,6 +126,25 @@ class TestAgentFactory:
             assert kwargs["base_url"] == "https://api.openai.com/v1/chat/completions"
             assert kwargs["api_key"] == "test-key"
 
+    def test_fugu_ultra_v2_routes_online_and_rejects_local_loading(self):
+        context = Mock()
+        context.settings = Mock()
+
+        with patch("agents.online_agent.OnlineAgent") as mock_online_agent:
+            AgentFactory.create_agent(
+                agent_type="online",
+                agent_context=context,
+                model="sakana/fugu-ultra-v2",
+                api_key="test-key",
+            )
+
+            kwargs = mock_online_agent.call_args.kwargs
+            assert kwargs["model"] == "sakana/fugu-ultra-v2"
+            assert kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+        with pytest.raises(ValueError, match="server-backed"):
+            AgentFactory._infer_runner_type("sakana/fugu-ultra-v2")
+
     def test_invalid_agent_type(self):
         """Test that invalid agent types raise an error."""
         context = Mock()

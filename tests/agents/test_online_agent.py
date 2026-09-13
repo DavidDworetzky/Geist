@@ -212,6 +212,7 @@ class TestOnlineAgentInitialization:
             "x-ai/grok-4.6",
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash",
+            "sakana/fugu-ultra-v2",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
         ],
@@ -477,6 +478,50 @@ class TestOnlineAgentAPIRequests:
                 assert "n" not in payload
                 assert payload["temperature"] == 0.7
                 assert "reasoning" not in payload
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_fugu_ultra_v2_applies_request_contract_and_preserves_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="sakana/fugu-ultra-v2",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "sakana/fugu-ultra-v2",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "max_tokens": 4096,
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                for parameter in (
+                    "max_tokens",
+                    "n",
+                    "temperature",
+                    "top_p",
+                    "frequency_penalty",
+                    "presence_penalty",
+                    "stop",
+                ):
+                    assert parameter not in payload
+                assert payload["reasoning"] == {"effort": "xhigh"}
                 assert payload["tools"][0]["function"]["name"] == "lookup"
 
     def test_inferred_self_hosted_model_keeps_request_parameters_unchanged(self):
