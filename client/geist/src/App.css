@@ -483,7 +483,7 @@ textarea:focus-visible {
 .chat-stop-button {
   width: 40px;
   height: 40px;
-  margin-top: 8px;
+  align-self: flex-end;
   padding: 0;
   color: var(--geist-color-accent-strong);
   background: color-mix(in srgb, var(--geist-color-accent) 12%, var(--geist-color-surface));
@@ -2272,12 +2272,13 @@ ul.relative {
 
 .input-actions {
   display: flex;
-  flex: 0 0 72px;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 8px;
   align-items: stretch;
   align-self: flex-end;
-  width: 72px;
+  min-width: 72px;
+  width: max-content;
   margin-right: 10px;
 }
 
@@ -2345,6 +2346,7 @@ ul.relative {
   width: 100%;
   padding: 0 12px;
   font-weight: 720;
+  white-space: nowrap;
 }
 
 .voice-settings {
@@ -2624,8 +2626,7 @@ select.form-control {
   }
 
   .input-actions {
-    flex-basis: 68px;
-    width: 68px;
+    min-width: 68px;
     margin-right: 8px;
   }
 
