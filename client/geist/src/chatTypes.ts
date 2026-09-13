@@ -99,6 +99,8 @@ export interface ModelLoadStatus {
   detail: string;
   started_at: string | null;
   updated_at: string;
+  error_code?: 'gpu_memory' | 'system_memory' | 'unified_memory' | null;
+  can_offload_to_system_ram?: boolean;
 }
 
 export type ActiveTurnStatus =

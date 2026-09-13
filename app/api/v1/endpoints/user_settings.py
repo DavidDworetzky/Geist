@@ -97,6 +97,7 @@ async def reset_workspace_settings(
             default_local_artifact_id=None,
             llama_backend=None,
             llama_gpu_device_ids=[],
+            llama_allow_system_ram=False,
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],

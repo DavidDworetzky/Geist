@@ -174,6 +174,7 @@ class AgentFactory:
             if runner_type != "llama_server":
                 device_config.pop("llama_backend", None)
                 device_config.pop("llama_gpu_device_ids", None)
+                device_config.pop("llama_allow_system_ram", None)
 
             if not runner_was_explicit and runner_type == "mlx_llama":
                 from agents.model_catalog import infer_model_spec

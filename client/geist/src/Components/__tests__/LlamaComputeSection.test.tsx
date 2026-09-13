@@ -57,6 +57,30 @@ describe('LlamaComputeSection', () => {
     jest.useRealTimers();
   });
 
+  it.each(['cpu', 'gpu'] as const)('uses forced %s acceleration for RAM setting visibility', async forcedBackend => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ...discoveredGpuInventory,
+        managed_by_environment: true,
+        forced_backend: forcedBackend,
+      }),
+    });
+    const onAllowSystemRamChange = jest.fn();
+    render(
+      <LlamaComputeSection
+        {...props}
+        backend={forcedBackend === 'gpu' ? 'cpu' : 'gpu'}
+        onAllowSystemRamChange={onAllowSystemRamChange}
+      />,
+    );
+    await screen.findByText(/Compute selection is managed by the environment/);
+    const toggles = screen.queryAllByRole('button', { name: 'Allow system RAM' });
+    expect(toggles).toHaveLength(Number(forcedBackend === 'gpu'));
+    toggles.forEach(toggle => fireEvent.click(toggle));
+    expect(onAllowSystemRamChange.mock.calls).toEqual(forcedBackend === 'gpu' ? [[true]] : []);
+  });
+
   it('expires settled refresh feedback without relying on its copy', async () => {
     jest.useFakeTimers();
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => discoveredGpuInventory });

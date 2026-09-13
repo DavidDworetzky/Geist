@@ -19,6 +19,7 @@ from agents.architectures.llama.mlx_lm_backend import (
     _stop_prefix_length,
 )
 from agents.architectures.mlx_llama_runner import MLXLlamaRunner
+from agents.model_load_errors import ModelMemoryError
 from agents.models.tool_calling import (
     ChatMessage,
     ModelEvent,
@@ -438,6 +439,66 @@ def test_failed_initial_load_releases_worker():
         runner.load("tiny", {"implementation": "invalid"})
     assert runner._worker is runner._worker_thread is None
     assert not runner._request_lock.locked()
+
+
+def test_memory_failure_during_load_is_classified_and_retry_releases_worker():
+    runner = MLXLlamaRunner()
+    original = RuntimeError("[malloc] Unable to allocate 123456 bytes.")
+    with (
+        patch.object(runner, "_load", side_effect=original),
+        pytest.raises(ModelMemoryError) as caught,
+    ):
+        runner.load("test/model")
+    assert caught.value.code == "unified_memory"
+    assert not caught.value.can_offload_to_system_ram
+    assert "load this model" in str(caught.value)
+    assert caught.value.__cause__ is original
+    assert runner._worker is runner._worker_thread is None
+    assert not runner._request_lock.locked()
+    with patch.object(runner, "_load") as retry:
+        runner.load("test/model")
+        retry.assert_called_once()
+    runner.cleanup()
+
+
+@pytest.mark.parametrize("operation", ["complete", "complete_messages", "stream_model_turn"])
+def test_memory_failure_during_generation_preserves_stream_cleanup(operation):
+    runner = MLXLlamaRunner()
+    backend = MagicMock()
+    runner.llama = backend
+    runner.implementation = "mlx_lm"
+    original = RuntimeError("[METAL] Command buffer execution failed: Insufficient Memory")
+    backend.complete.side_effect = original
+    backend.complete_messages.side_effect = original
+    closed = []
+
+    def failing_stream(*_args):
+        try:
+            yield ModelEvent.text_delta("partial reply")
+            raise original
+        finally:
+            closed.append(True)
+
+    backend.stream_model_turn = failing_stream
+    try:
+        with pytest.raises(ModelMemoryError) as caught:
+            if operation == "complete":
+                runner.complete("", "Hello", GenerationConfig())
+            elif operation == "complete_messages":
+                runner.complete_messages([], GenerationConfig())
+            else:
+                stream = runner.stream_model_turn([], [], ModelRequestConfig())
+                assert next(stream).text == "partial reply"
+                list(stream)
+        assert caught.value.code == "unified_memory"
+        assert "continue this response" in str(caught.value)
+        assert not caught.value.can_offload_to_system_ram
+        assert caught.value.__cause__ is original
+        assert not runner._request_lock.locked()
+        if operation == "stream_model_turn":
+            assert closed == [True]
+    finally:
+        runner.cleanup()
 
 
 @pytest.mark.parametrize("operation", ["load", "complete", "complete_messages"])

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import FileUpload from './Components/FileUpload';
+import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
 
 interface FileItem {
   file_id: number;
@@ -288,7 +289,7 @@ const Files: React.FC = () => {
       )}
 
       {deleteConfirm.show && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop" role="presentation" onPointerDown={acknowledgeModalBackdrop}>
           <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="delete-file-title">
             <h3 id="delete-file-title">Confirm Delete</h3>
             <p>Are you sure you want to delete this file?</p>

@@ -123,7 +123,8 @@
 .settings-section-header h3 {
   margin: 0;
   color: var(--geist-color-text);
-  font-size: 1rem;
+  font-size: 1.125rem;
+  line-height: 1.4;
 }
 
 .settings-section-header p,
@@ -661,14 +662,52 @@
   }
 }
 .llama-compute-section {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
   border-top: 1px solid var(--geist-color-border);
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
+  margin-top: 4px;
+  padding-top: 24px;
+}
+
+.llama-compute-section .settings-subsection-header > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.llama-compute-section .settings-subsection-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.llama-compute-section .settings-subsection-header > button {
+  flex-shrink: 0;
+}
+
+.llama-compute-section > .settings-toggle-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--geist-color-border);
+}
+
+.llama-compute-section .settings-toggle-copy .settings-description {
+  max-width: 70ch;
 }
 
 .llama-device-picker {
+  min-width: 0;
   border: 0;
-  margin: 1rem 0 0;
+  margin: 0;
+  padding: 0;
+}
+
+.llama-device-picker > legend {
+  margin-bottom: 6px;
   padding: 0;
 }
 
@@ -677,10 +716,15 @@
   border: 1px solid var(--geist-color-border);
   border-radius: 0.65rem;
   cursor: pointer;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.75rem;
-  margin-top: 0.65rem;
-  padding: 0.8rem;
+  margin-top: 12px;
+  padding: 14px 16px;
+}
+
+.llama-device-option input {
+  margin: 0;
 }
 
 .llama-device-option-disabled {
@@ -694,6 +738,8 @@
 .llama-device-option span {
   display: grid;
   gap: 0.2rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .llama-device-option small {

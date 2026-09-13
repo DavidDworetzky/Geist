@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
@@ -38,8 +39,14 @@ const fallbackLlamaComputeValidity = (value: any): boolean => {
 };
 
 const Settings: React.FC = () => {
+  const location = useLocation();
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
-  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [activeTab, setActiveTab] = useState<Tab>(
+    () => location.hash === '#models' ? 'models' : 'general',
+  );
+  useEffect(() => {
+    if (location.hash === '#models') setActiveTab('models');
+  }, [location.hash]);
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(() => new Set());
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -215,6 +222,9 @@ const Settings: React.FC = () => {
           : {}),
         ...(dirtyKeys.has('llama_gpu_device_ids')
           ? { llama_gpu_device_ids: localSettings.llama_gpu_device_ids }
+          : {}),
+        ...(dirtyKeys.has('llama_allow_system_ram')
+          ? { llama_allow_system_ram: Boolean(localSettings.llama_allow_system_ram) }
           : {}),
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
@@ -402,6 +412,7 @@ const Settings: React.FC = () => {
               onlineModel={localSettings.default_online_model}
               llamaBackend={localSettings.llama_backend}
               llamaGpuDeviceIds={localSettings.llama_gpu_device_ids}
+              llamaAllowSystemRam={Boolean(localSettings.llama_allow_system_ram)}
               onOnlineProviderChange={(value) => {
                 updateLocalSetting('default_online_provider', value);
                 if (localSettings.default_agent_type !== 'online') {
@@ -416,6 +427,7 @@ const Settings: React.FC = () => {
               }}
               onLlamaBackendChange={(value) => updateLocalSetting('llama_backend', value)}
               onLlamaGpuDeviceIdsChange={(value) => updateLocalSetting('llama_gpu_device_ids', value)}
+              onLlamaAllowSystemRamChange={(value) => updateLocalSetting('llama_allow_system_ram', value)}
               onLlamaComputeValidityChange={handleLlamaComputeValidityChange}
             />
           )}

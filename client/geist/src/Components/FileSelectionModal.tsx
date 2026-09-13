@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { acknowledgeModalBackdrop } from '../Utils/modalFeedback';
 
 interface FileItem {
   file_id: number;
@@ -146,7 +147,7 @@ const FileSelectionModal: React.FC<FileSelectionModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop" onPointerDown={acknowledgeModalBackdrop}>
       <div className="file-selection-modal" role="dialog" aria-modal="true" aria-labelledby="file-selection-title">
         <header className="file-selection-header">
           <h2 id="file-selection-title">{title}</h2>

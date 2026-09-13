@@ -1705,6 +1705,38 @@ def test_history_compacts_provider_invalid_tool_sequences(status):
     ]
 
 
+def test_generation_memory_failure_reaches_chat_error_event():
+    from agents.model_load_errors import ModelMemoryError
+
+    error = ModelMemoryError("unified_memory", runtime="mlx_llama", during_generation=True)
+    backend = ScriptedBackend([error])
+    backend.model_id = "test/model"
+    writes = []
+    orchestrator = ChatOrchestrator(
+        ToolRegistry(),
+        history_writer=lambda **kwargs: writes.append(kwargs) or 42,
+    )
+    events = list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Hello",
+            workspace_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+    payload = next(event.payload for event in events if event.event == "error")
+    assert payload["message"] == str(error)
+    assert payload["model_load"]["model_id"] == "test/model"
+    assert payload["model_load"]["error_code"] == "unified_memory"
+    assert payload["model_load"]["can_offload_to_system_ram"] is False
+    assert payload["model_load"]["state"] == "failed"
+    assert writes[0]["status"] == "failed"
+    assert events[-1].event == "done"
+    assert not any(event.event == "final" for event in events)
+
+
 def test_persistence_failure_does_not_emit_unpersisted_final():
     backend = ScriptedBackend([ModelTurn(text="answer")])
     write_attempts = []

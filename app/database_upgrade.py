@@ -186,7 +186,11 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
 
     routine_gap = ("agent_routine", "run_once_requested")
     missing_column_gaps.difference_update(
-        {("agent_routine", "last_status"), ("agent_routine", "last_error")}
+        {
+            ("agent_routine", "last_status"),
+            ("agent_routine", "last_error"),
+            ("user_settings", "llama_allow_system_ram"),
+        }
     )
     routine_missing = "agent_routine" in missing_tables or routine_gap in missing_column_gaps
     # A goal checkpoint implies its ancestor routine schema already exists.

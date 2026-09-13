@@ -1,4 +1,23 @@
 # Geist
+
+## Local model memory
+
+On Windows and Linux, Settings > Models and Providers includes **Allow system
+RAM** beside the GPU selection. It is off by default. Enable it to let llama.cpp
+fit model layers across GPU and system memory when GPU memory is insufficient;
+responses may be slower. Explicit `GEIST_LLAMA_GPU_LAYERS` launch overrides still
+take precedence. Saving the setting applies it on the next model load.
+
+Model load failures open a dismissible dialog with recovery actions. Confirmed
+memory failures explain the limit and link to model selection. The offload
+suggestion and memory-settings link appear only for llama.cpp GPU failures when
+system-RAM offloading is disabled and the setting can affect the runtime.
+On Apple Silicon, catchable MLX memory failures during loading or generation
+show shared-memory guidance without an offload option. A native runtime abort
+or an OS process termination cannot be handled by this in-process dialog path.
+The **See more…** badge beside **Model unavailable** in the composer reopens the
+dialog without changing the chat layout. Draft messages are retained.
+
 Geist is a local first, privacy first, voice enabled harness for AI agents.
 
 # Roadmap

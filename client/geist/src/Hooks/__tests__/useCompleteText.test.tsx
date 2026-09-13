@@ -255,6 +255,27 @@ describe('chatStreamReducer', () => {
 });
 
 describe('useCompleteText', () => {
+  it('preserves a structured memory failure without a duplicate inline error', async () => {
+    const memoryFailure = {
+      model_id: 'test/model', state: 'failed', error_code: 'unified_memory',
+      detail: 'Not enough shared memory to continue this response.',
+      can_offload_to_system_ram: false, started_at: null, updated_at: '2026-09-12T00:00:00Z',
+    };
+    global.fetch = jest.fn().mockResolvedValue(streamingResponse([
+      'event: run_started\ndata: {"run_id":"run_1","chat_id":7}\n\n',
+      'event: delta\ndata: {"text":"Partial reply"}\n\n',
+      `event: error\ndata: ${JSON.stringify({ message: memoryFailure.detail, model_load: memoryFailure, chat_id: 7 })}\n\n`,
+      'event: done\ndata: {"run_id":"run_1","chat_id":7}\n\n',
+    ]));
+    const { result } = renderHook(() => useCompleteText());
+    await act(async () => { await result.current.completeText('Hello'); });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.activeTurn).toMatchObject({
+      status: 'failed', message: 'Partial reply', model_load: memoryFailure,
+    });
+  });
+
   beforeEach(() => {
     jest.restoreAllMocks();
   });

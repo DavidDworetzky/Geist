@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import McpServersSection from './Components/McpServersSection';
+import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
 import './Tools.css';
 
 type ToolsTab = 'catalogue' | 'mcp';
@@ -239,9 +240,7 @@ const Tools: React.FC = () => {
         <div
           className="modal-backdrop"
           role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setConfigurationTool(null);
-          }}
+          onPointerDown={acknowledgeModalBackdrop}
         >
           <div
             ref={configurationDialog}

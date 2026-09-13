@@ -19,6 +19,7 @@ import useWorkflows, { WorkflowStep, WorkflowCreate, WorkflowUpdate } from './Ho
 import useOverflowObserver from './Hooks/useOverflowObserver';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import StagePanelIcon from './Components/StagePanelIcon';
+import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
 import './WorkflowBuilder.css';
 
 const WorkflowStepNode = ({ data, selected }: { data: any; selected: boolean }) => {
@@ -493,9 +494,9 @@ const WorkflowBuilder: React.FC = () => {
         </div>
 
         {showNodeEditor && (
-          <div className="node-editor-overlay">
-            <div className="node-editor">
-              <h3>Edit Step</h3>
+          <div className="node-editor-overlay" onPointerDown={acknowledgeModalBackdrop}>
+            <div className="node-editor" role="dialog" aria-modal="true" aria-labelledby="edit-step-title">
+              <h3 id="edit-step-title">Edit Step</h3>
               <div className="form-group">
                 <label>Step Name</label>
                 <input
@@ -550,9 +551,9 @@ const WorkflowBuilder: React.FC = () => {
         )}
 
         {showRunDialog && (
-          <div className="run-dialog-overlay">
-            <div className="run-dialog">
-              <h3>Run Workflow</h3>
+          <div className="run-dialog-overlay" onPointerDown={acknowledgeModalBackdrop}>
+            <div className="run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-workflow-title">
+              <h3 id="run-workflow-title">Run Workflow</h3>
               <div className="form-group">
                 <label>Input Data (JSON)</label>
                 <textarea

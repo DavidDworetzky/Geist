@@ -26,6 +26,7 @@ from agents.architectures.llama_devices import llama_compute_managed_by_environm
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
+from agents.model_load_errors import ModelMemoryError
 from agents.model_load_status import model_load_status_registry
 from agents.models.agent_completion import AgentCompletion
 from agents.models.tool_calling import ModelRequestConfig, ToolContext
@@ -258,7 +259,17 @@ def _get_or_create_local_agent(agent_type: AgentType):
             _local_agent_loading_model_id = None
             _local_agent_creation_lock.release()
             if load_error is not None:
-                model_load_status_registry.mark_failed(model_id, str(load_error))
+                model_load_status_registry.mark_failed(
+                    model_id,
+                    str(load_error),
+                    error_code=load_error.code
+                    if isinstance(load_error, ModelMemoryError)
+                    else None,
+                    can_offload_to_system_ram=(
+                        isinstance(load_error, ModelMemoryError)
+                        and load_error.can_offload_to_system_ram
+                    ),
+                )
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:
@@ -588,15 +599,20 @@ def stream_chat_events(
             "done",
             {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
         )
-    except Exception:
+    except Exception as error:
         logger.exception("Chat stream failed before a terminal event")
         yield ChatStreamEvent(
             "error",
             {
                 "code": "chat_backend_error",
-                "message": (
+                "message": str(error)
+                if isinstance(error, ModelMemoryError)
+                else (
                     "Chat backend failed to start. Check the configured model, "
                     "local weights, and required credentials."
+                ),
+                **(
+                    {"model_load": error.to_status()} if isinstance(error, ModelMemoryError) else {}
                 ),
                 "chat_id": chat_id,
             },

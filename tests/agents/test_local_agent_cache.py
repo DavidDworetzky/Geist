@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from agents.agent_type import AgentType
+from agents.model_load_errors import ModelMemoryError
 from agents.model_load_status import ModelLoadStatusRegistry
 from app import main as geist_main
 from app.api.v1.endpoints import models as models_endpoint
@@ -19,6 +20,24 @@ class RecordingLocalAgent:
 
     def phase_out(self) -> None:
         self.events.append(("stop", self.artifact_id))
+
+
+def test_failed_cache_initialization_preserves_memory_error_code(monkeypatch):
+    statuses = ModelLoadStatusRegistry()
+    monkeypatch.setattr(geist_main, "model_load_status_registry", statuses)
+    monkeypatch.setattr(geist_main, "agent_cache", {kind: None for kind in AgentType})
+    monkeypatch.setattr(geist_main, "_agent_cache_signatures", {kind: None for kind in AgentType})
+    monkeypatch.setattr(
+        geist_main, "_get_local_agent_factory_config", lambda: _factory_config("artifact")
+    )
+
+    def fail(_config):
+        raise ModelMemoryError("gpu_memory", runtime="llama_server", allow_system_ram=False)
+
+    monkeypatch.setattr(geist_main, "_create_local_agent", fail)
+    with pytest.raises(ModelMemoryError):
+        geist_main.get_or_create_agent(AgentType.LOCALAGENT)
+    assert statuses.get("Qwen/Qwen3-4B-GGUF").error_code == "gpu_memory"
 
 
 def _factory_config(
