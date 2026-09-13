@@ -1,4 +1,5 @@
 import tempfile
+from typing import cast
 
 import httpx
 
@@ -9,9 +10,9 @@ TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions"
 
 
 class WhisperAdapter(InertAdapter):
-    '''
+    """
     Whisper Adapter is an adapter for Open AI's speech to text model.
-    '''
+    """
 
     def __init__(self, api_key, **kwargs):
         self.api_key = api_key
@@ -29,10 +30,15 @@ class WhisperAdapter(InertAdapter):
                 TRANSCRIPTION_URL,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 files={"file": (temp_file.name, temp_file, "application/octet-stream")},
-                data={"model": "whisper-1", "response_format": "text", **({"language": language} if language else {})},
+                data={
+                    "model": "whisper-1",
+                    "response_format": "text",
+                    **({"language": language} if language else {}),
+                },
                 timeout=60.0,
             )
         if response.status_code != 200:
             raise RuntimeError(
-                f"Transcription failed with status {response.status_code}: {response.text}")
-        return response.text
+                f"Transcription failed with status {response.status_code}: {response.text}"
+            )
+        return cast(str, response.text)

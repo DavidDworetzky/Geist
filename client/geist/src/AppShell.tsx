@@ -7,6 +7,7 @@ import useLocalArtifacts, {
 } from './Hooks/useLocalArtifacts';
 import useUserSettings from './Hooks/useUserSettings';
 import { useBranding } from './branding';
+import BrandMark from './Components/BrandMark';
 
 interface ShellProps {
   children: ReactNode;
@@ -71,13 +72,6 @@ const navItems: NavItem[] = [
     ),
   },
 ];
-
-function BrandMark(): JSX.Element {
-  const branding = useBranding();
-  const logoUrl = branding.logoUrl || `${process.env.PUBLIC_URL}/logo192.png`;
-
-  return <img src={logoUrl} alt="" className="brand-mark-image" />;
-}
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith('/workflows')) return 'Workflows';
