@@ -483,7 +483,7 @@ textarea:focus-visible {
 .chat-stop-button {
   width: 40px;
   height: 40px;
-  align-self: flex-end;
+  align-self: center;
   padding: 0;
   color: var(--geist-color-accent-strong);
   background: color-mix(in srgb, var(--geist-color-accent) 12%, var(--geist-color-surface));
