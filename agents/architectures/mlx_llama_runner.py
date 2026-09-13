@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Protocol, TypeVar, cast
 
+from agents.model_load_errors import ModelMemoryError, is_mlx_memory_error
 from agents.models.llama_completion import LlamaCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -141,16 +142,27 @@ class MLXLlamaRunner(BaseRunner):
                 self._worker_thread = None
 
     @contextmanager
-    def _claim_request(self) -> Iterator[None]:
+    def _claim_request(
+        self, *, loading: bool = False, model_id: str | None = None
+    ) -> Iterator[None]:
         if not self._request_lock.acquire(blocking=False):
             raise RuntimeError("MLX runner is busy; retry after the active request finishes")
         try:
             yield
+        except Exception as error:
+            if is_mlx_memory_error(error):
+                raise ModelMemoryError(
+                    "unified_memory",
+                    runtime="mlx_llama",
+                    model_id=model_id or self.model_id,
+                    during_generation=not loading,
+                ) from error
+            raise
         finally:
             self._request_lock.release()
 
     def load(self, model_id: str, device_config: dict[str, Any] | None = None) -> None:
-        with self._claim_request():
+        with self._claim_request(loading=True, model_id=model_id):
             try:
                 self._on_worker(self._load, model_id, device_config)
             except BaseException:

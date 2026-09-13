@@ -5,9 +5,11 @@ These cover the behavior formerly exercised through LlamaAgent, using a stub
 runner (registered in conftest) so no model weights are loaded.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from agents.model_load_errors import ModelMemoryError
 from agents.models.agent_completion import AgentCompletion
 from app.main import (
     AgentType,
@@ -97,6 +99,18 @@ def test_stream_emits_terminal_error_when_agent_initialization_fails():
     assert '"code": "chat_backend_error"' in events[0]
     assert "private initialization detail" not in events[0]
     assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
+
+
+def test_chat_triggered_load_preserves_memory_error_in_sse():
+    error = ModelMemoryError("unified_memory", runtime="mlx_llama", model_id="test/model")
+    with patch("app.main.get_active_agent", side_effect=error):
+        events = list(stream_chat_completion(CompleteTextParams(prompt="Hello")))
+    payload = json.loads(events[0].split("data: ", 1)[1])
+    assert payload["message"] == str(error)
+    assert payload["model_load"]["model_id"] == "test/model"
+    assert payload["model_load"]["error_code"] == "unified_memory"
+    assert payload["model_load"]["can_offload_to_system_ram"] is False
+    assert events[-1].startswith("event: done")
 
 
 def test_modern_non_streaming_completion_uses_orchestrator_without_tools():

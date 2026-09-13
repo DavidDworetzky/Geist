@@ -16,7 +16,7 @@ from agents.architectures.llama_devices import (
     llama_server_filename,
 )
 from app.models.database.user_settings import UserSettingsModel
-from app.models.user_settings import UserSettingsUpdate
+from app.models.user_settings import AgentFactoryConfig, UserSettingsUpdate
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -48,6 +48,28 @@ def _settings(**overrides) -> UserSettingsModel:
     }
     values.update(overrides)
     return UserSettingsModel(**values)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_system_ram_preference_is_saved_and_passed_to_local_runner(enabled):
+    current = _settings(llama_backend="gpu", llama_gpu_device_ids=["gpu-0"])
+    updated = _settings(
+        llama_backend="gpu", llama_gpu_device_ids=["gpu-0"], llama_allow_system_ram=enabled
+    )
+    with (
+        patch("app.services.user_settings_service.get_user_settings", return_value=current),
+        patch(
+            "app.services.user_settings_service.update_user_settings", return_value=updated
+        ) as save,
+        patch("app.models.user_settings.sys.platform", "win32"),
+    ):
+        response = UserSettingsService.update_workspace_settings_by_id(
+            1, UserSettingsUpdate(llama_allow_system_ram=enabled)
+        )
+        assert save.call_args.args[1] == {"llama_allow_system_ram": enabled}
+        assert response.llama_allow_system_ram is enabled
+        config = AgentFactoryConfig.from_user_settings(response)
+        assert config.device_config["llama_allow_system_ram"] is enabled
 
 
 def _device(

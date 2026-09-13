@@ -13,6 +13,44 @@ from app.services.user_settings_service import UserSettingsService
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        ({}, 200),
+        ({"llama_allow_system_ram": False}, 200),
+        ({"llama_allow_system_ram": True}, 200),
+        ({"llama_allow_system_ram": None}, 422),
+    ],
+)
+async def test_ram_preference_accepts_omission_and_booleans_but_rejects_null(
+    payload, expected_status
+):
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/user-settings")
+    app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
+    response = UserSettingsResponse(
+        user_settings_id=1,
+        user_id=1,
+        create_date=datetime.datetime.now(datetime.UTC),
+        update_date=datetime.datetime.now(datetime.UTC),
+    )
+    with patch.object(
+        UserSettingsService, "update_workspace_settings_by_id", return_value=response
+    ) as write:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            result = await client.put("/api/v1/user-settings/", json=payload)
+    assert result.status_code == expected_status
+    if expected_status == 422:
+        write.assert_not_called()
+        assert result.json()["detail"][0]["loc"] == ["body", "llama_allow_system_ram"]
+    else:
+        write.assert_called_once()
+        assert write.call_args.args[1].model_dump(exclude_unset=True) == payload
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["exception", "timeout"])
 async def test_compute_probe_failure_is_actionable_validation_error(failure) -> None:
     app = FastAPI()

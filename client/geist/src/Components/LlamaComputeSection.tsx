@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import SettingsToggle from './SettingsToggle';
 
 type LlamaBackend = 'cpu' | 'gpu' | null;
 
@@ -27,6 +28,8 @@ interface LlamaDeviceInventory {
 interface LlamaComputeSectionProps {
   backend: LlamaBackend;
   deviceIds: string[];
+  allowSystemRam?: boolean;
+  onAllowSystemRamChange?: (enabled: boolean) => void;
   onBackendChange: (backend: LlamaBackend) => void;
   onDeviceIdsChange: (deviceIds: string[]) => void;
   onValidityChange: (
@@ -82,6 +85,8 @@ function memoryLabel(device: LlamaDevice): string {
 export default function LlamaComputeSection({
   backend,
   deviceIds,
+  allowSystemRam = false,
+  onAllowSystemRamChange,
   onBackendChange,
   onDeviceIdsChange,
   onValidityChange,
@@ -373,7 +378,7 @@ export default function LlamaComputeSection({
   const locked = inventory.managed_by_environment;
   const gpuAvailable = devices.length > 0;
   const selectedBackend = backend ?? 'automatic';
-  const effectiveBackend = backend ?? inventory.recommended_backend;
+  const effectiveBackend = inventory.forced_backend ?? backend ?? inventory.recommended_backend;
   const onlySelectedDeviceId = selectedAvailableDeviceIds.length === 1
     ? selectedAvailableDeviceIds[0]
     : null;
@@ -515,6 +520,14 @@ export default function LlamaComputeSection({
             </div>
           )}
         </fieldset>
+      )}
+      {effectiveBackend === 'gpu' && onAllowSystemRamChange && (
+        <SettingsToggle
+          label="Allow system RAM"
+          checked={allowSystemRam}
+          onChange={onAllowSystemRamChange}
+          description="When a model exceeds available GPU memory, let it use system RAM too. Responses may be slower. Applies the next time the model loads."
+        />
       )}
     </div>
   );

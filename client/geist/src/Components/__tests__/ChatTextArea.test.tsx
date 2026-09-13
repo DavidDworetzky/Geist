@@ -4,6 +4,19 @@ import ChatTextArea from '../ChatTextArea';
 import { ChatPair } from '../../chatTypes';
 
 describe('ChatTextArea loading state', () => {
+  it('retains partial replies without an inline memory-failure panel', () => {
+    render(<ChatTextArea chatHistory={[{
+      user: 'Hello', ai: 'Partial reply', status: 'failed',
+      model_load: {
+        model_id: 'test/model', state: 'failed', detail: 'Not enough shared memory',
+        error_code: 'unified_memory', started_at: null, updated_at: '2026-09-12T00:00:00Z',
+      },
+    }]} />);
+    expect(screen.getByText('Partial reply')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Model loading status' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Not enough shared memory')).not.toBeInTheDocument();
+  });
+
   it('shows the Geist loading indicator while chat is loading', () => {
     render(<ChatTextArea chatHistory={[]} isLoading />);
 

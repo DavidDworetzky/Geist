@@ -11,6 +11,7 @@ from agents.architectures import get_runner
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
 from agents.architectures.registry import ensure_runners_registered
 from agents.base_agent import BaseAgent
+from agents.model_load_errors import ModelMemoryError
 from agents.model_load_status import model_load_status_registry
 from agents.models.llama_completion import LlamaCompletion
 from agents.models.tool_calling import (
@@ -88,6 +89,10 @@ class LocalAgent(BaseAgent):
             model_load_status_registry.mark_failed(
                 self.model_id,
                 f"Model failed to load: {error}",
+                error_code=error.code if isinstance(error, ModelMemoryError) else None,
+                can_offload_to_system_ram=(
+                    isinstance(error, ModelMemoryError) and error.can_offload_to_system_ram
+                ),
             )
             raise
         self.runner = runner

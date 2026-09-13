@@ -75,6 +75,9 @@ class UserSettingsBase(BaseModel):
     llama_gpu_device_ids: list[str] = Field(
         default=[], description="Selected managed llama.cpp GPU device IDs"
     )
+    llama_allow_system_ram: bool = Field(
+        default=False, description="Allow GPU model loading to use system RAM when needed"
+    )
     default_online_model: str = Field(default="gpt-4", description="Default online model")
     default_online_provider: str = Field(default="openai", description="Default online provider")
     default_file_archives: list[int] = Field(
@@ -114,6 +117,7 @@ class UserSettingsUpdate(BaseModel):
     default_local_artifact_id: str | None = None
     llama_backend: Literal["cpu", "gpu"] | None = None
     llama_gpu_device_ids: list[str] | None = None
+    llama_allow_system_ram: bool = False
     default_online_model: str | None = None
     default_online_provider: str | None = None
     default_file_archives: list[int] | None = None
@@ -205,6 +209,7 @@ class AgentFactoryConfig(BaseModel):
             if sys.platform in {"win32", "linux"}:
                 device_config["llama_backend"] = settings.llama_backend or "auto"
                 device_config["llama_gpu_device_ids"] = settings.llama_gpu_device_ids
+                device_config["llama_allow_system_ram"] = settings.llama_allow_system_ram
             endpoint = None
             api_key = None
         else:  # online
