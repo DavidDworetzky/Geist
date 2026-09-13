@@ -145,3 +145,18 @@ describe('Tools', () => {
     expect(screen.getByTestId('mcp-catalogue')).toHaveTextContent('Proton Mail');
   });
 });
+
+it('returns from OAuth directly to the MCP servers tab', async () => {
+  const originalFetch = global.fetch;
+  window.history.replaceState(null, '', '/tools?mcp_oauth=connected');
+  global.fetch = jest.fn((url: string) => jsonResponse(url === '/agent/tools' ? { tools: [] } : [])) as any;
+  try {
+    render(<Tools />);
+    expect(await screen.findByText('No MCP servers configured yet.')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'MCP servers' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Account authorization completed');
+  } finally {
+    window.history.replaceState(null, '', '/tools');
+    global.fetch = originalFetch;
+  }
+});

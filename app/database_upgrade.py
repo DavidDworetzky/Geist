@@ -22,6 +22,8 @@ PRE_WORKSPACE_REVISION = "f5c8a1d3e7b9"
 PRE_WORKSPACE_GAP = ("geist_user", "workspace_key")
 PRE_MCP_REVISION = "c6d9e2f4a7b1"
 PRE_MCP_TABLE = "mcp_server"
+PRE_OAUTH_REVISION = "b3e5d7f9a1c3"
+OAUTH_TABLE = "mcp_oauth_connection"
 
 
 def upgrade_database() -> None:
@@ -58,7 +60,12 @@ def upgrade_database() -> None:
     elif not current_heads:
         _backup_sqlite_database(DATABASE_CONFIG.database_url, Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
-        if schema_kind == "pre_local_artifact":
+        if schema_kind in {"pre_oauth", "pre_local_artifact_and_oauth"}:
+            if schema_kind == "pre_local_artifact_and_oauth":
+                _add_default_local_artifact_column(Engine)
+            command.stamp(alembic_config, PRE_OAUTH_REVISION)
+            command.upgrade(alembic_config, "head")
+        elif schema_kind == "pre_local_artifact":
             logger.info(
                 "Adopting an unversioned Geist database missing only the local-artifact "
                 "selection column"
@@ -128,6 +135,8 @@ def _classify_legacy_schema(metadata, engine) -> str:
         "pre_mcp",
         "pre_workspace",
         "pre_local_artifact_and_workspace",
+        "pre_oauth",
+        "pre_local_artifact_and_oauth",
     }:
         return schema_kind
     _raise_legacy_schema_error(problems)
@@ -169,6 +178,13 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
                 f"table {table.name} missing columns {', '.join(sorted(missing_columns))}"
             )
 
+    if missing_tables == {OAUTH_TABLE}:
+        if not missing_column_gaps:
+            return "pre_oauth", problems
+        if missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP}:
+            return "pre_local_artifact_and_oauth", problems
+    if missing_tables == {PRE_MCP_TABLE, OAUTH_TABLE}:
+        missing_tables.remove(OAUTH_TABLE)
     if not missing_tables and not missing_column_gaps:
         return "current", problems
     if not missing_tables and missing_column_gaps == {PRE_LOCAL_ARTIFACT_GAP}:

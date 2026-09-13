@@ -57,7 +57,10 @@ const toolStatus = (tool: ToolDefinition): { label: string; className: string; n
 };
 
 const Tools: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ToolsTab>('catalogue');
+  const [activeTab, setActiveTab] = useState<ToolsTab>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('mcp_oauth') || params.get('tab') === 'mcp' ? 'mcp' : 'catalogue';
+  });
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

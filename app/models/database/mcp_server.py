@@ -57,6 +57,12 @@ class McpServer(Base):
     )
 
     workspace = relationship("GeistUser", backref="mcp_servers")
+    oauth_connection = relationship(
+        "McpOAuthConnection",
+        back_populates="server",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 @dataclass
@@ -79,6 +85,7 @@ class McpServerModel:
     cwd: str | None = None
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
+    oauth_configured: bool = False
 
 
 _MUTABLE_FIELDS = (
@@ -109,6 +116,7 @@ def _to_model(server: McpServer) -> McpServerModel:
         timeout_seconds=float(server.timeout_seconds or 30.0),
         create_date=server.create_date,
         update_date=server.update_date,
+        oauth_configured=server.oauth_connection is not None,
     )
 
 

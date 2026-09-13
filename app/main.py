@@ -690,6 +690,9 @@ def create_app(
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
     app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+    from app.api.v1.endpoints.mcp_oauth import router as mcp_oauth_router
+
+    app.include_router(mcp_oauth_router, prefix="/api/v1/mcp", tags=["mcp"])
     app.include_router(plugins_router, prefix="/api/v1/plugins", tags=["plugins"])
 
     @app.get("/health", include_in_schema=False)
