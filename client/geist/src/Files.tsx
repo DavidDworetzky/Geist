@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import FileUpload from './Components/FileUpload';
 import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
+import { createPortal } from 'react-dom';
 
 interface FileItem {
   file_id: number;
@@ -288,7 +289,7 @@ const Files: React.FC = () => {
         </div>
       )}
 
-      {deleteConfirm.show && (
+      {deleteConfirm.show && createPortal(
         <div className="modal-backdrop" role="presentation" onPointerDown={acknowledgeModalBackdrop}>
           <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="delete-file-title">
             <h3 id="delete-file-title">Confirm Delete</h3>
@@ -298,7 +299,8 @@ const Files: React.FC = () => {
               <button className="button button-danger" onClick={confirmDelete}>Delete</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

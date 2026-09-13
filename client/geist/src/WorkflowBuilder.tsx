@@ -20,6 +20,7 @@ import useOverflowObserver from './Hooks/useOverflowObserver';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import StagePanelIcon from './Components/StagePanelIcon';
 import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
+import { createPortal } from 'react-dom';
 import './WorkflowBuilder.css';
 
 const WorkflowStepNode = ({ data, selected }: { data: any; selected: boolean }) => {
@@ -493,7 +494,7 @@ const WorkflowBuilder: React.FC = () => {
           </aside>
         </div>
 
-        {showNodeEditor && (
+        {showNodeEditor && createPortal(
           <div className="node-editor-overlay" onPointerDown={acknowledgeModalBackdrop}>
             <div className="node-editor" role="dialog" aria-modal="true" aria-labelledby="edit-step-title">
               <h3 id="edit-step-title">Edit Step</h3>
@@ -547,10 +548,11 @@ const WorkflowBuilder: React.FC = () => {
                 <button onClick={() => setShowNodeEditor(false)} className="button button-secondary">Cancel</button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
-        {showRunDialog && (
+        {showRunDialog && createPortal(
           <div className="run-dialog-overlay" onPointerDown={acknowledgeModalBackdrop}>
             <div className="run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-workflow-title">
               <h3 id="run-workflow-title">Run Workflow</h3>
@@ -574,7 +576,8 @@ const WorkflowBuilder: React.FC = () => {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {runResult && (
