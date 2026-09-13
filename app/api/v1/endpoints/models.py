@@ -19,6 +19,7 @@ from agents.architectures.registry import (
     provider_from_string,
     provider_to_string,
 )
+from agents.model_load_errors import ModelLoadErrorCode
 from agents.model_load_status import model_load_status_registry
 from app.services.local_models import InsufficientStorageError, get_local_model_manager
 
@@ -76,6 +77,8 @@ class ModelLoadStatusResponse(BaseModel):
     detail: str
     started_at: datetime | None
     updated_at: datetime
+    error_code: ModelLoadErrorCode | None = None
+    can_offload_to_system_ram: bool = False
 
 
 @router.get("/", response_model=ModelsListResponse)
@@ -327,6 +330,13 @@ def start_local_runtime(background_tasks: BackgroundTasks):
 @router.get("/local/runtime")
 def get_local_runtime_status():
     return get_llama_server_manager().public_status()
+
+
+@router.get("/local/runtime/devices")
+def get_local_runtime_devices(refresh: bool = False):
+    """List managed llama.cpp devices and the automatic recommendation."""
+
+    return get_llama_server_manager().device_inventory(refresh=refresh)
 
 
 @router.post("/local/runtime/stop")

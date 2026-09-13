@@ -309,7 +309,6 @@ export default function AppShell({ children }: ShellProps): JSX.Element {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="topbar-eyebrow">Runtime</p>
             <h1>{pageTitle(location.pathname)}</h1>
           </div>
           <RuntimeSummary />

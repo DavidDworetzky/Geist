@@ -12,6 +12,7 @@ import EnhancedChatInput from './Components/EnhancedChatInput';
 import ChatMemoryControls from './Components/ChatMemoryControls';
 import MemoryExplorer from './Components/MemoryExplorer';
 import StagePanelIcon from './Components/StagePanelIcon';
+import ModelLoadFailureModal from './Components/ModelLoadFailureModal';
 import { ChatPair, ChatHistory, ChatTurnResult, ToolApprovalDecision } from './chatTypes';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 
@@ -119,6 +120,10 @@ const Chat = () => {
   } = useLocalRuntimeReadiness(userSettings, localArtifactInstalled);
   const {
     completeText,
+    steerRun,
+    steeringError,
+    steeringStatus,
+    isSteering,
     cancelGeneration,
     resetChatSession,
     loading: isLoading,
@@ -127,8 +132,20 @@ const Chat = () => {
     activeTurn,
     state_chat_id,
   } = useCompleteText(userSettings);
+  const [retriedGenerationFailure, setRetriedGenerationFailure] = useState<string | null>(null);
+  const generationMemoryFailure = activeTurn?.status === 'failed'
+    && activeTurn.model_load?.error_code
+    && activeTurn.model_load.model_id === userSettings?.default_local_model
+    && turnBelongsToChatSelection(activeTurn, chatId ? parseInt(chatId, 10) : null, state_chat_id)
+    ? activeTurn.model_load : null;
+  const generationFailureKey = generationMemoryFailure ? JSON.stringify(generationMemoryFailure) : null;
+  const newerRuntimeAttempt = generationMemoryFailure && localRuntimeStatus?.updated_at
+    && Date.parse(localRuntimeStatus.updated_at) > Date.parse(generationMemoryFailure.updated_at);
+  const modelFailureStatus = generationFailureKey !== retriedGenerationFailure
+    && generationMemoryFailure && !newerRuntimeAttempt
+    ? generationMemoryFailure : localRuntimeStatus;
   const localRuntimeBlocking = userSettings?.default_agent_type === 'local'
-    && (!localArtifactInstalled || localRuntimeStatus?.state !== 'ready');
+    && (!localArtifactInstalled || modelFailureStatus?.state !== 'ready');
   const localRuntimeLoading = localArtifactInstalled
     && localRuntimeStatus?.state !== 'ready'
     && localRuntimeStatus?.state !== 'failed';
@@ -140,13 +157,21 @@ const Chat = () => {
     else if (localArtifactInstalling) localModelPlaceholder = 'Installing model…';
     else if (localArtifactFailed) localModelPlaceholder = 'Install failed';
     else if (!localArtifactInstalled) localModelPlaceholder = 'Model not installed';
-    else if (localRuntimeStatus?.state === 'failed') localModelPlaceholder = 'Model unavailable';
+    else if (modelFailureStatus?.state === 'failed') localModelPlaceholder = 'Model unavailable';
     else if (localRuntimeLoading) localModelPlaceholder = 'Loading model…';
   }
-  const localRuntimeErrorDetail = localRuntimeStatus?.detail.replace(
-    /^Model failed to load:\s*/i,
-    '',
-  );
+  const runtimeFailed = userSettings?.default_agent_type === 'local'
+    && localArtifactInstalled && modelFailureStatus?.state === 'failed';
+  const failureKey = runtimeFailed && modelFailureStatus
+    ? JSON.stringify([modelFailureStatus.model_id, modelFailureStatus.updated_at, modelFailureStatus.detail])
+    : null;
+  const [dismissedFailure, setDismissedFailure] = useState<string | null>(null);
+  const closeModelFailure = () => setDismissedFailure(failureKey);
+  const retryModelFailure = () => {
+    closeModelFailure();
+    setRetriedGenerationFailure(generationFailureKey);
+    retryLocalRuntime();
+  };
   const retryLocalInstall = async () => {
     if (!configuredLocalArtifact) return;
     setLocalInstallRetryError(null);
@@ -240,6 +265,8 @@ const Chat = () => {
         status: h.status,
         tool_calls: h.tool_calls,
         artifacts: h.artifacts,
+        orchestration: h.orchestration,
+        instructions: h.instructions,
       }));
 
       setChatHistory(prev => {
@@ -392,6 +419,8 @@ const Chat = () => {
       ai: completedTurn.message,
       tool_calls: completedTurn.tool_calls,
       artifacts: completedTurn.artifacts,
+      orchestration: completedTurn.orchestration,
+      instructions: completedTurn.instructions,
     };
     setChatHistory(previous => {
       const existingHistory = previous?.chatHistory ?? [];
@@ -409,17 +438,27 @@ const Chat = () => {
     ]);
   }, [completedTurn, refreshChatSessions, refreshFolders, routeChatId, state_chat_id]);
 
+  const submitDisabled = isSteering
+    || (isLoading && (!activeTurn?.run_id || activeTurn.status === 'cancelling'))
+    || isProcessingFiles || isMemoryLoading || localRuntimeBlocking;
+
   const handleSubmit = async (message: string) => {
-    if (message.trim() && !isMemoryLoading) {
-      await chatWithServer(message);
+    if (message.trim() && !submitDisabled) {
+      if (isLoading) {
+        if (await steerRun(message)) {
+          setUserInput(current => current === message ? '' : current);
+        }
+        return;
+      }
       setUserInput('');
+      await chatWithServer(message);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (userInput.trim() && !isLoading && !isMemoryLoading) {
+      if (userInput.trim() && !submitDisabled) {
         void handleSubmit(userInput);
       }
     }
@@ -624,6 +663,8 @@ const Chat = () => {
             model_load: activeTurn!.model_load,
             tool_calls: activeTurn!.tool_calls,
             artifacts: activeTurn!.artifacts,
+            orchestration: activeTurn!.orchestration,
+            instructions: activeTurn!.instructions,
           },
         ]
       : (chatHistory?.chatHistory ?? []),
@@ -640,18 +681,36 @@ const Chat = () => {
     callId: string,
     decision: ToolApprovalDecision,
   ) => {
-    const response = await fetch(`/agent/runs/${runId}/tool_approval`, {
+    const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/tool_approval`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ call_id: callId, decision }),
     });
     if (!response.ok) {
+      if (response.status === 422) {
+        const error = new Error('Choose an invocation-only approval decision.');
+        error.name = 'ApprovalDecisionRejected';
+        throw error;
+      }
+      if (response.status === 404) {
+        const error = new Error('This approval is no longer pending.');
+        error.name = 'ApprovalUnavailable';
+        throw error;
+      }
       throw new Error(`Tool approval failed (${response.status})`);
     }
   }, []);
 
   return (
     <div className={`ChatContainer chat-drawer-${chatDrawerState}${hasChatScrollbar ? ' chat-scrollbar-visible' : ''}`}>
+      {failureKey && dismissedFailure !== failureKey && modelFailureStatus && (
+        <ModelLoadFailureModal
+          status={modelFailureStatus}
+          modelName={configuredLocalArtifact?.display_name || modelFailureStatus.model_id}
+          onClose={closeModelFailure}
+          onRetry={retryModelFailure}
+        />
+      )}
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
@@ -659,9 +718,7 @@ const Chat = () => {
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
-                onToolApproval={(runId, callId, decision) => {
-                  void handleToolApproval(runId, callId, decision);
-                }}
+                onToolApproval={handleToolApproval}
               />
             </div>
           </div>
@@ -1013,13 +1070,6 @@ const Chat = () => {
           </aside>
 
           <div className="chat-composer-dock" aria-hidden={chatDrawerState === 'expanded'}>
-            {userSettings?.default_agent_type === 'local' && localRuntimeLoading && (
-              <div className="chat-runtime-state" role="status">
-                <span className="runtime-model-spinner" aria-hidden="true" />
-                Loading model…
-              </div>
-            )}
-
             {userSettings?.default_agent_type === 'local' && localArtifactsError && (
               <div className="notice notice-error chat-runtime-notice" role="alert">
                 <strong>Models unavailable</strong>
@@ -1073,26 +1123,6 @@ const Chat = () => {
               </div>
             )}
 
-            {userSettings?.default_agent_type === 'local' && localArtifactInstalled
-              && localRuntimeStatus?.state === 'failed' && (
-                <div className="notice notice-error chat-runtime-notice" role="alert">
-                  <strong>Model failed to load</strong>
-                  {localRuntimeErrorDetail && <span>{localRuntimeErrorDetail}</span>}
-                  <div>
-                    <button
-                      className="button button-secondary button-small"
-                      type="button"
-                      onClick={retryLocalRuntime}
-                    >
-                      Retry
-                    </button>
-                    <NavLink className="button button-secondary button-small" to="/models">
-                      Models
-                    </NavLink>
-                  </div>
-                </div>
-            )}
-
             {fileContextInfo && (
               <div className="chat-context-info">
                 {fileContextInfo}
@@ -1104,23 +1134,31 @@ const Chat = () => {
                 value={userInput}
                 onChange={setUserInput}
                 onSubmit={handleSubmit}
-                disabled={isLoading || isProcessingFiles || isMemoryLoading || localRuntimeBlocking}
-                placeholder={localModelPlaceholder}
+                disabled={submitDisabled}
+                placeholder={isLoading ? 'Add instructions for the agent...' : localModelPlaceholder}
+                modelLoading={userSettings?.default_agent_type === 'local' && localRuntimeLoading}
+                onShowModelError={runtimeFailed ? () => setDismissedFailure(null) : undefined}
+                submitLabel={isLoading ? 'Add instructions' : 'Send'}
                 handleKeyDown={handleKeyDown}
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}
-                enableVoice={true}
+                enableVoice={!isLoading}
               />
+              {steeringError && <p role="alert">{steeringError}</p>}
+              {steeringStatus && <p role="status">{steeringStatus}</p>}
               {isLoading && (
                 <button
-                  className="button button-danger"
+                  className="button chat-stop-button"
                   type="button"
                   onClick={() => void cancelGeneration()}
                   disabled={activeTurn?.status === 'cancelling'}
-                  aria-label="Stop generating"
-                  style={{ marginTop: 8 }}
+                  aria-label="Stop"
+                  title={activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                  aria-busy={activeTurn?.status === 'cancelling'}
                 >
-                  {activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+                  </svg>
                 </button>
               )}
             </div>

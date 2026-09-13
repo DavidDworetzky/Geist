@@ -3,13 +3,36 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agents.architectures.base_runner import GenerationConfig
-from agents.architectures.llama_server_process import LlamaServerConnection
-from agents.architectures.llama_server_runner import LlamaServerRunner
-from agents.models.tool_calling import ChatMessage, ModelRequestConfig
+from agents.architectures.llama_devices import (
+    LlamaDeviceService,
+    llama_server_filename,
+)
+from agents.architectures.llama_server_process import (
+    LlamaServerConnection,
+    LlamaServerManager,
+)
+from agents.architectures.llama_server_runner import LlamaServerRunner, _llama_tool_schema
+from agents.local_agent import LocalAgent
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolCall,
+    ToolContext,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
+from app import main as geist_main
+from app.models.user_settings import AgentFactoryConfig
+from app.services.tool_registry import PlanUpdateArguments, ToolRegistry
 
 
 class StreamResponse:
@@ -29,7 +52,38 @@ class StreamResponse:
         return iter(self.lines)
 
 
-def _loaded_runner(tmp_path):
+class FakeProcess:
+    def __init__(self, args):
+        self.args = args
+        self.pid = 99_999_999
+        self.returncode = None
+        self.stdout = None
+        self.terminated = False
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = 0
+
+    def kill(self):
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def _runtime_tree(tmp_path: Path) -> Path:
+    runtime = tmp_path / "runtime"
+    for backend in ("cpu", "vulkan"):
+        directory = runtime / backend
+        directory.mkdir(parents=True)
+        (directory / llama_server_filename()).write_bytes(b"binary")
+    return runtime
+
+
+def _loaded_runner(tmp_path, *, backend="cpu", detection_error=None):
     model_path = tmp_path / "model.gguf"
     model_path.write_bytes(b"GGUFtest")
     artifact = SimpleNamespace(id="artifact-id", model_id="test/model")
@@ -39,9 +93,10 @@ def _loaded_runner(tmp_path):
     server_manager.start.return_value = LlamaServerConnection(
         "http://127.0.0.1:43123",
         "private-key",
-        "cpu",
+        backend,
         "test/model",
         str(model_path),
+        detection_error=detection_error,
     )
     client = MagicMock()
     with patch("agents.architectures.llama_server_runner.httpx.Client", return_value=client):
@@ -59,6 +114,269 @@ def test_load_resolves_managed_artifact_and_starts_private_server(tmp_path):
     model_manager.require_installed.assert_called_once_with("test/model")
     server_manager.start.assert_called_once()
     assert runner.headers["Authorization"] == "Bearer private-key"
+
+
+def test_explicit_server_does_not_report_a_managed_runtime_selection(tmp_path):
+    runner, _client, _model_manager, _server_manager = _loaded_runner(
+        tmp_path,
+        backend="explicit",
+    )
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "llama_server"
+    agent.runner = runner
+
+    assert runner.effective_backend is None
+    assert agent.runtime_selection() is None
+
+
+def test_auto_cpu_discovery_error_is_exposed_without_changing_selection_contract(tmp_path):
+    runner, _client, _model_manager, _server_manager = _loaded_runner(
+        tmp_path,
+        detection_error="device probe timed out",
+    )
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "llama_server"
+    agent.runner = runner
+
+    assert agent.runtime_selection() == ("cpu", ())
+    assert agent.runtime_selection_detection_error() == "device probe timed out"
+
+    factory_config = AgentFactoryConfig(
+        agent_type="local",
+        model="test/model",
+        runner_type="llama_server",
+        device_config={
+            "artifact_id": "artifact-id",
+            "llama_backend": "auto",
+            "llama_gpu_device_ids": [],
+        },
+        generation_config={},
+    )
+    signature = geist_main._local_agent_configuration_signature(factory_config)
+    with (
+        patch("app.main._llama_selection_managed_by_environment", return_value=False),
+        patch("app.main.get_default_workspace") as get_user,
+        patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+    ):
+        final_signature = geist_main._persist_first_use_llama_backend(
+            agent,
+            factory_config,
+            signature,
+        )
+
+    assert final_signature == signature
+    get_user.assert_not_called()
+    persist.assert_not_called()
+
+
+def test_auto_vulkan_startup_failure_remains_pending_through_persistence_guard(
+    tmp_path,
+):
+    runtime = _runtime_tree(tmp_path)
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"GGUFtest")
+
+    processes = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        processes.append(process)
+        return process
+
+    def health_probe(_base_url, _api_key, process, _timeout):
+        if Path(process.args[0]).parent.name == "vulkan":
+            raise TimeoutError("driver unavailable")
+
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    device_service = LlamaDeviceService(
+        environment=environment,
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="Available devices:\n  Vulkan0: NVIDIA RTX 4090\n",
+            stderr="",
+        ),
+    )
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=process_factory,
+        health_probe=health_probe,
+        port_factory=iter((43123, 43124)).__next__,
+        device_service=device_service,
+    )
+    artifact = SimpleNamespace(id="artifact-id", model_id="test/model")
+    model_manager = MagicMock()
+    model_manager.require_installed.return_value = (artifact, model_path)
+    runner = LlamaServerRunner(model_manager=model_manager, server_manager=manager)
+
+    try:
+        with patch("agents.architectures.llama_server_runner.httpx.Client"):
+            runner.load(
+                "test/model",
+                {
+                    "artifact_id": "artifact-id",
+                    "llama_backend": "auto",
+                    "llama_gpu_device_ids": [],
+                },
+            )
+
+        agent = LocalAgent.__new__(LocalAgent)
+        agent.runner_type = "llama_server"
+        agent.runner = runner
+        factory_config = AgentFactoryConfig(
+            agent_type="local",
+            model="test/model",
+            runner_type="llama_server",
+            device_config={
+                "artifact_id": "artifact-id",
+                "llama_backend": "auto",
+                "llama_gpu_device_ids": [],
+            },
+            generation_config={},
+        )
+        signature = geist_main._local_agent_configuration_signature(factory_config)
+
+        with (
+            patch("app.main._llama_selection_managed_by_environment", return_value=False),
+            patch("app.main.get_default_workspace") as get_user,
+            patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+        ):
+            final_signature = geist_main._persist_first_use_llama_backend(
+                agent,
+                factory_config,
+                signature,
+            )
+
+        assert runner.effective_backend == "cpu"
+        assert runner.effective_device_ids == ()
+        assert runner.selection_detection_error == "driver unavailable"
+        assert agent.runtime_selection() == ("cpu", ())
+        assert agent.runtime_selection_detection_error() == "driver unavailable"
+        assert final_signature == signature
+        assert len(processes) == 2
+        assert processes[0].terminated is True
+        get_user.assert_not_called()
+        persist.assert_not_called()
+    finally:
+        manager.stop()
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "missing-vulkan",
+        "transient-probe",
+        "ambiguous-devices",
+    ],
+)
+def test_auto_cpu_persistence_follows_internal_selection_signal(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    runtime = _runtime_tree(tmp_path)
+    if scenario == "missing-vulkan":
+        (runtime / "vulkan" / llama_server_filename()).unlink()
+
+    def probe(*_args, **_kwargs):
+        if scenario == "transient-probe":
+            return subprocess.CompletedProcess([], 1, stdout="", stderr="driver unavailable")
+        if scenario == "ambiguous-devices":
+            return subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=(
+                    "Available devices:\n"
+                    "  Vulkan0: NVIDIA RTX 4090\n"
+                    "  Vulkan1: NVIDIA RTX 4090\n"
+                ),
+                stderr="",
+            )
+        pytest.fail("A missing Vulkan executable must not run device discovery")
+
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    device_service = LlamaDeviceService(
+        environment=environment,
+        command_runner=probe,
+    )
+    inventory = device_service.inventory()
+    assert inventory.error is not None
+    assert inventory.discovery_in_progress is False
+
+    processes = []
+
+    def process_factory(args, **_options):
+        process = FakeProcess(args)
+        processes.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=process_factory,
+        health_probe=lambda *_args: None,
+        port_factory=lambda: 43123,
+        device_service=device_service,
+    )
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"GGUFtest")
+    artifact = SimpleNamespace(id="artifact-id", model_id="test/model")
+    model_manager = MagicMock()
+    model_manager.require_installed.return_value = (artifact, model_path)
+    runner = LlamaServerRunner(model_manager=model_manager, server_manager=manager)
+    factory_config = AgentFactoryConfig(
+        agent_type="local",
+        model="test/model",
+        runner_type="llama_server",
+        device_config={
+            "artifact_id": "artifact-id",
+            "llama_backend": "auto",
+            "llama_gpu_device_ids": [],
+        },
+        generation_config={},
+    )
+    signature = geist_main._local_agent_configuration_signature(factory_config)
+
+    try:
+        with patch("agents.architectures.llama_server_runner.httpx.Client"):
+            runner.load("test/model", factory_config.device_config)
+        agent = LocalAgent.__new__(LocalAgent)
+        agent.runner_type = "llama_server"
+        agent.runner = runner
+        with (
+            patch("app.main._llama_selection_managed_by_environment", return_value=False),
+            patch(
+                "app.main.get_default_workspace",
+                return_value=SimpleNamespace(workspace_id=1),
+            ) as get_user,
+            patch("app.main.UserSettingsService.persist_detected_llama_backend") as persist,
+        ):
+            persist.return_value = SimpleNamespace(
+                llama_backend="cpu",
+                llama_gpu_device_ids=[],
+            )
+            final_signature = geist_main._persist_first_use_llama_backend(
+                agent,
+                factory_config,
+                signature,
+            )
+
+        assert runner.effective_backend == "cpu"
+        assert len(processes) == 1
+        if scenario == "missing-vulkan":
+            assert inventory.selection_detection_error is None
+            assert runner.selection_detection_error is None
+            assert final_signature != signature
+            assert factory_config.device_config["llama_backend"] == "cpu"
+            get_user.assert_called_once_with()
+            persist.assert_called_once_with(1, "cpu", ())
+        else:
+            assert inventory.selection_detection_error == inventory.error
+            assert runner.selection_detection_error == inventory.error
+            assert final_signature == signature
+            assert factory_config.device_config["llama_backend"] == "auto"
+            get_user.assert_not_called()
+            persist.assert_not_called()
+    finally:
+        manager.stop()
 
 
 def test_complete_messages_adapts_openai_response(tmp_path):
@@ -103,11 +421,7 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
         {
             "choices": [
                 {
-                    "delta": {
-                        "tool_calls": [
-                            {"index": 0, "function": {"arguments": "7}"}}
-                        ]
-                    },
+                    "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "7}"}}]},
                     "finish_reason": "tool_calls",
                 }
             ]
@@ -130,3 +444,102 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
     assert turn is not None
     assert turn.tool_calls[0].name == "lookup"
     assert turn.tool_calls[0].arguments == {"id": 7}
+
+
+@pytest.mark.parametrize(
+    "evidence_length, expected_status", [(2000, "succeeded"), (2001, "failed")]
+)
+def test_plan_tool_grammar_keeps_execution_limits(tmp_path, evidence_length, expected_status):
+    runner, client, _model_manager, _server_manager = _loaded_runner(tmp_path)
+    client.stream.return_value = StreamResponse(["data: [DONE]"])
+    handler = MagicMock(return_value=ToolExecutionOutput(content="updated"))
+    definition = ToolDefinition(
+        name="agent.plan.update",
+        description="Update the plan",
+        arguments_model=PlanUpdateArguments,
+        handler=handler,
+    )
+    original = definition.to_openai()
+    fingerprint = definition.approval_fingerprint()
+
+    list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="Hello!")],
+            [definition],
+            ModelRequestConfig(),
+        )
+    )
+
+    payload = client.stream.call_args.kwargs["json"]
+    function = payload["tools"][0]["function"]
+    schema = function["parameters"]
+    properties = schema["$defs"]["PlanTaskUpdate"]["properties"]
+    assert function["name"] == runner._provider_tool_name(definition.name)
+    assert payload["tool_choice"] == "auto"
+    assert properties["evidence"]["anyOf"][0] == {
+        "type": "string",
+        "description": "Maximum length: 2000 characters.",
+    }
+    assert "maxLength" not in properties["skip_reason"]["anyOf"][0]
+    assert properties["task_id"]["maxLength"] == 64
+    assert schema["properties"]["updates"]["maxItems"] == 12
+    assert schema["properties"]["objective"]["anyOf"][0]["minLength"] == 1
+    assert definition.to_openai() == original
+    assert definition.approval_fingerprint() == fingerprint
+
+    registry = ToolRegistry()
+    registry.register(definition)
+    try:
+        result = registry.execute(
+            ToolCall.create(
+                definition.name,
+                {
+                    "updates": [{"task_id": "one", "evidence": "x" * evidence_length}],
+                },
+            ),
+            ToolContext(workspace_id=1, chat_id=1, run_id="grammar-test"),
+        )
+        assert result.status == expected_status
+        if expected_status == "failed":
+            assert result.error == "invalid_arguments"
+            handler.assert_not_called()
+        else:
+            handler.assert_called_once()
+    finally:
+        registry.shutdown()
+
+
+def test_llama_schema_adaptation_preserves_literal_data_and_named_properties():
+    literal = {"maxLength": 4000, "properties": {"text": {"maxLength": 2000}}}
+    schema = {
+        "type": "object",
+        "properties": {
+            "maxLength": {"type": "integer", "maximum": 4000},
+            "description": {"type": "string", "maxLength": 2000},
+            "literal": {"const": literal, "default": literal, "examples": [literal]},
+            "short": {"type": "string", "minLength": 1, "maxLength": 1999},
+            "nested": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {"type": "string", "maxLength": 4000, "description": "Evidence."},
+                        {"type": "null"},
+                    ]
+                },
+            },
+        },
+        "required": ["maxLength"],
+        "additionalProperties": False,
+    }
+    original = deepcopy(schema)
+    adapted = _llama_tool_schema(schema)
+    assert schema == original
+    for name in ("maxLength", "literal", "short"):
+        assert adapted["properties"][name] == schema["properties"][name]
+    assert adapted["properties"]["description"]["description"] == "Maximum length: 2000 characters."
+    assert adapted["properties"]["nested"]["items"]["oneOf"][0] == {
+        "type": "string",
+        "description": "Evidence. Maximum length: 4000 characters.",
+    }
+    assert adapted["required"] == ["maxLength"]
+    assert adapted["additionalProperties"] is False

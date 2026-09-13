@@ -68,6 +68,21 @@ class StreamingProbe:
             gates, generation = self.gates, self._generation
             scenario = self.scenario
         if scenario == "xml_tool":
+            complete_name = provider_tool_name("agent.goal.complete")
+            if self.closed and any(tool["function"]["name"] == complete_name for tool in tools):
+                import json
+
+                observation = next(
+                    item["tool_call_id"] for item in reversed(messages) if item["role"] == "tool"
+                )
+                yield (
+                    f"<tool_call>\n<function={complete_name}>\n"
+                    "<parameter=summary>STREAM-FIRST STREAM-SECOND STREAM-FINAL</parameter>\n"
+                    '<parameter=evidence>["Returned the fixture search result"]</parameter>\n'
+                    f"<parameter=evidence_refs>{json.dumps([observation])}</parameter>\n"
+                    "</function>\n</tool_call>"
+                )
+                return
             if messages[-1]["role"] != "tool":
                 name = provider_tool_name("web.search")
                 if not any(tool["function"]["name"] == name for tool in tools or []):

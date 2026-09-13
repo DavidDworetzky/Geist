@@ -1,5 +1,7 @@
 from app.models.database.agent import Agent
+from app.models.database.agent_goal import AgentGoal
 from app.models.database.agent_preset import AgentPreset
+from app.models.database.agent_routine import AgentRoutine
 from app.models.database.agent_snapshot import AgentSnapshot
 from app.models.database.chat_session import ChatSession
 from app.models.database.file_upload import FileUpload

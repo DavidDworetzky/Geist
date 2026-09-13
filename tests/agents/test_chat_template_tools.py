@@ -9,7 +9,38 @@ from agents.architectures.chat_template_tools import (
     parse_tool_response,
     tokenizer_supports_tools,
 )
-from agents.models.tool_calling import ChatMessage, ToolCall, ToolDefinition, ToolExecutionOutput
+from agents.models.tool_calling import (
+    ChatMessage,
+    MalformedToolCallError,
+    ToolCall,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
+
+
+def test_typed_parameter_extra_json_is_recoverable_without_exposing_value():
+    payload = build_tool_payload([], [search_tool()])
+    name = next(iter(payload.provider_to_internal))
+    response = (
+        f"<tool_call><function={name}>"
+        "<parameter=max_results>3 private-trailing-content</parameter>"
+        "</function></tool_call>"
+    )
+    with pytest.raises(MalformedToolCallError) as failure:
+        parse_tool_response(
+            response, provider_to_internal=payload.provider_to_internal, tools=payload.tools
+        )
+    assert "Extra data at character 2" in str(failure.value)
+    assert "private-trailing-content" not in str(failure.value)
+
+
+def test_later_malformed_call_invalidates_entire_streamed_turn():
+    parser = ToolResponseStream({"safe": "web.search"})
+    assert parser.feed('<tool_call>{"name":"safe","arguments":{}}</tool_call>') == ""
+    with pytest.raises(MalformedToolCallError):
+        parser.feed("<tool_call>{bad}</tool_call>")
+    with pytest.raises(MalformedToolCallError):
+        parser.finish()
 
 
 class SearchArguments(BaseModel):

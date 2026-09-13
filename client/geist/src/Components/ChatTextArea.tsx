@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useState } from 'react';
 import { ChatHistory, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
@@ -12,17 +12,52 @@ const statusTone = (status: ToolCallStatus): string => {
   return '';
 };
 
+const approvalChoices: { decision: ToolApprovalDecision; label: string }[] = [
+  { decision: 'approve', label: 'Approve once' },
+  { decision: 'session', label: 'Allow for this chat' },
+  { decision: 'always', label: 'Always allow' },
+  { decision: 'deny', label: 'Deny' }
+];
+
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
   onToolApproval?: (
     runId: string,
     callId: string,
     decision: ToolApprovalDecision,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
   const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+  const [answeredCallIds, setAnsweredCallIds] = useState<Set<string>>(new Set());
+  const [standingGrantUnavailable, setStandingGrantUnavailable] = useState<Set<string>>(new Set());
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+
+  const answerApproval = async (runId: string, callId: string, decision: ToolApprovalDecision) => {
+    const key = `${runId}:${callId}`;
+    setAnsweredCallIds((prev) => new Set(prev).add(key));
+    setApprovalErrors((prev) => ({ ...prev, [key]: '' }));
+    try {
+      await props.onToolApproval?.(runId, callId, decision);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'ApprovalUnavailable') {
+        setApprovalErrors((prev) => ({ ...prev, [key]: 'This approval or decision is no longer available. Wait for an updated tool call.' }));
+        return;
+      }
+      setAnsweredCallIds((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      if (error instanceof Error && error.name === 'ApprovalDecisionRejected') {
+        setStandingGrantUnavailable((prev) => new Set(prev).add(key));
+        setApprovalErrors((prev) => ({ ...prev, [key]: 'This tool needs invocation approval. Choose Approve once or Deny.' }));
+        return;
+      }
+      setApprovalErrors((prev) => ({ ...prev, [key]: 'Approval could not be submitted. Please retry.' }));
+    }
+  };
 
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
@@ -41,6 +76,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
           </div>
 
           {element.model_load
+            && !element.model_load.error_code
             && (element.model_load.state === 'loading' || element.model_load.state === 'failed')
             && (
             <div
@@ -59,6 +95,46 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
               Turn status: {statusLabel(element.status)}
             </div>
           )}
+
+          {element.orchestration && (
+            <section className="agentic-progress" aria-label="Agentic progress">
+              <div className="agentic-progress-header">
+                <strong>Agentic plan</strong>
+                {element.orchestration.goal_status && (
+                  <span className="status-badge">
+                    {statusLabel(element.orchestration.goal_status)}
+                  </span>
+                )}
+                {typeof element.orchestration.turns_used === 'number'
+                  && typeof element.orchestration.max_turns === 'number'
+                  && (
+                    <span className="input-help">
+                      Model calls {element.orchestration.turns_used}/{element.orchestration.max_turns}
+                    </span>
+                  )}
+              </div>
+              {element.orchestration.decomposition_warning && (
+                <div className="input-help">{element.orchestration.decomposition_warning}</div>
+              )}
+              <ol className="agentic-task-list">
+                {element.orchestration.tasks.map((task) => (
+                  <li key={task.id} className={`agentic-task agentic-task-${task.status}`}>
+                    <span aria-hidden="true">
+                      {task.status === 'completed' ? '✓' : task.status === 'blocked' ? '!' : '○'}
+                    </span>
+                    <span>
+                      <strong>{task.title}</strong>
+                      {task.evidence && <small>{task.evidence}</small>}
+                      {task.skip_reason && <small>Skipped: {task.skip_reason}</small>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {(element.instructions ?? element.orchestration?.instructions)?.map((instruction) => (
+            <p key={instruction.id}>Your instruction ({instruction.status}): {instruction.text}</p>
+          ))}
 
           {element.tool_calls?.map((toolCall) => {
             const needsApproval =
@@ -87,7 +163,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 </div>
 
                 {Object.keys(toolCall.arguments ?? {}).length > 0 && (
-                  <details style={{ marginTop: 8 }}>
+                  <details aria-label={`${toolCall.name} arguments`} open={needsApproval} style={{ marginTop: 8 }}>
                     <summary>Arguments</summary>
                     <pre style={{ marginBottom: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                       {JSON.stringify(toolCall.arguments ?? {}, null, 2)}
@@ -98,32 +174,32 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 {needsApproval && (
                   <div style={{ marginTop: 8 }}>
                     <div className="input-help">Approval required</div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  </div>
+                )}
+                {toolCall.status === 'awaiting_approval'
+                  && element.run_id
+                  && props.onToolApproval
+                  && (
+                  <div
+                    role="group"
+                    aria-label={`Approve ${toolCall.name}`}
+                    style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}
+                  >
+                    {approvalChoices.filter((choice) => (toolCall.can_grant && !standingGrantUnavailable.has(`${element.run_id}:${toolCall.id}`))
+                      || choice.decision === 'approve' || choice.decision === 'deny').map((choice) => (
                       <button
-                        className="button button-small"
+                        key={choice.decision}
                         type="button"
-                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
-                        onClick={() => element.run_id && props.onToolApproval?.(
-                          element.run_id,
-                          toolCall.id,
-                          'approve',
-                        )}
+                        className={`button button-small ${choice.decision === 'deny' ? 'button-danger' : 'button-secondary'}`}
+                        disabled={answeredCallIds.has(`${element.run_id}:${toolCall.id}`)}
+                        onClick={() => { void answerApproval(element.run_id as string, toolCall.id, choice.decision); }}
                       >
-                        Approve once
+                        {choice.label}
                       </button>
-                      <button
-                        className="button button-small"
-                        type="button"
-                        disabled={!element.run_id || toolCall.status !== 'awaiting_approval'}
-                        onClick={() => element.run_id && props.onToolApproval?.(
-                          element.run_id,
-                          toolCall.id,
-                          'deny',
-                        )}
-                      >
-                        Deny
-                      </button>
-                    </div>
+                    ))}
+                    {approvalErrors[`${element.run_id}:${toolCall.id}`] && (
+                      <div role="alert">{approvalErrors[`${element.run_id}:${toolCall.id}`]}</div>
+                    )}
                   </div>
                 )}
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}

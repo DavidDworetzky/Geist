@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import McpServersSection from './Components/McpServersSection';
+import { acknowledgeModalBackdrop } from './Utils/modalFeedback';
+import { createPortal } from 'react-dom';
 import './Tools.css';
 
 type ToolsTab = 'catalogue' | 'mcp';
@@ -235,13 +237,11 @@ const Tools: React.FC = () => {
         )}
       </div>
 
-      {configurationTool?.configuration && (
+      {configurationTool?.configuration && createPortal(
         <div
           className="modal-backdrop"
           role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setConfigurationTool(null);
-          }}
+          onPointerDown={acknowledgeModalBackdrop}
         >
           <div
             ref={configurationDialog}
@@ -310,7 +310,8 @@ const Tools: React.FC = () => {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </section>
   );
