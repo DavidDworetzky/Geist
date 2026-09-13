@@ -68,7 +68,7 @@ export type ChatStreamAction =
   | { type: 'USER_INSTRUCTION'; instruction: UserInstruction }
   | { type: 'FINAL'; prompt: string; data: CompleteTextResponse }
   | { type: 'DONE'; runId?: string | null; chatId?: number | null }
-  | { type: 'ERROR'; message: string }
+  | { type: 'ERROR'; message: string; modelLoad?: ModelLoadStatus }
   | { type: 'CANCELLING' }
   | { type: 'CANCEL_FAILED'; message: string }
   | { type: 'CANCELLED'; chatId?: number | null }
@@ -321,9 +321,9 @@ export const chatStreamReducer = (
       return {
         ...state,
         loading: false,
-        error: action.message,
+        error: action.modelLoad ? null : action.message,
         activeTurn: state.activeTurn
-          ? { ...state.activeTurn, status: 'failed', model_load: undefined }
+          ? { ...state.activeTurn, status: 'failed', model_load: action.modelLoad }
           : null,
       };
     case 'CANCELLING':
@@ -533,7 +533,21 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       const message = isRecord(data)
         ? String(data.message ?? data.error ?? 'Chat stream failed')
         : String(data || 'Chat stream failed');
-      dispatch({ type: 'ERROR', message });
+      const failure = isRecord(data) && isRecord(data.model_load) ? data.model_load : null;
+      const modelLoad: ModelLoadStatus | undefined = failure
+        && failure.state === 'failed'
+        && typeof failure.model_id === 'string'
+        && typeof failure.detail === 'string'
+        && typeof failure.updated_at === 'string'
+        && (failure.error_code === 'gpu_memory' || failure.error_code === 'system_memory'
+          || failure.error_code === 'unified_memory')
+        ? {
+            model_id: failure.model_id, state: 'failed', detail: failure.detail,
+            error_code: failure.error_code, started_at: null, updated_at: failure.updated_at,
+            can_offload_to_system_ram: failure.can_offload_to_system_ram === true,
+          }
+        : undefined;
+      dispatch({ type: 'ERROR', message, modelLoad });
     } else if (event === 'cancelled') {
       const chatId = isRecord(data) && typeof data.chat_id === 'number'
         ? data.chat_id

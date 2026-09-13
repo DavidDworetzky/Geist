@@ -1,4 +1,5 @@
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Settings from './Settings';
 import { BrandingProvider } from './branding';
@@ -99,18 +100,20 @@ const createFetchMock = (settingsResponses: any[], inventory = mockDeviceInvento
   });
 };
 
-const renderSettings = () => render(
-  <UserSettingsProvider>
-    <Settings />
-  </UserSettingsProvider>,
+const renderSettings = (path = '/settings') => render(
+  <MemoryRouter initialEntries={[path]}>
+    <UserSettingsProvider><Settings /></UserSettingsProvider>
+  </MemoryRouter>,
 );
 
 const renderBrandedSettings = () => render(
+  <MemoryRouter>
   <BrandingProvider>
     <UserSettingsProvider>
       <Settings />
     </UserSettingsProvider>
-  </BrandingProvider>,
+  </BrandingProvider>
+  </MemoryRouter>,
 );
 
 const waitForSettingsRefresh = async () => {
@@ -119,6 +122,25 @@ const waitForSettingsRefresh = async () => {
 };
 
 describe('Settings page', () => {
+  it('opens memory settings directly and saves an explicit system RAM opt-in', async () => {
+    const initial = { ...baseSettings, llama_backend: 'gpu', llama_gpu_device_ids: ['gpu-nvidia'], llama_allow_system_ram: false };
+    global.fetch = createFetchMock([
+      { ok: true, json: async () => initial },
+      { ok: true, json: async () => ({ ...initial, llama_allow_system_ram: true }) },
+    ]) as jest.Mock;
+    renderSettings('/settings#models');
+    await waitForSettingsRefresh();
+    const toggle = await screen.findByRole('button', { name: 'Allow system RAM' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText(/Responses may be slower/)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+    await waitFor(() => {
+      const call = (global.fetch as jest.Mock).mock.calls.find(([, options]) => options?.method === 'PUT');
+      expect(JSON.parse(call?.[1].body)).toHaveProperty('llama_allow_system_ram', true);
+    });
+  });
+
   beforeEach(() => {
     jest.restoreAllMocks();
     delete window.__GEIST_BRANDING__;

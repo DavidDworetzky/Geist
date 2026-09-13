@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
+from copy import deepcopy
 from typing import Any, Literal
 
 import httpx
@@ -27,6 +28,60 @@ from agents.models.tool_calling import (
     ToolDefinition,
 )
 from app.services.local_models import LocalModelManager, get_local_model_manager
+
+
+def _llama_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    schema = deepcopy(schema)
+
+    def adapt(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        # llama.cpp's GBNF repetition limit rejects nested maxLength: 2000.
+        # Keep large limits as guidance; execution retains the tool's own validation.
+        # https://github.com/ggml-org/llama.cpp/issues/27087
+        maximum = node.get("maxLength")
+        if isinstance(maximum, int) and maximum >= 2000:
+            del node["maxLength"]
+            description = node.get("description", "")
+            node["description"] = f"{description} Maximum length: {maximum} characters.".strip()
+
+        for keyword in (
+            "properties",
+            "patternProperties",
+            "$defs",
+            "definitions",
+            "dependentSchemas",
+        ):
+            children = node.get(keyword)
+            if isinstance(children, dict):
+                for child in children.values():
+                    adapt(child)
+        for keyword in (
+            "items",
+            "prefixItems",
+            "additionalItems",
+            "contains",
+            "additionalProperties",
+            "unevaluatedItems",
+            "unevaluatedProperties",
+            "propertyNames",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "not",
+            "if",
+            "then",
+            "else",
+        ):
+            child = node.get(keyword)
+            if isinstance(child, list):
+                for item in child:
+                    adapt(item)
+            else:
+                adapt(child)
+
+    adapt(schema)
+    return schema
 
 
 class LlamaServerRunner(BaseRunner):
@@ -55,6 +110,9 @@ class LlamaServerRunner(BaseRunner):
         config = dict(device_config or {})
         artifact_reference = str(config.pop("artifact_id", model_id))
         backend = str(config.pop("llama_backend", "auto"))
+        allow_system_ram = config.pop("llama_allow_system_ram", False)
+        if not isinstance(allow_system_ram, bool):
+            raise ValueError("llama_allow_system_ram must be a boolean")
         raw_device_ids = config.pop("llama_gpu_device_ids", [])
         if not isinstance(raw_device_ids, list | tuple) or not all(
             isinstance(device_id, str) for device_id in raw_device_ids
@@ -69,6 +127,7 @@ class LlamaServerRunner(BaseRunner):
             artifact.model_id,
             backend=backend,
             device_ids=tuple(raw_device_ids),
+            allow_system_ram=allow_system_ram,
         )
         if self.client is not None:
             self.client.close()
@@ -222,6 +281,9 @@ class LlamaServerRunner(BaseRunner):
             payload["stop"] = config.stop
         if tools:
             payload["tools"] = [tool.to_openai(internal_to_provider[tool.name]) for tool in tools]
+            for tool_payload in payload["tools"]:
+                function = tool_payload["function"]
+                function["parameters"] = _llama_tool_schema(function["parameters"])
             payload["tool_choice"] = "auto"
 
         text_parts: list[str] = []

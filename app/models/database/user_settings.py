@@ -29,6 +29,7 @@ class UserSettings(Base):
     default_local_artifact_id = Column(String, nullable=True)
     llama_backend = Column(String, nullable=True)
     llama_gpu_device_ids = Column(JSON, default=list)
+    llama_allow_system_ram = Column(Boolean, nullable=False, default=False, server_default="0")
     default_online_model = Column(String, default="gpt-4")
     default_online_provider = Column(
         String, default="openai"
@@ -96,6 +97,7 @@ class UserSettingsModel:
     agent_permissions: dict[str, Any]
     create_date: datetime.datetime
     update_date: datetime.datetime
+    llama_allow_system_ram: bool = False
 
 
 def get_user_settings(user_id: int) -> UserSettingsModel | None:
@@ -119,6 +121,7 @@ def get_user_settings(user_id: int) -> UserSettingsModel | None:
                 default_local_artifact_id=settings.default_local_artifact_id,
                 llama_backend=settings.llama_backend,
                 llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
+                llama_allow_system_ram=bool(settings.llama_allow_system_ram),
                 default_online_model=settings.default_online_model,
                 default_online_provider=settings.default_online_provider,
                 default_file_archives=settings.default_file_archives or [],
@@ -156,6 +159,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_local_artifact_id=None,
             llama_backend=None,
             llama_gpu_device_ids=[],
+            llama_allow_system_ram=False,
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
@@ -168,7 +172,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_presence_penalty=0.0,
             backup_providers=[],
             ui_preferences={},
-            agent_permissions={}
+            agent_permissions={},
         )
         session.add(settings)
         session.commit()
@@ -182,6 +186,7 @@ def create_default_user_settings(user_id: int) -> UserSettingsModel:
             default_local_artifact_id=settings.default_local_artifact_id,
             llama_backend=settings.llama_backend,
             llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
+            llama_allow_system_ram=bool(settings.llama_allow_system_ram),
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],
@@ -233,6 +238,7 @@ def update_user_settings(user_id: int, updates: dict[str, Any]) -> UserSettingsM
             default_local_artifact_id=settings.default_local_artifact_id,
             llama_backend=settings.llama_backend,
             llama_gpu_device_ids=settings.llama_gpu_device_ids or [],
+            llama_allow_system_ram=bool(settings.llama_allow_system_ram),
             default_online_model=settings.default_online_model,
             default_online_provider=settings.default_online_provider,
             default_file_archives=settings.default_file_archives or [],

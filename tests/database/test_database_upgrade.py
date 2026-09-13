@@ -53,6 +53,49 @@ def test_legacy_schema_validation_accepts_matching_metadata():
     _validate_legacy_schema(metadata, engine)
 
 
+@pytest.mark.parametrize("versioned", [False, True])
+def test_memory_preference_migrates_off_and_persists_without_changing_model(tmp_path, versioned):
+    from app.models.database.geist_user import GeistUser
+    from app.models.database.user_settings import (
+        UserSettings,
+        get_user_settings,
+        update_user_settings,
+    )
+
+    original = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(provider="sqlite", database_url=f"sqlite:///{tmp_path / 'memory.sqlite3'}")
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                GeistUser.__table__.insert().values(
+                    user_id=51, username="memory-test", workspace_key="local"
+                )
+            )
+            connection.execute(
+                UserSettings.__table__.insert().values(
+                    user_id=51, default_local_model="preserved/model"
+                )
+            )
+            connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_allow_system_ram"))
+        if versioned:
+            command.stamp(_alembic_config(), "f6a9b1c3d5e7")
+        upgrade_database()
+        assert get_user_settings(51).llama_allow_system_ram is False
+        assert (
+            update_user_settings(51, {"llama_allow_system_ram": True}).llama_allow_system_ram
+            is True
+        )
+        assert get_user_settings(51).default_local_model == "preserved/model"
+        upgrade_database()
+        assert get_user_settings(51).llama_allow_system_ram is True
+    finally:
+        configure_database(original)
+
+
 def test_legacy_schema_validation_refuses_to_stamp_missing_columns():
     expected_metadata = MetaData()
     Table(
@@ -197,7 +240,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -226,7 +269,7 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
         upgrade_database()
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
             connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
@@ -268,7 +311,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -314,7 +357,7 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
                 )
             ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 0)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
     finally:
         Session.remove()
@@ -389,7 +432,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -419,7 +462,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "f6a9b1c3d5e7"
+                "b9c2d4e6f8a0"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
@@ -511,7 +554,7 @@ def test_legacy_adoption_preserves_data_and_backup(
 
     _validate_legacy_schema(Base.metadata, engine)
     with engine.connect() as connection:
-        assert MigrationContext.configure(connection).get_current_heads() == ("f6a9b1c3d5e7",)
+        assert MigrationContext.configure(connection).get_current_heads() == ("b9c2d4e6f8a0",)
         assert connection.execute(text("SELECT user_id, workspace_key FROM geist_user")).one() == (
             52,
             "default",

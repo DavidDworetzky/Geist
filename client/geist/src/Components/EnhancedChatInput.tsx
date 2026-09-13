@@ -1,4 +1,4 @@
-import React, { useState, useRef, KeyboardEvent } from 'react';
+import React, { useState, useRef, useId, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
 import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
@@ -15,6 +15,8 @@ interface EnhancedChatInputProps {
   sessionId?: number;
   enableVoice?: boolean;
   submitLabel?: string;
+  modelLoading?: boolean;
+  onShowModelError?: () => void;
 }
 
 interface FileSuggestion extends FileItem {
@@ -31,8 +33,12 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
   enableVoice = true,
-  submitLabel = 'Send'
+  submitLabel = 'Send',
+  modelLoading = false,
+  onShowModelError,
 }) => {
+  const inputStatusId = useId();
+  const hasInputStatus = modelLoading || Boolean(onShowModelError);
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -182,16 +188,36 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       )}
 
       <div className="input-row">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => handleInputChange(e.target.value)}
-          onKeyDown={internalHandleKeyDown}
-          rows={rows}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="chat-textarea"
-        />
+        <div className="chat-input-field">
+          <textarea
+            ref={textareaRef}
+            value={hasInputStatus ? '' : value}
+            onChange={(e) => handleInputChange(e.target.value)}
+            onKeyDown={internalHandleKeyDown}
+            rows={rows}
+            disabled={disabled}
+            placeholder={hasInputStatus ? '' : placeholder}
+            aria-label="Message"
+            aria-describedby={hasInputStatus ? inputStatusId : undefined}
+            aria-busy={modelLoading || undefined}
+            className="chat-textarea"
+          />
+          {onShowModelError ? (
+            <div className="chat-input-status chat-model-unavailable" id={inputStatusId}>
+              <span>Model unavailable</span>
+              <button className="model-error-badge" type="button" onClick={onShowModelError}>
+                See more…
+              </button>
+            </div>
+          ) : modelLoading && (
+            <div className="chat-input-status" id={inputStatusId} role="status">
+              <span className="chat-runtime-state">
+                <span className="runtime-model-spinner" aria-hidden="true" />
+                Loading model…
+              </span>
+            </div>
+          )}
+        </div>
 
         <div className="input-actions">
           {enableVoice && (

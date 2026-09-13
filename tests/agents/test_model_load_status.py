@@ -43,6 +43,28 @@ def test_model_load_registry_records_failure() -> None:
     assert failed.detail == "Model failed to load."
 
 
+def test_memory_failure_code_reaches_api_and_clears_on_retry():
+    model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    model_load_status_registry.mark_failed(
+        model_id, "Not enough GPU memory", error_code="gpu_memory", can_offload_to_system_ram=True
+    )
+    assert asyncio.run(get_model_load_status(model_id)).error_code == "gpu_memory"
+    assert asyncio.run(get_model_load_status(model_id)).can_offload_to_system_ram is True
+    assert model_load_status_registry.mark_loading(model_id, "Retrying").error_code is None
+    assert model_load_status_registry.get(model_id).can_offload_to_system_ram is False
+    assert model_load_status_registry.mark_ready(model_id).error_code is None
+
+
+def test_unified_memory_failure_reaches_status_api():
+    model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    model_load_status_registry.mark_failed(
+        model_id, "Not enough shared memory", error_code="unified_memory"
+    )
+    response = asyncio.run(get_model_load_status(model_id))
+    assert response.error_code == "unified_memory"
+    assert response.can_offload_to_system_ram is False
+
+
 def test_model_status_endpoint_reports_process_local_state() -> None:
     model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     unloaded = asyncio.run(get_model_load_status(model_id))

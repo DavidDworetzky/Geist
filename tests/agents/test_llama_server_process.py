@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from agents.architectures.llama_server_process import (
 )
 from agents.architectures.llama_server_process_posix import process_options as posix_options
 from agents.architectures.llama_server_process_windows import process_options as windows_options
+from agents.model_load_errors import ModelMemoryError
 
 
 class FakeProcess:
@@ -105,6 +107,114 @@ def test_default_runtime_root_uses_geist_home_sibling(tmp_path: Path) -> None:
     assert default_llama_runtime_root({"GEIST_HOME": str(tmp_path / "geist")}) == (
         tmp_path / "geist-runtime" / "llama.cpp"
     )
+
+
+def test_system_ram_opt_in_changes_loading_policy_and_invalidates_reuse(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+    calls = []
+
+    def factory(args, **_options):
+        process = FakeProcess(args)
+        calls.append(process)
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=factory,
+        health_probe=lambda *_: None,
+        device_service=StaticDeviceService(),
+    )
+    try:
+        first = manager.start(model, "test/model", backend="gpu", device_ids=["gpu-0"])
+        assert calls[-1].args[calls[-1].args.index("--n-gpu-layers") + 1] == "999"
+        second = manager.start(
+            model, "test/model", backend="gpu", device_ids=["gpu-0"], allow_system_ram=True
+        )
+        assert calls[0].terminated
+        assert second is not first
+        assert calls[-1].args[calls[-1].args.index("--n-gpu-layers") + 1] == "auto"
+        assert (
+            manager.start(
+                model, "test/model", backend="gpu", device_ids=["gpu-0"], allow_system_ram=True
+            )
+            is second
+        )
+        manager.start(model, "test/model", backend="gpu", device_ids=["gpu-0"])
+        assert len(calls) == 3
+        assert calls[1].terminated
+    finally:
+        manager.stop()
+
+
+@pytest.mark.parametrize(
+    ("output", "code"),
+    [
+        ("ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory", "gpu_memory"),
+        ("std::bad_alloc", "system_memory"),
+        ("error loading model: unknown model architecture", None),
+    ],
+)
+def test_startup_reports_confirmed_memory_failures_without_raw_log_details(tmp_path, output, code):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+
+    def factory(args, **_options):
+        process = FakeProcess(args)
+        process.stdout = io.StringIO(output + "\n")
+        process.returncode = 1
+        return process
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        process_factory=factory,
+        device_service=StaticDeviceService(),
+    )
+    with pytest.raises(RuntimeError) as caught:
+        manager.start(model, "test/model", backend="gpu", device_ids=["gpu-0"])
+    if code:
+        assert isinstance(caught.value, ModelMemoryError)
+        assert caught.value.code == code
+        assert output not in str(caught.value)
+        if code == "gpu_memory":
+            assert "Allow system RAM" in str(caught.value)
+    else:
+        assert not isinstance(caught.value, ModelMemoryError)
+        assert "exited with code 1" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "allow, layers", [(True, None), (False, "auto"), (False, "12"), (False, "999")]
+)
+def test_memory_error_does_not_offer_ineffective_or_enabled_offload_setting(
+    tmp_path, allow, layers
+):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUFtest")
+
+    def factory(args, **_options):
+        process = FakeProcess(args)
+        process.stdout = io.StringIO("ErrorOutOfDeviceMemory\n")
+        process.returncode = 1
+        return process
+
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    if layers is not None:
+        environment["GEIST_LLAMA_GPU_LAYERS"] = layers
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=factory,
+        device_service=StaticDeviceService(),
+    )
+    with pytest.raises(ModelMemoryError) as caught:
+        manager.start(
+            model, "test/model", backend="gpu", device_ids=["gpu-0"], allow_system_ram=allow
+        )
+    assert not caught.value.can_offload_to_system_ram
+    assert "Allow system RAM" not in str(caught.value)
 
 
 def test_explicit_runtime_root_overrides_packaged_default(tmp_path: Path) -> None:

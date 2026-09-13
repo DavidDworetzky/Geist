@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agents.model_load_errors import ModelMemoryError
 from agents.models.agent_completion import AgentCompletion
 from agents.models.agent_state import ConversationState, RunStatus
 from agents.models.chat_result import ToolCallResult, WorkArtifact
@@ -505,6 +506,8 @@ class ChatOrchestrator:
 
     @staticmethod
     def _public_error_message(error: Exception) -> str:
+        if isinstance(error, ModelMemoryError):
+            return str(error)
         if isinstance(error, MalformedToolCallError):
             return "The model returned malformed tool calls and exhausted its recovery budget. Please try again."
         if isinstance(error, CheckpointRecoveryError):
@@ -1248,12 +1251,16 @@ class ChatOrchestrator:
                 "failed",
                 run.assistant_text or None,
             )
+            memory_failure = {}
+            if isinstance(error, ModelMemoryError):
+                memory_failure["model_load"] = error.to_status(getattr(backend, "model_id", None))
             yield ChatStreamEvent(
                 "error",
                 {
                     "run_id": run.run_id,
                     "chat_id": persisted_chat_id,
                     "message": self._public_error_message(error),
+                    **memory_failure,
                     "code": "checkpoint_recovery_required"
                     if isinstance(error, CheckpointRecoveryError)
                     else "malformed_tool_call"

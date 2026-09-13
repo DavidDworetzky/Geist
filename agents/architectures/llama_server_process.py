@@ -30,6 +30,7 @@ from agents.architectures.llama_server_process_platform import (
     process_options,
     terminate_process_tree,
 )
+from agents.model_load_errors import ModelLoadErrorCode, ModelMemoryError
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class LlamaServerConnection:
     selection_backend: str = "auto"
     selection_device_ids: tuple[str, ...] = ()
     detection_error: str | None = None
+    allow_system_ram: bool = False
 
 
 @dataclass
@@ -58,6 +60,28 @@ class LlamaServerState:
 
     def public_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class StartupDiagnostics:
+    memory_error: ModelLoadErrorCode | None = None
+    finished: threading.Event = field(default_factory=threading.Event)
+
+    def observe(self, line: str) -> None:
+        text = line[:4096].casefold()
+        if "erroroutofdevicememory" in text or "cuda out of memory" in text:
+            self.memory_error = "gpu_memory"
+        elif any(
+            marker in text
+            for marker in (
+                "erroroutofhostmemory",
+                "std::bad_alloc",
+                "cannot allocate memory",
+                "failed to allocate cpu",
+                "out of host memory",
+            )
+        ):
+            self.memory_error = "system_memory"
 
 
 ProcessFactory = Callable[..., subprocess.Popen[str]]
@@ -272,7 +296,10 @@ class LlamaServerManager:
         *,
         backend: str = "auto",
         device_ids: list[str] | tuple[str, ...] | None = None,
+        allow_system_ram: bool = False,
     ) -> LlamaServerConnection:
+        if not isinstance(allow_system_ram, bool):
+            raise ValueError("allow_system_ram must be a boolean")
         resolved_model = Path(model_path).expanduser().resolve(strict=True)
         requested_backend = backend.strip().lower()
         requested_device_ids = tuple(device_ids or ())
@@ -297,6 +324,7 @@ class LlamaServerManager:
                     and self._connection.model_path == str(resolved_model)
                     and self._connection.selection_backend == selection_backend
                     and self._connection.selection_device_ids == selection_device_ids
+                    and self._connection.allow_system_ram == allow_system_ram
                 ):
                     return self._connection
 
@@ -321,6 +349,7 @@ class LlamaServerManager:
 
             errors: list[str] = []
             prior_startup_error: str | None = None
+            last_error: Exception | None = None
             for candidate in candidates:
                 startup_candidate = (
                     replace(candidate, detection_error=prior_startup_error)
@@ -335,6 +364,7 @@ class LlamaServerManager:
                         requested_epoch,
                         selection_backend,
                         selection_device_ids,
+                        allow_system_ram,
                     )
                 except Exception as error:
                     with self._lock:
@@ -342,12 +372,17 @@ class LlamaServerManager:
                             raise RuntimeError("llama-server startup was cancelled") from error
                         self._stop_locked()
                     prior_startup_error = str(error)
+                    last_error = error
                     errors.append(f"{candidate.backend}: {error}")
                     logger.warning("llama-server %s startup failed: %s", candidate.backend, error)
+                    if isinstance(error, ModelMemoryError) and not allow_system_ram:
+                        break
 
             detail = "; ".join(errors) or "No llama-server runtime candidate was available"
             with self._lock:
                 self._state = LlamaServerState(status="error", model_id=model_id, detail=detail)
+            if isinstance(last_error, ModelMemoryError):
+                raise last_error
             raise RuntimeError(f"Unable to start llama-server ({detail})")
 
     def _start_candidate(
@@ -358,6 +393,7 @@ class LlamaServerManager:
         start_epoch: int,
         selection_backend: str,
         selection_device_ids: tuple[str, ...],
+        allow_system_ram: bool,
     ) -> LlamaServerConnection:
         executable = candidate.executable
         backend = candidate.backend
@@ -383,9 +419,11 @@ class LlamaServerManager:
             raise ValueError("GEIST_LLAMA_CONTEXT_SIZE must be a positive integer")
         args.extend(["--ctx-size", context_size])
         if backend == "vulkan":
-            gpu_layers = self.environment.get("GEIST_LLAMA_GPU_LAYERS", "999").strip()
-            if not gpu_layers.isdigit():
-                raise ValueError("GEIST_LLAMA_GPU_LAYERS must be a non-negative integer")
+            gpu_layers = self.environment.get(
+                "GEIST_LLAMA_GPU_LAYERS", "auto" if allow_system_ram else "999"
+            ).strip()
+            if gpu_layers != "auto" and not gpu_layers.isdigit():
+                raise ValueError("GEIST_LLAMA_GPU_LAYERS must be auto or a non-negative integer")
             args.extend(["--n-gpu-layers", gpu_layers])
             if candidate.runtime_device_ids:
                 args.extend(["--device", ",".join(candidate.runtime_device_ids)])
@@ -413,10 +451,27 @@ class LlamaServerManager:
             self._process_lifetime_handle = process_lifetime_handle
             self._state.backend = backend
             self._state.device_ids = list(candidate.public_device_ids)
-        self._drain_output(process, api_key)
+        diagnostics = self._drain_output(process, api_key)
         timeout = float(self.environment.get("GEIST_LLAMA_STARTUP_TIMEOUT_SECONDS", "180"))
         base_url = f"http://127.0.0.1:{port}"
-        self._health_probe(base_url, api_key, process, timeout)
+        try:
+            self._health_probe(base_url, api_key, process, timeout)
+        except Exception as error:
+            if process.poll() is not None:
+                diagnostics.finished.wait(timeout=1.0)
+            if diagnostics.memory_error:
+                raise ModelMemoryError(
+                    diagnostics.memory_error,
+                    runtime="llama_server",
+                    model_id=model_id,
+                    allow_system_ram=allow_system_ram,
+                    offload_setting_available=(
+                        backend == "vulkan"
+                        and "GEIST_LLAMA_GPU_LAYERS" not in self.environment
+                        and not self.environment.get("GEIST_LLAMA_SERVER_PATH")
+                    ),
+                ) from error
+            raise
         with self._lock:
             if (
                 start_epoch != self._stop_epoch
@@ -434,6 +489,7 @@ class LlamaServerManager:
                 selection_backend,
                 selection_device_ids,
                 candidate.detection_error,
+                allow_system_ram,
             )
             self._connection = connection
             self._state = LlamaServerState(
@@ -446,19 +502,26 @@ class LlamaServerManager:
             return connection
 
     @staticmethod
-    def _drain_output(process: subprocess.Popen[str], api_key: str) -> None:
+    def _drain_output(process: subprocess.Popen[str], api_key: str) -> StartupDiagnostics:
+        diagnostics = StartupDiagnostics()
         if process.stdout is None:
-            return
+            diagnostics.finished.set()
+            return diagnostics
 
         def consume() -> None:
-            for line in process.stdout or ():
-                logger.info("[llama-server] %s", line.rstrip().replace(api_key, "[redacted]"))
+            try:
+                for line in process.stdout or ():
+                    diagnostics.observe(line)
+                    logger.info("[llama-server] %s", line.rstrip().replace(api_key, "[redacted]"))
+            finally:
+                diagnostics.finished.set()
 
         threading.Thread(
             target=consume,
             name="geist-llama-server-log",
             daemon=True,
         ).start()
+        return diagnostics
 
     @staticmethod
     def _default_health_probe(

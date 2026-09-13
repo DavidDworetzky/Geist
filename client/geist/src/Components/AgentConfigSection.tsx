@@ -10,10 +10,12 @@ interface AgentConfigSectionProps {
   onlineModel: string;
   llamaBackend: 'cpu' | 'gpu' | null;
   llamaGpuDeviceIds: string[];
+  llamaAllowSystemRam?: boolean;
   onOnlineProviderChange: (value: string) => void;
   onOnlineModelChange: (value: string) => void;
   onLlamaBackendChange: (value: 'cpu' | 'gpu' | null) => void;
   onLlamaGpuDeviceIdsChange: (value: string[]) => void;
+  onLlamaAllowSystemRamChange?: (value: boolean) => void;
   onLlamaComputeValidityChange: (
     valid: boolean,
     settled: boolean,
@@ -46,10 +48,12 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   onlineModel,
   llamaBackend,
   llamaGpuDeviceIds,
+  llamaAllowSystemRam = false,
   onOnlineProviderChange,
   onOnlineModelChange,
   onLlamaBackendChange,
   onLlamaGpuDeviceIdsChange,
+  onLlamaAllowSystemRamChange,
   onLlamaComputeValidityChange,
 }) => {
   const {
@@ -116,6 +120,8 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
           <LlamaComputeSection
             backend={llamaBackend}
             deviceIds={llamaGpuDeviceIds}
+            allowSystemRam={llamaAllowSystemRam}
+            onAllowSystemRamChange={onLlamaAllowSystemRamChange}
             onBackendChange={onLlamaBackendChange}
             onDeviceIdsChange={onLlamaGpuDeviceIdsChange}
             onValidityChange={onLlamaComputeValidityChange}

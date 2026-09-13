@@ -76,6 +76,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
           </div>
 
           {element.model_load
+            && !element.model_load.error_code
             && (element.model_load.state === 'loading' || element.model_load.state === 'failed')
             && (
             <div

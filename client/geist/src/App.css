@@ -2809,6 +2809,57 @@ select.form-control {
   margin: 10px 0 18px;
 }
 
+.model-load-dialog {
+  width: min(520px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  padding: 24px;
+  color: var(--geist-color-text);
+  overflow: auto;
+}
+
+.model-load-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.model-load-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-load-dialog-heading h2 { margin: 0; font-size: 20px; }
+.model-load-dialog .model-load-dialog-model { color: var(--geist-color-text-muted); font-size: 13px; }
+.model-load-dialog .modal-actions { flex-wrap: wrap; }
+.chat-input-field { position: relative; display: flex; flex: 1; min-width: 0; }
+.chat-input-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--geist-color-text-muted);
+}
+.chat-input-status .runtime-model-spinner {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+.model-error-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--geist-color-border);
+  border-radius: 999px;
+  background: var(--geist-color-surface);
+  color: var(--geist-color-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.model-error-badge:hover { border-color: var(--geist-color-text-muted); }
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

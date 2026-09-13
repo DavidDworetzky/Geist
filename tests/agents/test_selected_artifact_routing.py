@@ -26,7 +26,7 @@ def _artifact(artifact_id: str, model_id: str, backend: str):
 def _expected_settings_device_config(artifact_id: str | None = None):
     config = {"artifact_id": artifact_id} if artifact_id else {}
     if sys.platform in {"win32", "linux"}:
-        config.update(llama_backend="auto", llama_gpu_device_ids=[])
+        config.update(llama_backend="auto", llama_gpu_device_ids=[], llama_allow_system_ram=False)
     return config
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -19,11 +20,19 @@ from agents.architectures.llama_server_process import (
     LlamaServerConnection,
     LlamaServerManager,
 )
-from agents.architectures.llama_server_runner import LlamaServerRunner
+from agents.architectures.llama_server_runner import LlamaServerRunner, _llama_tool_schema
 from agents.local_agent import LocalAgent
-from agents.models.tool_calling import ChatMessage, ModelRequestConfig
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolCall,
+    ToolContext,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
 from app import main as geist_main
 from app.models.user_settings import AgentFactoryConfig
+from app.services.tool_registry import PlanUpdateArguments, ToolRegistry
 
 
 class StreamResponse:
@@ -435,3 +444,102 @@ def test_stream_normalizes_text_and_tool_call_deltas(tmp_path):
     assert turn is not None
     assert turn.tool_calls[0].name == "lookup"
     assert turn.tool_calls[0].arguments == {"id": 7}
+
+
+@pytest.mark.parametrize(
+    "evidence_length, expected_status", [(2000, "succeeded"), (2001, "failed")]
+)
+def test_plan_tool_grammar_keeps_execution_limits(tmp_path, evidence_length, expected_status):
+    runner, client, _model_manager, _server_manager = _loaded_runner(tmp_path)
+    client.stream.return_value = StreamResponse(["data: [DONE]"])
+    handler = MagicMock(return_value=ToolExecutionOutput(content="updated"))
+    definition = ToolDefinition(
+        name="agent.plan.update",
+        description="Update the plan",
+        arguments_model=PlanUpdateArguments,
+        handler=handler,
+    )
+    original = definition.to_openai()
+    fingerprint = definition.approval_fingerprint()
+
+    list(
+        runner.stream_model_turn(
+            [ChatMessage(role="user", content="Hello!")],
+            [definition],
+            ModelRequestConfig(),
+        )
+    )
+
+    payload = client.stream.call_args.kwargs["json"]
+    function = payload["tools"][0]["function"]
+    schema = function["parameters"]
+    properties = schema["$defs"]["PlanTaskUpdate"]["properties"]
+    assert function["name"] == runner._provider_tool_name(definition.name)
+    assert payload["tool_choice"] == "auto"
+    assert properties["evidence"]["anyOf"][0] == {
+        "type": "string",
+        "description": "Maximum length: 2000 characters.",
+    }
+    assert "maxLength" not in properties["skip_reason"]["anyOf"][0]
+    assert properties["task_id"]["maxLength"] == 64
+    assert schema["properties"]["updates"]["maxItems"] == 12
+    assert schema["properties"]["objective"]["anyOf"][0]["minLength"] == 1
+    assert definition.to_openai() == original
+    assert definition.approval_fingerprint() == fingerprint
+
+    registry = ToolRegistry()
+    registry.register(definition)
+    try:
+        result = registry.execute(
+            ToolCall.create(
+                definition.name,
+                {
+                    "updates": [{"task_id": "one", "evidence": "x" * evidence_length}],
+                },
+            ),
+            ToolContext(workspace_id=1, chat_id=1, run_id="grammar-test"),
+        )
+        assert result.status == expected_status
+        if expected_status == "failed":
+            assert result.error == "invalid_arguments"
+            handler.assert_not_called()
+        else:
+            handler.assert_called_once()
+    finally:
+        registry.shutdown()
+
+
+def test_llama_schema_adaptation_preserves_literal_data_and_named_properties():
+    literal = {"maxLength": 4000, "properties": {"text": {"maxLength": 2000}}}
+    schema = {
+        "type": "object",
+        "properties": {
+            "maxLength": {"type": "integer", "maximum": 4000},
+            "description": {"type": "string", "maxLength": 2000},
+            "literal": {"const": literal, "default": literal, "examples": [literal]},
+            "short": {"type": "string", "minLength": 1, "maxLength": 1999},
+            "nested": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {"type": "string", "maxLength": 4000, "description": "Evidence."},
+                        {"type": "null"},
+                    ]
+                },
+            },
+        },
+        "required": ["maxLength"],
+        "additionalProperties": False,
+    }
+    original = deepcopy(schema)
+    adapted = _llama_tool_schema(schema)
+    assert schema == original
+    for name in ("maxLength", "literal", "short"):
+        assert adapted["properties"][name] == schema["properties"][name]
+    assert adapted["properties"]["description"]["description"] == "Maximum length: 2000 characters."
+    assert adapted["properties"]["nested"]["items"]["oneOf"][0] == {
+        "type": "string",
+        "description": "Evidence. Maximum length: 4000 characters.",
+    }
+    assert adapted["required"] == ["maxLength"]
+    assert adapted["additionalProperties"] is False
