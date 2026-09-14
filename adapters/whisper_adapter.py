@@ -1,5 +1,4 @@
 import tempfile
-from typing import cast
 
 import httpx
 
@@ -41,4 +40,4 @@ class WhisperAdapter(InertAdapter):
             raise RuntimeError(
                 f"Transcription failed with status {response.status_code}: {response.text}"
             )
-        return cast(str, response.text)
+        return str(response.text)
