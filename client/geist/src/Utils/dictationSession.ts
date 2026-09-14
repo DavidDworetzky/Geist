@@ -38,6 +38,9 @@ export class DictationSession {
       if (this.disposed) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
       this.context = new AudioContext({ sampleRate: 16000 });
+      if (this.context.sampleRate !== 16000) {
+        throw new Error(`Dictation requires 16000 Hz audio, but this browser uses ${this.context.sampleRate} Hz. Please try another browser or audio device.`);
+      }
       await this.context.audioWorklet.addModule('/audio/dictation-processor.js');
       if (this.disposed) return;
       await this.context.resume();

@@ -26,6 +26,9 @@ export class MoshiVoiceSession {
       if (this.disposed) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
       this.context = new AudioContext({ sampleRate: 24000 });
+      if (this.context.sampleRate !== 24000) {
+        throw new Error(`Moshi requires 24000 Hz audio, but this browser uses ${this.context.sampleRate} Hz. Please try another browser or audio device.`);
+      }
       await this.context.audioWorklet.addModule('/audio/moshi-processor.js');
       if (this.disposed) return;
       await this.context.resume();

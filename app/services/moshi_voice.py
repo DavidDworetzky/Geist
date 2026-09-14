@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 import os
 import platform
 import struct
@@ -8,6 +9,8 @@ from pathlib import Path
 import anyio
 from fastapi import WebSocket, WebSocketDisconnect
 
+
+logger = logging.getLogger(__name__)
 
 MODEL_ID = "kyutai/moshiko-mlx-q4"
 MOSHI_PROVIDER = {
@@ -71,6 +74,7 @@ async def serve_moshi(websocket: WebSocket) -> None:
     _active = True
     process = None
     tasks: list[asyncio.Task] = []
+    stderr_task: asyncio.Task | None = None
     try:
         script = Path(__file__).resolve().parents[2] / "scripts/runtimes/moshi/worker.py"
         process = await asyncio.create_subprocess_exec(
@@ -78,9 +82,18 @@ async def serve_moshi(websocket: WebSocket) -> None:
             str(script),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
         assert process.stdin is not None and process.stdout is not None
+        assert process.stderr is not None
+        stderr = process.stderr
+
+        async def log_stderr() -> None:
+            # Bounded reads also drain diagnostics without newlines or very long lines.
+            while chunk := await stderr.read(4096):
+                logger.warning("Moshi worker: %s", chunk.decode("utf-8", errors="replace").rstrip())
+
+        stderr_task = asyncio.create_task(log_stderr())
         writer, reader = process.stdin, process.stdout
         pending = 0
         ready = False
@@ -140,9 +153,10 @@ async def serve_moshi(websocket: WebSocket) -> None:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             task.result()
-    except (WebSocketDisconnect, asyncio.IncompleteReadError):
+    except WebSocketDisconnect:
         pass
     except Exception:
+        logger.exception("Moshi voice session failed")
         with contextlib.suppress(RuntimeError):
             await websocket.send_json(
                 {
@@ -164,6 +178,11 @@ async def serve_moshi(websocket: WebSocket) -> None:
                     with contextlib.suppress(ProcessLookupError):
                         process.kill()
                     await process.wait()
+            if stderr_task is not None:
+                try:
+                    await asyncio.wait_for(stderr_task, timeout=1)
+                except TimeoutError:
+                    logger.warning("Moshi worker stderr did not close after shutdown")
             _active = False
             with contextlib.suppress(RuntimeError):
                 await websocket.close()

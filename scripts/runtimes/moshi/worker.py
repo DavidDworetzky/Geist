@@ -1,12 +1,12 @@
 """Moshi MLX worker. stdin: PCM float32 frames; stdout: framed PCM/text events."""
 
-import contextlib
 import os
 import queue
 import struct
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 
@@ -16,6 +16,14 @@ FRAME_SAMPLES = 1920
 MAX_STEPS = 3750
 OUTPUT = sys.stdout.buffer
 OUTPUT_LOCK = threading.Lock()
+
+
+def isolate_protocol_output() -> None:
+    global OUTPUT
+    sys.stdout.flush()
+    OUTPUT = os.fdopen(os.dup(1), "wb")
+    # Native libraries write to fd 1 directly, bypassing Python's sys.stdout.
+    os.dup2(2, 1)
 
 
 def emit(kind: int, payload: bytes = b"") -> None:
@@ -116,12 +124,12 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    isolate_protocol_output()
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     try:
-        with contextlib.redirect_stdout(sys.stderr):
-            run()
+        run()
     except Exception as error:
         # Never put arbitrary provider errors or local configuration on the wire.
-        print(f"Moshi worker failed: {type(error).__name__}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         emit(3, b"Moshi could not run. Verify the isolated runtime and downloaded model weights.")
         raise SystemExit(1) from error

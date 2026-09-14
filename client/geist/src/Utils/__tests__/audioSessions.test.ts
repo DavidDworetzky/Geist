@@ -10,6 +10,13 @@ class FakeProcessor {
   emit(data: any) { this.port.onmessage?.({ data }); }
 }
 class FakeContext {
+  static actualRate: number | undefined;
+  static latest: FakeContext;
+  sampleRate: number;
+  constructor(options: AudioContextOptions) {
+    this.sampleRate = FakeContext.actualRate ?? options.sampleRate!;
+    FakeContext.latest = this;
+  }
   audioWorklet = { addModule: jest.fn(async () => {}) };
   destination = {};
   createMediaStreamSource = () => ({ connect: jest.fn() });
@@ -37,6 +44,7 @@ describe('isolated audio sessions', () => {
   let session: DictationSession | MoshiVoiceSession;
   beforeEach(() => {
     jest.useFakeTimers();
+    FakeContext.actualRate = undefined;
     Object.assign(global, { AudioContext: FakeContext, AudioWorkletNode: FakeProcessor, WebSocket: FakeSocket });
     stop = jest.fn();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
@@ -47,6 +55,24 @@ describe('isolated audio sessions', () => {
       onTranscript: jest.fn(), onAudioLevel: jest.fn(), onError: jest.fn(), onClosed: jest.fn() };
   });
   afterEach(() => { session?.dispose(); jest.useRealTimers(); jest.restoreAllMocks(); });
+
+  it.each([
+    ['Dictation', DictationSession, 16000],
+    ['Moshi', MoshiVoiceSession, 24000],
+  ] as const)('%s rejects a hardware sample-rate fallback and releases the microphone', async (name, Session, rate) => {
+    FakeContext.actualRate = 48000;
+    const previousSocket = FakeSocket.latest;
+    session = new Session(options);
+    await session.start();
+    expect(options.onError).toHaveBeenCalledWith(expect.stringContaining(`${name} requires ${rate} Hz audio`));
+    expect(options.onReady).not.toHaveBeenCalled();
+    expect(options.onClosed).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(FakeContext.latest.close).toHaveBeenCalledTimes(1);
+    expect(FakeContext.latest.audioWorklet.addModule).not.toHaveBeenCalled();
+    expect(FakeSocket.latest).toBe(previousSocket);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 
   it('dictation stops the mic before transcribing and never submits a chat turn', async () => {
     session = new DictationSession(options);

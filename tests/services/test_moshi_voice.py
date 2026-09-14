@@ -1,4 +1,7 @@
 import asyncio
+import logging
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -94,3 +97,46 @@ def test_disconnect_during_model_loading_terminates_worker(client, worker):
     worker("import time; time.sleep(60)")
     with client.websocket_connect("/moshi"):
         pass
+
+
+@pytest.mark.parametrize("corrupt_frame", [False, True])
+def test_worker_failures_are_logged_without_exposing_details(client, worker, caplog, corrupt_frame):
+    body = "import os; os.write(2, b'codec initialization failed\\n')"
+    if corrupt_frame:
+        body += "; os.write(1, b'broken protocol')"
+    worker(body)
+    with (
+        caplog.at_level(logging.WARNING, logger=moshi_voice.__name__),
+        client.websocket_connect("/moshi") as socket,
+    ):
+        assert socket.receive_json() == {
+            "type": "error",
+            "message": "Moshi stopped responding. End the call and reconnect.",
+        }
+        # Wait for shutdown so the stderr consumer finishes before checking logs.
+        assert socket.receive()["type"] == "websocket.close"
+    assert "codec initialization failed" in caplog.text
+    assert "Moshi voice session failed" in caplog.text
+    assert any(record.exc_info for record in caplog.records)
+
+
+def test_worker_protocol_survives_native_stdout_writes():
+    script = Path(__file__).resolve().parents[2] / "scripts/runtimes/moshi/worker.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os, runpy, sys; worker = runpy.run_path(sys.argv[1]); "
+            "worker['isolate_protocol_output'](); "
+            "os.write(1, b'native device warning\\n'); "
+            "print('Python diagnostic', flush=True); "
+            "worker['emit'](0); worker['emit'](1, b'audio')",
+            str(script),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    assert result.stdout == struct.pack("<BI", 0, 0) + struct.pack("<BI", 1, 5) + b"audio"
+    assert b"native device warning" in result.stderr
+    assert b"Python diagnostic" in result.stderr
