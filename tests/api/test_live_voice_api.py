@@ -94,7 +94,7 @@ def test_catalog_includes_conversation_without_changing_default(client):
     assert provider["mode"] == "conversation"
     assert provider["default_model"] == "gpt-live-1"
     assert provider["models"][0]["voices"][0]["id"] == "marin"
-    moshi = next(p for p in response["providers"] if p["provider"] == "moshi")
+    moshi = next(p for p in response["providers"] if p["provider"] == "local_live")
     assert moshi["mode"] == "conversation"
     assert moshi["models"][0]["streaming_mode"] == "websocket"
 
@@ -127,3 +127,40 @@ def test_dictation_rejects_invalid_provider_and_oversize_recording(client):
         },
     )
     assert response.status_code == 413
+
+
+def test_local_route_reports_transport_and_dispatches_moshi(client, monkeypatch):
+    from app.services import local_live_voice
+
+    monkeypatch.delenv("GEIST_LOCAL_LIVE_VOICE_BACKEND", raising=False)
+    response = client.get("/voice/live/local")
+    assert response.status_code == 200
+    assert response.json() == {
+        "endpoint": "/api/v1/voice/live/local",
+        "protocol": "geist-pcm-v1",
+        "model": "kyutai/moshiko-mlx-q4",
+        "sample_rate": 24000,
+        "frame_samples": 1920,
+    }
+
+    async def adapter(socket):
+        await socket.accept()
+        await socket.send_json({"type": "ready"})
+        await socket.close()
+
+    worker = AsyncMock(side_effect=adapter)
+    monkeypatch.setattr(local_live_voice, "serve_moshi", worker)
+    with client.websocket_connect("/voice/live/local") as socket:
+        assert socket.receive_json() == {"type": "ready"}
+    worker.assert_awaited_once()
+
+
+def test_invalid_local_configuration_does_not_hide_online_models(client, monkeypatch):
+    monkeypatch.setenv("GEIST_LOCAL_LIVE_VOICE_BACKEND", "unknown")
+    assert client.get("/voice/live/local").status_code == 503
+    response = client.get("/voice/models")
+    assert response.status_code == 200
+    providers = response.json()["providers"]
+    assert any(provider["provider"] == "openai_live" for provider in providers)
+    local = next(provider for provider in providers if provider["provider"] == "local_live")
+    assert "invalid" in local["description"]

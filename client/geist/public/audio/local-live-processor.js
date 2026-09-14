@@ -1,7 +1,8 @@
-class MoshiProcessor extends AudioWorkletProcessor {
-  constructor() {
+class LocalLiveProcessor extends AudioWorkletProcessor {
+  constructor(options) {
     super();
-    this.input = new Float32Array(1920);
+    this.frameSamples = options.processorOptions.frameSamples;
+    this.input = new Float32Array(this.frameSamples);
     this.offset = 0;
     this.playback = [];
     this.playbackOffset = 0;
@@ -38,10 +39,10 @@ class MoshiProcessor extends AudioWorkletProcessor {
       }
       if (output) output[i] = played;
       energy += Math.max(sample * sample, played * played);
-      if (this.offset === 1920) {
+      if (this.offset === this.frameSamples) {
         const pcm = this.input.buffer;
         this.port.postMessage({ type: 'audio', pcm }, [pcm]);
-        this.input = new Float32Array(1920);
+        this.input = new Float32Array(this.frameSamples);
         this.offset = 0;
         this.port.postMessage({ type: 'level', level: Math.min(1, Math.sqrt(energy / 128) * 5) });
       }
@@ -50,4 +51,4 @@ class MoshiProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('moshi-processor', MoshiProcessor);
+registerProcessor('local-live-processor', LocalLiveProcessor);

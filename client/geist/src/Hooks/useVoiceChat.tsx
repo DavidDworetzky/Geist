@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { LiveVoiceSession } from '../Utils/liveVoiceSession';
-import { MoshiVoiceSession } from '../Utils/moshiVoiceSession';
+import { LocalVoiceSession } from '../Utils/localVoiceSession';
 import { DictationSession } from '../Utils/dictationSession';
 
 interface UseVoiceChatProps {
@@ -21,7 +21,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
   const [partialTranscript, setPartialTranscript] = useState('');
   const [assistantText, setAssistantText] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
-  const sessionRef = useRef<LiveVoiceSession | MoshiVoiceSession | DictationSession | null>(null);
+  const sessionRef = useRef<LiveVoiceSession | LocalVoiceSession | DictationSession | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -41,7 +41,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
       setStatus('');
     };
     const onError = (error: string) => propsRef.current.onError?.(error);
-    const LiveSession = current.ttsProvider === 'moshi' ? MoshiVoiceSession : LiveVoiceSession;
+    const LiveSession = current.ttsProvider === 'local_live' ? LocalVoiceSession : LiveVoiceSession;
     const session = current.mode === 'live' ? new LiveSession({
       model: current.ttsModel,
       voice: current.ttsVoice,
@@ -67,7 +67,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
 
   const stopRecording = useCallback(() => {
     const session = sessionRef.current;
-    if (session instanceof LiveVoiceSession || session instanceof MoshiVoiceSession) { setStatus('Ending call…'); session.close(); }
+    if (session instanceof LiveVoiceSession || session instanceof LocalVoiceSession) { setStatus('Ending call…'); session.close(); }
     else session?.stop();
   }, []);
 

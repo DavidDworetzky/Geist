@@ -6,7 +6,7 @@ const catalog = { providers: [
   { provider: 'openai', display_name: 'OpenAI TTS', type: 'api', default_model: 'tts-1', models: [{ id: 'tts-1', display_name: 'TTS 1', voices: [] }] },
   { provider: 'openai_live', display_name: 'OpenAI GPT-Live', type: 'api', mode: 'conversation', default_model: 'gpt-live-1',
     models: [{ id: 'gpt-live-1', display_name: 'GPT-Live 1', voices: [{ id: 'marin', display_name: 'Marin' }, { id: 'quartz', display_name: 'Quartz' }] }] },
-  { provider: 'moshi', display_name: 'Moshi (local · MLX)', type: 'local', mode: 'conversation', default_model: 'kyutai/moshiko-mlx-q4',
+  { provider: 'local_live', display_name: 'Local live voice', description: 'Configured local voice engine', type: 'local', mode: 'conversation', default_model: 'kyutai/moshiko-mlx-q4',
     models: [{ id: 'kyutai/moshiko-mlx-q4', display_name: 'Moshiko 7B', voices: [{ id: 'moshiko', display_name: 'Moshiko' }] }] }
 ] };
 
@@ -32,11 +32,12 @@ describe('voice modes', () => {
     render(<Settings />);
     fireEvent.click(screen.getByRole('button', { name: 'Live chat' }));
     fireEvent.click(screen.getByLabelText('Voice settings'));
-    await waitFor(() => expect(screen.getByLabelText('Live voice model')).toHaveValue('gpt-live-1'));
+    await waitFor(() => expect(screen.getByLabelText('Live voice model')).toHaveValue('openai_live/gpt-live-1'));
     expect(screen.queryByLabelText('Speech to text')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /TTS 1/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Live voice model'), { target: { value: 'kyutai/moshiko-mlx-q4' } });
+    fireEvent.change(screen.getByLabelText('Live voice model'), { target: { value: 'local_live/kyutai/moshiko-mlx-q4' } });
     expect(screen.getByLabelText('Voice')).toHaveValue('moshiko');
+    expect(screen.getByText('Configured local voice engine')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Dictation' }));
     expect(screen.getByLabelText('Speech to text')).toHaveValue('mms');
   });
@@ -54,4 +55,17 @@ describe('voice modes', () => {
     fireEvent.click(screen.getByLabelText('Voice settings'));
     expect(await screen.findByText('Catalog unavailable')).toBeInTheDocument();
   });
+});
+
+
+it('shows a configured external engine without a client-side voice selector', async () => {
+  const externalCatalog = { providers: [{ ...catalog.providers[2], default_model: 'gpt-live-1', models: [{ id: 'gpt-live-1', display_name: 'Custom local engine', voices: [] }] }, catalog.providers[1]] };
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => externalCatalog })) as any;
+  render(<Settings />);
+  fireEvent.click(screen.getByRole('button', { name: 'Live chat' }));
+  fireEvent.click(screen.getByLabelText('Voice settings'));
+  await screen.findByRole('option', { name: /Custom local engine/ });
+  fireEvent.change(screen.getByLabelText('Live voice model'), { target: { value: 'local_live/gpt-live-1' } });
+  expect(screen.getByLabelText('Live voice model')).toHaveValue('local_live/gpt-live-1');
+  expect(screen.queryByLabelText('Voice')).not.toBeInTheDocument();
 });

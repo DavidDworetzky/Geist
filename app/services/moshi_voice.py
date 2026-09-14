@@ -5,6 +5,7 @@ import os
 import platform
 import struct
 from pathlib import Path
+from typing import Any
 
 import anyio
 from fastapi import WebSocket, WebSocketDisconnect
@@ -13,7 +14,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 logger = logging.getLogger(__name__)
 
 MODEL_ID = "kyutai/moshiko-mlx-q4"
-MOSHI_PROVIDER = {
+MOSHI_PROVIDER: dict[str, Any] = {
     "provider": "moshi",
     "display_name": "Moshi (local · MLX)",
     "type": "local",

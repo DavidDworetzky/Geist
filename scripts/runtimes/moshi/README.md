@@ -15,7 +15,7 @@ make run MLX_BACKEND=1
 Run `make services` in another terminal to connect the frontend to the native
 backend. The full Linux Docker backend cannot run this Apple Silicon MLX worker.
 
-In the composer, choose **Live chat**, open **Voice settings**, select **Moshi**,
+In the composer, choose **Live chat**, open **Voice settings**, select **Local live voice · Moshiko 7B · 4-bit**,
 and start the call. Use headphones to avoid speaker echo. First connection loads
 and warms the model. Calls are English, limited to five minutes, and independent
 of the selected text model. Closing a call releases its model memory.
@@ -54,3 +54,7 @@ Transport and UI tests cover mode separation, draft preservation, cancellation,
 worker shutdown, malformed audio, bounded queues, and live voice availability
 without a text model installed. GPT-Live negotiation has mock coverage; a real
 OpenAI media call still requires an API project with GPT-Live access.
+
+Moshi is the default adapter behind the configurable local live-voice endpoint.
+See [local live voice configuration and protocol](../../../docs/LOCAL_LIVE_VOICE.md)
+to connect a different local voice server.

@@ -27,11 +27,16 @@ from app.models.live_voice import (
     LiveSessionRequest,
     LiveSessionResponse,
 )
+from app.models.local_live_voice import LocalLiveVoiceConfig
 from app.models.user_settings import AgentConfigRequest
 from app.services.agent_context_provider import get_default_agent_context
 from app.services.dictation import MAX_DICTATION_BYTES, transcribe_dictation
 from app.services.live_voice import LIVE_PROVIDER, create_live_session
-from app.services.moshi_voice import MOSHI_PROVIDER, serve_moshi
+from app.services.local_live_voice import (
+    local_voice_backend,
+    local_voice_provider,
+    serve_local_voice,
+)
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -127,7 +132,7 @@ async def list_voice_models():
 
     return {
         "default_provider": "sesame",
-        "providers": [*get_supported_tts_providers(), LIVE_PROVIDER, MOSHI_PROVIDER],
+        "providers": [*get_supported_tts_providers(), LIVE_PROVIDER, local_voice_provider()],
     }
 
 
@@ -136,9 +141,14 @@ async def live_session(offer: LiveSessionRequest) -> LiveSessionResponse:
     return await create_live_session(offer)
 
 
-@router.websocket("/moshi")
-async def moshi_voice(websocket: WebSocket) -> None:
-    await serve_moshi(websocket)
+@router.get("/live/local", response_model=LocalLiveVoiceConfig)
+async def local_voice_config() -> LocalLiveVoiceConfig:
+    return local_voice_backend().transport
+
+
+@router.websocket("/live/local")
+async def local_live_voice(websocket: WebSocket) -> None:
+    await serve_local_voice(websocket)
 
 
 @router.post("/transcribe")

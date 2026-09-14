@@ -56,22 +56,22 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({ selection, onChange, disa
             ) : (
               <>
                 <div className="voice-settings-status">A continuous conversation with AI-generated speech.</div>
-                {selection.ttsProvider === 'moshi' && <div className="voice-settings-status">Requires Apple Silicon and the local Moshi runtime. English; five-minute calls. Captions show Moshi's speech.</div>}
+                {provider?.description && <div className="voice-settings-status">{provider.description}</div>}
                 {loading && <div className="voice-settings-status">Loading voice models...</div>}
                 {error && <div className="voice-settings-error">{error}</div>}
                 {data && <label className="voice-settings-field">Live voice model
-                  <select disabled={disabled} value={selection.ttsModel || ''} onChange={event => {
-                    const selectedProvider = providers.find(item => item.models.some(m => m.id === event.target.value));
-                    const selectedModel = selectedProvider?.models.find(item => item.id === event.target.value);
+                  <select disabled={disabled} value={`${selection.ttsProvider}/${selection.ttsModel || provider?.default_model || ''}`} onChange={event => {
+                    const selectedProvider = providers.find(item => item.models.some(m => `${item.provider}/${m.id}` === event.target.value));
+                    const selectedModel = selectedProvider?.models.find(item => `${selectedProvider?.provider}/${item.id}` === event.target.value);
                     if (selectedProvider && selectedModel) onChange({ ...selection, ttsProvider: selectedProvider.provider,
                       ttsModel: selectedModel.id, ttsVoice: selectedModel.voices[0]?.id });
                   }}>
                     {providers.flatMap(item => item.models.map(model => (
-                      <option key={model.id} value={model.id}>{item.display_name} · {model.display_name}</option>
+                      <option key={`${item.provider}/${model.id}`} value={`${item.provider}/${model.id}`}>{item.display_name} · {model.display_name}</option>
                     )))}
                   </select>
                 </label>}
-                {model && <label className="voice-settings-field">Voice
+                {model && model.voices.length > 0 && <label className="voice-settings-field">Voice
                   <select disabled={disabled} value={selection.ttsVoice || model.voices[0]?.id}
                     onChange={event => onChange({ ...selection, ttsVoice: event.target.value })}>
                     {model.voices.map(voice => <option key={voice.id} value={voice.id}>{voice.display_name}</option>)}

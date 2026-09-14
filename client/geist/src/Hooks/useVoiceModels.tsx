@@ -26,6 +26,7 @@ export interface TTSProviderInfo {
   provider: string;
   display_name: string;
   type: string;
+  description?: string;
   mode?: 'conversation';
   default_model: string;
   models: TTSModelInfo[];

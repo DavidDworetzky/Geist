@@ -1,12 +1,13 @@
 import { DictationSession } from '../dictationSession';
-import { MoshiVoiceSession } from '../moshiVoiceSession';
+import { LocalVoiceSession } from '../localVoiceSession';
 
 class FakeProcessor {
+  static options: any;
   static latest: FakeProcessor;
   port = { onmessage: null as any, postMessage: jest.fn() };
   connect = jest.fn();
   disconnect = jest.fn();
-  constructor() { FakeProcessor.latest = this; }
+  constructor(context: any, name: string, options: any) { FakeProcessor.latest = this; FakeProcessor.options = options; }
   emit(data: any) { this.port.onmessage?.({ data }); }
 }
 class FakeContext {
@@ -26,6 +27,7 @@ class FakeContext {
 class FakeSocket {
   static latest: FakeSocket;
   static OPEN = 1;
+  url: string;
   readyState = 1;
   bufferedAmount = 0;
   onmessage: any;
@@ -33,7 +35,7 @@ class FakeSocket {
   onclose: any;
   send = jest.fn();
   close = jest.fn();
-  constructor() { FakeSocket.latest = this; }
+  constructor(url: string) { this.url = url; FakeSocket.latest = this; }
   emit(data: any) { this.onmessage?.({ data: typeof data === 'object' && !(data instanceof ArrayBuffer) ? JSON.stringify(data) : data }); }
 }
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -41,7 +43,7 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 describe('isolated audio sessions', () => {
   let options: any;
   let stop: jest.Mock;
-  let session: DictationSession | MoshiVoiceSession;
+  let session: DictationSession | LocalVoiceSession;
   beforeEach(() => {
     jest.useFakeTimers();
     FakeContext.actualRate = undefined;
@@ -50,7 +52,7 @@ describe('isolated audio sessions', () => {
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
       getUserMedia: jest.fn(async () => ({ getTracks: () => [{ stop }] }))
     } });
-    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ text: 'Draft text' }) })) as any;
+    global.fetch = jest.fn(async (url) => ({ ok: true, json: async () => url === '/api/v1/voice/live/local' ? { protocol: 'geist-pcm-v1', endpoint: '/api/v1/voice/live/local', sample_rate: 24000, frame_samples: 1920 } : { text: 'Draft text' } })) as any;
     options = { provider: 'whisper', onReady: jest.fn(), onProcessing: jest.fn(), onText: jest.fn(),
       onTranscript: jest.fn(), onAudioLevel: jest.fn(), onError: jest.fn(), onClosed: jest.fn() };
   });
@@ -58,7 +60,7 @@ describe('isolated audio sessions', () => {
 
   it.each([
     ['Dictation', DictationSession, 16000],
-    ['Moshi', MoshiVoiceSession, 24000],
+    ['Local voice', LocalVoiceSession, 24000],
   ] as const)('%s rejects a hardware sample-rate fallback and releases the microphone', async (name, Session, rate) => {
     FakeContext.actualRate = 48000;
     const previousSocket = FakeSocket.latest;
@@ -71,7 +73,7 @@ describe('isolated audio sessions', () => {
     expect(FakeContext.latest.close).toHaveBeenCalledTimes(1);
     expect(FakeContext.latest.audioWorklet.addModule).not.toHaveBeenCalled();
     expect(FakeSocket.latest).toBe(previousSocket);
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(name === 'Dictation' ? 0 : 1);
   });
 
   it('dictation stops the mic before transcribing and never submits a chat turn', async () => {
@@ -103,8 +105,43 @@ describe('isolated audio sessions', () => {
     expect((global.fetch as jest.Mock).mock.calls[0][1].signal.aborted).toBe(true);
   });
 
-  it('Moshi sends audio over its socket and renders independent voice captions', async () => {
-    session = new MoshiVoiceSession(options);
+
+  it('uses the configured audio rate and frame size for another local engine', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ protocol: 'geist-pcm-v1', endpoint: '/api/v1/voice/live/local', sample_rate: 16000, frame_samples: 320 }) });
+    session = new LocalVoiceSession(options);
+    await session.start();
+    expect(FakeContext.latest.sampleRate).toBe(16000);
+    expect(FakeProcessor.options.processorOptions.frameSamples).toBe(320);
+    FakeSocket.latest.emit(new ArrayBuffer(1280));
+    expect(FakeProcessor.latest.port.postMessage).toHaveBeenCalled();
+    FakeSocket.latest.emit(new ArrayBuffer(7680));
+    expect(options.onError).toHaveBeenCalledWith('Invalid local voice audio frame.');
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unsupported transport before acquiring the microphone', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ protocol: 'opus' }) });
+    session = new LocalVoiceSession(options);
+    await session.start();
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(options.onError).toHaveBeenCalledWith('Unsupported local voice audio configuration.');
+  });
+
+  it('cancels a pending configuration request before accessing the microphone', async () => {
+    let finish: any;
+    (global.fetch as jest.Mock).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    session = new LocalVoiceSession(options);
+    const starting = session.start();
+    session.dispose();
+    finish({ ok: true, json: async () => ({}) });
+    await starting;
+    expect((global.fetch as jest.Mock).mock.calls[0][1].signal.aborted).toBe(true);
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(options.onError).not.toHaveBeenCalled();
+  });
+
+  it('Local voice sends audio over its socket and renders independent voice captions', async () => {
+    session = new LocalVoiceSession(options);
     await session.start();
     const socket = FakeSocket.latest;
     expect(options.onReady).not.toHaveBeenCalled();
@@ -117,14 +154,17 @@ describe('isolated audio sessions', () => {
     expect(FakeProcessor.latest.port.postMessage).toHaveBeenCalledWith({ type: 'audio', pcm }, [pcm]);
     socket.emit({ type: 'transcript', text: ' Hello' });
     expect(options.onTranscript).toHaveBeenCalledWith('assistant', ' Hello');
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(socket.url).toBe('ws://localhost/api/v1/voice/live/local');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    socket.emit({ type: 'transcript', role: 'user', text: 'Hi' });
+    expect(options.onTranscript).toHaveBeenCalledWith('user', 'Hi');
     session.close();
     expect(socket.close).toHaveBeenCalledTimes(1);
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
-  it('Moshi closes stalled audio before latency grows without bound', async () => {
-    session = new MoshiVoiceSession(options);
+  it('Local voice closes stalled audio before latency grows without bound', async () => {
+    session = new LocalVoiceSession(options);
     await session.start();
     FakeSocket.latest.bufferedAmount = 80000;
     FakeProcessor.latest.emit({ type: 'audio', pcm: new ArrayBuffer(7680) });
@@ -133,8 +173,8 @@ describe('isolated audio sessions', () => {
     expect(stop).toHaveBeenCalled();
   });
 
-  it('Moshi cancels model loading and ignores a late ready event', async () => {
-    session = new MoshiVoiceSession(options);
+  it('Local voice cancels model loading and ignores a late ready event', async () => {
+    session = new LocalVoiceSession(options);
     await session.start();
     session.close();
     FakeSocket.latest.emit({ type: 'ready' });
