@@ -252,6 +252,37 @@ def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_fugu_ultra_v2_metadata_is_explicit_and_server_backed():
+    fugu = get_model_spec("sakana/fugu-ultra-v2")
+
+    assert fugu.provider == "openrouter"
+    assert fugu.backend == "openai_compatible"
+    assert fugu.local is False
+    assert fugu.family == "fugu"
+    assert fugu.context_window == 1000000
+    assert fugu.max_output_tokens == 128000
+    assert fugu.parameter_count is None
+    assert fugu.activated_parameters is None
+    assert fugu.supports_vision is True
+    assert fugu.supports_function_calling is True
+    assert fugu.supports_reasoning is True
+    assert fugu.supports_streaming is True
+    assert fugu.recommended is True
+    assert fugu.mandatory_reasoning_effort == "xhigh"
+    assert fugu.unsupported_parameters == (
+        "max_tokens",
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert fugu.performance_note is not None
+    assert "do not use it for confidential or regulated workloads" in fugu.performance_note
+    assert get_provider_endpoint(fugu.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     hy4 = get_model_spec("tencent/hy4-preview")
 
@@ -701,6 +732,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "sakana/fugu-ultra-v2" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(

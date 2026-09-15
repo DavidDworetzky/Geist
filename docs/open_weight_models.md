@@ -11,8 +11,8 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
-Flash routes are also intentionally server-backed. For models with published
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, DeepSeek V4.1 Flash,
+and Sakana Fugu Ultra v2 routes are also intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -173,6 +173,35 @@ OpenRouter may route this model across providers with different context limits,
 supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
+
+## OpenRouter-hosted Sakana Fugu Ultra v2
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`sakana/fugu-ultra-v2`. OpenRouter added the stable route on September 11,
+2026. It accepts text, image, and file inputs, has a 1,000,000-token context
+window and a 128,000-token maximum output, and supports streaming, native
+function calling, automatic tool choice, structured outputs, and built-in web
+search. Fugu Ultra v2 always reasons; Geist sends OpenRouter's documented
+default `xhigh` effort. Because the route does not advertise Geist's standard
+generation controls, Geist omits `max_tokens`, `n`, temperature, `top_p`,
+frequency penalty, presence penalty, and stop before dispatch while preserving
+native tool definitions.
+
+OpenRouter lists prices of $5 per million input tokens, $30 per million output
+tokens, and $0.50 per million cached input tokens. Prompts above 272,000 tokens
+use higher $10/$45/$1 rates. At review time the single Sakana endpoint showed
+100% routed uptime but about 90% successful availability, a 69.6-second median
+latency, and 68 output tokens per second.
+
+Sakana's launch results report leading scores on agentic, coding, document,
+and visual-reasoning evaluations, but independent v2 reproductions were not yet
+available. Treat those results as provider claims and qualify the route on
+representative workloads before making it a default. OpenRouter itself does
+not retain prompt or response content unless logging is enabled, and its
+provider table marks Sakana as not training on OpenRouter requests. Sakana
+nonetheless retains prompts for an unspecified period, the worker pool is
+fixed and opaque, and this endpoint is not ZDR. Do not use it for confidential
+or regulated workloads.
 
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 

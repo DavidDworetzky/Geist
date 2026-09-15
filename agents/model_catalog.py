@@ -529,6 +529,36 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "sakana/fugu-ultra-v2",
+        "Sakana Fugu Ultra v2",
+        "fugu",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "max_tokens",
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+        ),
+        mandatory_reasoning_effort="xhigh",
+        local=False,
+        performance_note=(
+            "High-capability Sakana multi-agent orchestrator hosted through OpenRouter. "
+            "The single upstream retains prompts for an unspecified period and is not "
+            "ZDR; do not use it for confidential or regulated workloads."
+        ),
+    ),
+    ModelSpec(
         "tencent/hy4-preview",
         "Tencent Hy4 Preview",
         "hy",
