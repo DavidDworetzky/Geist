@@ -102,6 +102,16 @@ def test_memory_migration_round_trip_from_job_revision(tmp_path):
         assert "default_local_artifact_id" in {
             column["name"] for column in inspector.get_columns("user_settings")
         }
+        assert {"llama_backend", "llama_gpu_device_ids"}.issubset(
+            {column["name"] for column in inspector.get_columns("user_settings")}
+        )
+        assert "agentic_mode_enabled" in {
+            column["name"] for column in inspector.get_columns("user_settings")
+        }
+        assert "agent_goal" in inspector.get_table_names()
+        assert "checkpoint_json" in {
+            column["name"] for column in inspector.get_columns("agent_goal")
+        }
         engine.dispose()
 
         command.downgrade(config, "c3a1f5e7d9b2")
@@ -111,12 +121,17 @@ def test_memory_migration_round_trip_from_job_revision(tmp_path):
         assert "memory_enabled" not in {
             column["name"] for column in inspector.get_columns("chat_session")
         }
-        assert "dedupe_key" not in {
-            column["name"] for column in inspector.get_columns("job")
-        }
+        assert "dedupe_key" not in {column["name"] for column in inspector.get_columns("job")}
         assert "default_local_artifact_id" not in {
             column["name"] for column in inspector.get_columns("user_settings")
         }
+        assert "llama_backend" not in {
+            column["name"] for column in inspector.get_columns("user_settings")
+        }
+        assert "agentic_mode_enabled" not in {
+            column["name"] for column in inspector.get_columns("user_settings")
+        }
+        assert "agent_goal" not in inspector.get_table_names()
         engine.dispose()
     finally:
         Session.remove()

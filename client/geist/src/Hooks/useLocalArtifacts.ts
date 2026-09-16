@@ -12,6 +12,7 @@ export interface LocalArtifact {
   bytes_downloaded: number;
   total_bytes?: number | null;
   source: string;
+  repo_id?: string | null;
   error?: string | null;
   supported?: boolean;
   requires_auth?: boolean;
@@ -43,6 +44,44 @@ let pendingArtifactRequest: Promise<LocalArtifact[]> | null = null;
 const pendingArtifactDownloads = new Map<string, Promise<void>>();
 let artifactCache: LocalArtifact[] = [];
 let artifactCatalogLoaded = false;
+
+export function isArtifactInstalling(artifact?: LocalArtifact): boolean {
+  return Boolean(artifact && ['queued', 'downloading', 'cancelling'].includes(artifact.status));
+}
+
+export function installProgress(artifact?: LocalArtifact): {
+  label: string;
+  percent: number | null;
+} {
+  if (!artifact || artifact.status === 'queued') return { label: 'Installing…', percent: null };
+  if (artifact.status === 'cancelling') return { label: 'Cancelling…', percent: null };
+
+  const completed = artifact.progress_completed ?? artifact.bytes_downloaded ?? 0;
+  const total = artifact.progress_total ?? artifact.total_bytes ?? 0;
+  if (total > 0) {
+    const percent = Math.max(0, Math.min(100, Math.round((completed / total) * 100)));
+    return { label: `Installing ${percent}%`, percent };
+  }
+  if (artifact.bytes_downloaded > 0) {
+    return {
+      label: `Installing ${(artifact.bytes_downloaded / (1024 ** 3)).toFixed(1)} GB`,
+      percent: null,
+    };
+  }
+  return { label: 'Installing…', percent: null };
+}
+
+export async function responseError(response: Response, fallback: string): Promise<Error> {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === 'string' && payload.detail) {
+      return new Error(payload.detail);
+    }
+  } catch {
+    // The fallback below covers empty and non-JSON error responses.
+  }
+  return new Error(fallback);
+}
 
 function publishArtifacts(artifacts: LocalArtifact[]): void {
   artifactCache = artifacts;
@@ -79,7 +118,7 @@ async function requestArtifactDownload(artifactId: string): Promise<void> {
       method: 'POST',
     });
     if (!response.ok) {
-      throw new Error(`Model download failed: ${response.statusText}`);
+      throw await responseError(response, 'Could not install model.');
     }
 
     const updatedArtifact = await response.json();
@@ -161,7 +200,7 @@ export default function useLocalArtifacts({
 
   useEffect(() => {
     if (!enabled || !pollWhileBusy || !artifacts.some(artifact => (
-      ['queued', 'downloading', 'cancelling'].includes(artifact.status)
+      isArtifactInstalling(artifact)
       && (!pollModelId || artifact.model_id === pollModelId)
     ))) {
       return undefined;

@@ -138,6 +138,7 @@ def test_completion(log, stream_model_turn, online_agent, client):
             "prompt_tokens": [0],
             "response_format": "text",
             "agent_type": "GPT4AGENT",
+            "agentic_mode": False,
         }
 
         # send the request

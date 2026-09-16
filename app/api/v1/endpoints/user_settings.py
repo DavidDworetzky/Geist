@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from agents.model_catalog import default_local_model_id
 from app.api.utils import get_current_workspace
 from app.models.database.geist_user import WorkspaceModel
-from app.models.user_settings import AgentConfigRequest, UserSettingsResponse, UserSettingsUpdate
+from app.models.user_settings import (
+    AgentConfigRequest,
+    AgentPermissionsSettings,
+    UserSettingsResponse,
+    UserSettingsUpdate,
+)
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -38,7 +43,7 @@ async def get_workspace_settings(
 
 
 @router.put("/", response_model=UserSettingsResponse)
-async def update_workspace_settings(
+def update_workspace_settings(
     updates: UserSettingsUpdate,
     current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ):
@@ -90,10 +95,14 @@ async def reset_workspace_settings(
             default_agent_type="local",
             default_local_model=default_local_model_id(),
             default_local_artifact_id=None,
+            llama_backend=None,
+            llama_gpu_device_ids=[],
+            llama_allow_system_ram=False,
             default_online_model="gpt-4",
             default_online_provider="openai",
             default_file_archives=[],
             enable_rag_by_default=True,
+            agentic_mode_enabled=True,
             default_max_tokens=16,
             default_temperature=1.0,
             default_top_p=1.0,
@@ -101,10 +110,13 @@ async def reset_workspace_settings(
             default_presence_penalty=0.0,
             backup_providers=[],
             ui_preferences={},
+            agent_permissions=AgentPermissionsSettings(),
         )
 
         settings = UserSettingsService.update_workspace_settings_by_id(
-            current_workspace.workspace_id, default_updates
+            current_workspace.workspace_id,
+            default_updates,
+            allow_llama_redetection=True,
         )
         if not settings:
             settings = UserSettingsService.get_or_create_workspace_settings_by_id(

@@ -11,10 +11,10 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, and Qwen 3.8 Flash routes are also
-intentionally server-backed. For models with published weights, their total
-resident weights make an in-process laptop load impractical even when their
-mixture-of-experts active-parameter count is much smaller.
+and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
+Flash routes are also intentionally server-backed. For models with published
+weights, their total resident weights make an in-process laptop load impractical
+even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -130,6 +130,36 @@ change. As of August 28, 2026, OpenRouter identifies the Tencent endpoint as
 zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
+
+## OpenRouter-hosted DeepSeek V4.1 Flash
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`deepseek/deepseek-v4.1-flash`. OpenRouter added this stable route on September
+10, 2026. It accepts text and image input, has a 1,048,576-token context window
+and advertised 384,000-token maximum output, and supports optional reasoning,
+streaming, native function calling, and response-format JSON. JSON-schema
+enforcement varies by upstream. Geist omits the unsupported `n` parameter and
+otherwise preserves the route's supported sampling and tool parameters.
+
+OpenRouter listed four upstreams at review time. Its routed three-day
+availability was 99.92%, with a 134-token/second best-provider median and a
+1.40-second best-provider median latency. The displayed off-peak prices were
+$0.15 per million input tokens, $0.60 per million output tokens, and $0.003 per
+million cached input tokens; weekday peak windows double those rates.
+
+DeepSeek's launch results include 90.6 on Terminal-Bench 2.1, 74.2 on DeepSWE
+v1.1, and 54.8 on AutomationBench at maximum reasoning effort. Those are
+provider-run results, even though the model card publishes harness settings and
+reproduction instructions. Independent launch-day benchmarking was not yet
+available, and early hands-on reports were mixed, so qualify the model on your
+own workloads before making it a default.
+
+OpenRouter itself does not retain prompt or response content unless logging is
+explicitly enabled. The first-party DeepSeek endpoint, however, retains prompts
+and may train on them. DeepInfra, Novita, and Venice instances of this exact
+route appeared in OpenRouter's ZDR inventory on September 10, 2026. Enforce
+OpenRouter ZDR routing before sending confidential workloads; default routing
+does not make that guarantee.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 

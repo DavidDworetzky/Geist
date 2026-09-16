@@ -1,6 +1,10 @@
 FROM ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7 AS uv
 FROM python:3.11
 
+ARG TARGETARCH
+ARG LLAMA_CPP_VERSION=b10516
+ARG LLAMA_CPP_LINUX_X64_SHA256=f263a91280471b4c33c4999d7c76259c0f3a0a53a0b3e692b2c0b84380137a35
+
 ENV GEIST_HOME=/opt/geist
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 # Avoid runtime compiler dependencies in the cross-platform container. Both
@@ -21,6 +25,28 @@ RUN apt-get update && apt-get install -y \
     cmake \
     libopus-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# llama.cpp publishes the server and its matching shared libraries as one
+# official release asset. Pin and verify that complete runtime instead of mixing
+# a server executable with libraries from another build. Linux architectures
+# without a curated runtime continue to build, but local GGUF support remains
+# unavailable at runtime.
+RUN set -eux; \
+    if [ "${TARGETARCH:-amd64}" = "amd64" ]; then \
+        archive="llama-${LLAMA_CPP_VERSION}-bin-ubuntu-x64.tar.gz"; \
+        url="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_VERSION}/${archive}"; \
+        curl --fail --location --retry 3 --output "/tmp/${archive}" "${url}"; \
+        echo "${LLAMA_CPP_LINUX_X64_SHA256}  /tmp/${archive}" | sha256sum --check --strict; \
+        mkdir -p /opt/geist-runtime/llama.cpp/cpu; \
+        tar --extract --gzip --file "/tmp/${archive}" \
+            --strip-components=1 --directory /opt/geist-runtime/llama.cpp/cpu; \
+        test -x /opt/geist-runtime/llama.cpp/cpu/llama-server; \
+        cd /opt/geist-runtime/llama.cpp/cpu; \
+        ./llama-server --version; \
+        rm "/tmp/${archive}"; \
+    else \
+        echo "No bundled llama.cpp runtime for Linux ${TARGETARCH}; GGUF models will be unavailable."; \
+    fi
 
 # Install Rust using rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y

@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Literal
 
+from agents.model_load_errors import ModelLoadErrorCode
+
 
 ModelLoadState = Literal["unloaded", "loading", "ready", "failed"]
 
@@ -18,6 +20,8 @@ class ModelLoadStatus:
     detail: str
     started_at: datetime | None
     updated_at: datetime
+    error_code: ModelLoadErrorCode | None = None
+    can_offload_to_system_ram: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,14 +65,30 @@ class ModelLoadStatusRegistry:
     def mark_ready(self, model_id: str) -> ModelLoadStatus:
         return self._set_terminal(model_id, "ready", "Model is loaded and ready.")
 
-    def mark_failed(self, model_id: str, detail: str) -> ModelLoadStatus:
-        return self._set_terminal(model_id, "failed", detail)
+    def mark_failed(
+        self,
+        model_id: str,
+        detail: str,
+        *,
+        error_code: ModelLoadErrorCode | None = None,
+        can_offload_to_system_ram: bool = False,
+    ) -> ModelLoadStatus:
+        return self._set_terminal(
+            model_id,
+            "failed",
+            detail,
+            error_code=error_code,
+            can_offload_to_system_ram=can_offload_to_system_ram,
+        )
 
     def _set_terminal(
         self,
         model_id: str,
         state: Literal["ready", "failed"],
         detail: str,
+        *,
+        error_code: ModelLoadErrorCode | None = None,
+        can_offload_to_system_ram: bool = False,
     ) -> ModelLoadStatus:
         with self._lock:
             current = self._statuses.get(model_id)
@@ -79,6 +99,8 @@ class ModelLoadStatusRegistry:
                 detail=detail,
                 started_at=current.started_at if current else now,
                 updated_at=now,
+                error_code=error_code,
+                can_offload_to_system_ram=can_offload_to_system_ram,
             )
             self._statuses[model_id] = status
             return status

@@ -8,7 +8,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel
 
@@ -31,6 +31,25 @@ ToolSemanticTag = Literal[
     "action",
     "image_generation",
 ]
+
+# User-configurable approval posture for agentic tool execution.
+#   default          — per-tool requires_approval flags decide (side-effecting
+#                      tools ask, read-only tools run).
+#   auto_approve     — no tool ever waits for approval.
+#   require_approval — every tool call waits for approval unless the tool is
+#                      covered by an eligible standing grant; source-provided
+#                      tools cannot redeem name-only grants.
+PermissionMode = Literal["default", "auto_approve", "require_approval"]
+MAX_ALWAYS_ALLOWED_TOOLS = 256
+MAX_PERMISSION_TOOL_NAME_LENGTH = 256
+PERMISSION_MODE_DEFAULT: PermissionMode = "default"
+PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
+PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
+VALID_PERMISSION_MODES: frozenset[PermissionMode] = frozenset(get_args(PermissionMode))
+
+
+class MalformedToolCallError(ValueError):
+    """Invalid model tool syntax; the entire attempted turn must remain unexecuted."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +97,7 @@ class ChatMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    preserve_content: bool = False
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ChatMessage:
@@ -124,8 +144,32 @@ class ToolContext:
     workspace_id: int
     chat_id: int | None
     run_id: str
-    approved_call_ids: frozenset[str] = frozenset()
+    permission_mode: PermissionMode = PERMISSION_MODE_DEFAULT
+    always_allow_tools: frozenset[str] = frozenset()
+    agentic_mode: bool = False
+    coding_workspace_id: str | None = None
     cancellation: threading.Event | None = None
+    invocation_approval: InvocationApproval | None = None
+
+
+class InvocationApproval:
+    """One-use authorization bound to one server-issued call and validated payload."""
+
+    def __init__(self, call: ToolCall) -> None:
+        self._lock = threading.Lock()
+        self._fingerprint = self._digest(call)
+        self._used = False
+
+    @staticmethod
+    def _digest(call: ToolCall) -> str:
+        return hashlib.sha256(json.dumps(call.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def consume(self, call: ToolCall) -> bool:
+        with self._lock:
+            if self._used or self._fingerprint != self._digest(call):
+                return False
+            self._used = True
+            return True
 
 
 @dataclass
@@ -133,6 +177,7 @@ class ToolExecutionOutput:
     content: str
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    error: str | None = None
 
 
 # Argument models are validated by ToolRegistry immediately before dispatch.
@@ -150,6 +195,9 @@ class ToolDefinition:
     handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
+    approval_exempt: bool = False
+    allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
@@ -190,6 +238,9 @@ class ToolDefinition:
                 "side_effect": self.side_effect,
                 "source_adapter": self.source_adapter,
                 "source_revision": self.source_revision,
+                "allows_standing_grant": self.allows_standing_grant,
+                "approval_exempt": self.approval_exempt,
+                "requires_per_call_approval": self.requires_per_call_approval,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -213,6 +264,27 @@ class ToolDefinition:
             "description": self.description,
             "input_schema": self.parameters_schema(),
         }
+
+
+def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
+    """Effective approval requirement for one call under the user's permissions.
+
+    Fresh per-call approval cannot be waived by any mode or standing grant.
+    Otherwise, auto-approve waives approval. Eligible static built-in
+    grants skip approval; require_approval asks for remaining tools; default
+    falls back to the tool's flag. Mutable sources cannot redeem name-only grants.
+    """
+    if definition.requires_per_call_approval:
+        return True
+    if definition.approval_exempt:
+        return False
+    if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
+        return False
+    if definition.allows_standing_grant and definition.name in context.always_allow_tools:
+        return False
+    if context.permission_mode == PERMISSION_MODE_REQUIRE_APPROVAL:
+        return True
+    return definition.requires_approval
 
 
 @dataclass

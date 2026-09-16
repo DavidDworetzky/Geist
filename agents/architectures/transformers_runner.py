@@ -497,6 +497,7 @@ class TransformersRunner(BaseRunner):
         turn = parse_tool_response(
             response,
             provider_to_internal=payload.provider_to_internal,
+            tools=payload.tools,
         )
         if turn.text:
             yield ModelEvent.text_delta(turn.text)

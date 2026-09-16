@@ -133,9 +133,7 @@ def _run_streamed_tool_call(second_id=None):
             {
                 "choices": [
                     {
-                        "delta": {
-                            "tool_calls": [second_tool_call]
-                        },
+                        "delta": {"tool_calls": [second_tool_call]},
                         "finish_reason": "tool_calls",
                     }
                 ]

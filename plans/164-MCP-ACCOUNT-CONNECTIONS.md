@@ -162,3 +162,35 @@ PATH="$PWD/.venv/bin:$PATH" SKIP=frontend-eslint .venv/bin/pre-commit run
 /Users/daviddworetzky/.cache/pre-commit/repopzzhupy9/py_env-python3/bin/bandit -c pyproject.toml -b /tmp/geist-oauth-main-bandit.json <changed-python-files>
 docker run --rm --network none --tmpfs /tmp:mode=1777,size=268435456 --entrypoint /app/node_modules/.bin/eslint -v /Users/daviddworetzky/Documents/repos/Geist-wt/geist-5/client/geist/src:/app/src:ro -w /app geist-tools-mcp-pr-frontend <changed-frontend-files> --max-warnings=0
 ```
+
+### Main merge validation (2026-09-15)
+
+Merged `origin/main` at `964a057` and resolved the database adoption conflicts by
+retaining main's settings repairs and recognizing missing or existing OAuth
+metadata independently. Added merge revision `a8c1e3f5b7d9` joining the published
+OAuth revision and main's memory-settings revision without rewriting either.
+Historical test fixtures now omit the OAuth table; regressions verify upgrades
+from main and the original OAuth branch, existing credential-reference retention,
+legacy adoption with settings gaps, and repeated upgrades.
+
+- The same Docker backend suite command above passes **108 tests** after the
+  merge; the same frontend command passes **19 tests**. Existing Pydantic, Babel,
+  and React test warnings remain.
+- `ruff check` and `ruff format --check` pass for `app/database_upgrade.py`,
+  `tests/database/test_database_upgrade.py`, and the new merge revision.
+  `.venv/bin/python -m mypy --follow-imports=silent app/database_upgrade.py`
+  passes. `git diff --check` passes.
+- Reused the isolated compose harness with `up -d`; backend startup and frontend
+  compilation passed. `curl -fsS http://localhost:5535/health` reports healthy
+  lifespan/database checks. Curl checks on 3535 and the unrelated existing 3000
+  frontend return 200. No source or data in that existing stack was changed.
+- Browser verified the MCP tab, Google setup's missing-registration message,
+  disabled saved server, persistence after reload, and zero console errors.
+  Settings/chat smoke was not repeated for this database-conflict resolution;
+  prior results and live-provider limitations remain as documented above.
+  Native MLX is not applicable to the conflict-resolution changes.
+- All applicable scoped pre-commit checks pass for the manually resolved files.
+  Commit-time checks also include automatic merges, reproducing the previously
+  documented Whisper mypy error and missing local ESLint executable. Those two
+  hooks use the same exceptions as initial publication; targeted mypy and Docker
+  ESLint cover the automatic merges. Bandit and staged secret scanning pass.

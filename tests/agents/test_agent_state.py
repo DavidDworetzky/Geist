@@ -59,3 +59,13 @@ def test_agent_run_context_snapshots_terminal_execution_state():
     run.mark_persisted(41)
     assert conversation.chat_id == 41
     assert run.persisted_status == "completed"
+
+
+def test_tool_lifecycle_updates_replace_pending_state_in_snapshot():
+    run = ConversationState(chat_id=1, user_id=1).begin_run("write")
+    run.record_tool_call(ToolCallResult.create(id="call", name="tool", status="awaiting_approval"))
+    assert run.persistence_snapshot()["tool_calls"][0].status == "awaiting_approval"
+    run.record_tool_call(ToolCallResult.create(id="call", name="tool", status="succeeded"))
+    snapshot = run.persistence_snapshot()
+    assert len(snapshot["tool_calls"]) == 1
+    assert snapshot["tool_calls"][0].status == "succeeded"

@@ -2,7 +2,7 @@
 
 import json
 
-from agents.models.tool_calling import ToolCall, ToolContext
+from agents.models.tool_calling import InvocationApproval, ToolCall, ToolContext
 from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
 from app.services.plugin_loader import MCP_SCHEMA_ID, PLUGIN_SCHEMA_ID, PluginRegistry
 from app.services.tool_registry import ToolRegistry
@@ -147,7 +147,7 @@ class TestPluginMcpMounting:
                 workspace_id=1,
                 chat_id=None,
                 run_id="run-test",
-                approved_call_ids=frozenset({call.id}),
+                invocation_approval=InvocationApproval(call),
             ),
         )
         assert result.succeeded

@@ -67,6 +67,7 @@ def test_tool_catalogue_reports_redacted_image_configuration(tools_client):
     assert "adapter.JobStatusAdapter.check_async_tool" not in tools
     assert tools["workspace.list_markdown"]["enabled"] is True
     assert tools["workspace.read_markdown"]["enabled"] is True
+    assert tools["workspace.read_markdown"]["allows_standing_grant"] is True
     assert tools["image.generate"]["configuration"] == {
         "kind": "environment",
         "provider": "OpenAI-compatible image API",
@@ -79,3 +80,33 @@ def test_tool_catalogue_reports_redacted_image_configuration(tools_client):
             "model": "OPENAI_IMAGE_MODEL",
         },
     }
+
+
+def test_runtime_source_catalog_never_offers_standing_grants(tools_client, monkeypatch):
+    from types import SimpleNamespace
+
+    from pydantic import BaseModel
+
+    from agents.models.tool_calling import ToolDefinition, ToolExecutionOutput
+    from app import main
+    from app.services.tool_registry import ToolRegistry
+
+    class Arguments(BaseModel):
+        query: str
+
+    registry = ToolRegistry()
+    definition = ToolDefinition(
+        name="runtime.lookup",
+        description="Runtime lookup",
+        arguments_model=Arguments,
+        handler=lambda context, arguments: ToolExecutionOutput(content="result"),
+    )
+    registry.add_source(
+        SimpleNamespace(name="test-source", definitions=lambda context: [definition])
+    )
+    monkeypatch.setattr(main.chat_orchestrator, "registry", registry)
+    client, _secret = tools_client
+    response = client.get("/agent/tools")
+    assert response.status_code == 200
+    tools = {tool["name"]: tool for tool in response.json()["tools"]}
+    assert tools[definition.name]["allows_standing_grant"] is False

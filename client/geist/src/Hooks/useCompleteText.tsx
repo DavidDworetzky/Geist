@@ -5,8 +5,11 @@ import {
   ChatTurnResult,
   CompleteTextResponse,
   ModelLoadStatus,
+  OrchestrationState,
+  PlanTask,
   ToolCallResult,
   WorkArtifact,
+  UserInstruction,
 } from '../chatTypes';
 
 
@@ -41,6 +44,7 @@ const getDefaultParams = (settings: UserSettings | null) => ({
   response_format: "text",
   agent_type: getAgentTypeFromSettings(settings),
   enable_tools: true,
+  agentic_mode: settings ? settings.agentic_mode_enabled !== false : undefined,
 });
 
 type ToolCallUpdate = Partial<ToolCallResult> & Pick<ToolCallResult, 'id'>;
@@ -59,9 +63,12 @@ export type ChatStreamAction =
   | { type: 'MODEL_LOAD_STATUS'; status: ModelLoadStatus }
   | { type: 'TOOL_UPSERT'; toolCall: ToolCallUpdate }
   | { type: 'ARTIFACT_UPSERT'; artifact: WorkArtifact }
+  | { type: 'PLAN_UPDATE'; tasks: PlanTask[]; warning?: string | null }
+  | { type: 'GOAL_UPDATE'; orchestration: OrchestrationState }
+  | { type: 'USER_INSTRUCTION'; instruction: UserInstruction }
   | { type: 'FINAL'; prompt: string; data: CompleteTextResponse }
   | { type: 'DONE'; runId?: string | null; chatId?: number | null }
-  | { type: 'ERROR'; message: string }
+  | { type: 'ERROR'; message: string; modelLoad?: ModelLoadStatus }
   | { type: 'CANCELLING' }
   | { type: 'CANCEL_FAILED'; message: string }
   | { type: 'CANCELLED'; chatId?: number | null }
@@ -91,6 +98,9 @@ const mergeToolCall = (
   arguments: update.arguments ?? current?.arguments ?? {},
   status: update.status ?? current?.status ?? 'proposed',
   requires_approval: update.requires_approval ?? current?.requires_approval,
+  requires_per_call_approval:
+    update.requires_per_call_approval ?? current?.requires_per_call_approval,
+  can_grant: update.can_grant ?? current?.can_grant,
   result_summary: update.result_summary ?? current?.result_summary,
   artifact_ids: update.artifact_ids ?? current?.artifact_ids,
   error: update.error ?? current?.error,
@@ -228,6 +238,19 @@ export const chatStreamReducer = (
         },
       };
     }
+    case 'USER_INSTRUCTION': {
+      if (!state.activeTurn) return state;
+      const existing = state.activeTurn.instructions ?? [];
+      if (action.instruction.status === 'queued'
+        && existing.some(item => item.id === action.instruction.id && item.status === 'applied')) return state;
+      return {
+        ...state,
+        activeTurn: {
+          ...state.activeTurn,
+          instructions: [...existing.filter(item => item.id !== action.instruction.id), action.instruction],
+        },
+      };
+    }
     case 'ARTIFACT_UPSERT':
       if (!state.activeTurn) return state;
       return {
@@ -235,6 +258,32 @@ export const chatStreamReducer = (
         activeTurn: {
           ...state.activeTurn,
           artifacts: upsertArtifact(state.activeTurn.artifacts, action.artifact),
+        },
+      };
+    case 'PLAN_UPDATE':
+      if (!state.activeTurn) return state;
+      return {
+        ...state,
+        activeTurn: {
+          ...state.activeTurn,
+          orchestration: {
+            ...(state.activeTurn.orchestration ?? { agentic_mode: true }),
+            agentic_mode: true,
+            tasks: action.tasks,
+            decomposition_warning: action.warning ?? null,
+          },
+        },
+      };
+    case 'GOAL_UPDATE':
+      if (!state.activeTurn) return state;
+      return {
+        ...state,
+        activeTurn: {
+          ...state.activeTurn,
+          orchestration: {
+            ...(state.activeTurn.orchestration ?? { agentic_mode: true, tasks: [] }),
+            ...action.orchestration,
+          },
         },
       };
     case 'FINAL': {
@@ -246,6 +295,8 @@ export const chatStreamReducer = (
         origin_chat_id: state.activeTurn?.origin_chat_id ?? null,
         tool_calls: dedupeTools(action.data.tool_calls ?? []),
         artifacts: dedupeArtifacts(action.data.artifacts ?? []),
+        orchestration: action.data.orchestration ?? state.activeTurn?.orchestration ?? null,
+        instructions: action.data.instructions ?? state.activeTurn?.instructions ?? [],
       };
       return {
         ...state,
@@ -270,9 +321,9 @@ export const chatStreamReducer = (
       return {
         ...state,
         loading: false,
-        error: action.message,
+        error: action.modelLoad ? null : action.message,
         activeTurn: state.activeTurn
-          ? { ...state.activeTurn, status: 'failed', model_load: undefined }
+          ? { ...state.activeTurn, status: 'failed', model_load: action.modelLoad }
           : null,
       };
     case 'CANCELLING':
@@ -354,6 +405,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   const [state_chat_id, setStateChatId] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const [steeringError, setSteeringError] = useState<string | null>(null);
+  const [steeringStatus, setSteeringStatus] = useState<string | null>(null);
+  const [isSteering, setIsSteering] = useState(false);
+  const instructionSequenceRef = useRef(0);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
@@ -445,6 +500,16 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       dispatch({ type: 'TOOL_UPSERT', toolCall: data as unknown as ToolCallUpdate });
     } else if (event === 'artifact' && isRecord(data) && typeof data.id === 'string') {
       dispatch({ type: 'ARTIFACT_UPSERT', artifact: data as unknown as WorkArtifact });
+    } else if (event === 'plan' && isRecord(data) && Array.isArray(data.tasks)) {
+      dispatch({
+        type: 'PLAN_UPDATE',
+        tasks: data.tasks as PlanTask[],
+        warning: typeof data.warning === 'string' ? data.warning : null,
+      });
+    } else if (event === 'goal' && isRecord(data) && Array.isArray(data.tasks)) {
+      dispatch({ type: 'GOAL_UPDATE', orchestration: data as unknown as OrchestrationState });
+    } else if (event === 'user_instruction' && isRecord(data) && typeof data.id === 'string' && typeof data.text === 'string') {
+      dispatch({ type: 'USER_INSTRUCTION', instruction: data as unknown as UserInstruction });
     } else if (event === 'final' && isRecord(data)) {
       const response = data as unknown as CompleteTextResponse;
       if (typeof response.run_id === 'string') {
@@ -468,7 +533,21 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       const message = isRecord(data)
         ? String(data.message ?? data.error ?? 'Chat stream failed')
         : String(data || 'Chat stream failed');
-      dispatch({ type: 'ERROR', message });
+      const failure = isRecord(data) && isRecord(data.model_load) ? data.model_load : null;
+      const modelLoad: ModelLoadStatus | undefined = failure
+        && failure.state === 'failed'
+        && typeof failure.model_id === 'string'
+        && typeof failure.detail === 'string'
+        && typeof failure.updated_at === 'string'
+        && (failure.error_code === 'gpu_memory' || failure.error_code === 'system_memory'
+          || failure.error_code === 'unified_memory')
+        ? {
+            model_id: failure.model_id, state: 'failed', detail: failure.detail,
+            error_code: failure.error_code, started_at: null, updated_at: failure.updated_at,
+            can_offload_to_system_ram: failure.can_offload_to_system_ram === true,
+          }
+        : undefined;
+      dispatch({ type: 'ERROR', message, modelLoad });
     } else if (event === 'cancelled') {
       const chatId = isRecord(data) && typeof data.chat_id === 'number'
         ? data.chat_id
@@ -495,6 +574,8 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     activeRunIdRef.current = null;
 
     const currentChatId = chat_id === undefined ? state_chat_id : chat_id;
+    setSteeringError(null);
+    setSteeringStatus(null);
     const prompt = inputText;
     const params = getDefaultParams(userSettings);
     dispatch({ type: 'START', prompt, chatId: currentChatId });
@@ -592,6 +673,39 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     }
   };
 
+  const steerRun = async (text: string): Promise<boolean> => {
+    const runId = activeRunIdRef.current;
+    if (!runId || !streamState.loading) return false;
+    setIsSteering(true);
+    setSteeringError(null);
+    setSteeringStatus(null);
+    const instructionId = globalThis.crypto?.randomUUID?.() ?? `${runId}:${Date.now()}:${++instructionSequenceRef.current}`;
+    try {
+      const response = await fetch(`/agent/runs/${encodeURIComponent(runId)}/instructions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction_id: instructionId, text }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        const detail = typeof body?.detail === 'string' ? body.detail
+          : Array.isArray(body?.detail) ? body.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join('; ')
+            : 'Instructions were not accepted. Keep your message and retry.';
+        throw new Error(detail);
+      }
+      if (activeRunIdRef.current === runId) {
+        dispatch({ type: 'USER_INSTRUCTION', instruction: { id: instructionId, text: text.trim(), status: 'queued' } });
+      }
+      setSteeringStatus('Instructions queued. The agent will read them before its next step.');
+      return true;
+    } catch (error) {
+      setSteeringError(error instanceof Error ? error.message : 'Could not send instructions.');
+      return false;
+    } finally {
+      setIsSteering(false);
+    }
+  };
+
   const cancelGeneration = async () => {
     const runId = activeRunIdRef.current;
     if (!runId) {
@@ -654,6 +768,10 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   return {
     prompt,
     completeText,
+    steerRun,
+    steeringError,
+    steeringStatus,
+    isSteering,
     cancelGeneration,
     resetChatSession,
     loading: streamState.loading,
