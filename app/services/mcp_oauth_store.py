@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -20,7 +21,7 @@ class CredentialStoreError(RuntimeError):
 
 
 def _directory() -> Path:
-    if os.name != "posix":
+    if sys.platform == "win32" or os.name != "posix":
         raise CredentialStoreError("OAuth credential storage currently requires macOS or Linux")
     directory = default_data_dir() / "mcp-credentials"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -39,6 +40,8 @@ def _path(credential_id: str) -> Path:
 
 @contextmanager
 def connection_lock(server_id: int, timeout_seconds: float = 30) -> Iterator[None]:
+    if sys.platform == "win32":
+        raise CredentialStoreError("OAuth credential storage currently requires macOS or Linux")
     directory = _directory()
     import fcntl
 
@@ -63,6 +66,8 @@ def connection_lock(server_id: int, timeout_seconds: float = 30) -> Iterator[Non
 
 
 def read_credentials(credential_id: str) -> dict:
+    if sys.platform == "win32":
+        raise CredentialStoreError("OAuth credential storage currently requires macOS or Linux")
     try:
         descriptor = os.open(_path(credential_id), os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(descriptor, "r", encoding="utf-8") as handle:

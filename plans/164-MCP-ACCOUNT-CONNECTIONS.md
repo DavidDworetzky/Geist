@@ -194,3 +194,23 @@ legacy adoption with settings gaps, and repeated upgrades.
   documented Whisper mypy error and missing local ESLint executable. Those two
   hooks use the same exceptions as initial publication; targeted mypy and Docker
   ESLint cover the automatic merges. Bandit and staged secret scanning pass.
+
+### Windows CI repair
+
+The Windows native-host job found five mypy errors in the OAuth store: `getuid`
+and `fcntl` locking symbols are unavailable in Windows typeshed. Explicit
+`sys.platform == "win32"` guards now reject credential operations before those
+Unix-only APIs. The supported macOS/Linux path and the documented Windows
+unsupported-platform message remain unchanged. No workflow checks were weakened.
+
+- Reproduced all five errors with
+  `.venv/bin/python -m mypy --platform win32 --follow-imports=silent app/services/mcp_oauth_store.py`;
+  the same command passes after the fix.
+- The full failing CI file set passes locally with Windows targeting:
+  `.venv/bin/python -m mypy --platform win32 agents/architectures/llama_server_process.py agents/architectures/llama_server_process_platform.py agents/architectures/llama_server_process_posix.py agents/architectures/llama_server_process_windows.py app/cli.py app/runtime_config.py`.
+- The Docker backend suite above, with `tests/services/test_mcp_oauth_store.py`
+  added, passes **112 tests**. New cases cover Windows read, write, delete, and
+  locking rejection before filesystem access. Ruff lint/format pass.
+- Native Windows execution is delegated to the GitHub Windows runner; the local
+  machine is macOS. No inference behavior changed. Docker/browser startup smoke
+  results from the merge remain applicable to the unchanged supported path.
