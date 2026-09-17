@@ -573,6 +573,25 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "stealth/union-alpha",
+        "Union Alpha (Preview)",
+        "stealth",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=262144,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_streaming=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        local=False,
+        performance_note=(
+            "Anonymous third-party preview on OpenRouter for research, coding, and "
+            "agentic workflows. Prompts and completions may be retained by the "
+            "provider but are not used for training."
+        ),
+    ),
+    ModelSpec(
         "meta/muse-spark-1.2-contributor",
         "Muse Spark 1.2 Contributor",
         "muse",

@@ -214,6 +214,7 @@ class TestOnlineAgentInitialization:
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
+            "stealth/union-alpha",
         ],
     )
     def test_openrouter_initialization(self, model_id):
@@ -598,6 +599,44 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
+
+    def test_union_alpha_completion_uses_openrouter_key_and_supported_parameters(self):
+        context = create_mock_agent_context()
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="stealth/union-alpha",
+            )
+
+        with patch.object(agent.client, "post") as mock_post:
+            response = Mock(status_code=200)
+            response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = response
+            result = agent.complete_text(
+                prompt="Hello",
+                max_tokens=100,
+                n=1,
+                temperature=0.7,
+                top_p=0.9,
+                frequency_penalty=0.5,
+                presence_penalty=0.5,
+                stop="END",
+            )
+
+        assert result.choices[0].message.content == "This is a test response from OpenAI."
+        assert mock_post.call_args.args[0] == "https://openrouter.ai/api/v1/chat/completions"
+        assert (
+            mock_post.call_args.kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
+        )
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == "stealth/union-alpha"
+        assert payload["max_tokens"] == 100
+        assert payload["temperature"] == 0.7
+        assert payload["top_p"] == 0.9
+        assert (
+            not {"n", "frequency_penalty", "presence_penalty", "stop", "reasoning"} & payload.keys()
+        )
 
     def test_openai_complete_text(self):
         """Test complete_text with OpenAI API."""

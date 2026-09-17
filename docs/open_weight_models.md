@@ -174,6 +174,31 @@ supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
 
+## OpenRouter-hosted Union Alpha (Preview)
+
+Create an API key in [OpenRouter's key settings](https://openrouter.ai/settings/keys)
+and supply it to the Geist backend as `OPENROUTER_API_KEY`, using your existing
+secret manager or local environment configuration. Restart the backend after
+changing the key. In Settings, choose Online mode, provider **OpenRouter**, and
+model **Union Alpha (Preview)** (`stealth/union-alpha`), then save.
+This uses Geist's existing OpenRouter credential support; no Cloudflare token
+or account ID is required.
+
+The [OpenRouter model page](https://openrouter.ai/stealth/union-alpha) and
+[endpoint metadata](https://openrouter.ai/api/v1/models/stealth/union-alpha/endpoints),
+checked September 17, 2026, list a 262,144-token context, 131,072-token maximum
+output, text and image input, and native tools with automatic tool choice.
+The endpoint supports JSON output via `response_format`, without JSON-schema
+enforcement. It does not advertise configurable reasoning. Geist omits the
+unsupported `n`, `frequency_penalty`, `presence_penalty`, and `stop` parameters.
+
+Union Alpha's developer is anonymous. Cloudflare's catalog also labels it as
+[a third-party model](https://developers.cloudflare.com/ai/models/stealth/union-alpha/);
+that listing does not establish Cloudflare as its developer. Preview access is
+currently free, but availability and pricing can change. Prompts and completions
+may be retained by the provider but are not used for training; review
+OpenRouter's linked Stealth Model Terms before use.
+
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
