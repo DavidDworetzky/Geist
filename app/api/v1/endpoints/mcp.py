@@ -136,6 +136,7 @@ class McpServerResponse(BaseModel):
     timeout_seconds: float
     create_date: Any
     update_date: Any
+    oauth_configured: bool = False
 
 
 class McpToolInfo(BaseModel):
@@ -249,6 +250,16 @@ async def update_server(
     try:
         existing = _owned_server_or_404(mcp_server_id, operator.workspace_id)
         updates = request.model_dump(exclude_unset=True)
+        if existing.oauth_configured and (
+            any(
+                key in updates and updates[key] != getattr(existing, key)
+                for key in ("transport", "url")
+            )
+            or any(key.lower() == "authorization" for key in (updates.get("headers") or {}))
+        ):
+            raise HTTPException(
+                409, "Disconnect OAuth before changing the endpoint or Authorization header"
+            )
         try:
             _preserve_redacted_secrets(updates, existing)
         except ValueError as error:
@@ -301,7 +312,11 @@ async def delete_server(
     operator: OperatorPrincipal = Depends(_require_tools_operator),
 ):
     try:
-        _owned_server_or_404(mcp_server_id, operator.workspace_id)
+        server = _owned_server_or_404(mcp_server_id, operator.workspace_id)
+        if server.oauth_configured:
+            from app.services.mcp_oauth import disconnect
+
+            await run_in_threadpool(disconnect, server)
         if not delete_mcp_server(mcp_server_id, workspace_id=operator.workspace_id):
             raise HTTPException(status_code=404, detail="MCP server not found")
         _invalidate(mcp_server_id)

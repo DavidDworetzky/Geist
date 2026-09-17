@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import McpServersSection from '../McpServersSection';
 
 const stdioServer = {
@@ -100,9 +100,7 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Add MCP Server'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'my-server' } });
     fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'npx' } });
-    await act(async () => {
-      fireEvent.click(screen.getByText('Add Server'));
-    });
+    fireEvent.click(screen.getByText('Add Server'));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -137,6 +135,9 @@ describe('McpServersSection', () => {
       enabled: false,
     };
     const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url.endsWith('/oauth')) {
+        return jsonResponse({ providers: [], provider: 'google', status: 'connected' });
+      }
       if (url === '/api/v1/mcp/servers/2' && options?.method === 'PUT') {
         return jsonResponse(gmailServer);
       }
@@ -147,6 +148,7 @@ describe('McpServersSection', () => {
     render(<McpServersSection />);
 
     const editButton = await screen.findByRole('button', { name: 'Edit Gmail' });
+    await screen.findByText('Account connected. Test the server before enabling its tools.');
     expect(screen.getByText('Configured')).toBeInTheDocument();
     fireEvent.click(editButton);
     expect(screen.getByRole('heading', { name: 'Edit MCP Server' })).toBeInTheDocument();
@@ -155,9 +157,7 @@ describe('McpServersSection', () => {
       'Google OAuth 2.0 delegated authorization'
     );
 
-    await act(async () => {
-      fireEvent.click(screen.getByText('Save Server'));
-    });
+    fireEvent.click(screen.getByText('Save Server'));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -166,6 +166,9 @@ describe('McpServersSection', () => {
       );
     });
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Edit MCP Server' })).not.toBeInTheDocument();
+    });
   });
 
   it('requires a command before submitting a stdio server', async () => {
@@ -226,4 +229,34 @@ describe('McpServersSection', () => {
     const result = await screen.findByTestId('mcp-test-result-1');
     expect(result.textContent).toContain('Connection failed: Could not start MCP server');
   });
+});
+
+it('keeps the newly saved Gmail server editable when OAuth needs configuration', async () => {
+  const saved = { ...stdioServer, mcp_server_id: 12, name: 'gmail', transport: 'http', command: null, url: 'https://gmailmcp.googleapis.com/mcp/v1', headers: {} };
+  let created = false;
+  global.fetch = jest.fn((url: string, options?: RequestInit) => {
+    if (url.endsWith('/oauth/start')) return jsonResponse({ detail: 'Configure the Google OAuth application' }, 409);
+    if (url.endsWith('/oauth')) return jsonResponse({ providers: [{ id: 'google', label: 'Google', ready: false, scopes: [] }], status: 'disconnected' });
+    if (options?.method === 'POST') { created = true; return jsonResponse(saved, 201); }
+    return jsonResponse(created ? [saved] : []);
+  }) as any;
+  render(<McpServersSection />);
+  await screen.findByText('No MCP servers configured yet.');
+  fireEvent.click(screen.getByRole('button', { name: 'Configure Gmail' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save and connect with Google' }));
+  expect(await screen.findByText('Configure the Google OAuth application')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Edit MCP Server' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Name')).toHaveValue('gmail');
+  expect(await screen.findByRole('button', { name: 'Connect with Google' })).toBeDisabled();
+});
+
+it('explains Bridge credentials and local networking during Proton setup', async () => {
+  global.fetch = jest.fn(() => jsonResponse([])) as any;
+  render(<McpServersSection />);
+  await screen.findByText('No MCP servers configured yet.');
+  fireEvent.click(screen.getByRole('button', { name: 'Configure Proton Mail' }));
+  expect(screen.getByRole('link', { name: 'Install Proton Mail Bridge' })).toHaveAttribute('href', 'https://proton.me/mail/bridge');
+  expect(screen.getByText(/Use the Bridge password, which is separate/)).toBeInTheDocument();
+  expect(screen.getByText(/localhost refers to the container/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /connect with Google/ })).not.toBeInTheDocument();
 });
