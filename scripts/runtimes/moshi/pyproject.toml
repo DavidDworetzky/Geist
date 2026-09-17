@@ -1,0 +1,27 @@
+[project]
+name = "geist-moshi-worker"
+version = "0.1.0"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "mlx==0.31.2",
+    "moshi-mlx==0.3.0",
+    "sentencepiece==0.2.1",
+]
+
+[tool.uv]
+package = false
+override-dependencies = ["mlx==0.31.2", "sentencepiece==0.2.1"]
+# Geist supplies transport, capture, playback and the Rust Mimi codec.
+# Preserve 0.3.0's inference requirements; omit aiohttp, sounddevice and sphn,
+# which only support the standalone web/audio demos. Use only Geist's worker.
+[[tool.uv.dependency-metadata]]
+name = "moshi-mlx"
+version = "0.3.0"
+requires-dist = [
+    "numpy>=2.1.0,<2.3",
+    "safetensors>=0.4.0,<0.6",
+    "huggingface-hub>=0.24,<0.29",
+    "rustymimi==0.4.1",
+    "sentencepiece==0.2.0",
+    "mlx>=0.26.0,<0.27",
+]
