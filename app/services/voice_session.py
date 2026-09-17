@@ -9,10 +9,10 @@ from typing import Any
 
 import numpy as np
 
-from adapters.mms_adapter import MMSAdapter
-from adapters.whisper_adapter import WhisperAdapter
 from agents.base_agent import BaseAgent
+from app.services.stt import STTAdapter, create_stt_adapter
 from app.services.tts import TTSProvider, create_tts_provider
+from app.services.vad import VADProvider, create_vad
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ class VoiceSessionService:
         tts_provider: str = "sesame",
         sample_rate: int = 16000,
         vad_threshold: float = 0.01,
+        vad_provider: str = "auto",
         silence_duration_ms: int = 800,
         chunk_duration_ms: int = 100,
         **provider_kwargs,
@@ -45,10 +46,13 @@ class VoiceSessionService:
 
         Args:
             agent: Agent to use for text completion
-            stt_provider: STT provider ("mms" or "whisper")
-            tts_provider: TTS provider ("sesame", "openai", or "qwen3")
+            stt_provider: STT provider ("mms", "whisper", "faster_whisper",
+                or "parakeet")
+            tts_provider: TTS provider ("sesame", "openai", "qwen3",
+                "kokoro", or "cosyvoice2")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
+            vad_provider: VAD provider ("silero", "rms", or "auto")
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
             chunk_duration_ms: Audio chunk duration for processing (ms)
             **provider_kwargs: Additional provider-specific arguments
@@ -60,14 +64,12 @@ class VoiceSessionService:
         self.chunk_duration_ms = chunk_duration_ms
 
         # Initialize STT
-        self.stt: MMSAdapter | WhisperAdapter
-        if stt_provider.lower() == "mms":
-            self.stt = MMSAdapter()
-        elif stt_provider.lower() == "whisper":
-            api_key = provider_kwargs.get("whisper_api_key")
-            self.stt = WhisperAdapter(api_key=api_key)
-        else:
-            raise ValueError(f"Unknown STT provider: {stt_provider}")
+        self.stt: STTAdapter = create_stt_adapter(stt_provider, **provider_kwargs)
+
+        # Initialize VAD
+        self.vad: VADProvider = create_vad(
+            vad_provider, rms_threshold=vad_threshold, sample_rate=sample_rate
+        )
 
         # Initialize TTS
         self.tts: TTSProvider = create_tts_provider(tts_provider, **provider_kwargs)
@@ -85,9 +87,8 @@ class VoiceSessionService:
         return float(np.sqrt(np.mean(audio_chunk**2)))
 
     def _detect_speech(self, audio_chunk: np.ndarray) -> bool:
-        """Simple VAD using RMS threshold."""
-        rms = self._calculate_rms(audio_chunk)
-        return rms > self.vad_threshold
+        """Voice activity detection via the configured VAD provider."""
+        return self.vad.is_speech(audio_chunk)
 
     def add_audio_chunk(self, audio_chunk: bytes) -> str | None:
         """
@@ -256,4 +257,5 @@ class VoiceSessionService:
         self.audio_buffer.clear()
         self.transcript_buffer = ""
         self.silence_frames = 0
+        self.vad.reset()
         self.logger.info("Voice session reset")
