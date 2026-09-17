@@ -98,7 +98,9 @@ class SequencedOpenAIClient(OpenAIClient):
         return next(self.responses)
 
 
-def _run_streamed_tool_call(second_id=None):
+def _run_streamed_tool_call(
+    second_id=None, *, model="gpt-test", endpoint="https://api.openai.com/v1"
+):
     provider_name = OnlineAgent._provider_tool_name("web.search")
     second_tool_call = {
         "index": 0,
@@ -141,7 +143,7 @@ def _run_streamed_tool_call(second_id=None):
         ),
         "data: [DONE]",
     ]
-    agent = OnlineAgent(context(), "https://api.openai.com/v1", "gpt-test", api_key="key")
+    agent = OnlineAgent(context(), endpoint, model, api_key="key")
     agent.client.close()
     agent.client = OpenAIClient(lines)
 
@@ -168,6 +170,25 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
     assert payload["tools"][0]["function"]["name"] == provider_name
     assert provider_name != "web.search"
     assert payload["tools"][0]["function"]["parameters"]["required"] == ["query"]
+
+
+def test_union_alpha_stream_filters_defaults_and_preserves_automatic_tool_calling():
+    turn, agent, provider_name = _run_streamed_tool_call(
+        model="stealth/union-alpha", endpoint="https://openrouter.ai/api/v1"
+    )
+
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "today news"}
+    assert turn.finish_reason == "tool_calls"
+    assert agent.client.request["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    payload = agent.client.request["json"]
+    assert payload["model"] == "stealth/union-alpha"
+    assert payload["stream"] is True
+    assert payload["tool_choice"] == "auto"
+    assert payload["tools"][0]["function"]["name"] == provider_name
+    assert payload["temperature"] == 1.0
+    assert payload["top_p"] == 1.0
+    assert not {"n", "frequency_penalty", "presence_penalty", "stop", "reasoning"} & payload.keys()
 
 
 def test_openai_stream_accepts_repeated_tool_call_id():
