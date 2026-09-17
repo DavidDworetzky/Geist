@@ -15,6 +15,7 @@ interface EnhancedChatInputProps {
   sessionId?: number;
   enableVoice?: boolean;
   submitLabel?: string;
+  secondaryAction?: React.ReactNode;
   modelLoading?: boolean;
   onShowModelError?: () => void;
 }
@@ -34,6 +35,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   sessionId = 1,
   enableVoice = true,
   submitLabel = 'Send',
+  secondaryAction,
   modelLoading = false,
   onShowModelError,
 }) => {
@@ -236,6 +238,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             </>
           )}
 
+          {secondaryAction}
           <button
             type="button"
             onClick={handleSubmit}
