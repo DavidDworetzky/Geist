@@ -573,9 +573,9 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
-        "stealth/union-alpha",
-        "Union Alpha (Preview)",
-        "stealth",
+        "unbiased/pareto",
+        "Pareto",
+        "pareto",
         provider="openrouter",
         backend="openai_compatible",
         context_window=262144,
@@ -586,9 +586,10 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
         local=False,
         performance_note=(
-            "Anonymous third-party preview on OpenRouter for research, coding, and "
-            "agentic workflows. Prompts and completions may be retained by the "
-            "provider but are not used for training."
+            "Stable composite model hosted through OpenRouter's sole Unbiased route. "
+            "The provider retains requests for 30 days but does not use them for "
+            "training; this route is not ZDR-eligible, so do not use it for "
+            "confidential workloads."
         ),
     ),
     ModelSpec(

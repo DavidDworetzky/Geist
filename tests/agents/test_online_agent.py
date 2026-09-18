@@ -214,7 +214,7 @@ class TestOnlineAgentInitialization:
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
-            "stealth/union-alpha",
+            "unbiased/pareto",
         ],
     )
     def test_openrouter_initialization(self, model_id):
@@ -600,13 +600,13 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_union_alpha_completion_uses_openrouter_key_and_supported_parameters(self):
+    def test_pareto_completion_uses_openrouter_key_and_supported_parameters(self):
         context = create_mock_agent_context()
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}, clear=True):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="stealth/union-alpha",
+                model="unbiased/pareto",
             )
 
         with patch.object(agent.client, "post") as mock_post:
@@ -630,7 +630,7 @@ class TestOnlineAgentAPIRequests:
             mock_post.call_args.kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
         )
         payload = mock_post.call_args.kwargs["json"]
-        assert payload["model"] == "stealth/union-alpha"
+        assert payload["model"] == "unbiased/pareto"
         assert payload["max_tokens"] == 100
         assert payload["temperature"] == 0.7
         assert payload["top_p"] == 0.9
