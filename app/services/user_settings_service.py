@@ -8,6 +8,7 @@ from typing import Any, Literal
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.factory import AgentFactory
+from agents.model_catalog import canonicalize_online_model_id
 from agents.model_ids import canonicalize_local_model_id
 from app.models.database.geist_user import get_default_workspace
 from app.models.database.user_settings import (
@@ -44,7 +45,10 @@ def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSetting
     payload["agent_permissions"] = _permissions_from_stored(settings_model.agent_permissions)
     response = UserSettingsResponse.model_validate(payload)
     return response.model_copy(
-        update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
+        update={
+            "default_local_model": canonicalize_local_model_id(response.default_local_model),
+            "default_online_model": canonicalize_online_model_id(response.default_online_model),
+        }
     )
 
 
@@ -108,6 +112,10 @@ class UserSettingsService:
         if "default_local_model" in update_dict:
             update_dict["default_local_model"] = canonicalize_local_model_id(
                 update_dict["default_local_model"]
+            )
+        if "default_online_model" in update_dict:
+            update_dict["default_online_model"] = canonicalize_online_model_id(
+                update_dict["default_online_model"]
             )
 
         current_local_model = canonicalize_local_model_id(current_settings.default_local_model)
