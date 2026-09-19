@@ -681,6 +681,14 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
 
 _MODEL_INDEX = {spec.id.lower(): spec for spec in MODEL_SPECS}
 _MODEL_ALIAS_INDEX = {alias.lower(): spec for spec in MODEL_SPECS for alias in spec.aliases}
+_RETIRED_ONLINE_MODEL_IDS = {
+    "stealth/union-alpha": "unbiased/pareto",
+}
+
+
+def canonicalize_online_model_id(model_id: str) -> str:
+    """Map retired hosted model IDs to their supported replacements."""
+    return _RETIRED_ONLINE_MODEL_IDS.get(model_id.lower(), model_id)
 
 
 def get_model_spec(model_id: str) -> ModelSpec | None:

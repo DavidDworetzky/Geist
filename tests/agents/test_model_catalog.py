@@ -13,6 +13,7 @@ from agents.model_catalog import (
     MODEL_SPECS,
     PROVIDERS,
     ProviderSpec,
+    canonicalize_online_model_id,
     default_local_model_id,
     get_model_spec,
     get_provider_endpoint,
@@ -51,6 +52,8 @@ def test_pareto_is_a_stable_openrouter_model_with_verified_capabilities():
     assert "does not use them for training" in spec.performance_note
     assert "not ZDR-eligible" in spec.performance_note
     assert "do not use it for confidential workloads" in spec.performance_note
+    assert get_model_spec("stealth/union-alpha") is None
+    assert canonicalize_online_model_id("stealth/union-alpha") == "unbiased/pareto"
     assert PROVIDERS[spec.provider].api_key_env == "OPENROUTER_API_KEY"
 
 

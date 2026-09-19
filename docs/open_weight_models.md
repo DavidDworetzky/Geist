@@ -181,8 +181,7 @@ and supply it to the Geist backend as `OPENROUTER_API_KEY`, using your existing
 secret manager or local environment configuration. Restart the backend after
 changing the key. In Settings, choose Online mode, provider **OpenRouter**, and
 model **Pareto** (`unbiased/pareto`), then save.
-This uses Geist's existing OpenRouter credential support; no Cloudflare token
-or account ID is required.
+This uses Geist's existing OpenRouter credential support.
 
 The [OpenRouter model page](https://openrouter.ai/unbiased/pareto) and
 [endpoint metadata](https://openrouter.ai/api/v1/models/unbiased/pareto-20260917/endpoints),
