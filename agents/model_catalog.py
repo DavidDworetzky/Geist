@@ -573,6 +573,30 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "z-ai/glm-5.3-flashx",
+        "GLM 5.3 FlashX",
+        "glm",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="320B",
+        activated_parameters="18B",
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="max",
+        local=False,
+        performance_note=(
+            "High-speed single-provider GLM 5.3 Flash tier through OpenRouter. "
+            "Geist applies Z.AI's recommended max reasoning effort; re-check the "
+            "fresh route's availability and data policy before sensitive deployments."
+        ),
+    ),
+    ModelSpec(
         "stealth/union-alpha",
         "Union Alpha (Preview)",
         "stealth",
