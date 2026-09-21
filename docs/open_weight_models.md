@@ -11,10 +11,11 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
-Flash routes are also intentionally server-backed. For models with published
-weights, their total resident weights make an in-process laptop load impractical
-even when their mixture-of-experts active-parameter count is much smaller.
+and OpenRouter's GLM 5.3 Flash/FlashX, Grok 4.6, Qwen 3.8 Flash, and DeepSeek
+V4.1 Flash routes are also intentionally server-backed. For models with
+published weights, their total resident weights make an in-process laptop load
+impractical even when their mixture-of-experts active-parameter count is much
+smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -173,6 +174,37 @@ OpenRouter may route this model across providers with different context limits,
 supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
+
+## OpenRouter-hosted GLM 5.3 FlashX
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`z-ai/glm-5.3-flashx`. OpenRouter added the stable high-speed route on September
+18, 2026. Its [model page](https://openrouter.ai/z-ai/glm-5.3-flashx/) and
+[endpoint API](https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flashx-20260918/endpoints)
+list a 1,048,576-token context, 131,072-token output limit, image and video
+input, streaming, response-format JSON, and native function calling. JSON-schema
+enforcement is not advertised. Geist sends Z.AI's recommended `max` reasoning
+effort and omits unsupported `n`, frequency-penalty, presence-penalty, and stop
+parameters.
+
+[Z.AI's model documentation](https://docs.z.ai/guides/vlm/glm-5.3-flash)
+describes FlashX as the same 320B-total/18B-active multimodal model served at up
+to 200 tokens/second. OpenRouter showed a 91-token/second provider median,
+1.96-second latency, 98.98% 24-hour availability, and one Z.AI FP8 endpoint when
+checked September 19, 2026. A small independent six-run comparison reported
+[283.8 tokens/second median generation and 64% lower completion time](https://labmemo.com/glm-5-3-flashx-speed-benchmark-coding-plan-2026/)
+than the regular Flash tier, but it tested a deterministic counting task rather
+than coding or visual quality. Treat FlashX as a latency tier, not a capability
+upgrade.
+
+[Z.AI pricing](https://docs.z.ai/guides/overview/pricing) and OpenRouter both
+list $0.37 per million input tokens, $1.25 per million output tokens, and $0.075
+per million cached input tokens—about 2.5 times the regular Flash tier. The
+[OpenRouter provider registry](https://openrouter.ai/providers/) labels Z.AI as
+zero-retention and not used for training, while OpenRouter content logging is
+opt-in. This newly added exact endpoint did not yet appear in OpenRouter's ZDR
+inventory during the September 19 check. Re-check endpoint policy and qualify
+availability before confidential or high-reliability workloads.
 
 ## OpenRouter-hosted Union Alpha (Preview)
 
