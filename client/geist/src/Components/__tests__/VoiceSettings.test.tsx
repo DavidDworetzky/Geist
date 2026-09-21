@@ -21,7 +21,9 @@ describe('voice modes', () => {
 
   it('defaults to dictation and only offers transcription settings', () => {
     render(<Settings />);
-    expect(screen.getByRole('button', { name: 'Dictation' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Dictation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Live chat' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Live chat' })).toHaveAttribute('title', 'Live chat');
     fireEvent.click(screen.getByLabelText('Voice settings'));
     expect(screen.getByLabelText('Speech to text')).toHaveValue('mms');
     expect(screen.queryByLabelText('Live voice model')).not.toBeInTheDocument();
@@ -38,7 +40,7 @@ describe('voice modes', () => {
     fireEvent.change(screen.getByLabelText('Live voice model'), { target: { value: 'local_live/kyutai/moshiko-mlx-q4' } });
     expect(screen.getByLabelText('Voice')).toHaveValue('moshiko');
     expect(screen.getByText('Configured local voice engine')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Dictation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live chat' }));
     expect(screen.getByLabelText('Speech to text')).toHaveValue('mms');
   });
 

@@ -29,7 +29,7 @@ it('live chat replaces the composer and restores the unsent draft on return', ()
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Live voice conversation')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Dictation', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Live chat', exact: true }));
   expect(screen.getByRole('textbox')).toHaveValue('Keep this draft');
 });
 

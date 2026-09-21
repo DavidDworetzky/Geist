@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import useVoiceModels from '../Hooks/useVoiceModels';
+import BrandMark from './BrandMark';
 
 export interface VoiceSelection {
   mode: 'dictation' | 'live';
@@ -30,12 +31,6 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({ selection, onChange, disa
 
   return (
     <div className="voice-controls">
-      <div className="voice-mode-switch" role="group" aria-label="Voice mode">
-        <button type="button" disabled={disabled} aria-pressed={selection.mode === 'dictation'}
-          onClick={() => onChange({ ...selection, mode: 'dictation' })}>Dictation</button>
-        <button type="button" disabled={disabled} aria-pressed={selection.mode === 'live'}
-          onClick={() => onChange({ ...selection, mode: 'live' })}>Live chat</button>
-      </div>
       <div className="voice-settings">
         <button type="button" className="voice-settings-toggle" disabled={disabled}
           aria-expanded={expanded} aria-label="Voice settings" onClick={() => setExpanded(value => !value)}>⚙</button>
@@ -82,6 +77,11 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({ selection, onChange, disa
           </div>
         )}
       </div>
+      <button type="button" className="live-chat-toggle" disabled={disabled}
+        aria-label="Live chat" title="Live chat" aria-pressed={selection.mode === 'live'}
+        onClick={() => onChange({ ...selection, mode: selection.mode === 'live' ? 'dictation' : 'live' })}>
+        <BrandMark />
+      </button>
     </div>
   );
 };
