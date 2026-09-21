@@ -1,4 +1,5 @@
 """Tests for model-specific weight download locations."""
+
 import os
 
 import pytest
@@ -55,10 +56,11 @@ def test_voice_models_download_into_hugging_face_cache(monkeypatch):
     fetched_repos = {call["repo_id"] for call in snapshot_calls + file_calls}
     assert "sesame/csm-1b" in fetched_repos
     assert "facebook/mms-1b-all" in fetched_repos
+    moshi = next(call for call in snapshot_calls if call["repo_id"] == "kyutai/moshiko-mlx-q4")
+    assert moshi["revision"] == "18e4df760a34d5977a34517d7d1580e07acbb2f1"
+    assert "model.q4.safetensors" in moshi["allow_patterns"]
     # Sesame needs the Mimi codec weights alongside the CSM checkpoint
-    assert any(
-        call["repo_id"] == "kyutai/moshiko-pytorch-bf16" for call in file_calls
-    )
+    assert any(call["repo_id"] == "kyutai/moshiko-pytorch-bf16" for call in file_calls)
 
 
 def test_voice_registry_covers_local_tts_provider_models():
@@ -67,9 +69,7 @@ def test_voice_registry_covers_local_tts_provider_models():
     tts = pytest.importorskip("app.services.tts")
 
     registry_repos = {
-        download["repo_id"]
-        for spec in VOICE_MODELS.values()
-        for download in spec["downloads"]
+        download["repo_id"] for spec in VOICE_MODELS.values() for download in spec["downloads"]
     }
 
     for provider in tts.SUPPORTED_TTS_PROVIDERS:

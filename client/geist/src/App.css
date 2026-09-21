@@ -2266,19 +2266,19 @@ ul.relative {
 
 .input-row {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
 }
 
 .input-actions {
   display: flex;
-  flex: 0 0 72px;
-  flex-direction: column;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  flex-direction: row;
   gap: 8px;
-  align-items: stretch;
-  align-self: flex-end;
-  width: 72px;
-  margin-right: 10px;
+  align-items: center;
+  width: 100%;
 }
 
 .chat-textarea,
@@ -2342,13 +2342,13 @@ ul.relative {
 
 .send-button {
   flex: 0 0 auto;
-  width: 100%;
+  width: auto;
+  min-width: 68px;
   padding: 0 12px;
   font-weight: 720;
 }
 
 .voice-settings {
-  position: relative;
   display: flex;
   align-items: flex-end;
 }
@@ -2380,11 +2380,12 @@ ul.relative {
 .voice-settings-panel {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 8px);
+  bottom: 52px;
   z-index: 20;
   display: grid;
   gap: 8px;
-  width: 260px;
+  width: min(360px, 100%);
+  box-sizing: border-box;
   padding: 12px;
   background: var(--geist-color-surface);
   border: 1px solid var(--geist-color-border);
@@ -2624,9 +2625,7 @@ select.form-control {
   }
 
   .input-actions {
-    flex-basis: 68px;
-    width: 68px;
-    margin-right: 8px;
+    gap: 6px;
   }
 
   .ChatSidebar.stage-panel-minimized::before {
@@ -3018,3 +3017,21 @@ select.form-control {
     flex-direction: column;
   }
 }
+
+.voice-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.live-chat-toggle { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; padding: 7px; border: 1px solid var(--geist-color-border-strong); border-radius: 50%; background: radial-gradient(circle at 50% 35%, rgba(156, 169, 255, 0.22), rgba(124, 140, 255, 0.04)); cursor: pointer; transition: box-shadow 160ms ease, border-color 160ms ease; }
+.live-chat-toggle .brand-mark-image { width: 24px; height: 24px; object-fit: contain; filter: drop-shadow(0 0 5px rgba(156, 169, 255, 0.5)); }
+.live-chat-toggle:hover:not(:disabled), .live-chat-toggle[aria-pressed="true"] { border-color: var(--geist-color-accent); box-shadow: 0 0 14px rgba(124, 140, 255, 0.28); }
+.live-chat-toggle:focus-visible { outline: 2px solid var(--geist-color-accent); outline-offset: 3px; }
+.live-chat-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+.live-call-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 25px 12px 16px; width: 100%; }
+.live-call-mark { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: rgba(109, 156, 255, 0.06); transition: transform 90ms linear, box-shadow 90ms linear; }
+.live-call-mark .brand-mark-svg, .live-call-mark .brand-mark-image { width: 62px; height: 62px; }
+.live-call-mark.active { transform: scale(calc(1 + var(--voice-level, 0) * 0.24)); box-shadow: 0 0 calc(8px + var(--voice-level, 0) * 40px) rgba(108, 164, 255, 0.4); }
+.live-call-status { font-size: 14px; font-weight: 600; }
+.live-call-hint { font-size: 12px; opacity: 0.7; text-align: center; }
+.live-call-captions { width: 100%; max-height: 150px; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 13px; overflow-wrap: anywhere; }
+.live-call-captions strong { font-size: 11px; opacity: 0.65; }
+.live-call-captions p { margin: 5px 0; white-space: pre-wrap; }
+@media (prefers-reduced-motion: reduce) { .live-call-mark.active { transform: none; transition: none; } }
+@media (max-width: 600px) { .voice-controls { flex-wrap: wrap; } .live-call-captions { grid-template-columns: 1fr; } }
