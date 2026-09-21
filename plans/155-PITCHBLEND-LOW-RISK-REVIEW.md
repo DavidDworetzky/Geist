@@ -4,16 +4,17 @@
 
 Create a GitHub App-backed review workflow that evaluates pull requests when an
 authorized collaborator comments `@pitchblend-ai review` and approves only
-low-complexity bug fixes.
+eligible low-risk changes, including copy-only edits.
 
 ## Policy
 
 - Only evaluate non-draft pull requests targeting `main`.
 - Cap eligible changes at 20 files and 1,000 changed lines (additions plus
   deletions).
-- Require the change to be a bug fix with low implementation complexity.
-- Require all current checks to pass and a focused regression test to be
-  present.
+- Evaluate semantic eligibility using the explicit classification pass matrix.
+- Evaluate review approval independently of CI; repository merge requirements enforce checks.
+- Require a changed regression-test file except for low-complexity copy-only changes.
+- Allow copy-only changes only when migration, contract, and security flags are false.
 - Block data migrations, persistent data model changes, public or shared
   contract changes, security-sensitive changes, dependency changes, and CI/CD
   changes.
@@ -23,11 +24,11 @@ low-complexity bug fixes.
 ## Implementation
 
 1. Register the `pitchblend` GitHub App with least-privilege pull-request,
-   issue, contents, and checks access.
+   issue, contents, and commit-status access.
 2. Add a workflow triggered by new pull-request conversation comments.
 3. Authenticate the workflow as the GitHub App and authorize the requesting
    commenter.
-4. Fetch pull-request metadata, file statistics, patches, and check state via
+4. Fetch pull-request metadata, file statistics and patches via
    the GitHub API without checking out or executing pull-request code.
 5. Apply deterministic size and blocked-surface gates before invoking the
    classifier.

@@ -199,7 +199,7 @@ User settings control default agent behavior and can be configured via API:
 - `MOONSHOT_API_KEY` - Moonshot API key for Kimi models
 - `ZAI_API_KEY` - Z.AI API key for hosted GLM models
 - `DEEPSEEK_API_KEY` - DeepSeek API key
-- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. GLM 5.3 Flash, Grok 4.6, Tencent Hy4 Preview, Muse Spark 1.2 Contributor, and Qwen 3.8 Max/Flash)
+- `OPENROUTER_API_KEY` - OpenRouter API key for aggregated hosted models (e.g. Union Alpha, GLM 5.3 Flash, Grok 4.6, Tencent Hy4 Preview, Muse Spark 1.2 Contributor, and Qwen 3.8 Max/Flash)
 - `MODEL_API_KEY` - Meta's official environment variable for a Model API key used by first-party hosted Muse models (e.g. Muse Spark 1.3)
 - `OPENAI_COMPATIBLE_BASE_URL` - Base `/v1` URL for a self-hosted inference server
 - `API_KEY` - Generic fallback API key
@@ -239,7 +239,7 @@ overrides = AgentConfigRequest(
 )
 
 agent = UserSettingsService.create_agent_from_default_workspace(
-    context, 
+    context,
     overrides=overrides
 )
 ```
@@ -253,11 +253,11 @@ class MyCustomRunner(BaseRunner):
     def load(self, model_id: str, device_config=None):
         # Load your model
         pass
-    
+
     def generate(self, prompt: str, generation_config: GenerationConfig):
         # Generate text
         pass
-    
+
     def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
         # Complete conversation
         pass
@@ -280,7 +280,7 @@ and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
    ```python
    # Old
    agent = LlamaAgent(agent_context, ckpt_dir=None)
-   
+
    # New
    agent = AgentFactory.create_agent(
        agent_type="local",
@@ -293,7 +293,7 @@ and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
    ```python
    # Old
    result = agent.complete_text(prompt="Hello")
-   
+
    # New (same interface)
    result = agent.complete_text(prompt="Hello")
    ```

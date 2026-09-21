@@ -1,0 +1,245 @@
+{
+  "device": {
+    "device_name": "Apple M2 Max",
+    "max_recommended_working_set_size": 83494174720,
+    "memory_size": 103079215104,
+    "architecture": "applegpu_g14s",
+    "max_buffer_length": 62620631040,
+    "resource_limit": 499000
+  },
+  "mlx_version": "0.32.2",
+  "results": [
+    {
+      "k": 5120,
+      "n": 248320,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 12.715953111182898,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 248320,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 7.210052106529474,
+      "relative_max_error": 0.002747252816334367,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 248320,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 8.574104285798967,
+      "relative_max_error": 0.005494505632668734,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 1.1292864801362157,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.6031718803569674,
+      "relative_max_error": 0.0015060240402817726,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.7328802603296936,
+      "relative_max_error": 0.0059523810632526875,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 1.1502759880386293,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.6905468762852252,
+      "relative_max_error": 0.0038759689778089523,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.7881822530180216,
+      "relative_max_error": 0.0038759689778089523,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 0.4437916213646531,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.2787292469292879,
+      "relative_max_error": 0.004761904943734407,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.3495155833661556,
+      "relative_max_error": 0.004761904943734407,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 0.8289843681268394,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.4791770479641855,
+      "relative_max_error": 0.0020242915488779545,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.5389166180975735,
+      "relative_max_error": 0.004048583097755909,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 0.411614659242332,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.29262498719617724,
+      "relative_max_error": 0.005847953259944916,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.325489672832191,
+      "relative_max_error": 0.005847953259944916,
+      "chain_length": 8,
+      "precision_variant": true
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "rows": 8,
+      "variant": "native",
+      "pad_rows": 16,
+      "milliseconds": 0.6976770819164813,
+      "relative_max_error": 0,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "rows": 8,
+      "variant": "staged",
+      "pad_rows": 16,
+      "milliseconds": 0.3718750085681677,
+      "relative_max_error": 0.0010460250778123736,
+      "chain_length": 8,
+      "precision_variant": false
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "rows": 8,
+      "variant": "affine_fold",
+      "pad_rows": 16,
+      "milliseconds": 0.4516197368502617,
+      "relative_max_error": 0.0058823530562222,
+      "chain_length": 8,
+      "precision_variant": true
+    }
+  ],
+  "metadata_correction": "affine_fold changes dequantization rounding; the initial writer omitted its precision flag."
+}

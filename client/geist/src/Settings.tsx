@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import './Settings.css';
 import { useUserSettings, UserSettingsUpdate } from './Hooks/useUserSettings';
 import AgentConfigSection from './Components/AgentConfigSection';
+import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
+import AgentPermissionsSection from './Components/AgentPermissionsSection';
+import RoutinesSection from './Components/RoutinesSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
 import SettingsSelect from './Components/SettingsSelect';
 import SettingsToggle from './Components/SettingsToggle';
@@ -14,32 +18,151 @@ import {
   useHostDevelopmentEnabled,
 } from './plugins/runtime';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'routines' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
-  { value: 'local', label: 'Local Model' },
-  { value: 'online', label: 'Online Model' }
+  { value: 'local', label: 'Local' },
+  { value: 'online', label: 'Online' }
 ];
 
+const SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID = 'settings-llama-compute-validation';
+
+const llamaComputeSelectionSignature = (value: any): string => JSON.stringify([
+  value?.llama_backend ?? null,
+  [...(value?.llama_gpu_device_ids ?? [])].sort(),
+]);
+
+const fallbackLlamaComputeValidity = (value: any): boolean => {
+  const deviceIds = value?.llama_gpu_device_ids ?? [];
+  return value?.llama_backend !== 'gpu'
+    || (deviceIds.length > 0 && new Set(deviceIds).size === deviceIds.length);
+};
+
 const Settings: React.FC = () => {
+  const location = useLocation();
   const { settings, loading, error, updateSettings, resetSettings, refetch } = useUserSettings();
-  const [activeTab, setActiveTab] = useState<Tab>('general');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>(
+    () => location.hash === '#models' ? 'models' : 'general',
+  );
+  useEffect(() => {
+    if (location.hash === '#models') setActiveTab('models');
+  }, [location.hash]);
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(() => new Set());
   const [localSettings, setLocalSettings] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [llamaComputeValidityBySignature, setLlamaComputeValidityBySignature] = useState(
+    () => new Map<string, boolean>(),
+  );
+  const [pendingLlamaComputeValidity, setPendingLlamaComputeValidity] = useState<{
+    signature: string;
+    valid: boolean;
+    validationError: string | null;
+  } | null>(null);
+  const refreshedOnMount = useRef(false);
+  const mounted = useRef(true);
+  const [refreshingOnMount, setRefreshingOnMount] = useState(true);
+  const [mountRefreshSettled, setMountRefreshSettled] = useState(false);
+  const lastMergedSettings = useRef<any>(null);
+  const hasUnsavedChanges = dirtyKeys.size > 0;
+  const llamaComputeDirty = dirtyKeys.has('llama_backend')
+    || dirtyKeys.has('llama_gpu_device_ids');
   const hostDevelopmentEnabled = useHostDevelopmentEnabled();
   const pluginDiagnostics = useGeistPluginDiagnostics();
+  const llamaComputeSignature = llamaComputeSelectionSignature(localSettings);
+  const cachedLlamaComputeValidity = llamaComputeValidityBySignature.get(llamaComputeSignature);
+  const pendingCurrentLlamaComputeValidity = (
+    pendingLlamaComputeValidity?.signature === llamaComputeSignature
+      ? pendingLlamaComputeValidity
+      : undefined
+  );
+  const llamaComputeValidationError = pendingCurrentLlamaComputeValidity?.validationError
+    ?? null;
+  const llamaComputeValid = llamaComputeValidationError
+    ? false
+    : cachedLlamaComputeValidity
+      ?? pendingCurrentLlamaComputeValidity?.valid
+      ?? fallbackLlamaComputeValidity(localSettings);
+  const llamaComputeSaveBlocked = llamaComputeDirty && !llamaComputeValid;
+  const llamaComputeSectionMounted = activeTab === 'models'
+    && localSettings?.default_agent_type === 'local';
+  const handleLlamaComputeValidityChange = useCallback((
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => {
+    if (!settled) {
+      setPendingLlamaComputeValidity({
+        signature: llamaComputeSignature,
+        valid,
+        validationError,
+      });
+      return;
+    }
+    setLlamaComputeValidityBySignature(current => {
+      if (current.get(llamaComputeSignature) === valid) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(llamaComputeSignature, valid);
+      return next;
+    });
+    setPendingLlamaComputeValidity(current => (
+      current?.signature === llamaComputeSignature ? null : current
+    ));
+  }, [llamaComputeSignature]);
   const {
     ref: settingsScrollRef,
     hasOverflow: hasSettingsScrollbar,
   } = useOverflowObserver<HTMLDivElement>(Boolean(localSettings));
 
   useEffect(() => {
-    if (settings) {
-      setLocalSettings(settings);
+    if (!settings) return;
+    if (lastMergedSettings.current === settings) {
+      if (dirtyKeys.size === 0) {
+        setLocalSettings(settings);
+      }
+      return;
     }
-  }, [settings]);
+    lastMergedSettings.current = settings;
+    setLocalSettings((current: any) => {
+      if (!current) return settings;
+      const merged = { ...current, ...settings };
+      dirtyKeys.forEach(key => {
+        merged[key] = current[key];
+      });
+      return merged;
+    });
+  }, [settings, dirtyKeys]);
+
+  useEffect(() => {
+    if (mountRefreshSettled) {
+      setRefreshingOnMount(false);
+    }
+  }, [mountRefreshSettled]);
+
+  useEffect(() => {
+    if (loading || refreshedOnMount.current) {
+      return;
+    }
+    refreshedOnMount.current = true;
+    if (!settings) {
+      setMountRefreshSettled(true);
+      return;
+    }
+    void refetch().finally(() => {
+      if (mounted.current) {
+        setMountRefreshSettled(true);
+      }
+    });
+  }, [loading, refetch, settings]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hostDevelopmentEnabled && activeTab === 'developer') {
@@ -47,12 +170,24 @@ const Settings: React.FC = () => {
     }
   }, [activeTab, hostDevelopmentEnabled]);
 
+  useEffect(() => {
+    if (!llamaComputeSectionMounted) {
+      setPendingLlamaComputeValidity(current => (
+        current?.validationError ? current : null
+      ));
+    }
+  }, [llamaComputeSectionMounted]);
+
   const updateLocalSetting = (key: string, value: any) => {
     setLocalSettings((prev: any) => ({
       ...prev,
       [key]: value
     }));
-    setHasUnsavedChanges(true);
+    setDirtyKeys(previous => {
+      const next = new Set(previous);
+      next.add(key);
+      return next;
+    });
     setSaveStatus('idle');
   };
 
@@ -64,7 +199,15 @@ const Settings: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!localSettings) return;
+    if (refreshingOnMount || !localSettings) return;
+    if (llamaComputeSaveBlocked) {
+      setSaveStatus('error');
+      setStatusMessage(
+        llamaComputeValidationError
+        || 'Resolve the GPU device selection before saving.',
+      );
+      return;
+    }
 
     try {
       setSaveStatus('saving');
@@ -74,21 +217,34 @@ const Settings: React.FC = () => {
         default_agent_type: localSettings.default_agent_type,
         default_local_model: localSettings.default_local_model,
         default_local_artifact_id: localSettings.default_local_artifact_id,
+        ...(dirtyKeys.has('llama_backend')
+          ? { llama_backend: localSettings.llama_backend }
+          : {}),
+        ...(dirtyKeys.has('llama_gpu_device_ids')
+          ? { llama_gpu_device_ids: localSettings.llama_gpu_device_ids }
+          : {}),
+        ...(dirtyKeys.has('llama_allow_system_ram')
+          ? { llama_allow_system_ram: Boolean(localSettings.llama_allow_system_ram) }
+          : {}),
         default_online_model: localSettings.default_online_model,
         default_online_provider: localSettings.default_online_provider,
         default_file_archives: localSettings.default_file_archives,
         enable_rag_by_default: localSettings.enable_rag_by_default,
+        agentic_mode_enabled: localSettings.agentic_mode_enabled,
         default_max_tokens: localSettings.default_max_tokens,
         default_temperature: localSettings.default_temperature,
         default_top_p: localSettings.default_top_p,
         default_frequency_penalty: localSettings.default_frequency_penalty,
         default_presence_penalty: localSettings.default_presence_penalty,
         backup_providers: localSettings.backup_providers,
-        ui_preferences: localSettings.ui_preferences
+        ui_preferences: localSettings.ui_preferences,
+        ...(dirtyKeys.has('agent_permissions')
+          ? { agent_permissions: localSettings.agent_permissions }
+          : {})
       };
 
       await updateSettings(updates);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('success');
       setStatusMessage('Settings saved successfully.');
 
@@ -105,13 +261,14 @@ const Settings: React.FC = () => {
   const handleCancel = () => {
     if (settings) {
       setLocalSettings(settings);
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
       setSaveStatus('idle');
       setStatusMessage('');
     }
   };
 
   const handleReset = async () => {
+    if (refreshingOnMount) return;
     if (!window.confirm('Are you sure you want to reset all settings to their default values? This cannot be undone.')) {
       return;
     }
@@ -120,7 +277,9 @@ const Settings: React.FC = () => {
       setSaveStatus('saving');
       setStatusMessage('');
       await resetSettings();
-      setHasUnsavedChanges(false);
+      setDirtyKeys(new Set());
+      setLlamaComputeValidityBySignature(new Map());
+      setPendingLlamaComputeValidity(null);
       setSaveStatus('success');
       setStatusMessage('Settings reset to defaults successfully.');
 
@@ -139,6 +298,8 @@ const Settings: React.FC = () => {
     { id: 'models' as Tab, label: 'Models and Providers' },
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
+    { id: 'permissions' as Tab, label: 'Permissions' },
+    { id: 'routines' as Tab, label: 'Routines' },
     { id: 'ui' as Tab, label: 'Appearance' },
     ...(hostDevelopmentEnabled
       ? [{ id: 'developer' as Tab, label: 'Developer' }]
@@ -204,25 +365,41 @@ const Settings: React.FC = () => {
           ))}
         </div>
 
-        <div className="settings-tab-panel">
+        {refreshingOnMount && (
+          <p className="settings-description settings-refresh-status" role="status">
+            Refreshing settings… You can keep editing. Save and Reset will be available when refresh finishes.
+          </p>
+        )}
+
+        <fieldset
+          className="settings-tab-panel"
+          aria-busy={refreshingOnMount}
+          aria-label="Settings controls"
+        >
           {activeTab === 'general' && (
             <section className="settings-section">
               <header className="settings-section-header">
                 <h3>General</h3>
                 <p>Choose the default runtime mode for new conversations.</p>
               </header>
+              <SettingsToggle
+                label="Agentic Mode"
+                checked={localSettings.agentic_mode_enabled !== false}
+                onChange={(value) => updateLocalSetting('agentic_mode_enabled', value)}
+                description="With a tool-capable model, plan as needed and keep working until done, waiting for your input, or paused at the execution budget."
+              />
               <SettingsSelect
                 label="Default Agent Type"
                 value={localSettings.default_agent_type}
                 options={agentTypeOptions}
                 onChange={(value) => updateLocalSetting('default_agent_type', value)}
-                description="Choose whether to use a local or online language model by default."
+                description="Choose whether Geist runs inference locally or through an online API."
               />
               <SettingsToggle
                 label="Intent Router"
-                checked={localSettings.ui_preferences?.intentRouterEnabled !== false}
+                checked={localSettings.ui_preferences?.intentRouterEnabled === true}
                 onChange={(value) => updateUiPreference('intentRouterEnabled', value)}
-                description="Select a focused tool catalog for each turn. Turn this off to expose the full enabled catalog."
+                description="Off by default. Enable an extra model pass to select a focused tool catalog for each turn. When off, the full enabled catalog is available."
               />
             </section>
           )}
@@ -233,13 +410,9 @@ const Settings: React.FC = () => {
               localModel={localSettings.default_local_model}
               onlineProvider={localSettings.default_online_provider}
               onlineModel={localSettings.default_online_model}
-              onLocalModelChange={(value) => {
-                updateLocalSetting('default_local_model', value);
-                updateLocalSetting('default_local_artifact_id', null);
-                if (localSettings.default_agent_type !== 'local') {
-                  updateLocalSetting('default_agent_type', 'local');
-                }
-              }}
+              llamaBackend={localSettings.llama_backend}
+              llamaGpuDeviceIds={localSettings.llama_gpu_device_ids}
+              llamaAllowSystemRam={Boolean(localSettings.llama_allow_system_ram)}
               onOnlineProviderChange={(value) => {
                 updateLocalSetting('default_online_provider', value);
                 if (localSettings.default_agent_type !== 'online') {
@@ -252,6 +425,10 @@ const Settings: React.FC = () => {
                   updateLocalSetting('default_agent_type', 'online');
                 }
               }}
+              onLlamaBackendChange={(value) => updateLocalSetting('llama_backend', value)}
+              onLlamaGpuDeviceIdsChange={(value) => updateLocalSetting('llama_gpu_device_ids', value)}
+              onLlamaAllowSystemRamChange={(value) => updateLocalSetting('llama_allow_system_ram', value)}
+              onLlamaComputeValidityChange={handleLlamaComputeValidityChange}
             />
           )}
 
@@ -278,6 +455,15 @@ const Settings: React.FC = () => {
               onFileArchivesChange={(value) => updateLocalSetting('default_file_archives', value)}
             />
           )}
+
+          {activeTab === 'permissions' && (
+            <AgentPermissionsSection
+              agentPermissions={localSettings.agent_permissions}
+              onChange={(value) => updateLocalSetting('agent_permissions', value)}
+            />
+          )}
+
+          {activeTab === 'routines' && <RoutinesSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection
@@ -347,18 +533,37 @@ const Settings: React.FC = () => {
           )}
 
           {activeTab === 'about' && <AboutSection />}
-        </div>
+        </fieldset>
       </div>
 
       {activeTab !== 'about' && (
         <footer className="settings-actions" aria-label="Settings actions">
-          <button className="button button-danger" onClick={handleReset} disabled={saveStatus === 'saving'}>
+          {llamaComputeSaveBlocked && !llamaComputeSectionMounted && (
+            <span
+              id={SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID}
+              className="settings-description settings-action-validation"
+              role="alert"
+            >
+              {llamaComputeValidationError
+                || 'Resolve the GPU device selection before saving.'}
+            </span>
+          )}
+          <button className="button button-danger" onClick={handleReset} disabled={refreshingOnMount || saveStatus === 'saving'}>
             Reset to Defaults
           </button>
           <button className="button button-secondary" onClick={handleCancel} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
             Cancel
           </button>
-          <button className="button" onClick={handleSave} disabled={!hasUnsavedChanges || saveStatus === 'saving'}>
+          <button
+            className="button"
+            onClick={handleSave}
+            disabled={refreshingOnMount || !hasUnsavedChanges || saveStatus === 'saving' || llamaComputeSaveBlocked}
+            aria-describedby={llamaComputeSaveBlocked
+              ? (llamaComputeSectionMounted
+                ? LLAMA_COMPUTE_VALIDATION_MESSAGE_ID
+                : SETTINGS_LLAMA_COMPUTE_VALIDATION_MESSAGE_ID)
+              : undefined}
+          >
             {saveStatus === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </footer>

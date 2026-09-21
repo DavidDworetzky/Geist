@@ -5,9 +5,11 @@ These cover the behavior formerly exercised through LlamaAgent, using a stub
 runner (registered in conftest) so no model weights are loaded.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from agents.model_load_errors import ModelMemoryError
 from agents.models.agent_completion import AgentCompletion
 from app.main import (
     AgentType,
@@ -31,10 +33,16 @@ agent_completion = {
 }
 
 
-def test_intent_router_setting_defaults_on_and_respects_explicit_false():
+def test_intent_router_setting_defaults_off_and_respects_explicit_preferences():
     with patch(
         "app.main.UserSettingsService.get_or_create_workspace_settings_by_id",
         return_value=SimpleNamespace(ui_preferences={}),
+    ):
+        assert intent_router_enabled(7) is False
+
+    with patch(
+        "app.main.UserSettingsService.get_or_create_workspace_settings_by_id",
+        return_value=SimpleNamespace(ui_preferences={"intentRouterEnabled": True}),
     ):
         assert intent_router_enabled(7) is True
 
@@ -93,6 +101,18 @@ def test_stream_emits_terminal_error_when_agent_initialization_fails():
     assert events[1] == 'event: done\ndata: {"run_id": null, "chat_id": null}\n\n'
 
 
+def test_chat_triggered_load_preserves_memory_error_in_sse():
+    error = ModelMemoryError("unified_memory", runtime="mlx_llama", model_id="test/model")
+    with patch("app.main.get_active_agent", side_effect=error):
+        events = list(stream_chat_completion(CompleteTextParams(prompt="Hello")))
+    payload = json.loads(events[0].split("data: ", 1)[1])
+    assert payload["message"] == str(error)
+    assert payload["model_load"]["model_id"] == "test/model"
+    assert payload["model_load"]["error_code"] == "unified_memory"
+    assert payload["model_load"]["can_offload_to_system_ram"] is False
+    assert events[-1].startswith("event: done")
+
+
 def test_modern_non_streaming_completion_uses_orchestrator_without_tools():
     class ModernAgent:
         def stream_model_turn(self, *_args, **_kwargs):
@@ -115,6 +135,8 @@ def test_modern_non_streaming_completion_uses_orchestrator_without_tools():
     assert result == completion
     assert complete.call_args.kwargs["chat_id"] == 8
     assert complete.call_args.kwargs["enable_tools"] is False
+    assert complete.call_args.kwargs["agentic_mode"] is True
+
     assert complete.call_args.kwargs["enable_intent_router"] is False
 
 
@@ -137,6 +159,7 @@ def test_completion(log, local_agent, client):
             "prompt_tokens": [0],
             "response_format": "text",
             "agent_type": "LLAMA",
+            "agentic_mode": False,
         }
 
         response = client.post("agent/complete_text", json=payload)

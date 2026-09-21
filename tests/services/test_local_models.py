@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
+import os
 import threading
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.services.local_models import (
     CURATED_LOCAL_ARTIFACTS,
+    DOWNLOAD_DISK_RESERVE_BYTES,
+    InsufficientStorageError,
     LocalModelArtifact,
     LocalModelManager,
     default_model_home,
@@ -57,18 +62,80 @@ def _mlx_artifact(**overrides) -> LocalModelArtifact:
     return LocalModelArtifact(**values)
 
 
-def test_qwen3_8_uses_pinned_mlx_snapshot():
-    artifact = next(
-        item for item in CURATED_LOCAL_ARTIFACTS if item.model_id == "Qwen/Qwen3.8-27B"
+def test_qwen3_8_uses_pinned_platform_artifacts(tmp_path: Path):
+    artifacts = {
+        item.backend: item
+        for item in CURATED_LOCAL_ARTIFACTS
+        if item.model_id == "Qwen/Qwen3.8-27B"
+    }
+
+    mlx = artifacts["mlx_llama"]
+    assert mlx.id == "qwen3.8-27b-4bit-mlx"
+    assert mlx.repo_id == "mlx-community/Qwen3.8-27B-4bit"
+    assert mlx.revision == "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
+    assert mlx.quantization == "4-bit"
+    assert local_artifact_supported(mlx, system="Darwin", machine="arm64") is True
+    assert local_artifact_supported(mlx, system="Linux", machine="x86_64") is False
+
+    gguf = artifacts["llama_server"]
+    assert gguf.id == "qwen3.8-27b-q4-k-m-gguf"
+    assert gguf.repo_id == "ggml-org/Qwen3.8-27B-GGUF"
+    assert gguf.revision == "0669b98607d47046c7c2b3f801011d54a08cfccf"
+    assert gguf.filename == "Qwen3.8-27B-Q4_K_M.gguf"
+    assert gguf.size_bytes == 18_973_870_432
+    assert gguf.sha256 == "31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34"
+    assert gguf.quantization == "Q4_K_M"
+    runtime = tmp_path / "runtime"
+    server = runtime / "cpu" / "llama-server"
+    server.parent.mkdir(parents=True)
+    server.write_bytes(b"binary")
+    server.chmod(0o755)
+    assert (
+        local_artifact_supported(
+            gguf,
+            system="Linux",
+            machine="x86_64",
+            environment={
+                "GEIST_LLAMA_RUNTIME_ROOT": str(runtime),
+                "GEIST_LLAMA_ACCELERATION": "cpu",
+            },
+        )
+        is True
+    )
+    assert local_artifact_supported(gguf, system="Darwin", machine="arm64") is False
+
+
+def test_linux_gguf_is_unsupported_without_a_llama_runtime(tmp_path: Path):
+    gguf = next(
+        artifact for artifact in CURATED_LOCAL_ARTIFACTS if artifact.backend == "llama_server"
     )
 
-    assert artifact.id == "qwen3.8-27b-4bit-mlx"
-    assert artifact.repo_id == "mlx-community/Qwen3.8-27B-4bit"
-    assert artifact.revision == "3e6447f082e89cc7f0bc6e5441afd38dfce760ff"
-    assert artifact.backend == "mlx_llama"
-    assert artifact.quantization == "4-bit"
-    assert local_artifact_supported(artifact, system="Darwin", machine="arm64") is True
-    assert local_artifact_supported(artifact, system="Linux", machine="x86_64") is False
+    assert (
+        local_artifact_supported(
+            gguf,
+            system="Linux",
+            machine="x86_64",
+            environment={"GEIST_LLAMA_RUNTIME_ROOT": str(tmp_path / "missing")},
+        )
+        is False
+    )
+
+
+def test_model_lookup_prefers_the_platform_supported_artifact(tmp_path, managers):
+    mlx = _mlx_artifact(model_id="Qwen/Qwen3.8-27B")
+    gguf = _artifact(
+        id="test-qwen-gguf",
+        model_id="Qwen/Qwen3.8-27B",
+        repo_id="test/qwen-gguf",
+    )
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(mlx, gguf),
+        artifact_support=lambda artifact: artifact.backend == "llama_server",
+    )
+    managers.append(manager)
+
+    assert manager.find_artifact("Qwen/Qwen3.8-27B") == gguf
 
 
 @pytest.fixture
@@ -125,6 +192,180 @@ def test_download_is_verified_and_atomically_installed(tmp_path, managers):
     assert manager.status("test-q4")["sha256"] == hashlib.sha256(MODEL_BYTES).hexdigest()
 
 
+def test_download_hashes_gguf_once_and_caches_verified_target(tmp_path, managers):
+    def downloader(_artifact, destination, callback):
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    with patch(
+        "app.services.local_models._sha256_file",
+        wraps=lambda path: hashlib.sha256(path.read_bytes()).hexdigest(),
+    ) as hash_file:
+        installed = manager.download_artifact("test-q4")
+        assert manager.status("test-q4")["status"] == "installed"
+
+    assert hash_file.call_count == 1
+    stats = installed.stat()
+    assert manager._verified_files["test-q4"] == (
+        stats.st_mtime_ns,
+        stats.st_size,
+        hashlib.sha256(MODEL_BYTES).hexdigest(),
+    )
+
+
+def test_download_rename_and_installed_state_are_atomic(tmp_path, managers):
+    def downloader(_artifact, destination, callback):
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+    target = manager._artifact_path(manager.get_artifact("test-q4"))
+    target_renamed = threading.Event()
+    finish_rename = threading.Event()
+    second_request_started = threading.Event()
+    second_request_result = []
+    real_replace = os.replace
+
+    def controlled_replace(source, destination):
+        real_replace(source, destination)
+        if Path(destination) == target:
+            target_renamed.set()
+            finish_rename.wait(timeout=2)
+
+    def request_again():
+        second_request_started.set()
+        second_request_result.append(manager.request_download("test-q4"))
+
+    with patch("app.services.local_models.os.replace", side_effect=controlled_replace):
+        manager.request_download("test-q4")
+        assert target_renamed.wait(timeout=2)
+        requester = threading.Thread(target=request_again)
+        requester.start()
+        assert second_request_started.wait(timeout=2)
+        requester.join(timeout=0.05)
+        assert requester.is_alive()
+        finish_rename.set()
+        manager._futures["test-q4"].result(timeout=2)
+        requester.join(timeout=2)
+
+    assert second_request_result[0]["status"] == "installed"
+    assert target.read_bytes() == MODEL_BYTES
+
+
+def test_download_fails_before_queueing_when_model_store_is_too_small(tmp_path, managers):
+    artifact = _artifact(size_bytes=16 * 1024**3)
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+
+    with (
+        patch(
+            "app.services.local_models.shutil.disk_usage",
+            return_value=SimpleNamespace(free=512 * 1024**2),
+        ),
+        pytest.raises(InsufficientStorageError, match="needed; 512.0 MB available"),
+    ):
+        manager.request_download(artifact.id)
+
+    status = manager.status(artifact.id)
+    assert status["status"] == "not_installed"
+    assert status["progress_unit"] == "bytes"
+    assert status["progress_total"] == artifact.size_bytes
+    assert artifact.id not in manager._futures
+
+
+def test_capacity_check_accounts_for_resumable_partial_download(tmp_path, managers):
+    artifact = _artifact(size_bytes=1024)
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    partial = manager._partial_path(artifact)
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"x" * 768)
+
+    with patch(
+        "app.services.local_models.shutil.disk_usage",
+        return_value=SimpleNamespace(free=DOWNLOAD_DISK_RESERVE_BYTES + 256),
+    ):
+        manager._require_download_capacity(artifact)
+
+
+def test_stream_capacity_recheck_uses_model_store_filesystem(tmp_path, managers):
+    artifact = _artifact(size_bytes=len(MODEL_BYTES))
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    destination = manager._partial_path(artifact)
+    destination.parent.mkdir(parents=True)
+    response = MagicMock()
+    response.status_code = 200
+    response.headers = {"content-length": str(len(MODEL_BYTES))}
+    response.iter_bytes.return_value = [MODEL_BYTES]
+    stream = MagicMock()
+    stream.__enter__.return_value = response
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.stream.return_value = stream
+    checked_paths = []
+
+    def disk_usage(path):
+        checked_paths.append(Path(path))
+        return SimpleNamespace(free=1024**3)
+
+    with (
+        patch("app.services.local_models.httpx.Client", return_value=client),
+        patch("app.services.local_models.shutil.disk_usage", side_effect=disk_usage),
+    ):
+        manager._download_hugging_face_artifact(
+            artifact,
+            destination,
+            lambda _downloaded, _total: None,
+        )
+
+    assert checked_paths == [tmp_path]
+
+
+def test_only_one_model_download_can_be_active(tmp_path, managers):
+    started = threading.Event()
+    release = threading.Event()
+
+    def downloader(_artifact, destination, callback):
+        started.set()
+        release.wait(timeout=2)
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    first = _artifact(id="first", model_id="test/first", filename="first.gguf")
+    second = _artifact(id="second", model_id="test/second", filename="second.gguf")
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(first, second),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    manager.request_download(first.id)
+    assert started.wait(timeout=2)
+    try:
+        with pytest.raises(RuntimeError, match="Another model is already installing"):
+            manager.request_download(second.id)
+    finally:
+        release.set()
+
+    manager._futures[first.id].result(timeout=2)
+    assert manager.status(second.id)["status"] == "not_installed"
+    assert second.id not in manager._futures
+
+
 def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):
     def downloader(_artifact, destination, callback):
         destination.write_bytes(MODEL_BYTES)
@@ -146,19 +387,100 @@ def test_bad_checksum_is_rejected_without_installing(tmp_path, managers):
     assert not list((tmp_path / ".downloads").glob("*.partial.gguf"))
 
 
-def test_installed_artifact_is_reverified_before_inference(tmp_path, managers):
-    manager = LocalModelManager(tmp_path, artifacts=(_artifact(),))
+def test_invalid_managed_artifact_is_not_installed_and_can_be_repaired(tmp_path, managers):
+    invalid_target_seen = []
+
+    def downloader(_artifact, destination, callback):
+        invalid_target_seen.append(target.exists())
+        destination.write_bytes(MODEL_BYTES)
+        callback(len(MODEL_BYTES), len(MODEL_BYTES))
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
     managers.append(manager)
     target = tmp_path / "artifacts" / "test-q4" / "test-q4.gguf"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"GGUF" + b"tampered!!")
 
-    with pytest.raises(RuntimeError, match="failed verification"):
+    with pytest.raises(RuntimeError, match="not installed"):
         manager.require_installed("test-q4")
 
     status = manager.status("test-q4")
-    assert status["status"] == "failed"
+    assert status["status"] == "not_installed"
     assert status["path"] is None
+    assert status["error"] is None
+
+    manager.request_download("test-q4")
+    manager._futures["test-q4"].result(timeout=5)
+
+    assert invalid_target_seen == [False]
+    assert manager.status("test-q4")["status"] == "installed"
+    assert target.read_bytes() == MODEL_BYTES
+
+
+def test_status_reconciles_installed_state_when_files_are_missing(tmp_path, managers):
+    artifact = _artifact()
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    manager._states[artifact.id] = {
+        "status": "installed",
+        "bytes_downloaded": len(MODEL_BYTES),
+        "total_bytes": len(MODEL_BYTES),
+        "path": str(tmp_path / "artifacts" / artifact.id / artifact.filename),
+        "error": None,
+    }
+    manager._save_index_locked()
+
+    status = manager.status(artifact.id)
+
+    assert status["status"] == "not_installed"
+    assert status["bytes_downloaded"] == 0
+    assert status["progress_completed"] == 0
+    assert status["path"] is None
+    assert status["error"] is None
+    assert manager.status(artifact.id) == status
+
+    reloaded = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(reloaded)
+    assert reloaded.status(artifact.id)["status"] == "not_installed"
+
+
+@pytest.mark.parametrize(
+    ("persisted_status", "expected_status", "expected_error"),
+    [
+        ("queued", "failed", "Install was interrupted."),
+        ("downloading", "failed", "Install was interrupted."),
+        ("cancelling", "cancelled", None),
+    ],
+)
+def test_restart_reconciles_incomplete_operations(
+    tmp_path,
+    managers,
+    persisted_status,
+    expected_status,
+    expected_error,
+):
+    artifact = _artifact()
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(manager)
+    manager._states[artifact.id] = {
+        "status": persisted_status,
+        "bytes_downloaded": 4,
+        "total_bytes": len(MODEL_BYTES),
+        "path": None,
+        "error": None,
+    }
+    manager._save_index_locked()
+
+    reloaded = LocalModelManager(tmp_path, artifacts=(artifact,))
+    managers.append(reloaded)
+    status = reloaded.status(artifact.id)
+
+    assert status["status"] == expected_status
+    assert status["error"] == expected_error
 
 
 def test_require_installed_does_not_queue_or_start_download(tmp_path, managers):
@@ -200,6 +522,25 @@ def test_transient_failure_keeps_partial_for_resume(tmp_path, managers):
         manager.download_artifact("test-q4")
 
     assert list((tmp_path / ".downloads").glob("*.partial.gguf"))
+
+
+def test_out_of_space_download_failure_has_a_clear_message(tmp_path, managers):
+    def downloader(_artifact, _destination, _callback):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    manager = LocalModelManager(
+        tmp_path,
+        artifacts=(_artifact(),),
+        downloader=downloader,
+    )
+    managers.append(manager)
+
+    with pytest.raises(OSError):
+        manager.download_artifact("test-q4")
+
+    status = manager.status("test-q4")
+    assert status["status"] == "failed"
+    assert status["error"] == "Not enough space to finish installing this model."
 
 
 def test_retry_reports_and_reuses_existing_partial(tmp_path, managers):
@@ -274,6 +615,17 @@ def test_import_copies_gguf_into_managed_store_and_persists(tmp_path, managers):
         reloaded.status(imported["id"])
 
 
+def test_import_reports_out_of_space_clearly(tmp_path, managers):
+    manager = LocalModelManager(tmp_path, artifacts=())
+    managers.append(manager)
+
+    with (
+        patch("pathlib.Path.open", side_effect=OSError(errno.ENOSPC, "No space left")),
+        pytest.raises(InsufficientStorageError, match="Not enough space to import"),
+    ):
+        manager.import_stream(io.BytesIO(MODEL_BYTES), "model.gguf")
+
+
 @pytest.mark.parametrize("filename", ["../escape.gguf", r"..\escape.gguf", "model.bin"])
 def test_import_rejects_unsafe_or_non_gguf_names(tmp_path, managers, filename):
     manager = LocalModelManager(tmp_path, artifacts=())
@@ -316,9 +668,9 @@ def test_llama_artifacts_are_not_offered_as_runnable_on_macos_arm64(tmp_path, ma
     managers.append(manager)
 
     assert manager.status(artifact.id)["supported"] is False
-    with pytest.raises(ValueError, match="Select an MLX model"):
+    with pytest.raises(ValueError, match="not supported by an available local runtime"):
         manager.request_download(artifact.id)
-    with pytest.raises(ValueError, match="Select an MLX model"):
+    with pytest.raises(ValueError, match="not supported by an available local runtime"):
         manager.import_stream(io.BytesIO(MODEL_BYTES), "model.gguf")
 
 
@@ -382,8 +734,12 @@ def test_mlx_snapshot_requires_completion_manifest(tmp_path, managers):
     (target / "tokenizer.json").write_text("{}", encoding="utf-8")
     (target / "model.safetensors").write_bytes(b"weights")
 
-    with pytest.raises(RuntimeError, match="completion manifest"):
+    with pytest.raises(RuntimeError, match="not installed"):
         manager.require_installed(artifact.id)
+
+    status = manager.status(artifact.id)
+    assert status["status"] == "not_installed"
+    assert status["error"] is None
 
 
 def test_mlx_snapshot_background_download_can_be_cancelled(tmp_path, managers):

@@ -1,6 +1,7 @@
 """
 Initialize and register all available runners.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -282,9 +283,7 @@ def register_all_runners(registry: RunnerRegistry | None = None) -> None:
 
     logger.info("Registering all available runners...")
 
-    registry.register_lazy(
-        "mlx_llama", "agents.architectures.mlx_llama_runner", "MLXLlamaRunner"
-    )
+    registry.register_lazy("mlx_llama", "agents.architectures.mlx_llama_runner", "MLXLlamaRunner")
     registry.register_lazy(
         "transformers", "agents.architectures.transformers_runner", "TransformersRunner"
     )
@@ -792,28 +791,30 @@ for _spec in MODEL_SPECS:
         _existing.local = _spec.local
         _existing.performance_note = _spec.performance_note
         continue
-    _models.append(ModelInfo(
-        id=_spec.id,
-        name=_spec.name,
-        provider=_provider,
-        context_window=_spec.context_window,
-        max_output_tokens=_spec.max_output_tokens,
-        supports_vision=_spec.supports_vision,
-        supports_function_calling=_spec.supports_function_calling,
-        supports_streaming=_spec.supports_streaming,
-        recommended=_spec.recommended,
-        family=_spec.family,
-        backend=_spec.backend,
-        supports_reasoning=_spec.supports_reasoning,
-        gated=_spec.gated,
-        requires_remote_code=_spec.requires_remote_code,
-        min_transformers_version=_spec.min_transformers_version,
-        parameter_count=_spec.parameter_count,
-        activated_parameters=_spec.activated_parameters,
-        optional_dependencies=_spec.optional_dependencies,
-        local=_spec.local,
-        performance_note=_spec.performance_note,
-    ))
+    _models.append(
+        ModelInfo(
+            id=_spec.id,
+            name=_spec.name,
+            provider=_provider,
+            context_window=_spec.context_window,
+            max_output_tokens=_spec.max_output_tokens,
+            supports_vision=_spec.supports_vision,
+            supports_function_calling=_spec.supports_function_calling,
+            supports_streaming=_spec.supports_streaming,
+            recommended=_spec.recommended,
+            family=_spec.family,
+            backend=_spec.backend,
+            supports_reasoning=_spec.supports_reasoning,
+            gated=_spec.gated,
+            requires_remote_code=_spec.requires_remote_code,
+            min_transformers_version=_spec.min_transformers_version,
+            parameter_count=_spec.parameter_count,
+            activated_parameters=_spec.activated_parameters,
+            optional_dependencies=_spec.optional_dependencies,
+            local=_spec.local,
+            performance_note=_spec.performance_note,
+        )
+    )
 
 
 # Dynamic registry - populated by sync script
@@ -1574,9 +1575,7 @@ def get_model_by_id(model_id: str) -> ModelInfo | None:
     )
 
 
-def update_discovered_models(
-    provider: OnlineModelProviders | str, models: list[ModelInfo]
-) -> None:
+def update_discovered_models(provider: OnlineModelProviders | str, models: list[ModelInfo]) -> None:
     """
     Update the discovered models for a provider.
 
@@ -1599,18 +1598,24 @@ def get_last_model_sync_time() -> datetime | None:
     return _last_model_sync
 
 
+def is_user_selectable_provider(provider: OnlineModelProviders | str) -> bool:
+    """Expose local models or providers backed by a supported online API."""
+
+    provider_id = provider_to_string(provider)
+    if provider_id == OnlineModelProviders.OFFLINE.value:
+        return True
+    provider_spec = PROVIDERS.get(provider_id)
+    return provider_spec is not None and bool(provider_spec.base_url)
+
+
 def get_provider_ids() -> list[str]:
-    """List legacy, catalog, static, and discovered provider IDs once."""
-    provider_ids = [provider.value for provider in OnlineModelProviders]
-    for provider in PROVIDERS:
-        if provider not in provider_ids:
-            provider_ids.append(provider)
-    _provider_key: OnlineModelProviders | str
-    for _provider_key in (*STATIC_MODELS, *DISCOVERED_MODELS):
-        provider_id = provider_to_string(_provider_key)
-        if provider_id not in provider_ids:
-            provider_ids.append(provider_id)
-    return provider_ids
+    """List user-selectable local and online provider IDs once."""
+
+    return [
+        provider_to_string(provider)
+        for provider in get_all_models()
+        if is_user_selectable_provider(provider)
+    ]
 
 
 def provider_from_string(

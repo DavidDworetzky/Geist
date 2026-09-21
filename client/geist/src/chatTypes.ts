@@ -6,14 +6,14 @@ export type ToolCallStatus =
   | 'failed'
   | 'cancelled';
 
-export type ToolApprovalDecision = 'approve' | 'deny';
-
 export interface ToolCallResult {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   requires_approval?: boolean;
+  requires_per_call_approval?: boolean;
+  can_grant?: boolean;
   result_summary?: string;
   artifact_ids?: string[];
   error?: string;
@@ -29,15 +29,58 @@ export interface WorkArtifact {
   url?: string;
 }
 
+export type PlanTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'blocked'
+  | 'skipped';
+
+export type GoalStatus =
+  | 'active'
+  | 'waiting_for_user'
+  | 'complete'
+  | 'paused'
+  | 'budget_limited'
+  | 'failed';
+
+export interface PlanTask {
+  id: string;
+  title: string;
+  acceptance_criteria: string[];
+  status: PlanTaskStatus;
+  evidence?: string | null;
+  evidence_refs?: string[];
+  skip_reason?: string | null;
+}
+
+export interface OrchestrationState {
+  objective?: string;
+  agentic_mode: boolean;
+  goal_id?: string | null;
+  goal_status?: GoalStatus | null;
+  turns_used?: number;
+  max_turns?: number;
+  tasks: PlanTask[];
+  completion_summary?: string | null;
+  completion_evidence?: string[];
+  decomposition_warning?: string | null;
+  waiting_question?: string | null;
+  instructions?: Array<{ id: string; text: string; status: string }>;
+}
+
 export interface CompleteTextResponse {
+  instructions?: UserInstruction[];
   message: string | string[];
   chat_id: number | null;
   run_id?: string | null;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export interface ChatTurnResult {
+  instructions?: UserInstruction[];
   run_id: string | null;
   prompt: string;
   message: string;
@@ -45,6 +88,7 @@ export interface ChatTurnResult {
   origin_chat_id: number | null;
   tool_calls: ToolCallResult[];
   artifacts: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export type ModelLoadState = 'unloaded' | 'loading' | 'ready' | 'failed';
@@ -55,6 +99,8 @@ export interface ModelLoadStatus {
   detail: string;
   started_at: string | null;
   updated_at: string;
+  error_code?: 'gpu_memory' | 'system_memory' | 'unified_memory' | null;
+  can_offload_to_system_ram?: boolean;
 }
 
 export type ActiveTurnStatus =
@@ -74,6 +120,7 @@ export interface ActiveChatTurn extends ChatTurnResult {
 }
 
 export interface ChatPair {
+  instructions?: UserInstruction[];
   run_id?: string | null;
   user: string;
   ai: string;
@@ -81,8 +128,17 @@ export interface ChatPair {
   model_load?: ModelLoadStatus;
   tool_calls?: ToolCallResult[];
   artifacts?: WorkArtifact[];
+  orchestration?: OrchestrationState | null;
 }
 
 export interface ChatHistory {
   chatHistory: ChatPair[];
 }
+
+export interface UserInstruction {
+  id: string;
+  text: string;
+  status: string;
+}
+
+export type ToolApprovalDecision = 'approve' | 'session' | 'always' | 'deny';

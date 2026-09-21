@@ -16,16 +16,27 @@ export interface BackupProvider {
   supports_native_tool_calling?: boolean;
 }
 
+export type AgentPermissionMode = 'default' | 'auto_approve' | 'require_approval';
+
+export interface AgentPermissions {
+  mode: AgentPermissionMode;
+  always_allow: string[];
+}
+
 export interface UserSettings {
   user_settings_id: number;
   user_id: number;
   default_agent_type: string;
   default_local_model: string;
   default_local_artifact_id: string | null;
+  llama_backend: 'cpu' | 'gpu' | null;
+  llama_gpu_device_ids: string[];
+  llama_allow_system_ram?: boolean;
   default_online_model: string;
   default_online_provider: string;
   default_file_archives: number[];
   enable_rag_by_default: boolean;
+  agentic_mode_enabled?: boolean;
   default_max_tokens: number;
   default_temperature: number;
   default_top_p: number;
@@ -33,6 +44,7 @@ export interface UserSettings {
   default_presence_penalty: number;
   backup_providers: BackupProvider[];
   ui_preferences: Record<string, any>;
+  agent_permissions: AgentPermissions;
   create_date: string;
   update_date: string;
 }
@@ -41,10 +53,14 @@ export interface UserSettingsUpdate {
   default_agent_type?: string;
   default_local_model?: string;
   default_local_artifact_id?: string | null;
+  llama_backend?: 'cpu' | 'gpu' | null;
+  llama_gpu_device_ids?: string[];
+  llama_allow_system_ram?: boolean;
   default_online_model?: string;
   default_online_provider?: string;
   default_file_archives?: number[];
   enable_rag_by_default?: boolean;
+  agentic_mode_enabled?: boolean;
   default_max_tokens?: number;
   default_temperature?: number;
   default_top_p?: number;
@@ -52,6 +68,7 @@ export interface UserSettingsUpdate {
   default_presence_penalty?: number;
   backup_providers?: BackupProvider[];
   ui_preferences?: Record<string, any>;
+  agent_permissions?: AgentPermissions;
 }
 
 export interface UseUserSettingsReturn {
@@ -64,6 +81,21 @@ export interface UseUserSettingsReturn {
 }
 
 const UserSettingsContext = createContext<UseUserSettingsReturn | null>(null);
+
+const responseErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Some upstream failures do not return JSON; preserve the HTTP fallback.
+  }
+  return fallback;
+};
 
 const useUserSettingsState = (): UseUserSettingsReturn => {
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -110,7 +142,10 @@ const useUserSettingsState = (): UseUserSettingsReturn => {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to update settings: ${response.statusText}`);
+        throw new Error(await responseErrorMessage(
+          response,
+          `Failed to update settings: ${response.statusText}`,
+        ));
       }
 
       const data = await response.json();

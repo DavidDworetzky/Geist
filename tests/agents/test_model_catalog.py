@@ -1,6 +1,8 @@
 """Tests for generic model/provider catalog and runner routing."""
+
 import asyncio
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -30,11 +32,42 @@ def test_platform_default_uses_qwen38_mlx_and_uses_gguf_on_windows():
         assert default_local_model_id() == "Qwen/Qwen3-4B"
 
 
+def test_union_alpha_is_an_openrouter_preview_with_verified_capabilities():
+    spec = get_model_spec("stealth/union-alpha")
+
+    assert spec.provider == "openrouter"
+    assert spec.family == "stealth"
+    assert spec.backend == "openai_compatible"
+    assert spec.local is False
+    assert spec.context_window == 262144
+    assert spec.max_output_tokens == 131072
+    assert spec.supports_vision is True
+    assert spec.supports_function_calling is True
+    assert spec.supports_streaming is True
+    assert spec.supports_reasoning is False
+    assert spec.mandatory_reasoning_effort is None
+    assert spec.unsupported_parameters == ("n", "frequency_penalty", "presence_penalty", "stop")
+    assert "may be retained" in spec.performance_note
+    assert "not used for training" in spec.performance_note
+    assert PROVIDERS[spec.provider].api_key_env == "OPENROUTER_API_KEY"
+
+
 def test_catalog_covers_requested_families():
     families = {spec.family for spec in MODEL_SPECS}
     assert {
-        "llama", "qwen", "mistral", "phi", "smollm", "gemma",
-        "granite", "olmo", "glm", "gpt-oss", "kimi", "deepseek", "gemini",
+        "llama",
+        "qwen",
+        "mistral",
+        "phi",
+        "smollm",
+        "gemma",
+        "granite",
+        "olmo",
+        "glm",
+        "gpt-oss",
+        "kimi",
+        "deepseek",
+        "gemini",
     }.issubset(families)
 
 
@@ -44,6 +77,7 @@ def test_qwen3_8_27b_declares_runtime_compatibility():
     assert spec.local is True
     assert spec.backend == "mlx_llama"
     assert spec.context_window == 262144
+    assert spec.max_output_tokens == 131072
     assert spec.parameter_count == "27B"
     assert spec.min_transformers_version == "5.8.0"
     assert spec.supports_vision is False
@@ -157,9 +191,7 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     assert flash.mandatory_reasoning_effort is None
     assert flash.unsupported_parameters == ("n", "temperature", "top_p")
     assert flash.performance_note is not None
-    assert "migration checklist by omitting n, temperature, and top_p" in (
-        flash.performance_note
-    )
+    assert "migration checklist by omitting n, temperature, and top_p" in (flash.performance_note)
     assert get_provider_endpoint(flash.provider) == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )
@@ -244,6 +276,29 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("deepseek/deepseek-v4.1-flash")
+
+    assert flash.provider == "openrouter"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.family == "deepseek"
+    assert flash.context_window == 1048576
+    assert flash.max_output_tokens == 384000
+    assert flash.parameter_count is None
+    assert flash.activated_parameters is None
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.recommended is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n",)
+    assert flash.performance_note is not None
+    assert "enforce OpenRouter ZDR" in flash.performance_note
+    assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     hy4 = get_model_spec("tencent/hy4-preview")
 
@@ -292,6 +347,31 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
 
 
 @pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen3-4B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "microsoft/Phi-4-mini-instruct",
+        "HuggingFaceTB/SmolLM3-3B",
+        "google/gemma-3-1b-it",
+        "ibm-granite/granite-3.3-8b-instruct",
+        "allenai/Olmo-3-7B-Instruct",
+        "zai-org/glm-4-9b-chat-hf",
+        "openai/gpt-oss-20b",
+    ],
+)
+def test_standard_local_models_use_generic_runner(model_id):
+    if sys.platform in {"win32", "linux"}:
+        expected = "llama_server"
+    elif sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        expected = "mlx_llama"
+    else:
+        expected = "transformers"
+    assert AgentFactory._infer_runner_type(model_id) == expected
+
+
+@pytest.mark.parametrize(
     ("model_id", "recommended"),
     [
         ("muse-spark-1.1", False),
@@ -322,19 +402,22 @@ def test_meta_model_api_catalog_options(model_id, recommended):
     assert get_provider_endpoint(model.provider) == "https://api.meta.ai/v1"
 
 
-@pytest.mark.parametrize("model_id", [
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen3-4B",
-    "Qwen/Qwen3.8-27B",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "microsoft/Phi-4-mini-instruct",
-    "HuggingFaceTB/SmolLM3-3B",
-    "google/gemma-3-1b-it",
-    "ibm-granite/granite-3.3-8b-instruct",
-    "allenai/Olmo-3-7B-Instruct",
-    "zai-org/glm-4-9b-chat-hf",
-    "openai/gpt-oss-20b",
-])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen3-4B",
+        "Qwen/Qwen3.8-27B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "microsoft/Phi-4-mini-instruct",
+        "HuggingFaceTB/SmolLM3-3B",
+        "google/gemma-3-1b-it",
+        "ibm-granite/granite-3.3-8b-instruct",
+        "allenai/Olmo-3-7B-Instruct",
+        "zai-org/glm-4-9b-chat-hf",
+        "openai/gpt-oss-20b",
+    ],
+)
 def test_local_catalog_models_use_managed_runner_on_linux(model_id):
     with patch("agents.factory.sys.platform", "linux"):
         assert AgentFactory._infer_runner_type(model_id) == "llama_server"
@@ -405,9 +488,15 @@ def test_environment_runner_override_precedes_catalog_inference():
             "local",
             context,
             model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            device_config={
+                "device": "cpu",
+                "llama_backend": "gpu",
+                "llama_gpu_device_ids": ["gpu-inert"],
+            },
         )
 
     assert local_agent.call_args.kwargs["runner_type"] == "transformers"
+    assert local_agent.call_args.kwargs["device_config"] == {"device": "cpu"}
 
 
 def test_explicit_runner_argument_precedes_environment_override():
@@ -428,35 +517,38 @@ def test_explicit_runner_argument_precedes_environment_override():
 
 def test_existing_llama_id_preserves_optimized_runner():
     expected = "llama_server" if sys.platform in {"win32", "linux"} else "mlx_llama"
-    assert AgentFactory._infer_runner_type(
-        "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    ) == expected
+    assert AgentFactory._infer_runner_type("meta-llama/Meta-Llama-3.1-8B-Instruct") == expected
 
 
-@pytest.mark.parametrize("model_id", [
-    "kimi-k2.5",
-    "moonshotai/Kimi-K2.5",
-    "glm-4.7-flash",
-    "zai-org/GLM-4.7-Flash",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-    "openai/gpt-oss-120b",
-    "zai-org/GLM-5.2",
-    "deepseek-ai/DeepSeek-R1",
-    "x-ai/grok-4.6",
-    "qwen/qwen3.8-max",
-    "qwen3.8-max",
-    "qwen/qwen3.8-flash",
-    "tencent/hy4-preview",
-    "z-ai/glm-5.3-flash",
-    "meta/muse-spark-1.2-contributor",
-    "muse-spark-1.1",
-    "muse-spark-1.2",
-    "muse-spark-1.3",
-    "gemini-3.8-flash",
-    "gpt-6-astra",
-])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "kimi-k2.5",
+        "moonshotai/Kimi-K2.5",
+        "glm-4.7-flash",
+        "zai-org/GLM-4.7-Flash",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "Qwen/Qwen2.5-72B-Instruct",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "openai/gpt-oss-120b",
+        "zai-org/GLM-5.2",
+        "deepseek-ai/DeepSeek-R1",
+        "x-ai/grok-4.6",
+        "qwen/qwen3.8-max",
+        "qwen3.8-max",
+        "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash",
+        "tencent/hy4-preview",
+        "z-ai/glm-5.3-flash",
+        "meta/muse-spark-1.2-contributor",
+        "stealth/union-alpha",
+        "muse-spark-1.1",
+        "muse-spark-1.2",
+        "muse-spark-1.3",
+        "gemini-3.8-flash",
+        "gpt-6-astra",
+    ],
+)
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
         AgentFactory._infer_runner_type(model_id)
@@ -503,9 +595,11 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
+        "stealth/union-alpha",
     ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
@@ -575,9 +669,7 @@ def test_model_api_metadata_contains_performance_fields():
     )
 
     local_models = get_models_for_provider(OnlineModelProviders.OFFLINE)
-    local_glm = next(
-        model for model in local_models if model.id == "zai-org/glm-4-9b-chat-hf"
-    )
+    local_glm = next(model for model in local_models if model.id == "zai-org/glm-4-9b-chat-hf")
     assert local_glm.backend == "transformers"
     assert local_glm.local is True
 
@@ -633,6 +725,9 @@ def test_future_provider_does_not_require_enum_change(monkeypatch):
 
 
 def test_model_routes_serialize_string_backed_providers():
+    from fastapi import HTTPException
+
+    from agents.architectures.registry import get_all_models, provider_to_string
     from app.api.v1.endpoints.models import (
         get_available_models,
         get_models_by_provider,
@@ -640,42 +735,54 @@ def test_model_routes_serialize_string_backed_providers():
     )
 
     provider_ids = asyncio.run(get_providers())
-    assert "self-hosted" in provider_ids
+    assert "offline" in provider_ids
+    assert "anthropic" in provider_ids
     assert "moonshot" in provider_ids
     assert "openrouter" in provider_ids
     assert "meta" in provider_ids
     assert "google" in provider_ids
+    assert "huggingface" not in provider_ids
+    assert "self-hosted" not in provider_ids
 
     response = asyncio.run(get_available_models())
-    assert "self-hosted" in response.providers
+    assert "offline" in response.providers
+    assert "anthropic" in response.providers
     assert "openrouter" in response.providers
     assert "meta" in response.providers
     assert "google" in response.providers
     assert any(model.id == "gpt-6-astra" for model in response.providers["openai"])
+    assert "huggingface" not in response.providers
+    assert "self-hosted" not in response.providers
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
-        model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"]
+        model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
+    assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
+    assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(
-        model.id == "tencent/hy4-preview" for model in response.providers["openrouter"]
-    )
-    assert any(
-        model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"]
-    )
-    assert any(
-        model.id == "meta/muse-spark-1.2-contributor"
-        for model in response.providers["openrouter"]
+        model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
     )
     assert {
         "muse-spark-1.1",
         "muse-spark-1.2",
         "muse-spark-1.3",
     } <= {model.id for model in response.providers["meta"]}
-    assert any(
-        model.id == "openai/gpt-oss-120b"
-        for model in response.providers["self-hosted"]
-    )
 
-    hosted_models = asyncio.run(get_models_by_provider("self-hosted"))
-    assert all(model.provider == "self-hosted" for model in hosted_models)
+    internal_models = get_all_models()
+    internal_provider_ids = {provider_to_string(provider) for provider in internal_models}
+    assert "huggingface" in internal_provider_ids
+    assert "self-hosted" in internal_provider_ids
+    self_hosted_models = next(
+        models
+        for provider, models in internal_models.items()
+        if provider_to_string(provider) == "self-hosted"
+    )
+    assert any(model.id == "openai/gpt-oss-120b" for model in self_hosted_models)
+
+    for hidden_provider in ("huggingface", "self-hosted"):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_models_by_provider(hidden_provider))
+        assert exc_info.value.status_code == 400
