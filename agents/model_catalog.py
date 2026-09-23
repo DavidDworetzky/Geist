@@ -320,7 +320,13 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_reasoning=True,
         supports_streaming=True,
         recommended=True,
-        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
         mandatory_reasoning_effort="high",
         local=False,
         performance_note=(

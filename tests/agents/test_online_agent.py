@@ -457,10 +457,10 @@ class TestOnlineAgentAPIRequests:
 
                 payload = mock_post.call_args.kwargs["json"]
                 assert "n" not in payload
+                assert "temperature" not in payload
                 assert "top_p" not in payload
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
-                assert payload["temperature"] == 0.7
                 assert payload["stop"] == "END"
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"

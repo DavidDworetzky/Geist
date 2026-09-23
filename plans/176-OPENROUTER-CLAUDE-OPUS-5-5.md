@@ -25,7 +25,9 @@ default effort, native tools with automatic tool choice, and JSON-schema
 structured output. OpenRouter lists $4/M input, $20/M output, and $0.20/M
 cached input for the standard Bedrock route. Three Amazon Bedrock endpoints
 appear in OpenRouter's ZDR inventory; the global route reported 99.80% one-day
-uptime at review time.
+uptime at review time. The aggregate route advertises temperature through
+Azure, while the recommended ZDR endpoints omit it, so Geist filters
+temperature to keep requests compatible with ZDR routing.
 
 Gate score: capability value 5, evidence quality 5, Geist fit 5, operational
 safety 5, implementation confidence 4 = **24/25**. Implementation confidence
@@ -37,9 +39,9 @@ narrower sampling contract than Geist's generic OpenAI-compatible payload.
 1. Add an explicit hosted `ModelSpec` with provider `openrouter`, backend
    `openai_compatible`, the exact stable ID, verified limits/capabilities, no
    parameter-count claim, and no local fallback.
-2. Filter only unsupported generic request parameters (`n`, `top_p`, frequency
-   penalty, and presence penalty), apply mandatory high reasoning, and retain
-   temperature, stop, response format, streaming, and native tools.
+2. Filter unsupported generic request parameters (`n`, temperature, `top_p`,
+   frequency penalty, and presence penalty), apply mandatory high reasoning,
+   and retain stop, response format, streaming, and native tools.
 3. Extend catalog, factory-routing, credential, request-shaping, and API/UI
    discovery tests.
 4. Document pricing, launch-day evidence, forced-tool caveats, and the need to

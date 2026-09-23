@@ -11,8 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
-Flash routes are also intentionally server-backed. For models with published
+and OpenRouter's Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash,
+and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -85,8 +86,10 @@ Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
 and 128,000-token output limit, and supports streaming, native function
 calling, and JSON-schema structured output. Reasoning is always on; Geist sends
 OpenRouter's documented default `high` effort. Geist retains automatic tool
-choice and omits unsupported `n`, `top_p`, frequency-penalty, and
-presence-penalty parameters. Forced function selection is not supported.
+choice and omits `n`, `temperature`, `top_p`, frequency-penalty, and
+presence-penalty parameters. The aggregate route advertises temperature through
+Azure, but the recommended ZDR endpoints omit it. Forced function selection is
+not supported.
 
 OpenRouter lists $4 per million input tokens, $20 per million output tokens,
 and $0.20 per million cached input tokens. At review time, three Amazon Bedrock

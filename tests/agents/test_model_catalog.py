@@ -338,6 +338,7 @@ def test_openrouter_claude_opus_55_metadata_is_explicit_and_server_backed():
     assert opus.mandatory_reasoning_effort == "high"
     assert opus.unsupported_parameters == (
         "n",
+        "temperature",
         "top_p",
         "frequency_penalty",
         "presence_penalty",
