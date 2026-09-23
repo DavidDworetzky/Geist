@@ -319,6 +319,34 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_claude_opus_55_metadata_is_explicit_and_server_backed():
+    opus = get_model_spec("anthropic/claude-opus-5.5")
+
+    assert opus.provider == "openrouter"
+    assert opus.backend == "openai_compatible"
+    assert opus.local is False
+    assert opus.family == "claude"
+    assert opus.context_window == 1000000
+    assert opus.max_output_tokens == 128000
+    assert opus.parameter_count is None
+    assert opus.activated_parameters is None
+    assert opus.supports_vision is True
+    assert opus.supports_function_calling is True
+    assert opus.supports_reasoning is True
+    assert opus.supports_streaming is True
+    assert opus.recommended is True
+    assert opus.mandatory_reasoning_effort == "high"
+    assert opus.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert opus.performance_note is not None
+    assert "Enforce OpenRouter ZDR" in opus.performance_note
+    assert get_provider_endpoint(opus.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -507,6 +535,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "zai-org/GLM-5.2",
         "deepseek-ai/DeepSeek-R1",
         "x-ai/grok-4.6",
+        "anthropic/claude-opus-5.5",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -564,6 +593,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
     "model_id",
     [
         "x-ai/grok-4.6",
+        "anthropic/claude-opus-5.5",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -719,6 +749,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert "self-hosted" not in response.providers
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "anthropic/claude-opus-5.5" for model in response.providers["openrouter"]
+    )
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]

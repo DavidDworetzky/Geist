@@ -11,7 +11,7 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
+and OpenRouter's Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
 Flash routes are also intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
@@ -76,6 +76,25 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
+
+## OpenRouter-hosted Claude Opus 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-opus-5.5`. OpenRouter added this stable route on September
+22, 2026. It accepts text and image input, has a 1,000,000-token context window
+and 128,000-token output limit, and supports streaming, native function
+calling, and JSON-schema structured output. Reasoning is always on; Geist sends
+OpenRouter's documented default `high` effort. Geist retains automatic tool
+choice and omits unsupported `n`, `top_p`, frequency-penalty, and
+presence-penalty parameters. Forced function selection is not supported.
+
+OpenRouter lists $4 per million input tokens, $20 per million output tokens,
+and $0.20 per million cached input tokens. At review time, three Amazon Bedrock
+routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
+99.80% one-day uptime. Enforce OpenRouter ZDR routing before sending
+confidential workloads; ordinary provider policy and availability can change.
+OpenRouter itself does not retain prompt or response content unless logging is
+explicitly enabled.
 
 ## Meta-hosted Muse Spark
 

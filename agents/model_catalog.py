@@ -307,6 +307,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enable OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "anthropic/claude-opus-5.5",
+        "Claude Opus 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
