@@ -377,6 +377,37 @@ def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_gpt_6_sol_metadata_is_explicit_and_server_backed():
+    sol = get_model_spec("openai/gpt-6-sol")
+
+    assert sol.provider == "openrouter"
+    assert sol.backend == "openai_compatible"
+    assert sol.local is False
+    assert sol.family == "gpt"
+    assert sol.context_window == 1050000
+    assert sol.max_output_tokens == 128000
+    assert sol.parameter_count is None
+    assert sol.activated_parameters is None
+    assert sol.supports_vision is True
+    assert sol.supports_function_calling is True
+    assert sol.supports_reasoning is True
+    assert sol.supports_streaming is True
+    assert sol.recommended is True
+    assert sol.mandatory_reasoning_effort == "none"
+    assert sol.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert sol.performance_note is not None
+    assert "Chat Completions tool calling" in sol.performance_note
+    assert "Enforce OpenRouter ZDR" in sol.performance_note
+    assert get_provider_endpoint(sol.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -567,6 +598,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "x-ai/grok-4.6",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "openai/gpt-6-sol",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -626,6 +658,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "x-ai/grok-4.6",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "openai/gpt-6-sol",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -787,6 +820,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "openai/gpt-6-sol" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
