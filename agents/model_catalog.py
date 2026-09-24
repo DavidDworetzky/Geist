@@ -469,6 +469,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "fireworks/ember-1",
+        "Fireworks Ember-1",
+        "ember",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Fireworks-hosted Kimi K3 specialization with optional reasoning, native "
+            "tools, and shorter reasoning traces. The current Fireworks route is zero "
+            "retention; re-check endpoint policy before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
