@@ -68,6 +68,8 @@ def test_memory_preference_migrates_off_and_persists_without_changing_model(tmp_
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -192,6 +194,8 @@ def test_real_metadata_recognizes_supported_pre_workspace_schemas(removed_column
     importlib.import_module("app.models.database")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
 
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE mcp_server"))
@@ -210,6 +214,8 @@ def test_real_metadata_recognizes_pre_mcp_schema():
     importlib.import_module("app.models.database")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
 
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE mcp_server"))
@@ -229,6 +235,8 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             if missing_mcp:
@@ -240,7 +248,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -258,6 +266,8 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN agent_permissions"))
@@ -269,7 +279,7 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
         upgrade_database()
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
             connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
@@ -288,6 +298,8 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
@@ -311,7 +323,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -336,6 +348,8 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -357,7 +371,7 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
                 )
             ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 0)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
     finally:
         Session.remove()
@@ -372,6 +386,8 @@ def test_routine_outcome_upgrade_preserves_existing_schedule(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE agent_routine DROP COLUMN last_status"))
@@ -412,6 +428,8 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE user_settings DROP COLUMN llama_backend"))
@@ -432,7 +450,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -451,6 +469,8 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
     )
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         with engine.begin() as connection:
             connection.execute(text("DROP TABLE mcp_server"))
@@ -462,7 +482,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9c2d4e6f8a0"
+                "a8c1e3f5b7d9"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
@@ -490,6 +510,8 @@ def legacy_database(tmp_path):
     engine = configure_database(DatabaseConfig(provider="sqlite", database_url=f"sqlite:///{path}"))
     importlib.import_module("app.models.database")
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE mcp_oauth_connection"))
     try:
         yield path, engine
     finally:
@@ -554,7 +576,7 @@ def test_legacy_adoption_preserves_data_and_backup(
 
     _validate_legacy_schema(Base.metadata, engine)
     with engine.connect() as connection:
-        assert MigrationContext.configure(connection).get_current_heads() == ("b9c2d4e6f8a0",)
+        assert MigrationContext.configure(connection).get_current_heads() == ("a8c1e3f5b7d9",)
         assert connection.execute(text("SELECT user_id, workspace_key FROM geist_user")).one() == (
             52,
             "default",
@@ -628,3 +650,104 @@ def test_legacy_adoption_aborts_before_writes_if_backup_fails(legacy_database, m
         upgrade_database()
     with sqlite3.connect(path) as connection:
         assert list(connection.iterdump()) == original_dump
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_upgrade_adds_oauth_table_and_preserves_mcp_configuration(tmp_path, versioned):
+    original_config = DATABASE_CONFIG
+    engine = configure_database(
+        DatabaseConfig(
+            provider="sqlite",
+            database_url=f"sqlite:///{tmp_path / 'oauth-upgrade.sqlite3'}",
+        )
+    )
+    importlib.import_module("app.models.database")
+    Base.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE mcp_oauth_connection"))
+            connection.execute(
+                text(
+                    "INSERT INTO geist_user (user_id, workspace_key, name) VALUES (1, 'default', 'Workspace')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mcp_server (mcp_server_id, workspace_id, name, transport, url, enabled, timeout_seconds) VALUES (5, 1, 'gmail', 'http', 'https://gmailmcp.googleapis.com/mcp/v1', 0, 30)"
+                )
+            )
+        if versioned:
+            command.stamp(_alembic_config(), "b9c2d4e6f8a0")
+        else:
+            assert _classify_legacy_schema(Base.metadata, engine) == "pre_oauth"
+        upgrade_database()
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT name FROM mcp_server WHERE mcp_server_id = 5")
+                ).scalar_one()
+                == "gmail"
+            )
+            assert (
+                connection.execute(text("SELECT COUNT(*) FROM mcp_oauth_connection")).scalar_one()
+                == 0
+            )
+    finally:
+        Session.remove()
+        engine.dispose()
+        configure_database(original_config)
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_upgrade_preserves_existing_oauth_connection(legacy_database, versioned):
+    from app.models.database.mcp_oauth import McpOAuthConnection
+
+    _, engine = legacy_database
+    McpOAuthConnection.__table__.create(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO geist_user (user_id, workspace_key) VALUES (1, 'default')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO mcp_server (mcp_server_id, workspace_id, name, transport, url, enabled, timeout_seconds) "
+                "VALUES (5, 1, 'gmail', 'http', 'https://gmailmcp.googleapis.com/mcp/v1', 0, 30)"
+            )
+        )
+        connection.execute(
+            McpOAuthConnection.__table__.insert().values(
+                mcp_server_id=5,
+                provider="google",
+                endpoint="https://gmailmcp.googleapis.com/mcp/v1",
+                client_id="test-client",
+                credential_id="a" * 32,
+            )
+        )
+        if versioned:
+            # Reproduce this PR's original schema before the main branch merge.
+            connection.execute(text("DROP TABLE agent_goal"))
+            connection.execute(text("DROP TABLE agent_routine"))
+            for column in (
+                "llama_backend",
+                "llama_gpu_device_ids",
+                "agent_permissions",
+                "agentic_mode_enabled",
+                "llama_allow_system_ram",
+            ):
+                connection.execute(text(f"ALTER TABLE user_settings DROP COLUMN {column}"))
+        else:
+            connection.execute(
+                text("ALTER TABLE user_settings DROP COLUMN default_local_artifact_id")
+            )
+    if versioned:
+        command.stamp(_alembic_config(), "d8f0a2b4c6e8")
+
+    upgrade_database()
+    upgrade_database()
+
+    _validate_legacy_schema(Base.metadata, engine)
+    with engine.connect() as connection:
+        assert MigrationContext.configure(connection).get_current_heads() == ("a8c1e3f5b7d9",)
+        assert connection.execute(
+            text("SELECT provider, client_id, credential_id FROM mcp_oauth_connection")
+        ).one() == ("google", "test-client", "a" * 32)

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import SettingsSelect from './SettingsSelect';
 import SettingsToggle from './SettingsToggle';
+import McpOAuthAccount, { connectOAuth } from './McpOAuthAccount';
+import ProtonBridgeSetup from './ProtonBridgeSetup';
 import { McpCatalogueEntry, mcpCatalogue } from '../mcpCatalogue';
 import '../Tools.css';
 import {
@@ -101,6 +103,7 @@ const McpServersSection: React.FC = () => {
     updateServer,
     deleteServer,
     testServer,
+    refetch,
   } = useMcpServers();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -156,7 +159,7 @@ const McpServersSection: React.FC = () => {
     setFormError(null);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (oauthProvider?: string) => {
     try {
       setSaving(true);
       setFormError(null);
@@ -170,10 +173,13 @@ const McpServersSection: React.FC = () => {
       if (input.transport === 'http' && !input.url) {
         throw new Error('Remote servers require a URL');
       }
-      if (editingId !== null) {
-        await updateServer(editingId, input);
-      } else {
-        await createServer(input);
+      const saved = editingId !== null
+        ? await updateServer(editingId, input)
+        : await createServer(input);
+      if (oauthProvider) {
+        setEditingId(saved.mcp_server_id);
+        await connectOAuth(saved.mcp_server_id, oauthProvider);
+        return;
       }
       closeForm();
     } catch (err) {
@@ -285,6 +291,9 @@ const McpServersSection: React.FC = () => {
       </div>
 
       {error && <div className="notice notice-error">{error}</div>}
+      {new URLSearchParams(window.location.search).get('mcp_oauth') === 'connected' && (
+        <p role="status" className="notice notice-success">Account authorization completed. Test your MCP server before enabling its tools.</p>
+      )}
       {formError && !formOpen && <div className="notice notice-error">{formError}</div>}
 
       {loading ? (
@@ -337,6 +346,7 @@ const McpServersSection: React.FC = () => {
                   onChange={(checked) => void handleToggleEnabled(server, checked)}
                   description="Only enabled servers expose tools to chat."
                 />
+                {server.transport === 'http' && <McpOAuthAccount serverId={server.mcp_server_id} onChange={refetch} />}
                 {testResult && (
                   <div
                     className={`notice ${testResult.ok ? 'notice-success' : 'notice-error'}`}
@@ -391,6 +401,7 @@ const McpServersSection: React.FC = () => {
           )}
 
           {formError && <div className="notice notice-error">{formError}</div>}
+          {selectedCatalogueEntry?.id === 'proton-mail' && <ProtonBridgeSetup />}
 
           <div className="settings-field">
             <label className="settings-label" htmlFor="mcp-name">Name</label>
@@ -495,6 +506,12 @@ const McpServersSection: React.FC = () => {
           </div>
 
           <div className="mcp-server-actions">
+            {selectedCatalogueEntry?.oauthProvider && (
+              <button className="button" type="button" disabled={saving}
+                onClick={() => void handleSubmit(selectedCatalogueEntry.oauthProvider)}>
+                {saving ? 'Connecting...' : `Save and connect with ${selectedCatalogueEntry.oauthLabel ?? 'Google'}`}
+              </button>
+            )}
             <button className="button" type="button" disabled={saving} onClick={() => void handleSubmit()}>
               {saving ? 'Saving...' : editingId !== null ? 'Save Server' : 'Add Server'}
             </button>
