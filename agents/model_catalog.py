@@ -334,6 +334,36 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enforce OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "openai/gpt-6-luna",
+        "GPT-6 Luna",
+        "gpt",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1050000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+        ),
+        mandatory_reasoning_effort="none",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter for cost-sensitive, high-volume work. Geist "
+            "disables reasoning because OpenAI's Chat Completions tool calling "
+            "requires reasoning effort none. Enforce OpenRouter ZDR routing before "
+            "sending confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
