@@ -13,6 +13,7 @@ from agents.model_catalog import (
     MODEL_SPECS,
     PROVIDERS,
     ProviderSpec,
+    canonicalize_online_model_id,
     default_local_model_id,
     get_model_spec,
     get_provider_endpoint,
@@ -32,11 +33,11 @@ def test_platform_default_uses_qwen38_mlx_and_uses_gguf_on_windows():
         assert default_local_model_id() == "Qwen/Qwen3-4B"
 
 
-def test_union_alpha_is_an_openrouter_preview_with_verified_capabilities():
-    spec = get_model_spec("stealth/union-alpha")
+def test_pareto_is_a_stable_openrouter_model_with_verified_capabilities():
+    spec = get_model_spec("unbiased/pareto")
 
     assert spec.provider == "openrouter"
-    assert spec.family == "stealth"
+    assert spec.family == "pareto"
     assert spec.backend == "openai_compatible"
     assert spec.local is False
     assert spec.context_window == 262144
@@ -47,8 +48,12 @@ def test_union_alpha_is_an_openrouter_preview_with_verified_capabilities():
     assert spec.supports_reasoning is False
     assert spec.mandatory_reasoning_effort is None
     assert spec.unsupported_parameters == ("n", "frequency_penalty", "presence_penalty", "stop")
-    assert "may be retained" in spec.performance_note
-    assert "not used for training" in spec.performance_note
+    assert "retains requests for 30 days" in spec.performance_note
+    assert "does not use them for training" in spec.performance_note
+    assert "not ZDR-eligible" in spec.performance_note
+    assert "do not use it for confidential workloads" in spec.performance_note
+    assert get_model_spec("stealth/union-alpha") is None
+    assert canonicalize_online_model_id("stealth/union-alpha") == "unbiased/pareto"
     assert PROVIDERS[spec.provider].api_key_env == "OPENROUTER_API_KEY"
 
 
@@ -544,7 +549,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
-        "stealth/union-alpha",
+        "unbiased/pareto",
         "muse-spark-1.1",
         "muse-spark-1.2",
         "muse-spark-1.3",
@@ -602,7 +607,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
-        "stealth/union-alpha",
+        "unbiased/pareto",
     ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
@@ -757,7 +762,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
     )
-    assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
+    assert any(model.id == "unbiased/pareto" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(

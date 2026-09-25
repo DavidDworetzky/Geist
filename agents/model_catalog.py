@@ -600,9 +600,9 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
-        "stealth/union-alpha",
-        "Union Alpha (Preview)",
-        "stealth",
+        "unbiased/pareto",
+        "Pareto",
+        "pareto",
         provider="openrouter",
         backend="openai_compatible",
         context_window=262144,
@@ -613,9 +613,10 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
         local=False,
         performance_note=(
-            "Anonymous third-party preview on OpenRouter for research, coding, and "
-            "agentic workflows. Prompts and completions may be retained by the "
-            "provider but are not used for training."
+            "Stable composite model hosted through OpenRouter's sole Unbiased route. "
+            "The provider retains requests for 30 days but does not use them for "
+            "training; this route is not ZDR-eligible, so do not use it for "
+            "confidential workloads."
         ),
     ),
     ModelSpec(
@@ -707,6 +708,14 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
 
 _MODEL_INDEX = {spec.id.lower(): spec for spec in MODEL_SPECS}
 _MODEL_ALIAS_INDEX = {alias.lower(): spec for spec in MODEL_SPECS for alias in spec.aliases}
+_RETIRED_ONLINE_MODEL_IDS = {
+    "stealth/union-alpha": "unbiased/pareto",
+}
+
+
+def canonicalize_online_model_id(model_id: str) -> str:
+    """Map retired hosted model IDs to their supported replacements."""
+    return _RETIRED_ONLINE_MODEL_IDS.get(model_id.lower(), model_id)
 
 
 def get_model_spec(model_id: str) -> ModelSpec | None:
