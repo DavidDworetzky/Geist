@@ -11,9 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
-with published
+and OpenRouter's GPT-6 Luna, Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen
+3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed.
+For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -98,6 +98,32 @@ routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
 confidential workloads; ordinary provider policy and availability can change.
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled.
+
+## OpenRouter-hosted GPT-6 Luna
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`openai/gpt-6-luna`. The stable route accepts text and image input, has a
+1,050,000-token context window and 128,000-token output limit, and supports
+streaming, structured output, native function calling, and optional reasoning.
+OpenRouter lists $0.10 per million input tokens, $0.50 per million output
+tokens, and $0.01 per million cached input tokens. Prompts above 272,000 input
+tokens use OpenAI's long-context price multiplier.
+
+Geist uses OpenRouter's OpenAI-compatible Chat Completions path. OpenAI
+documents that function calling on that endpoint requires reasoning effort
+`none`, so Geist enforces non-reasoning mode and omits unsupported `n`,
+`temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, and `stop`
+fields. Use a Responses API integration outside the current OnlineAgent path
+when reasoning and tools are both required.
+
+Independent evaluations support Luna as an inexpensive, high-throughput choice
+for scoped work, but report mixed results on complex coding tasks. It is not a
+replacement for a flagship model on difficult changes. OpenAI states API
+content is not used for training by default, but standard abuse-monitoring logs
+may retain prompts and responses for up to 30 days. OpenRouter listed three
+Azure endpoints for this exact model in its ZDR inventory on September 25,
+2026. Enforce OpenRouter ZDR routing before sending confidential workloads;
+normal routing does not guarantee a ZDR endpoint.
 
 ## Meta-hosted Muse Spark
 

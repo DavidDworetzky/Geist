@@ -211,6 +211,7 @@ class TestOnlineAgentInitialization:
         [
             "x-ai/grok-4.6",
             "anthropic/claude-opus-5.5",
+            "openai/gpt-6-luna",
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
@@ -495,6 +496,56 @@ class TestOnlineAgentAPIRequests:
                 assert "n" not in payload
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_gpt_6_luna_uses_tool_compatible_non_reasoning_request(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="openai/gpt-6-luna",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "openai/gpt-6-luna",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "max_tokens": 128,
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "seed": 7,
+                        "response_format": {"type": "json_object"},
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                for parameter in (
+                    "n",
+                    "temperature",
+                    "top_p",
+                    "frequency_penalty",
+                    "presence_penalty",
+                    "stop",
+                ):
+                    assert parameter not in payload
+                assert payload["max_tokens"] == 128
+                assert payload["seed"] == 7
+                assert payload["response_format"] == {"type": "json_object"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["reasoning"] == {"effort": "none"}
 
     def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self):
         context = create_mock_agent_context()
