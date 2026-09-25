@@ -588,6 +588,37 @@ def test_openrouter_claude_haiku_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(haiku.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_gpt_6_luna_metadata_is_explicit_and_server_backed():
+    luna = get_model_spec("openai/gpt-6-luna")
+
+    assert luna.provider == "openrouter"
+    assert luna.backend == "openai_compatible"
+    assert luna.local is False
+    assert luna.family == "gpt"
+    assert luna.context_window == 1050000
+    assert luna.max_output_tokens == 128000
+    assert luna.parameter_count is None
+    assert luna.activated_parameters is None
+    assert luna.supports_vision is True
+    assert luna.supports_function_calling is True
+    assert luna.supports_reasoning is True
+    assert luna.supports_streaming is True
+    assert luna.recommended is True
+    assert luna.mandatory_reasoning_effort == "none"
+    assert luna.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert luna.performance_note is not None
+    assert "Chat Completions tool calling" in luna.performance_note
+    assert "Enforce OpenRouter ZDR" in luna.performance_note
+    assert get_provider_endpoint(luna.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -786,6 +817,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "openai/gpt-6-luna",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -866,6 +898,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "openai/gpt-6-luna",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -1039,6 +1072,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "inclusionai/ling-3.1-flash" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "openai/gpt-6-luna" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash-1017"
