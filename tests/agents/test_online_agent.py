@@ -210,6 +210,7 @@ class TestOnlineAgentInitialization:
         "model_id",
         [
             "x-ai/grok-4.6",
+            "anthropic/claude-opus-5.5",
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
@@ -419,6 +420,52 @@ class TestOnlineAgentAPIRequests:
                 assert payload["presence_penalty"] == 0.5
                 assert payload["stop"] == "END"
                 assert payload["reasoning"] == {"effort": "max"}
+
+    def test_claude_opus_55_filters_sampling_defaults_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="anthropic/claude-opus-5.5",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "anthropic/claude-opus-5.5",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "temperature" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+                assert payload["reasoning"] == {"effort": "high"}
 
     def test_qwen38_flash_omits_unsupported_n_without_forcing_reasoning(self):
         context = create_mock_agent_context()
