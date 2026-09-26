@@ -336,6 +336,12 @@ class ChatOrchestrator:
             # A pending signed tool turn must survive checkpoints and continuation.
             # This retention budget is soft; the provider enforces its token limit.
             if size > remaining_chars and not pending_reasoning:
+                block = [
+                    replace(item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                    for item in block
+                ]
+                size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
+            if size > remaining_chars and not pending_reasoning:
                 if len(block) != 1 or block[0].tool_calls:
                     continue  # Drop the whole protocol block, never orphan a result.
                 if remaining_chars <= 128:
@@ -432,7 +438,12 @@ class ChatOrchestrator:
         for entry in reversed(entries):
             if len(selected_blocks) >= self.max_history_entries:
                 break
-            block = self._entry_messages(entry)
+            # Prior chat turns are complete. Resume active tool reasoning from
+            # trusted goal checkpoints, not from ordinary conversation history.
+            block = [
+                replace(message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                for message in self._entry_messages(entry)
+            ]
             if not block:
                 continue
             block_chars = len(

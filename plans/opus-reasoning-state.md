@@ -14,13 +14,16 @@ tool continuations without the provider state required by mandatory thinking.
   text deltas or modify their content.
 - Carry them through orchestration, saved transcripts, and goal checkpoints.
   Replay them only to the originating model and endpoint on the OpenAI-compatible path.
+  Ordinary history loading omits prior-turn reasoning while retaining visible
+  answers and tool results; active goal resume uses the intact checkpoint.
 - Keep existing tool invocation IDs and approval isolation unchanged.
 - Count this state against existing context limits and discard whole protocol
   blocks rather than partially truncating reasoning details.
   Keep a pending signed tool turn intact even if it exceeds the soft retention
   budget so checkpointing and resume cannot lose executed results. The provider
   still enforces its token limit. For completed plain answers, discard oversized
-  reasoning and retain bounded visible text.
+  reasoning and retain bounded visible text. Completed tool blocks can shed
+  reasoning under budget pressure while retaining their call/result pairs.
 
 ## Validation
 

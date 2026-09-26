@@ -101,7 +101,7 @@ def test_recent_denial_survives_bounded_context_and_trusted_checkpoint():
     assert not ChatMessage.from_dict(checkpoint[1]).preserve_content
 
 
-def test_context_budget_drops_old_reasoning_tool_blocks():
+def test_context_budget_retains_completed_tool_results_without_oversized_reasoning():
     orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
     call = ToolCall.create("read")
     messages = [
@@ -116,9 +116,43 @@ def test_context_budget_drops_old_reasoning_tool_blocks():
         ChatMessage(role="user", content="Continue"),
     ]
     bounded = orchestrator._model_context(messages)
-    assert [message.content for message in bounded] == ["Finished", "Continue"]
+    assert [message.content for message in bounded] == [None, "result", "Finished", "Continue"]
+    assert not bounded[0].reasoning_details
+    assert bounded[0].reasoning_model is None
     assert orchestrator._has_complete_tool_sequence(bounded)
     assert messages[0].reasoning_details[0]["data"] == "x" * 2000
+
+
+def test_completed_history_reasoning_does_not_evict_conversation_or_tool_results():
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    history = []
+    for index in range(2):
+        call = ToolCall.create("read")
+        messages = [
+            ChatMessage(role="user", content=f"Request {index}"),
+            ChatMessage(
+                role="assistant",
+                tool_calls=[call],
+                reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+                reasoning_model="anthropic/claude-opus-5.5",
+                reasoning_endpoint="https://openrouter.ai/api/v1/chat/completions",
+            ),
+            ChatMessage(role="tool", tool_call_id=call.id, content=f"Result {index}"),
+            ChatMessage(role="assistant", content=f"Answer {index}"),
+        ]
+        history.append({"status": "completed", "transcript": [item.to_dict() for item in messages]})
+    original = deepcopy(history)
+    restored = orchestrator._model_context(orchestrator._history_messages(history))
+    assert [item.content for item in restored if item.role == "user"] == ["Request 0", "Request 1"]
+    assert [item.content for item in restored if item.role == "tool"] == ["Result 0", "Result 1"]
+    assert [item.content for item in restored if item.role == "assistant" and not item.tool_calls] == [
+        "Answer 0",
+        "Answer 1",
+    ]
+    assert all(not item.reasoning_details for item in restored)
+    assert orchestrator._has_complete_tool_sequence(restored)
+    assert len(json.dumps([item.to_dict() for item in restored])) <= 1200
+    assert history == original
 
 
 @pytest.mark.parametrize("answer", ["Short answer", "Long answer " * 500])

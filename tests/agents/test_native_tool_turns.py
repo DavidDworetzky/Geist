@@ -195,7 +195,9 @@ def test_opus_reasoning_survives_tool_continuation_history_and_checkpoint():
     assert next(e.payload for e in events if e.event == "final").message == ["Found it"]
 
     saved = json.loads(json.dumps(writes[0]["transcript"]))
-    restored = orchestrator._history_messages([{"transcript": saved, "status": "completed"}])
+    history = orchestrator._history_messages([{"transcript": saved, "status": "completed"}])
+    assert all(not message.reasoning_details for message in history)
+    restored = [ChatMessage.from_dict(item) for item in saved]
     checkpoint = orchestrator._checkpoint_messages(restored)
     restored = [orchestrator._checkpoint_message(item) for item in checkpoint]
     restored.append(ChatMessage(role="user", content="Continue"))
