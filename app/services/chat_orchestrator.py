@@ -309,6 +309,14 @@ class ChatOrchestrator:
                 blocks.append([message])
         selected: list[tuple[int, list[ChatMessage]]] = []
         remaining_chars = self.max_history_chars
+        latest_assistant = next(
+            (
+                index
+                for index in reversed(range(len(blocks)))
+                if blocks[index][0].role == "assistant"
+            ),
+            None,
+        )
         protected = [
             index
             for index, block in enumerate(blocks)
@@ -319,16 +327,16 @@ class ChatOrchestrator:
         )
         for index in indices:
             block = blocks[index]
-            if len(selected) >= self.max_history_entries:
-                break
+            pending_reasoning = bool(
+                index == latest_assistant and block[0].tool_calls and block[0].reasoning_details
+            )
+            if len(selected) >= self.max_history_entries and not pending_reasoning:
+                continue
             size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
-            if size > remaining_chars:
-                if index == len(blocks) - 1 and block[0].tool_calls and block[0].reasoning_details:
-                    raise RuntimeError(
-                        "The latest tool turn and its reasoning exceed the conversation context "
-                        "budget. Stopping rather than continuing without the tool results."
-                    )
-                if len(block) != 1 or block[0].tool_calls or block[0].reasoning_details:
+            # A pending signed tool turn must survive checkpoints and continuation.
+            # This retention budget is soft; the provider enforces its token limit.
+            if size > remaining_chars and not pending_reasoning:
+                if len(block) != 1 or block[0].tool_calls:
                     continue  # Drop the whole protocol block, never orphan a result.
                 if remaining_chars <= 128:
                     continue
@@ -336,6 +344,9 @@ class ChatOrchestrator:
                     replace(
                         block[0],
                         content=self._bounded_result(block[0].content or "", remaining_chars - 128),
+                        reasoning_details=[],
+                        reasoning_model=None,
+                        reasoning_endpoint=None,
                     )
                 ]
                 size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))

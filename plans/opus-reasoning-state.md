@@ -17,8 +17,10 @@ tool continuations without the provider state required by mandatory thinking.
 - Keep existing tool invocation IDs and approval isolation unchanged.
 - Count this state against existing context limits and discard whole protocol
   blocks rather than partially truncating reasoning details.
-  Stop with an explicit error if the current tool turn cannot fit, rather than
-  silently discarding the results of an already-executed tool.
+  Keep a pending signed tool turn intact even if it exceeds the soft retention
+  budget so checkpointing and resume cannot lose executed results. The provider
+  still enforces its token limit. For completed plain answers, discard oversized
+  reasoning and retain bounded visible text.
 
 ## Validation
 
