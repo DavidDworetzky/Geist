@@ -101,6 +101,46 @@ def test_recent_denial_survives_bounded_context_and_trusted_checkpoint():
     assert not ChatMessage.from_dict(checkpoint[1]).preserve_content
 
 
+@pytest.mark.parametrize("with_tool", [True, False])
+def test_context_budget_drops_whole_reasoning_blocks(with_tool):
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    call = ToolCall.create("read")
+    messages = [
+        ChatMessage(
+            role="assistant",
+            content="Old answer",
+            tool_calls=[call] if with_tool else [],
+            reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+            reasoning_model="anthropic/claude-opus-5.5",
+        )
+    ]
+    if with_tool:
+        messages.append(ChatMessage(role="tool", tool_call_id=call.id, content="result"))
+    messages.append(ChatMessage(role="user", content="Continue"))
+    bounded = orchestrator._model_context(messages)
+    assert [message.to_dict() for message in bounded] == [{"role": "user", "content": "Continue"}]
+    assert orchestrator._has_complete_tool_sequence(bounded)
+    assert messages[0].reasoning_details[0]["data"] == "x" * 2000
+
+
+def test_current_tool_reasoning_over_budget_stops_instead_of_losing_results():
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    call = ToolCall.create("write")
+    messages = [
+        ChatMessage(role="user", content="Write the file"),
+        ChatMessage(
+            role="assistant",
+            tool_calls=[call],
+            reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+            reasoning_model="anthropic/claude-opus-5.5",
+        ),
+        ChatMessage(role="tool", tool_call_id=call.id, content="File written"),
+    ]
+    with pytest.raises(RuntimeError, match="latest tool turn.*reasoning exceed"):
+        orchestrator._model_context(messages)
+    assert messages[-1].content == "File written"
+
+
 class ScriptedBackend:
     supports_native_tool_calling = True
 

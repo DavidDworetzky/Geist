@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
+from copy import deepcopy
 from typing import Any, cast
 
 import httpx
@@ -629,7 +630,14 @@ class OnlineAgent(BaseAgent):
         internal_to_provider, provider_to_internal = self._provider_tool_name_maps(tools, messages)
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [message.to_openai(internal_to_provider) for message in messages],
+            "messages": [
+                message.to_openai(
+                    internal_to_provider,
+                    reasoning_model=self.model,
+                    reasoning_endpoint=self._openai_chat_url(),
+                )
+                for message in messages
+            ],
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "top_p": config.top_p,
@@ -646,6 +654,7 @@ class OnlineAgent(BaseAgent):
 
         text_parts: list[str] = []
         call_parts: dict[int, dict[str, str]] = {}
+        reasoning_details: list[dict[str, Any]] = []
         finish_reason: str | None = None
         saw_done = False
         with self.client.stream(
@@ -680,6 +689,9 @@ class OnlineAgent(BaseAgent):
                 choice = choices[0]
                 finish_reason = choice.get("finish_reason") or finish_reason
                 delta = choice.get("delta") or {}
+                # OpenRouter requires the original reasoning sequence on tool continuations.
+                # Keep opaque chunks (including signatures) in order, separate from UI text.
+                reasoning_details.extend(deepcopy(delta.get("reasoning_details") or []))
                 content = delta.get("content")
                 if content:
                     text_parts.append(content)
@@ -728,6 +740,9 @@ class OnlineAgent(BaseAgent):
                 text="".join(text_parts),
                 tool_calls=calls,
                 finish_reason=finish_reason,
+                reasoning_details=reasoning_details,
+                reasoning_model=self.model if reasoning_details else None,
+                reasoning_endpoint=self._openai_chat_url() if reasoning_details else None,
             )
         )
 

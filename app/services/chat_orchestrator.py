@@ -323,7 +323,12 @@ class ChatOrchestrator:
                 break
             size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
             if size > remaining_chars:
-                if len(block) != 1 or block[0].tool_calls:
+                if index == len(blocks) - 1 and block[0].tool_calls and block[0].reasoning_details:
+                    raise RuntimeError(
+                        "The latest tool turn and its reasoning exceed the conversation context "
+                        "budget. Stopping rather than continuing without the tool results."
+                    )
+                if len(block) != 1 or block[0].tool_calls or block[0].reasoning_details:
                     continue  # Drop the whole protocol block, never orphan a result.
                 if remaining_chars <= 128:
                     continue
@@ -891,6 +896,9 @@ class ChatOrchestrator:
                     role="assistant",
                     content=completed_turn.text or None,
                     tool_calls=completed_turn.tool_calls,
+                    reasoning_details=completed_turn.reasoning_details,
+                    reasoning_model=completed_turn.reasoning_model,
+                    reasoning_endpoint=completed_turn.reasoning_endpoint,
                 )
                 with run.persistence_lock:
                     if not run.persisted:
