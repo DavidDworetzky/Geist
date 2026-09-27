@@ -105,13 +105,9 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                     {statusLabel(element.orchestration.goal_status)}
                   </span>
                 )}
-                {typeof element.orchestration.turns_used === 'number'
-                  && typeof element.orchestration.max_turns === 'number'
-                  && (
-                    <span className="input-help">
-                      Model calls {element.orchestration.turns_used}/{element.orchestration.max_turns}
-                    </span>
-                  )}
+                <span className="input-help">
+                  Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
+                </span>
               </div>
               {element.orchestration.decomposition_warning && (
                 <div className="input-help">{element.orchestration.decomposition_warning}</div>
