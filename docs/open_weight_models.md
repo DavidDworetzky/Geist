@@ -11,9 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3 Flash, Grok 4.6,
-Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
-server-backed. For models with published
+and OpenRouter's Claude Opus 5.5, Claude Sonnet 5.5, Solar Mini 4, GLM 5.3
+Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
+intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -142,6 +142,36 @@ Meta describes open weights as future work.
 The Contributor tier remains under provider `openrouter`. Although Meta lists
 the tier, direct Chat Completions availability has not been reliable enough to
 make it a first-party provider option in Geist.
+
+## OpenRouter-hosted Solar Mini 4
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`upstage/solar-mini4`. The stable text-only route has a 524,288-token context
+window and 131,072-token maximum output. It supports optional reasoning,
+streaming, native and parallel function calling, and JSON-schema structured
+output. Geist omits unsupported `n` and `stop` fields while retaining supported
+sampling, reasoning, tool, and response-format parameters. Upstage discloses a
+35B-parameter mixture-of-experts model with 3B active parameters.
+
+OpenRouter listed a 50%-discounted price of $0.05 per million input tokens,
+$0.20 per million output tokens, and $0.005 per million cached input tokens on
+September 27, 2026. The page reported 99.94% three-day availability, 99.97%
+24-hour availability, 70 output tokens/second best-provider P50, and 0.42-second
+best-provider P50 latency. These are live observations, not guarantees.
+
+Neither Upstage nor an established independent benchmark provider had
+published an exact-model coding or agent score at review time. A community
+wrapper reported 98.4% field accuracy on its own 447-field bilingual decision
+test at non-reasoning effort, but the harness and model judge were not neutral.
+Treat Solar Mini 4 as a low-cost long-context candidate and qualify it on
+Geist/Pitchblend workloads before making it a default.
+
+OpenRouter exposes two Upstage routes for this model: one appears in the ZDR
+inventory and one does not. Its provider directory labels Upstage as retaining
+prompts by default and not using them for training. Default routing therefore
+is not appropriate for confidential workloads; enforce OpenRouter ZDR and
+re-check the live endpoint inventory before use. BYOK additionally requires a
+ZDR-enabled Upstage organization.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 

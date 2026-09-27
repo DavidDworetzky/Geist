@@ -422,6 +422,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Solar Mini 4 privacy guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Default routing can retain prompts; enforce OpenRouter ZDR.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'upstage/solar-mini4',
+              name: 'Solar Mini 4',
+              provider: 'openrouter',
+              context_window: 524288,
+              max_output_tokens: 131072,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'solar',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="upstage/solar-mini4"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Solar Mini 4' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Tencent Hy4 Preview guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Single Tencent FP8 preview route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({
