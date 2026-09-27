@@ -147,30 +147,42 @@ describe('ChatTextArea tool activity', () => {
 });
 
 describe('ChatTextArea agentic progress', () => {
-  it('renders goal turns, task status, and evidence', () => {
+  it('renders actual plan progress, task status, and evidence independently of model calls', () => {
     render(<ChatTextArea chatHistory={[{
       run_id: 'run_agentic',
       user: 'Build a feature',
       ai: 'Done',
       orchestration: {
         agentic_mode: true,
-        goal_status: 'complete',
+        goal_status: 'active',
         turns_used: 2,
-        max_turns: 8,
+        max_turns: 48,
         tasks: [{
           id: 'task-1',
           title: 'Implement the UI',
           acceptance_criteria: ['UI test passes'],
           status: 'completed',
           evidence: 'UI test passes',
+        }, {
+          id: 'task-2',
+          title: 'Verify the UI',
+          acceptance_criteria: [],
+          status: 'in_progress',
+        }, {
+          id: 'task-3',
+          title: 'Publish a preview',
+          acceptance_criteria: [],
+          status: 'skipped',
+          skip_reason: 'Preview not requested',
         }],
       },
     }]} />);
 
     const progress = screen.getByRole('region', { name: 'Agentic progress' });
     expect(progress).toHaveTextContent('Agentic plan');
-    expect(progress).toHaveTextContent('complete');
-    expect(progress).toHaveTextContent('Model calls 2/8');
+    expect(progress).toHaveTextContent('active');
+    expect(progress).toHaveTextContent('Steps 1/3 completed');
+    expect(progress).not.toHaveTextContent('Model calls');
     expect(progress).toHaveTextContent('Implement the UI');
     expect(progress).toHaveTextContent('UI test passes');
   });
