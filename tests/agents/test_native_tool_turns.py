@@ -172,9 +172,9 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
     assert payload["tools"][0]["function"]["parameters"]["required"] == ["query"]
 
 
-def test_union_alpha_stream_filters_defaults_and_preserves_automatic_tool_calling():
+def test_pareto_stream_filters_defaults_and_preserves_automatic_tool_calling():
     turn, agent, provider_name = _run_streamed_tool_call(
-        model="stealth/union-alpha", endpoint="https://openrouter.ai/api/v1"
+        model="unbiased/pareto", endpoint="https://openrouter.ai/api/v1"
     )
 
     assert turn.tool_calls[0].name == "web.search"
@@ -182,7 +182,7 @@ def test_union_alpha_stream_filters_defaults_and_preserves_automatic_tool_callin
     assert turn.finish_reason == "tool_calls"
     assert agent.client.request["url"] == "https://openrouter.ai/api/v1/chat/completions"
     payload = agent.client.request["json"]
-    assert payload["model"] == "stealth/union-alpha"
+    assert payload["model"] == "unbiased/pareto"
     assert payload["stream"] is True
     assert payload["tool_choice"] == "auto"
     assert payload["tools"][0]["function"]["name"] == provider_name

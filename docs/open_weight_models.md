@@ -196,30 +196,36 @@ supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
 
-## OpenRouter-hosted Union Alpha (Preview)
+## OpenRouter-hosted Pareto
 
 Create an API key in [OpenRouter's key settings](https://openrouter.ai/settings/keys)
 and supply it to the Geist backend as `OPENROUTER_API_KEY`, using your existing
 secret manager or local environment configuration. Restart the backend after
 changing the key. In Settings, choose Online mode, provider **OpenRouter**, and
-model **Union Alpha (Preview)** (`stealth/union-alpha`), then save.
-This uses Geist's existing OpenRouter credential support; no Cloudflare token
-or account ID is required.
+model **Pareto** (`unbiased/pareto`), then save.
+This uses Geist's existing OpenRouter credential support.
 
-The [OpenRouter model page](https://openrouter.ai/stealth/union-alpha) and
-[endpoint metadata](https://openrouter.ai/api/v1/models/stealth/union-alpha/endpoints),
-checked September 17, 2026, list a 262,144-token context, 131,072-token maximum
-output, text and image input, and native tools with automatic tool choice.
-The endpoint supports JSON output via `response_format`, without JSON-schema
-enforcement. It does not advertise configurable reasoning. Geist omits the
+The [OpenRouter model page](https://openrouter.ai/unbiased/pareto) and
+[endpoint metadata](https://openrouter.ai/api/v1/models/unbiased/pareto-20260917/endpoints),
+checked September 18, 2026, list a 262,144-token context, 131,072-token maximum
+output, text and image input, and native tools with automatic tool choice. The
+stable release replaces the retired `stealth/union-alpha` preview. It does not
+advertise configurable reasoning or structured output. Geist omits the
 unsupported `n`, `frequency_penalty`, `presence_penalty`, and `stop` parameters.
+OpenRouter lists prices of $2.50 per million input tokens, $7.50 per million
+output tokens, and $0.25 per million cached input tokens.
 
-Union Alpha's developer is anonymous. Cloudflare's catalog also labels it as
-[a third-party model](https://developers.cloudflare.com/ai/models/stealth/union-alpha/);
-that listing does not establish Cloudflare as its developer. Preview access is
-currently free, but availability and pricing can change. Prompts and completions
-may be retained by the provider but are not used for training; review
-OpenRouter's linked Stealth Model Terms before use.
+[Unbiased's model card](https://unbiased.ai/model-card/) describes Pareto 26.9
+as a blended model and reports 74 on DeepSWE, 51 on Terminal-Bench 4.0, 78 on
+MMMU-Pro, 49 on Humanity's Last Exam without tools, and 88 on ArXivMath. These
+are provider-run results, even though Unbiased publishes its evaluation harness.
+AI Benchy's independent September 18 run reported an 8.9 score, 86.4% pass
+rate, and 10.0 reliability; other independent launch-day evidence is limited.
+
+The sole Unbiased endpoint retains requests for 30 days and is absent from
+OpenRouter's ZDR inventory. Unbiased says it does not train on prompts or
+responses, but its own FAQ had not published a raw-content retention window at
+launch. Do not send confidential or regulated workloads to this model.
 
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 

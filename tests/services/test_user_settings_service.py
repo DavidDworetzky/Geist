@@ -47,6 +47,48 @@ def test_returns_canonical_local_model_for_legacy_settings():
     assert response.default_local_model == "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 
+def test_returns_pareto_for_retired_union_alpha_setting():
+    settings_model = make_settings_model("meta-llama/Meta-Llama-3.1-8B-Instruct")
+    settings_model.default_agent_type = "online"
+    settings_model.default_online_model = "stealth/union-alpha"
+    settings_model.default_online_provider = "openrouter"
+
+    with patch(
+        "app.services.user_settings_service.get_user_settings",
+        return_value=settings_model,
+    ):
+        response = UserSettingsService.get_workspace_settings_by_id(1)
+
+    assert response is not None
+    assert response.default_online_model == "unbiased/pareto"
+
+
+def test_persists_pareto_for_retired_union_alpha_update():
+    settings_model = make_settings_model("meta-llama/Meta-Llama-3.1-8B-Instruct")
+
+    with (
+        patch(
+            "app.services.user_settings_service.get_user_settings",
+            return_value=settings_model,
+        ),
+        patch(
+            "app.services.user_settings_service.update_user_settings",
+            return_value=settings_model,
+        ) as update_settings,
+    ):
+        UserSettingsService.update_workspace_settings_by_id(
+            1,
+            UserSettingsUpdate(
+                default_online_model="stealth/union-alpha",
+                default_online_provider="openrouter",
+            ),
+        )
+
+    update_dict = update_settings.call_args.args[1]
+    assert update_dict["default_online_model"] == "unbiased/pareto"
+    assert update_dict["default_agent_type"] == "online"
+
+
 def test_persists_canonical_local_model_for_legacy_update():
     settings_model = make_settings_model("meta-llama/Meta-Llama-3.1-8B-Instruct")
 
