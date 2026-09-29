@@ -356,6 +356,8 @@ class TestOnlineAgentAPIRequests:
                 payload = mock_post.call_args.kwargs["json"]
                 if model_id == "x-ai/grok-4.7":
                     assert "n" not in payload
+                else:
+                    assert payload["n"] == 2
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
                 assert "stop" not in payload
