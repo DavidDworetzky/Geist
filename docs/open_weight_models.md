@@ -11,9 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Claude Opus 5.5, GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
-with published
+and OpenRouter's Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3 Flash, Grok 4.6,
+Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
+server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -96,6 +96,36 @@ and $0.20 per million cached input tokens. At review time, three Amazon Bedrock
 routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
 99.80% one-day uptime. Enforce OpenRouter ZDR routing before sending
 confidential workloads; ordinary provider policy and availability can change.
+OpenRouter itself does not retain prompt or response content unless logging is
+explicitly enabled.
+
+## OpenRouter-hosted Claude Sonnet 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-sonnet-5.5`. OpenRouter added this stable route on September
+28, 2026. It accepts text, image, and file input, has a 1,000,000-token context
+window and 128,000-token output limit, and supports streaming, native function
+calling, automatic or forced tool choice, and JSON-schema structured output.
+Reasoning is always on; Geist sends OpenRouter's documented default `high`
+effort. Geist retains stop while omitting `n`, temperature, `top_p`,
+frequency-penalty, and presence-penalty parameters. The aggregate route
+advertises temperature through Azure, but six other upstreams omit it.
+
+OpenRouter lists $2 per million input tokens, $10 per million output tokens,
+$0.20 per million cached input tokens, and $2.50 per million five-minute cache
+writes. Anthropic reports materially faster, more token-efficient routine work
+than Sonnet 5. Independent Vals AI measurements place Sonnet 5.5 near the top
+of its broad suite and first on its code-migration and vibe-coding evaluations;
+hands-on Electricity Bench results are more mixed, supporting its role as a
+high-volume worker rather than a universal replacement for Opus 5.5.
+
+OpenRouter exposed eight live upstream routes at review time. Its provider
+directory lists Google Vertex, Amazon Bedrock, and Azure as no-training and
+zero-retention providers, but the exact Sonnet 5.5 route was absent from the
+OpenRouter ZDR endpoint inventory on September 29, 2026. Default routing can
+reach Anthropic or Claude Platform on AWS, which OpenRouter lists as no-training
+with 30-day retention. Do not send confidential workloads until the exact route
+appears in the ZDR inventory or an approved zero-retention upstream is enforced.
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled.
 

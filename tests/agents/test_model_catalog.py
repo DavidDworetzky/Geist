@@ -348,6 +348,35 @@ def test_openrouter_claude_opus_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(opus.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
+    sonnet = get_model_spec("anthropic/claude-sonnet-5.5")
+
+    assert sonnet.provider == "openrouter"
+    assert sonnet.backend == "openai_compatible"
+    assert sonnet.local is False
+    assert sonnet.family == "claude"
+    assert sonnet.context_window == 1000000
+    assert sonnet.max_output_tokens == 128000
+    assert sonnet.parameter_count is None
+    assert sonnet.activated_parameters is None
+    assert sonnet.supports_vision is True
+    assert sonnet.supports_function_calling is True
+    assert sonnet.supports_reasoning is True
+    assert sonnet.supports_streaming is True
+    assert sonnet.recommended is True
+    assert sonnet.mandatory_reasoning_effort == "high"
+    assert sonnet.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert sonnet.performance_note is not None
+    assert "not currently listed for OpenRouter ZDR" in sonnet.performance_note
+    assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -537,6 +566,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "deepseek-ai/DeepSeek-R1",
         "x-ai/grok-4.6",
         "anthropic/claude-opus-5.5",
+        "anthropic/claude-sonnet-5.5",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -595,6 +625,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
     [
         "x-ai/grok-4.6",
         "anthropic/claude-opus-5.5",
+        "anthropic/claude-sonnet-5.5",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -752,6 +783,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(
         model.id == "anthropic/claude-opus-5.5" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
