@@ -373,7 +373,7 @@ def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
         "presence_penalty",
     )
     assert sonnet.performance_note is not None
-    assert "not currently listed for OpenRouter ZDR" in sonnet.performance_note
+    assert "Enforce OpenRouter ZDR routing" in sonnet.performance_note
     assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
 
 

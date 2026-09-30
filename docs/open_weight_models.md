@@ -121,13 +121,12 @@ high-volume worker rather than a universal replacement for Opus 5.5.
 
 OpenRouter exposed eight live upstream routes at review time. Its provider
 directory lists Google Vertex, Amazon Bedrock, and Azure as no-training and
-zero-retention providers, but the exact Sonnet 5.5 route was absent from the
-OpenRouter ZDR endpoint inventory on September 29, 2026. Default routing can
+zero-retention providers. The exact Sonnet 5.5 route appeared in OpenRouter's
+ZDR endpoint inventory on September 30, 2026, but default routing can still
 reach Anthropic or Claude Platform on AWS, which OpenRouter lists as no-training
-with 30-day retention. Do not send confidential workloads until the exact route
-appears in the ZDR inventory or an approved zero-retention upstream is enforced.
-OpenRouter itself does not retain prompt or response content unless logging is
-explicitly enabled.
+with 30-day retention. Enforce ZDR routing before sending confidential
+workloads. OpenRouter itself does not retain prompt or response content unless
+logging is explicitly enabled.
 
 ## Meta-hosted Muse Spark
 

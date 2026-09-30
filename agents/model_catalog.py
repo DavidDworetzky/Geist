@@ -358,8 +358,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         local=False,
         performance_note=(
             "Hosted through OpenRouter with mandatory reasoning and native tools. "
-            "The exact route is not currently listed for OpenRouter ZDR; do not send "
-            "confidential workloads until an approved zero-retention route is enforced."
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
     # Heavyweight models are deliberately server-backed.
