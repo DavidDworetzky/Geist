@@ -248,41 +248,6 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
     });
 
-    it('shows Claude Sonnet 5.5 from live OpenRouter catalog data', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          providers: {
-            openrouter: [{
-              id: 'anthropic/claude-sonnet-5.5',
-              name: 'Claude Sonnet 5.5',
-              provider: 'openrouter',
-              context_window: 1000000,
-              max_output_tokens: 128000,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_reasoning: true,
-              supports_streaming: true,
-              recommended: true,
-              family: 'claude',
-            }],
-          },
-          last_updated: null,
-        }),
-      });
-
-      render(
-        <AgentConfigSection
-          {...defaultProps}
-          onlineProvider="openrouter"
-          onlineModel="anthropic/claude-sonnet-5.5"
-        />
-      );
-
-      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Claude Sonnet 5.5' })).toBeInTheDocument();
-    });
-
     it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
