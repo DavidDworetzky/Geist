@@ -133,7 +133,8 @@ logging is explicitly enabled.
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
 `openai/gpt-6-sol`. The stable route accepts text and image input, has a
 1,050,000-token context window and 128,000-token output limit, and supports
-streaming, structured output, native function calling, and optional reasoning.
+streaming, structured output, and native function calling. The model also
+offers optional reasoning, but Geist does not use it on this route.
 OpenRouter lists $2 per million input tokens, $10 per million output tokens,
 and $0.20 per million cached input tokens. Prompts above 272,000 input tokens
 use OpenAI's long-context price multiplier.

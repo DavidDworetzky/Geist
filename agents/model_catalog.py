@@ -371,7 +371,6 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         max_output_tokens=128000,
         supports_vision=True,
         supports_function_calling=True,
-        supports_reasoning=True,
         supports_streaming=True,
         recommended=True,
         unsupported_parameters=(

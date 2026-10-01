@@ -390,7 +390,7 @@ def test_openrouter_gpt_6_sol_metadata_is_explicit_and_server_backed():
     assert sol.activated_parameters is None
     assert sol.supports_vision is True
     assert sol.supports_function_calling is True
-    assert sol.supports_reasoning is True
+    assert sol.supports_reasoning is False
     assert sol.supports_streaming is True
     assert sol.recommended is True
     assert sol.mandatory_reasoning_effort == "none"
