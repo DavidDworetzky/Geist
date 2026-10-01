@@ -390,7 +390,7 @@ def test_openrouter_gpt_6_luna_metadata_is_explicit_and_server_backed():
     assert luna.activated_parameters is None
     assert luna.supports_vision is True
     assert luna.supports_function_calling is True
-    assert luna.supports_reasoning is True
+    assert luna.supports_reasoning is False
     assert luna.supports_streaming is True
     assert luna.recommended is True
     assert luna.mandatory_reasoning_effort == "none"
