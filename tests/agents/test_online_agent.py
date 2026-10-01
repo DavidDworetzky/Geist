@@ -211,6 +211,7 @@ class TestOnlineAgentInitialization:
         [
             "x-ai/grok-4.6",
             "anthropic/claude-opus-5.5",
+            "anthropic/claude-sonnet-5.5",
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
@@ -421,14 +422,18 @@ class TestOnlineAgentAPIRequests:
                 assert payload["stop"] == "END"
                 assert payload["reasoning"] == {"effort": "max"}
 
-    def test_claude_opus_55_filters_sampling_defaults_and_keeps_native_tools(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        ["anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"],
+    )
+    def test_claude_55_filters_sampling_defaults_and_keeps_native_tools(self, model_id: str):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="anthropic/claude-opus-5.5",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -438,7 +443,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "anthropic/claude-opus-5.5",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 0.7,
