@@ -210,6 +210,7 @@ class TestOnlineAgentInitialization:
         "model_id",
         [
             "x-ai/grok-4.6",
+            "x-ai/grok-4.7",
             "anthropic/claude-opus-5.5",
             "anthropic/claude-sonnet-5.5",
             "fireworks/ember-1",
@@ -320,6 +321,7 @@ class TestOnlineAgentAPIRequests:
         ("model_id", "reasoning_effort"),
         [
             ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
         ],
     )
@@ -343,6 +345,7 @@ class TestOnlineAgentAPIRequests:
                     {
                         "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 2,
                         "frequency_penalty": 0.5,
                         "presence_penalty": 0.5,
                         "stop": "END",
@@ -351,6 +354,10 @@ class TestOnlineAgentAPIRequests:
                 )
 
                 payload = mock_post.call_args.kwargs["json"]
+                if model_id == "x-ai/grok-4.7":
+                    assert "n" not in payload
+                else:
+                    assert payload["n"] == 2
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
                 assert "stop" not in payload
@@ -1016,6 +1023,7 @@ class TestOnlineAgentRetryLogic:
         ("model_id", "reasoning_effort"),
         [
             ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
         ],
     )
