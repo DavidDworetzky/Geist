@@ -422,6 +422,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'fireworks/ember-1',
+              name: 'Fireworks Ember-1',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'ember',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="fireworks/ember-1"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Fireworks Ember-1' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Tencent Hy4 Preview guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Single Tencent FP8 preview route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({
