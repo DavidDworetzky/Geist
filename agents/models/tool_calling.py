@@ -7,6 +7,7 @@ import json
 import threading
 import uuid
 from collections.abc import Callable, Iterator
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, get_args
 
@@ -98,6 +99,9 @@ class ChatMessage:
     tool_call_id: str | None = None
     name: str | None = None
     preserve_content: bool = False
+    reasoning_details: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    reasoning_model: str | None = None
+    reasoning_endpoint: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ChatMessage:
@@ -111,6 +115,9 @@ class ChatMessage:
             tool_calls=calls,
             tool_call_id=value.get("tool_call_id"),
             name=value.get("name"),
+            reasoning_details=deepcopy(value.get("reasoning_details") or []),
+            reasoning_model=value.get("reasoning_model"),
+            reasoning_endpoint=value.get("reasoning_endpoint"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -121,9 +128,19 @@ class ChatMessage:
             value["tool_call_id"] = self.tool_call_id
         if self.name:
             value["name"] = self.name
+        if self.role == "assistant" and self.reasoning_details:
+            value["reasoning_details"] = deepcopy(self.reasoning_details)
+            value["reasoning_model"] = self.reasoning_model
+            value["reasoning_endpoint"] = self.reasoning_endpoint
         return value
 
-    def to_openai(self, tool_name_map: dict[str, str] | None = None) -> dict[str, Any]:
+    def to_openai(
+        self,
+        tool_name_map: dict[str, str] | None = None,
+        *,
+        reasoning_model: str | None = None,
+        reasoning_endpoint: str | None = None,
+    ) -> dict[str, Any]:
         value: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:
             value["tool_calls"] = [
@@ -136,6 +153,15 @@ class ChatMessage:
         # Anthropic serialization, but do not send it on role="tool".
         if self.name and self.role != "tool":
             value["name"] = (tool_name_map or {}).get(self.name, self.name)
+        if (
+            self.role == "assistant"
+            and self.reasoning_details
+            and reasoning_model is not None
+            and self.reasoning_model == reasoning_model
+            and reasoning_endpoint is not None
+            and self.reasoning_endpoint == reasoning_endpoint
+        ):
+            value["reasoning_details"] = deepcopy(self.reasoning_details)
         return value
 
 
@@ -314,6 +340,9 @@ class ModelTurn:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
+    reasoning_details: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    reasoning_model: str | None = None
+    reasoning_endpoint: str | None = None
 
 
 @dataclass
