@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -406,6 +407,292 @@ def test_approval_gate_rejects_stale_author_read_and_superseded_reviews() -> Non
     )
 
 
+APPROVED_SHA = "a" * 40
+
+
+def test_stale_pitchblend_approval_counts_only_when_it_carries_forward() -> None:
+    github = mock.Mock()
+    reviews = [review("pitchblend-ai[bot]", "Bot", commit_id=APPROVED_SHA)]
+    with mock.patch.object(
+        pitchblend, "approval_carries_forward", return_value=True
+    ) as carries_forward:
+        source = pitchblend.approval_gate_source(
+            github, "org", "repo", gate_pull_request(), reviews
+        )
+    assert source == f"pitchblend-carried:{APPROVED_SHA}"
+    assert carries_forward.call_args.args[-1] == APPROVED_SHA
+
+    with mock.patch.object(pitchblend, "approval_carries_forward", return_value=False):
+        assert (
+            pitchblend.approval_gate_source(
+                github, "org", "repo", gate_pull_request(), reviews
+            )
+            is None
+        )
+
+
+def test_dismissed_or_human_approval_skips_pitchblend_carry_forward() -> None:
+    github = mock.Mock()
+    github.request.return_value = {"permission": "write"}
+    with mock.patch.object(pitchblend, "approval_carries_forward") as carries_forward:
+        dismissed = [
+            review("pitchblend-ai[bot]", "Bot", id=1, commit_id=APPROVED_SHA),
+            review("pitchblend-ai[bot]", "Bot", id=2, state="DISMISSED"),
+        ]
+        assert (
+            pitchblend.approval_gate_source(
+                github, "org", "repo", gate_pull_request(), dismissed
+            )
+            is None
+        )
+        human = [
+            review("pitchblend-ai[bot]", "Bot", id=1, commit_id=APPROVED_SHA),
+            review("maintainer", id=2),
+        ]
+        assert (
+            pitchblend.approval_gate_source(
+                github, "org", "repo", gate_pull_request(), human
+            )
+            == "human:maintainer"
+        )
+    carries_forward.assert_not_called()
+
+
+def git(repository: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repository), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def commit_files(repository: Path, message: str, files: dict[str, str]) -> str:
+    for path, content in files.items():
+        target = repository / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    git(repository, "add", "--all")
+    git(repository, "commit", "--quiet", "-m", message)
+    return git(repository, "rev-parse", "HEAD")
+
+
+class CarryForwardRepository:
+    """A local stand-in for GitHub: a bare `org/repo.git` plus an author clone."""
+
+    def __init__(self, root: Path):
+        self.remote = root / "server" / "org" / "repo.git"
+        self.remote.parent.mkdir(parents=True)
+        subprocess.run(
+            ["git", "init", "--quiet", "--bare", "-b", "main", str(self.remote)], check=True
+        )
+        self.author = root / "author"
+        self.evaluator = root / "evaluator"
+        subprocess.run(["git", "clone", "--quiet", str(self.remote), str(self.author)],
+                       check=True, capture_output=True)
+        for key, value in (("user.name", "Test"), ("user.email", "test@example.com")):
+            git(self.author, "config", key, value)
+        git(self.author, "checkout", "--quiet", "-b", "main")
+        self.server_url = f"file://{root / 'server'}"
+
+    def push_main(self) -> None:
+        git(self.author, "push", "--quiet", "origin", "main")
+
+    def push_pull_head(self) -> str:
+        head = git(self.author, "rev-parse", "HEAD")
+        git(self.author, "push", "--quiet", "--force", "origin", "HEAD:refs/pull/7/head")
+        return head
+
+    def clone_evaluator(self) -> None:
+        subprocess.run(["git", "clone", "--quiet", str(self.remote), str(self.evaluator)],
+                       check=True, capture_output=True)
+
+
+CATALOG = "agents/model_catalog.py"
+DOCS = "docs/agents.md"
+TEST = "tests/agents/test_model_catalog.py"
+
+
+def pr_380_shaped_repository(tmp_path: Path) -> tuple[CarryForwardRepository, str]:
+    """Build PR #380's shape: approve a catalog PR, then main edits the same lines."""
+    repository = CarryForwardRepository(tmp_path)
+    commit_files(repository.author, "base", {
+        CATALOG: "MODELS = [\n    'a',\n]\n\n\ndef route():\n    return 'a'\n",
+        DOCS: "Models: A\n",
+        TEST: "IDS = ['a']\n",
+    })
+    repository.push_main()
+    git(repository.author, "checkout", "--quiet", "-b", "feature")
+    approved = commit_files(repository.author, "add luna", {
+        CATALOG: "MODELS = [\n    'a',\n    'luna',\n]\n\n\ndef route():\n    return 'a'\n",
+        DOCS: "Models: Luna, A\n",
+        TEST: "IDS = ['a', 'luna']\n",
+    })
+    git(repository.author, "checkout", "--quiet", "main")
+    commit_files(repository.author, "add ember on main", {
+        CATALOG: "MODELS = [\n    'a',\n]\n\n\ndef route():\n    return 'a'\n\n\nEMBER = 1\n",
+        DOCS: "Models: Ember, A\n",
+        TEST: "IDS = ['a', 'ember']\n",
+    })
+    repository.push_main()
+    git(repository.author, "checkout", "--quiet", "feature")
+    subprocess.run(["git", "-C", str(repository.author), "merge", "--quiet", "main"],
+                   capture_output=True)
+    commit_files(repository.author, "merge main", {
+        DOCS: "Models: Luna, Ember, A\n",
+        TEST: "IDS = ['a', 'luna', 'ember']\n",
+    })
+    return repository, approved
+
+
+def changed_since(
+    repository: CarryForwardRepository, approved: str, monkeypatch
+) -> list[str]:
+    head = repository.push_pull_head()
+    if not repository.evaluator.exists():
+        repository.clone_evaluator()
+    monkeypatch.chdir(repository.evaluator)
+    monkeypatch.setenv("GITHUB_SERVER_URL", repository.server_url)
+    monkeypatch.delenv("PITCHBLEND_GITHUB_TOKEN", raising=False)
+    pull_request = {"number": 7, "head": {"sha": head}, "base": {"ref": "main"}}
+    return pitchblend.paths_changed_since_approval("org", "repo", pull_request, approved)
+
+
+def test_pr_380_main_sync_with_docs_and_test_conflicts_carries_forward(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository, approved = pr_380_shaped_repository(tmp_path)
+
+    changed = changed_since(repository, approved, monkeypatch)
+
+    assert changed == [DOCS, TEST]
+    assert all(pitchblend.is_carry_forward_safe_path(path) for path in changed)
+
+
+def test_clean_main_sync_reports_no_changes_since_approval(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository = CarryForwardRepository(tmp_path)
+    commit_files(repository.author, "base", {CATALOG: "MODELS = []\n", DOCS: "A\n"})
+    repository.push_main()
+    git(repository.author, "checkout", "--quiet", "-b", "feature")
+    approved = commit_files(repository.author, "feature", {CATALOG: "MODELS = ['luna']\n"})
+    git(repository.author, "checkout", "--quiet", "main")
+    commit_files(repository.author, "main docs", {DOCS: "A and B\n"})
+    repository.push_main()
+    git(repository.author, "checkout", "--quiet", "feature")
+    git(repository.author, "merge", "--quiet", "--no-edit", "main")
+
+    assert changed_since(repository, approved, monkeypatch) == []
+
+    git(repository.author, "reset", "--quiet", "--hard", approved)
+    git(repository.author, "rebase", "--quiet", "main")
+    assert changed_since(repository, approved, monkeypatch) == []
+
+
+def test_code_edits_after_approval_do_not_carry_forward(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository, approved = pr_380_shaped_repository(tmp_path)
+    commit_files(repository.author, "change routing", {
+        CATALOG: "MODELS = [\n    'a',\n    'luna',\n]\n\n\ndef route():\n"
+                 "    return 'luna'\n\n\nEMBER = 1\n",
+    })
+
+    changed = changed_since(repository, approved, monkeypatch)
+
+    assert changed == [CATALOG, DOCS, TEST]
+    assert not pitchblend.is_carry_forward_safe_path(CATALOG)
+
+
+def test_carry_forward_path_policy_keeps_protected_paths_blocked() -> None:
+    assert pitchblend.is_carry_forward_safe_path("docs/agents.md")
+    assert pitchblend.is_carry_forward_safe_path("plans/380-LUNA.md")
+    assert pitchblend.is_carry_forward_safe_path("client/geist/src/App.test.tsx")
+    assert not pitchblend.is_carry_forward_safe_path("tests/security/test_operator.py")
+    assert not pitchblend.is_carry_forward_safe_path("docs/schemas/api.json")
+    assert not pitchblend.is_carry_forward_safe_path("agents/online_agent.py")
+    assert not pitchblend.is_carry_forward_safe_path("README.md")
+
+
+def catalog_pull_request_files() -> list[dict]:
+    return [
+        {"filename": path, "status": "modified", "additions": 3, "deletions": 0,
+         "patch": "@@ -1 +1 @@"}
+        for path in (CATALOG, DOCS, TEST)
+    ]
+
+
+def carry_forward_pull_request(**overrides: object) -> dict:
+    value = {
+        "number": 7,
+        "head": {"sha": "b" * 40},
+        "base": {"ref": "main"},
+    }
+    value.update(overrides)
+    return value
+
+
+def test_carry_forward_requires_main_scope_gates_and_safe_changes() -> None:
+    github = mock.Mock()
+    github.paginate.return_value = catalog_pull_request_files()
+    with mock.patch.object(
+        pitchblend, "paths_changed_since_approval", return_value=[DOCS, TEST]
+    ):
+        assert pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(), APPROVED_SHA
+        )
+        assert not pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(base={"ref": "dev"}),
+            APPROVED_SHA,
+        )
+        assert not pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(), "--upload-pack=x"
+        )
+
+    with mock.patch.object(
+        pitchblend, "paths_changed_since_approval", return_value=[CATALOG]
+    ):
+        assert not pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(), APPROVED_SHA
+        )
+
+    github.paginate.return_value = catalog_pull_request_files() + [
+        {"filename": "agents/base_agent.py", "status": "modified", "additions": 1,
+         "deletions": 0, "patch": "@@ -1 +1 @@"}
+    ]
+    with mock.patch.object(pitchblend, "paths_changed_since_approval") as changed:
+        assert not pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(), APPROVED_SHA
+        )
+    changed.assert_not_called()
+
+
+def test_carry_forward_fails_closed_when_git_cannot_verify() -> None:
+    github = mock.Mock()
+    github.paginate.return_value = catalog_pull_request_files()
+    with mock.patch.object(
+        pitchblend,
+        "paths_changed_since_approval",
+        side_effect=pitchblend.ReviewError("git fetch failed: not our ref"),
+    ):
+        assert not pitchblend.approval_carries_forward(
+            github, "org", "repo", carry_forward_pull_request(), APPROVED_SHA
+        )
+
+
+def test_run_git_keeps_installation_token_out_of_argv(monkeypatch) -> None:
+    monkeypatch.setenv("PITCHBLEND_GITHUB_TOKEN", "secret-token")
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+    with mock.patch.object(pitchblend.subprocess, "run", return_value=completed) as run:
+        assert pitchblend.run_git("rev-parse", "HEAD") == "ok"
+    argv = run.call_args.args[0]
+    environment = run.call_args.kwargs["env"]
+    assert "secret-token" not in " ".join(argv)
+    assert environment["GIT_CONFIG_KEY_0"] == "http.extraheader"
+    assert environment["GIT_TERMINAL_PROMPT"] == "0"
+
+
 def test_publish_approval_gate_sets_one_pending_or_success_context() -> None:
     github = mock.Mock()
     pull_request = gate_pull_request()
@@ -426,6 +713,15 @@ def test_publish_approval_gate_sets_one_pending_or_success_context() -> None:
     assert success_payload["state"] == "success"
     assert success_payload["description"] == "Approved by maintainer"
 
+    pitchblend.publish_approval_gate(
+        github, "org", "repo", pull_request, f"pitchblend-carried:{APPROVED_SHA}"
+    )
+    carried_payload = github.request.call_args.args[2]
+    assert carried_payload["state"] == "success"
+    assert carried_payload["description"] == (
+        f"Pitchblend approval of {APPROVED_SHA[:12]} still applies"
+    )
+
 
 def test_review_workflow_recomputes_gate_and_requests_status_write() -> None:
     workflow = (
@@ -436,6 +732,7 @@ def test_review_workflow_recomputes_gate_and_requests_status_write() -> None:
     assert "pull_request_target:" in workflow
     assert "types: [opened, reopened, synchronize, ready_for_review]" in workflow
     assert "permission-statuses: write" in workflow
+    assert "fetch-depth: 0" in workflow
 
 
 def test_pull_request_review_event_recomputes_current_head_gate() -> None:
