@@ -14,6 +14,7 @@ export interface McpServer {
   timeout_seconds: number;
   create_date: string;
   update_date: string;
+  oauth_configured?: boolean;
 }
 
 export interface McpServerInput {

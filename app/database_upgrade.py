@@ -27,6 +27,8 @@ PRE_MCP_TABLE = "mcp_server"
 LEGACY_AGENTIC_REVISION = "e9f2a4b6c8d0"
 PERMISSIONS_GAP = ("user_settings", "agent_permissions")
 MCP_REVISION = "b3e5d7f9a1c3"
+OAUTH_REVISION = "d8f0a2b4c6e8"
+OAUTH_TABLE = "mcp_oauth_connection"
 
 
 def upgrade_database() -> None:
@@ -66,8 +68,8 @@ def upgrade_database() -> None:
         _complete_legacy_settings_columns(Engine)
         schema_kind = _classify_legacy_schema(Base.metadata, Engine)
         revisions = [LEGACY_AGENTIC_REVISION]
-        if schema_kind in {"current", "pre_routines"}:
-            revisions.append(MCP_REVISION)
+        if schema_kind in {"current", "pre_routines", "pre_oauth"}:
+            revisions.append(OAUTH_REVISION if OAUTH_TABLE in table_names else MCP_REVISION)
         elif schema_kind == "pre_mcp":
             revisions.append(PRE_MCP_REVISION)
         elif schema_kind != "pre_workspace":
@@ -112,6 +114,7 @@ def _classify_legacy_schema(metadata, engine) -> str:
     if schema_kind in {
         "current",
         "pre_routines",
+        "pre_oauth",
         "pre_permissions",
         "pre_llama_compute",
         "pre_local_artifact",
@@ -184,6 +187,8 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
                 f"table {table.name} missing columns {', '.join(sorted(missing_columns))}"
             )
 
+    oauth_missing = OAUTH_TABLE in missing_tables
+    missing_tables.discard(OAUTH_TABLE)
     routine_gap = ("agent_routine", "run_once_requested")
     missing_column_gaps.difference_update(
         {
@@ -197,6 +202,8 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
     # Never stamp past a missing ancestor table and silently leave it absent.
     missing_column_gaps.discard(routine_gap)
     if not missing_tables and not missing_column_gaps:
+        if oauth_missing:
+            return "pre_oauth", problems
         return "pre_routines" if routine_missing else "current", problems
     if PERMISSIONS_GAP in missing_column_gaps:
         missing_column_gaps.remove(PERMISSIONS_GAP)
