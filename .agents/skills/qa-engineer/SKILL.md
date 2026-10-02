@@ -23,6 +23,12 @@ Produce independent evidence for the riskiest behaviors changed by one open Geis
 
 ## Step 1: Establish immutable PR context
 
+Use a task-owned temporary directory for context and evidence. The examples use
+macOS `/private/tmp`; on Windows use an absolute directory beneath the system
+temporary directory and the existing `.venv/Scripts/python.exe`. Read
+[references/windows-recording.md](references/windows-recording.md) for Windows
+command setup, recording, and playback validation.
+
 Run:
 
 ```bash
@@ -170,12 +176,24 @@ reclaimable space when requesting approval.
 
 Before recording:
 
-- arrange the browser and one terminal/log window on the designated display;
-- close unrelated windows and disable visible notifications;
+- for desktop capture, arrange the browser and one terminal/log window on the
+  designated display; close unrelated windows and disable visible notifications;
+- for browser-only capture, use an isolated test page with contemporaneous QA
+  output and clearly identify any controlled fixtures;
 - ensure no secrets, tokens, private conversations, or unrelated user data are visible;
 - prepare runtimes so the recording focuses on proof rather than downloads or long startup waits.
 
-Start the recorder in a long-running command session:
+Choose the recorder for the host:
+
+- **macOS:** start the desktop recorder below in a long-running command session.
+- **Windows:** use the installed-browser MP4 workflow in
+  [references/windows-recording.md](references/windows-recording.md). It records
+  sampled browser frames and QA output; it does not capture the Windows desktop,
+  OS dialogs, or continuous full-motion animation. Use additional evidence when
+  those surfaces or timing are part of the acceptance criteria.
+- **Other hosts:** use an available recorder with equivalent evidence and report
+  its coverage, or mark required recording `BLOCKED`. Do not run the macOS script
+  on an unsupported host.
 
 ```bash
 .agents/skills/qa-engineer/scripts/record_qa_evidence.sh \
@@ -190,7 +208,8 @@ During the recording, show:
 3. Browser actions for the highest-risk pathway.
 4. The corresponding terminal logs, response, or focused-test output.
 5. Any failure or blocker encountered.
-6. A final terminal line containing `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: BLOCKED`.
+6. A final terminal or recorded QA-output line containing `VERDICT: PASS`,
+   `VERDICT: FAIL`, or `VERDICT: BLOCKED`.
 
 Do not exceed five minutes. If evidence cannot fit, prioritize the highest-ranked pathway and summarize the remaining machine-verifiable results in the report.
 
@@ -215,6 +234,12 @@ python3 .agents/skills/qa-engineer/scripts/render_qa_report.py \
 ```
 
 Review the MP4 and report before publication. Confirm that the video is playable, contains no secrets or unrelated user data, matches the tested head SHA, and supports the verdict.
+
+Record the capture method, browser/codec when applicable, sampled-frame or native
+dialog limitations, and any capture failures in the rendered report's test
+evidence and failures/blockers. File extension and nonzero size alone do not prove
+playback: decode the completed file, confirm playback advances, and visually
+inspect indexed frames including the selected behavior and final verdict.
 
 Publish with:
 
