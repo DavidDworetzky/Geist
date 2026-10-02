@@ -12,6 +12,8 @@ interface UseVoiceChatProps {
   ttsVoice?: string;
   onTranscriptFinal?: (text: string) => void;
   onError?: (error: string) => void;
+  onLiveStart?: () => void;
+  onLiveDelegate?: (transcript: string, signal: AbortSignal) => Promise<string>;
 }
 
 const useVoiceChat = (props: UseVoiceChatProps) => {
@@ -28,6 +30,7 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
   const startRecording = useCallback(async () => {
     if (sessionRef.current) return;
     const current = propsRef.current;
+    if (current.mode === 'live') current.onLiveStart?.();
     setIsRecording(true);
     setIsProcessing(true);
     setStatus('Connecting…');
@@ -45,6 +48,8 @@ const useVoiceChat = (props: UseVoiceChatProps) => {
     const session = current.mode === 'live' ? new LiveSession({
       model: current.ttsModel,
       voice: current.ttsVoice,
+      onDelegate: current.onLiveDelegate
+        ? (transcript, signal) => propsRef.current.onLiveDelegate!(transcript, signal) : undefined,
       onReady: () => { setIsProcessing(false); setStatus('Live · Listening'); },
       onTranscript: (role, text) => {
         if (role === 'user') setPartialTranscript(previous => (previous + text).slice(-4000));

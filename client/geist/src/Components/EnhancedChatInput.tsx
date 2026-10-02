@@ -4,6 +4,9 @@ import VoiceButton from './VoiceButton';
 import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
 import useVoiceChat from '../Hooks/useVoiceChat';
 import LiveCallPanel from './LiveCallPanel';
+import ChatTextArea from './ChatTextArea';
+import useLiveTools from '../Hooks/useLiveTools';
+import { UserSettings } from '../Hooks/useUserSettings';
 
 interface EnhancedChatInputProps {
   value: string;
@@ -18,6 +21,7 @@ interface EnhancedChatInputProps {
   submitLabel?: string;
   modelLoading?: boolean;
   onShowModelError?: () => void;
+  voiceAgentSettings?: UserSettings | null;
 }
 
 interface FileSuggestion extends FileItem {
@@ -37,6 +41,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   submitLabel = 'Send',
   modelLoading = false,
   onShowModelError,
+  voiceAgentSettings = null,
 }) => {
   const inputStatusId = useId();
   const hasInputStatus = modelLoading || Boolean(onShowModelError);
@@ -48,6 +53,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
   const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
   const [voiceError, setVoiceError] = useState('');
+  const liveTools = useLiveTools(voiceAgentSettings);
 
   const {
     isRecording,
@@ -64,6 +70,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     ttsProvider: voiceSelection.ttsProvider,
     ttsModel: voiceSelection.ttsModel,
     ttsVoice: voiceSelection.ttsVoice,
+    onLiveStart: liveTools.reset,
+    onLiveDelegate: voiceAgentSettings ? liveTools.delegate : undefined,
     onTranscriptFinal: (text) => {
       if (text) onChange(value + (value && !/\s$/.test(value) ? ' ' : '') + text);
     },
@@ -173,6 +181,16 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
     <div className="enhanced-input">
       {enableVoice && voiceSelection.mode === 'live' && <LiveCallPanel active={isRecording}
         status={status} audioLevel={audioLevel} userText={partialTranscript} assistantText={assistantText} />}
+      {voiceSelection.mode === 'live' && liveTools.turn && (
+        <section className="live-tool-activity" aria-label="Voice tool activity">
+          <strong>Tool activity</strong>
+          <ChatTextArea chatHistory={[{ ...liveTools.turn, user: 'Live voice request', ai: liveTools.turn.message }]}
+            isLoading={liveTools.loading} onToolApproval={liveTools.approve} />
+          {liveTools.error && <p role="alert">{liveTools.error}</p>}
+          {liveTools.loading && <button type="button" className="button button-secondary"
+            onClick={() => void liveTools.cancel()}>Stop tool task</button>}
+        </section>
+      )}
       {voiceError && <div className="input-banner input-banner-warning" role="alert">{voiceError}</div>}
       {voiceSelection.mode === 'dictation' && status && <div className="input-banner" role="status">{status}</div>}
 
