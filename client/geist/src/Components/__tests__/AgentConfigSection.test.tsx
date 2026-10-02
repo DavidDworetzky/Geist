@@ -219,18 +219,32 @@ describe('AgentConfigSection', () => {
         ok: true,
         json: async () => ({
           providers: {
-            openrouter: [{
-              id: 'x-ai/grok-4.6',
-              name: 'Grok 4.6',
-              provider: 'openrouter',
-              context_window: 500000,
-              max_output_tokens: null,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_streaming: true,
-              recommended: true,
-              family: 'grok',
-            }],
+            openrouter: [
+              {
+                id: 'x-ai/grok-4.6',
+                name: 'Grok 4.6',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+              {
+                id: 'x-ai/grok-4.7',
+                name: 'Grok 4.7',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: 450000,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+            ],
           },
           last_updated: null,
         }),
@@ -246,6 +260,7 @@ describe('AgentConfigSection', () => {
 
       expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Grok 4.7' })).toBeInTheDocument();
     });
 
     it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {
@@ -456,6 +471,43 @@ describe('AgentConfigSection', () => {
       );
 
       expect(await screen.findByRole('option', { name: 'Solar Mini 4' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'fireworks/ember-1',
+              name: 'Fireworks Ember-1',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'ember',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="fireworks/ember-1"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Fireworks Ember-1' })).toBeInTheDocument();
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 

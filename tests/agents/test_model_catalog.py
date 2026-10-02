@@ -272,6 +272,29 @@ def test_openrouter_solar_mini4_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(solar.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
+    ember = get_model_spec("fireworks/ember-1")
+
+    assert ember.provider == "openrouter"
+    assert ember.backend == "openai_compatible"
+    assert ember.local is False
+    assert ember.family == "ember"
+    assert ember.context_window == 1048576
+    assert ember.max_output_tokens == 943718
+    assert ember.parameter_count is None
+    assert ember.activated_parameters is None
+    assert ember.supports_vision is True
+    assert ember.supports_function_calling is True
+    assert ember.supports_reasoning is True
+    assert ember.supports_streaming is True
+    assert ember.recommended is True
+    assert ember.mandatory_reasoning_effort is None
+    assert ember.unsupported_parameters == ("n",)
+    assert ember.performance_note is not None
+    assert "zero retention" in ember.performance_note
+    assert get_provider_endpoint(ember.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("deepseek/deepseek-v4.1-flash")
 
@@ -339,6 +362,34 @@ def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
         "presence_penalty",
         "stop",
     )
+    assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_grok_47_metadata_is_explicit_and_server_backed():
+    grok = get_model_spec("x-ai/grok-4.7")
+
+    assert grok.provider == "openrouter"
+    assert grok.backend == "openai_compatible"
+    assert grok.local is False
+    assert grok.family == "grok"
+    assert grok.context_window == 500000
+    assert grok.max_output_tokens == 450000
+    assert grok.parameter_count is None
+    assert grok.activated_parameters is None
+    assert grok.supports_vision is True
+    assert grok.supports_function_calling is True
+    assert grok.supports_reasoning is True
+    assert grok.supports_streaming is True
+    assert grok.recommended is True
+    assert grok.mandatory_reasoning_effort == "high"
+    assert grok.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert grok.performance_note is not None
+    assert "Enforce OpenRouter ZDR" in grok.performance_note
     assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
 
 
@@ -588,9 +639,11 @@ def test_existing_llama_id_preserves_optimized_runner():
         "zai-org/GLM-5.2",
         "deepseek-ai/DeepSeek-R1",
         "x-ai/grok-4.6",
+        "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
         "upstage/solar-mini4",
+        "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -648,9 +701,11 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
     "model_id",
     [
         "x-ai/grok-4.6",
+        "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
         "upstage/solar-mini4",
+        "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -806,6 +861,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert "self-hosted" not in response.providers
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(model.id == "x-ai/grok-4.7" for model in response.providers["openrouter"])
     assert any(model.id == "upstage/solar-mini4" for model in response.providers["openrouter"])
     assert any(
         model.id == "anthropic/claude-opus-5.5" for model in response.providers["openrouter"]
@@ -813,6 +869,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]

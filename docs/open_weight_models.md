@@ -11,8 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Claude Opus 5.5, Claude Sonnet 5.5, Solar Mini 4, GLM 5.3
-Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
+and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, Solar
+Mini 4, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash
+routes are also
 intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
@@ -77,6 +78,29 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
+
+## OpenRouter-hosted Grok 4.7
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`x-ai/grok-4.7`. OpenRouter added the stable route on September 21, 2026. It
+accepts text, image, and file input, has a 500,000-token context window and a
+450,000-token output ceiling, and supports streaming, native function calling,
+forced function selection, and JSON-schema structured output. Reasoning is
+always on; Geist sends OpenRouter's documented default `high` effort and omits
+unsupported `n`, frequency-penalty, presence-penalty, and stop parameters.
+
+OpenRouter lists $2 per million input tokens, $6 per million output tokens, and
+$0.50 per million cached input tokens; input and output rates double beyond
+200,000 input tokens. SpaceXAI reports strong gains over Grok 4.6 on long-running
+coding and agent benchmarks, while independent measurements and arena results
+are more mixed. The model is therefore an additional hosted option rather than
+a universal default.
+
+OpenRouter lists xAI's ordinary provider policy as no training with 30-day
+retention, and also exposes several Grok 4.7 endpoints in its ZDR inventory.
+Enforce OpenRouter ZDR routing before sending confidential workloads. OpenRouter
+itself does not retain prompt or response content unless logging is explicitly
+enabled.
 
 ## OpenRouter-hosted Claude Opus 5.5
 
@@ -172,6 +196,30 @@ prompts by default and not using them for training. Default routing therefore
 is not appropriate for confidential workloads; enforce OpenRouter ZDR and
 re-check the live endpoint inventory before use. BYOK additionally requires a
 ZDR-enabled Upstage organization.
+
+## OpenRouter-hosted Fireworks Ember-1
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`fireworks/ember-1`. The stable route accepts text and image input, has a
+1,048,576-token context window and 943,718-token maximum output, and supports
+optional reasoning, streaming, native function calling, and JSON-schema
+structured outputs. Geist omits the unsupported `n` parameter while preserving
+the route's supported sampling, stop, tool, and response-format parameters.
+OpenRouter lists the current price as $3 per million input tokens, $15 per
+million output tokens, and $0.30 per million cached input tokens.
+
+[Fireworks' September 23, 2026 launch report](https://fireworks.ai/blog/ember-1)
+describes Ember-1 as a Kimi K3 specialization trained to shorten reasoning.
+Its provider-run evaluation reports 82.0% on Terminal-Bench 2.1, 92.2% on
+SWE-bench Verified, 20.0% on SWE-Interact, 75.2% on DeepSWE 1.1, and 66% on
+tau2-bench Airline, with 35–50% fewer reasoning tokens than Kimi K3 across the
+reported evaluations. These are provider claims, not independent measurements;
+qualify the model on Geist workloads before making it a default.
+
+The route currently has one Fireworks endpoint, so there is no provider
+fallback diversity. OpenRouter lists Fireworks as zero retention and not using
+prompts for training as of September 24, 2026. Re-check the live endpoint and
+provider policy before sending confidential or regulated workloads.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
