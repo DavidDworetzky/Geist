@@ -544,6 +544,28 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "upstage/solar-mini4",
+        "Solar Mini 4",
+        "solar",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=524288,
+        max_output_tokens=131072,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="35B",
+        activated_parameters="3B",
+        unsupported_parameters=("n", "stop"),
+        local=False,
+        performance_note=(
+            "Low-cost, text-only agent model with optional reasoning, native tools, "
+            "and structured output. Default routing can use an Upstage endpoint that "
+            "retains prompts; enforce OpenRouter ZDR for confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "fireworks/ember-1",
         "Fireworks Ember-1",
         "ember",
