@@ -474,6 +474,45 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Ling 3.1 Flash from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Stable free Novita route with native tools and zero retention.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'inclusionai/ling-3.1-flash',
+              name: 'Ling 3.1 Flash',
+              provider: 'openrouter',
+              context_window: 262144,
+              max_output_tokens: 32768,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'ling',
+              parameter_count: '560B',
+              activated_parameters: '25B',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="inclusionai/ling-3.1-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Ling 3.1 Flash' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Tencent Hy4 Preview guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Single Tencent FP8 preview route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({

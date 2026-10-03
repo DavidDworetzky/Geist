@@ -11,9 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3
-Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
-intentionally server-backed. For models with published
+and OpenRouter's Ling 3.1 Flash, Fireworks Ember-1, Claude Opus 5.5, Claude
+Sonnet 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1
+Flash routes are also intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -189,6 +189,44 @@ The route currently has one Fireworks endpoint, so there is no provider
 fallback diversity. OpenRouter lists Fireworks as zero retention and not using
 prompts for training as of September 24, 2026. Re-check the live endpoint and
 provider policy before sending confidential or regulated workloads.
+
+## OpenRouter-hosted Ling 3.1 Flash
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`inclusionai/ling-3.1-flash`. The
+[OpenRouter model page](https://openrouter.ai/inclusionai/ling-3.1-flash) and
+[live model API](https://openrouter.ai/api/v1/models) show that OpenRouter added
+this stable, named route on October 2, 2026. The currently served Novita
+endpoint accepts text input, has a 262,144-token context window and 32,768-token
+output limit, and supports
+optional hybrid reasoning, streaming, and native tool calling. Its live
+parameter contract does not expose JSON-schema structured outputs. Geist omits
+only the unsupported `n` field and leaves reasoning optional.
+
+OpenRouter currently lists both input and output as free. The route has one
+provider, so it has no fallback diversity and its promotional price can change.
+At review time OpenRouter reported 74 output tokens per second and 1.95-second
+latency at P50. Three-day routed uptime was 99.99%, but successful availability
+was 97.41% over three days and 97.26% over 24 hours.
+
+inclusionAI reports a 560B-parameter mixture-of-experts model with 25B active
+parameters. Its September 30 launch results include 40.4% on Terminal-Bench
+4.0, 55.9% on SWE Atlas Codebase QnA, 52.5% on AutomationBench, 68.7% on
+SkillsBench, 87.9% on CyberGym, 57.9% on Finance Agent v2, and 85.5% on DRACO.
+These are provider-run results without published harness details. As of October
+2, [BenchLM](https://benchlm.ai/models/ling-3-1-flash) had no independent
+exact-model ranking. A
+[MindStudio hands-on review](https://www.mindstudio.ai/blog/ling-3-1-flash-hands-on)
+was mixed: scoped SQL and SVG tasks worked well, while a long-horizon
+Blender-to-Godot agent task produced a broken result. Qualify it on Geist and
+Pitchblend workloads before relying on it.
+
+The exact Novita endpoint appears in OpenRouter's
+[ZDR inventory](https://openrouter.ai/api/v1/endpoints/zdr), and OpenRouter's
+[provider directory](https://openrouter.ai/providers) lists Novita as zero
+retention and not using prompts for training. Re-check the endpoint inventory
+and provider policy before confidential use. OpenRouter does not retain prompt
+or response content unless logging is explicitly enabled.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
