@@ -287,7 +287,7 @@ def test_openrouter_ling31_flash_metadata_is_explicit_and_server_backed():
     assert ling.supports_function_calling is True
     assert ling.supports_reasoning is True
     assert ling.supports_streaming is True
-    assert ling.recommended is True
+    assert ling.recommended is False
     assert ling.mandatory_reasoning_effort is None
     assert ling.unsupported_parameters == ("n",)
     assert ling.performance_note is not None
