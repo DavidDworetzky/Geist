@@ -382,6 +382,28 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enforce OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "mistralai/mistral-large-4-0",
+        "Mistral Large 4 (Public Preview)",
+        "mistral",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=524288,
+        max_output_tokens=262144,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        parameter_count="1.05T",
+        activated_parameters="49B",
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Named OpenRouter public preview with native tools and structured output. "
+            "The sole Mistral route retains requests for 30 days and is not ZDR; do not "
+            "use it for confidential or regulated workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",

@@ -428,6 +428,30 @@ def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_mistral_large_4_metadata_is_explicit_and_server_backed():
+    model = get_model_spec("mistralai/mistral-large-4-0")
+
+    assert model.provider == "openrouter"
+    assert model.backend == "openai_compatible"
+    assert model.local is False
+    assert model.family == "mistral"
+    assert model.context_window == 524288
+    assert model.max_output_tokens == 262144
+    assert model.parameter_count == "1.05T"
+    assert model.activated_parameters == "49B"
+    assert model.supports_vision is True
+    assert model.supports_function_calling is True
+    assert model.supports_reasoning is True
+    assert model.supports_streaming is True
+    assert model.recommended is False
+    assert model.mandatory_reasoning_effort is None
+    assert model.unsupported_parameters == ("n",)
+    assert model.performance_note is not None
+    assert "public preview" in model.performance_note
+    assert "not ZDR" in model.performance_note
+    assert get_provider_endpoint(model.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -619,6 +643,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "mistralai/mistral-large-4-0",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -680,6 +705,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "mistralai/mistral-large-4-0",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -842,6 +868,9 @@ def test_model_routes_serialize_string_backed_providers():
     )
     assert any(
         model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "mistralai/mistral-large-4-0" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
