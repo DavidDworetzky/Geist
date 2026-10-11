@@ -187,7 +187,8 @@ def _token_request(
             result = json.loads(body)
             if not isinstance(result, dict):
                 raise ValueError()
-            if result.get("error") == "invalid_grant":
+            # GitHub reports expired or revoked refresh tokens as bad_refresh_token.
+            if result.get("error") in {"invalid_grant", "bad_refresh_token"}:
                 raise OAuthGrantExpiredError(
                     "Account authorization expired or was revoked; reconnect the account"
                 )

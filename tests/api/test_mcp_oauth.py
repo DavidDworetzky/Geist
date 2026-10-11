@@ -255,7 +255,8 @@ def test_refresh_rotation_is_serialized_and_disconnect_invalidates_cached_config
         McpClientManager().list_tools(config)
 
 
-def test_revoked_refresh_is_reported_as_reconnect_required(oauth, monkeypatch):
+@pytest.mark.parametrize("error", ["invalid_grant", "bad_refresh_token"])
+def test_revoked_refresh_is_reported_as_reconnect_required(oauth, monkeypatch, error):
     client, server_id = oauth
     token_server(
         monkeypatch,
@@ -266,7 +267,7 @@ def test_revoked_refresh_is_reported_as_reconnect_required(oauth, monkeypatch):
                 "token_type": "Bearer",
                 "expires_in": 1,
             },
-            {"error": "invalid_grant", "error_description": "sensitive-provider-details"},
+            {"error": error, "error_description": "sensitive-provider-details"},
         ],
     )
     params, _ = begin(client, server_id)
@@ -278,6 +279,7 @@ def test_revoked_refresh_is_reported_as_reconnect_required(oauth, monkeypatch):
         == "reconnect_required"
     )
     assert "refresh_token" not in credentials(server_id)[1]
+    assert "access_token" not in credentials(server_id)[1]
 
 
 def test_new_account_cannot_reuse_previous_refresh_token(oauth, monkeypatch):
