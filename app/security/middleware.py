@@ -19,6 +19,8 @@ DEFAULT_OPERATOR_AUTH_EXEMPT_PATHS = frozenset(
         "/docs/oauth2-redirect",
         "/openapi.json",
         "/redoc",
+        # This route validates single-use state and an HttpOnly browser cookie.
+        "/api/v1/mcp/oauth/callback",
     }
 )
 
