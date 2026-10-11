@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+
 DEFAULT_MODEL = "qwen/qwen3.8-max-0902"
 DEFAULT_REASONING_EFFORT = "high"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
