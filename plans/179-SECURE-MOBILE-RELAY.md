@@ -127,9 +127,14 @@ client on the phone.
 - `app/services/job_queue.py` runs a durable DB queue (`job` table, a
   single-claim worker, backoff, `dedupe_key`, `recover_stale_jobs` lease).
   `app/services/routine_scheduler.py` runs routines unattended.
-- PR #350 adds `prompt_schedule` and `prompt_schedule_run`, a separate inference
-  worker lane, and run-history rows keyed by scheduled time. It uses
-  `complete_text` without tools, so it has no approval interaction.
+- PR #350 (draft) adds `prompt_schedule` and `prompt_schedule_run`, plus a
+  separate `prompt.inference` worker lane. Duplicate runs are prevented by a
+  unique (schedule, `scheduled_for`) constraint inside a savepoint, not by
+  `dedupe_key`. There is no lease heartbeat beyond the startup stale-job sweep.
+  It calls `complete_text` directly (not `ChatOrchestrator`), so scheduled
+  prompts never invoke tools or approvals. Its new `create_prompt_schedule` chat
+  tool is enabled without approval, which review flagged as a
+  prompt-injection persistence risk.
 
 ### MCP trust boundaries and credentials
 
@@ -154,10 +159,10 @@ client on the phone.
 
 | PR | Reuse for the relay |
 | --- | --- |
-| #350 scheduled prompts | `dedupe_key` enqueue semantics and run-history rows. This is the pattern for durable "deferred prompt" jobs in phase 3. Its separate inference lane prevents a mobile-triggered run from starving tool/workflow jobs. |
+| #350 scheduled prompts | Its unique-occurrence constraint plus savepoint enqueue (`add_job` within the caller's transaction) is the pattern for exactly-once "deferred prompt" jobs in phase 3. Its separate inference lane prevents a mobile-triggered run from starving tool/workflow jobs. **Caveat:** `create_prompt_schedule` must be write-tier (approval required) for relay-origin runs, so that a phone session cannot plant recurring jobs through injected content. |
 | #370 OAuth MCP | Generalize `mcp_oauth_store.py` into a private-file secret store for the node identity key. Reuse its PKCE/state hygiene for the standalone node-enrollment flow, and copy its callback middleware exemption pattern (narrow, single-use, state-validated). |
-| #316 MCP inspection | `SecurityAuditLog` format (hashes, never bodies) for the relay audit log. Treat inspector verdicts as an input to mobile risk badges. `McpWritePolicy` recipient checks still apply to mobile-approved calls. |
-| #381 reasoning continuations | Persists provider reasoning state in transcripts and goal checkpoints, so a run paused on an approval can continue correctly when the approval arrives minutes later from a phone. This is a prerequisite for long remote approval waits on reasoning models. |
+| #316 MCP inspection | `SecurityAuditLog` format (hashes, never bodies) for the relay audit log. Treat inspector verdicts as an input to mobile risk badges. `McpWritePolicy` recipient checks still apply to mobile-approved calls. It is a draft stacked on #315/#303, which supply the `trusted`/`connector_kind` fields. Its `/api/v1/security/*` routes have no operator capability dependency, so they must stay off the relay allowlist. |
+| #381 reasoning continuations | Carries provider reasoning state through tool continuations, transcripts, and goal checkpoints. Approval waits happen **inside the live process** (no history reload), so a remote approval works only while the node process that owns the run is alive. A node restart loses pending approvals; only goal checkpoints are resumable. The relay accepts this for the MVP: approvals are in-memory, and the phone sees `run not found` and reloads history. |
 | #376 live voice tools | Precedent: delegation reuses the authenticated chat stream, the registry, and approvals, and "spoken consent does not replace" UI approval. The relay applies the same rule: a mobile prompt never implies approval. |
 
 ## Threat Model
@@ -494,8 +499,10 @@ pairing/device management, and any future `tools.manage` route.
   relay principals (`ToolApprovalRegistry.resolve` receives the principal origin
   and refuses them). Mobile cannot change permission mode.
 - A mobile prompt is user content, not approval (same rule as #376).
-- Unattended paths are unchanged: routines and #350 schedules started via
-  `routine.run_now` still run with `interactive=False` and deny gated tools.
+- Unattended paths are unchanged: routines started via `routine.run_now` still
+  run with `interactive=False` and deny gated tools. #350 prompt schedules run
+  without tools at all. Creating schedules or routines is not a relay op, and
+  the `create_prompt_schedule` chat tool is write-tier in relay-origin runs.
 
 ## Rate Limiting and Audit
 
@@ -534,8 +541,9 @@ per-device activity view.
   anywhere else. A queued "delete the branch" executing hours later is a stale
   intent. Phase 3 may add **deferred prompts**: E2E-encrypted,
   signed, TTL ≤ 24 h, stored opaquely at the relay. On reconnect the node
-  enqueues them via `job_queue` with `dedupe_key=request_id` (the #350 pattern)
-  as read-only-tool runs unless the user approves later.
+  enqueues them via `job_queue` with `dedupe_key=request_id`, backed by a unique
+  constraint on the request ID in the style of #350's occurrence constraint. They
+  run as read-only-tool runs unless the user approves later.
 - **Phone offline**: runs continue (detach policy). Approvals time out and deny
   after 300 s as today. The phone gets a push wake-up; content-free by default
   ("Geist on *Studio* needs your approval"). Encrypted-payload pushes through a
