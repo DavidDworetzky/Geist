@@ -156,20 +156,18 @@ logging is explicitly enabled.
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
 `mistralai/mistral-large-4-0`. OpenRouter added the named route on October 6,
-2026. It accepts text and image input, has a 524,288-token context window and a
+2026. It accepts text and image input, has a 1,048,576-token context window and a
 262,144-token output ceiling, and supports streaming, native function calling,
-all advertised tool-choice modes, and JSON-schema structured output. Mistral
-describes the model as hybrid instruct-and-reasoning, but OpenRouter does not
-advertise a separate reasoning request parameter. Geist therefore preserves
-the supported sampling and tool fields, omits only unsupported `n`, and does
-not inject a reasoning effort.
+all advertised tool-choice modes, JSON-schema structured output, and optional
+reasoning that defaults to high effort. Geist preserves the supported sampling,
+reasoning, and tool fields and omits only unsupported `n`.
 
 Mistral discloses a 1.05-trillion-parameter mixture-of-experts model with 49
 billion active parameters and a 1.6-billion-parameter vision encoder. OpenRouter
 lists $0.68 per million input tokens, $2.09 per million output tokens, and $0.07
-per million cached input tokens. At review time, the sole Mistral endpoint
-reported 99.54% uptime over 30 minutes and 99.64% over one day, so the new route
-does not provide upstream fallback diversity.
+per million cached input tokens. As of October 12, OpenRouter exposes standard,
+ZDR, and EU-tagged Mistral routes. The standard and ZDR routes advertise the full
+1,048,576-token context; the EU route advertises 524,288 tokens.
 
 [Mistral's October 6 launch report](https://mistral.ai/news/mistral-large-4/)
 publishes exact-model results of 62 on Artificial Analysis DeepSWE 1.1, 28 on
@@ -180,11 +178,10 @@ community discussion does not yet provide repeatable hands-on validation. Treat
 the model as an evaluation option, not a proven default.
 
 This release is a public preview: Mistral says the reinforcement-learning run
-is still in flight and weights will arrive later in October. OpenRouter lists
-Mistral as no-training with 30-day retention, and the exact model is absent
-from OpenRouter's ZDR-filtered model API as of October 6. Do not send
-confidential or regulated workloads to this route. Re-check preview status,
-endpoint policy, and reliability before production use.
+is still in flight and weights will arrive later in October. OpenRouter now
+offers an exact-model ZDR route alongside standard and EU routes. Enforce ZDR
+routing before sending confidential or regulated workloads, and re-check
+preview status, endpoint policy, and reliability before production use.
 
 ## Meta-hosted Muse Spark
 

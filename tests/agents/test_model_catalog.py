@@ -435,7 +435,7 @@ def test_openrouter_mistral_large_4_metadata_is_explicit_and_server_backed():
     assert model.backend == "openai_compatible"
     assert model.local is False
     assert model.family == "mistral"
-    assert model.context_window == 524288
+    assert model.context_window == 1048576
     assert model.max_output_tokens == 262144
     assert model.parameter_count == "1.05T"
     assert model.activated_parameters == "49B"
@@ -448,7 +448,7 @@ def test_openrouter_mistral_large_4_metadata_is_explicit_and_server_backed():
     assert model.unsupported_parameters == ("n",)
     assert model.performance_note is not None
     assert "public preview" in model.performance_note
-    assert "not ZDR" in model.performance_note
+    assert "offers a ZDR route" in model.performance_note
     assert get_provider_endpoint(model.provider) == "https://openrouter.ai/api/v1"
 
 

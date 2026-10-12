@@ -475,7 +475,7 @@ describe('AgentConfigSection', () => {
     });
 
     it('shows Mistral Large 4 public-preview privacy guidance', async () => {
-      const performanceNote = 'Public preview; 30-day retention and no ZDR route.';
+      const performanceNote = 'Public preview; enforce the available ZDR route for sensitive data.';
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -484,7 +484,7 @@ describe('AgentConfigSection', () => {
               id: 'mistralai/mistral-large-4-0',
               name: 'Mistral Large 4 (Public Preview)',
               provider: 'openrouter',
-              context_window: 524288,
+              context_window: 1048576,
               max_output_tokens: 262144,
               supports_vision: true,
               supports_function_calling: true,

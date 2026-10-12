@@ -388,7 +388,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "mistral",
         provider="openrouter",
         backend="openai_compatible",
-        context_window=524288,
+        context_window=1048576,
         max_output_tokens=262144,
         supports_vision=True,
         supports_function_calling=True,
@@ -400,8 +400,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         local=False,
         performance_note=(
             "Named OpenRouter public preview with native tools and structured output. "
-            "The sole Mistral route retains requests for 30 days and is not ZDR; do not "
-            "use it for confidential or regulated workloads."
+            "OpenRouter offers a ZDR route; enforce ZDR routing before sending confidential "
+            "or regulated workloads."
         ),
     ),
     # Heavyweight models are deliberately server-backed.
