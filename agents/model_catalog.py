@@ -398,6 +398,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         activated_parameters="49B",
         unsupported_parameters=("n",),
         local=False,
+        aliases=("mistralai/mistral-large-4-0-20261006",),
         performance_note=(
             "Named OpenRouter public preview with native tools and structured output. "
             "OpenRouter offers a ZDR route; enforce ZDR routing before sending confidential "
@@ -831,6 +832,8 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
     # trillion-parameter load.
     if "qwen3.8-max" in value:
         return get_model_spec("qwen/qwen3.8-max")
+    if "mistral-large-4" in value:
+        return get_model_spec("mistralai/mistral-large-4-0")
     if "moonshotai/kimi-k2" in value:
         return get_model_spec("kimi-k2.5")
     if "zai-org/glm-5" in value:

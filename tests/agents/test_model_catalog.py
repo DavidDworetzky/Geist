@@ -455,6 +455,28 @@ def test_openrouter_mistral_large_4_metadata_is_explicit_and_server_backed():
 @pytest.mark.parametrize(
     "model_id",
     [
+        "mistralai/mistral-large-4-0-20261006",
+        "mistralai/mistral-large-4",
+        "mistral-large-4-0",
+    ],
+)
+def test_mistral_large_4_variants_never_fall_back_to_a_local_model(model_id):
+    spec = infer_model_spec(model_id)
+
+    assert spec.id == "mistralai/mistral-large-4-0"
+    assert spec.provider == "openrouter"
+    assert spec.local is False
+
+
+def test_mistral_large_4_dated_slug_shares_the_request_contract():
+    model = get_model_spec("mistralai/mistral-large-4-0")
+
+    assert resolve_request_spec("mistralai/mistral-large-4-0-20261006") is model
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
         "Qwen/Qwen2.5-3B-Instruct",
         "Qwen/Qwen3-4B",
         "mistralai/Mistral-7B-Instruct-v0.3",
