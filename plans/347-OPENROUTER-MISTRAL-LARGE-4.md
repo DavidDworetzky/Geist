@@ -17,19 +17,19 @@ The model scored 21/25 on October 6, 2026:
 - operational safety: 3/5
 - implementation confidence: 5/5
 
-OpenRouter exposes one callable Mistral endpoint with a stable named model ID,
+OpenRouter exposes callable Mistral endpoints with a stable named model ID,
 native tools, forced or automatic tool choice, JSON-schema structured output,
-streaming, text/image input, a 524,288-token context window, and a 262,144-token
+streaming, text/image input, a 1,048,576-token context window, and a 262,144-token
 output ceiling. The route is compatible with `OnlineAgent` and materially adds
 a strong finance/legal/coding evaluation option.
 
 The deductions are deliberate. Mistral labels the release a public preview,
 says training is still in flight, and has not yet published the weights. The
 exact-model benchmark results are credible but currently appear through
-Mistral's launch materials rather than public independent leaderboards. The
-sole Mistral route retains requests for 30 days, reports no training, and is
-absent from OpenRouter's ZDR-filtered model API. It must not be recommended for
-confidential or regulated workloads.
+Mistral's launch materials rather than public independent leaderboards.
+OpenRouter now exposes standard, ZDR, and EU-tagged routes, so confidential or
+regulated workloads must be restricted to ZDR routing rather than sent through
+the default route selection.
 
 ## Verified metadata
 
@@ -38,16 +38,16 @@ confidential or regulated workloads.
 - OpenRouter addition: `2026-10-06T13:42:02Z`
 - provider/backend/local: `openrouter` / `openai_compatible` / `false`
 - modality: text and image input, text output
-- context/output: 524,288 / 262,144 tokens
+- context/output: 1,048,576 / 262,144 tokens (EU route: 524,288 context)
 - disclosed architecture: 1.05T total / 49B active parameters, 1.6B vision
   encoder
-- reasoning: no separate OpenRouter reasoning parameter; Mistral describes the
-  preview as hybrid instruct-and-reasoning
+- reasoning: optional and enabled by default at high effort; `high` and `none`
+  are advertised
 - capabilities: streaming, native tools, all advertised tool-choice modes,
   response format, and structured output
 - pricing checked October 6: $0.68/M input, $2.09/M output, $0.07/M cached input
-- route inventory: one Mistral endpoint; 99.54% 30-minute and 99.64% one-day
-  endpoint uptime at review time
+- route inventory rechecked October 12: standard, ZDR, and EU-tagged Mistral
+  endpoints; standard and ZDR advertise the full context window
 
 ## Evidence
 
