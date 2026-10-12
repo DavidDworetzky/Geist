@@ -51,6 +51,9 @@ const VoiceSettings: React.FC<VoiceSettingsProps> = ({ selection, onChange, disa
             ) : (
               <>
                 <div className="voice-settings-status">A continuous conversation with AI-generated speech.</div>
+                {selection.ttsProvider === 'openai_live' && <div className="voice-settings-status">
+                  Tools use your selected text model and enabled catalog. Review tool approvals on screen.
+                </div>}
                 {provider?.description && <div className="voice-settings-status">{provider.description}</div>}
                 {loading && <div className="voice-settings-status">Loading voice models...</div>}
                 {error && <div className="voice-settings-error">{error}</div>}

@@ -47,6 +47,17 @@ def test_session_uses_live_contract_and_keeps_credentials_server_side(client, up
     assert payload["session"]["audio"] == {"output": {"voice": "quartz"}}
     assert payload["transport"] == {"type": "webrtc", "sdp": "v=0\r\n"}
     assert "test-server-key" not in response.text
+    assert "no backend tools" in payload["session"]["instructions"]
+
+
+def test_tool_delegation_is_opt_in_and_retains_application_approvals(client, upstream):
+    response = client.post("/voice/live/session", json={"sdp": "v=0\n", "tools_enabled": True})
+    assert response.status_code == 201
+    session = upstream.call_args.kwargs["json"]["session"]
+    assert session["delegation"] == {"type": "client"}
+    assert "enabled tool catalog" in session["instructions"]
+    assert "spoken consent does not replace" in session["instructions"]
+    assert "after the backend confirms success" in session["instructions"]
 
 
 @pytest.mark.parametrize(
