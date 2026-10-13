@@ -500,6 +500,7 @@ class TestOnlineAgentAPIRequests:
                     {
                         "model": "anthropic/claude-haiku-5.5",
                         "messages": [{"role": "user", "content": "Test prompt"}],
+                        "reasoning": {"effort": "low"},
                         "n": 1,
                         "temperature": 0.7,
                         "top_p": 0.9,
@@ -523,11 +524,11 @@ class TestOnlineAgentAPIRequests:
                         "top_p",
                         "frequency_penalty",
                         "presence_penalty",
-                        "reasoning",
                     }
                     & payload.keys()
                 )
                 assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "low"}
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
