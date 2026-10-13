@@ -4,6 +4,7 @@ import { waitForFileJob } from '../Utils/waitForFileJob';
 
 interface FileUploadProps {
   onFileUpload?: (file: File) => void;
+  onUploadStored?: () => void;
   onUploadComplete?: (response: any) => void;
   onUploadError?: (error: string) => void;
   multiple?: boolean;
@@ -20,6 +21,7 @@ interface UploadStatus {
 
 const FileUpload: React.FC<FileUploadProps> = ({
   onFileUpload,
+  onUploadStored,
   onUploadComplete,
   onUploadError,
   multiple = false,
@@ -32,9 +34,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
     message: ''
   });
 
+  const batchId = useRef(0);
   const uploadController = useRef<AbortController | null>(null);
   const resetTimer = useRef<number | undefined>();
   useEffect(() => () => {
+    batchId.current += 1;
     uploadController.current?.abort();
     window.clearTimeout(resetTimer.current);
   }, []);
@@ -52,6 +56,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       fileName: file.name
     });
 
+    let stored = false;
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -69,6 +74,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
       const result = await response.json();
       if (controller.signal.aborted) return;
+      stored = true;
+      onUploadStored?.();
       if (result.processing_status?.status === 'failed') {
         throw new Error(result.processing_status.error || 'File processing failed.');
       }
@@ -119,16 +126,20 @@ const FileUpload: React.FC<FileUploadProps> = ({
       resetTimer.current = window.setTimeout(() => {
         setUploadStatus({ status: 'idle', progress: 0, message: '' });
       }, 5000);
+    } finally {
+      if (stored && !controller.signal.aborted) onUploadStored?.();
     }
-  }, [onUploadComplete, onUploadError]);
+  }, [onUploadComplete, onUploadError, onUploadStored]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const currentBatch = ++batchId.current;
     for (const file of acceptedFiles) {
+      if (batchId.current !== currentBatch) break;
       if (onFileUpload) {
         onFileUpload(file);
       }
       await uploadFile(file);
-      if (uploadController.current?.signal.aborted) break;
+      if (batchId.current !== currentBatch) break;
     }
   }, [onFileUpload, uploadFile]);
 
