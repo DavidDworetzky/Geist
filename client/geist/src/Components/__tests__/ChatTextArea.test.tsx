@@ -286,3 +286,13 @@ it('does not render a completed turn again when only streaming text changes', ()
   expect(screen.getByText('ab')).toBeInTheDocument();
   expect(content).not.toHaveBeenCalled();
 });
+
+
+it('renders readable orchestration task markers', () => {
+  render(<ChatTextArea chatHistory={[{ user: 'plan', ai: '', orchestration: {
+    agentic_mode: true,
+    tasks: [{ id: 'done', title: 'Done', acceptance_criteria: ['done'], status: 'completed' }, { id: 'todo', title: 'Todo', acceptance_criteria: ['todo'], status: 'pending' }],
+  } }]} />);
+  expect(screen.getByText('\u2713')).toBeInTheDocument();
+  expect(screen.getByText('\u25cb')).toBeInTheDocument();
+});

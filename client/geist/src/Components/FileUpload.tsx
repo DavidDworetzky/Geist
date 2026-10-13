@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { waitForFileJob } from '../Utils/waitForFileJob';
 
 interface FileUploadProps {
   onFileUpload?: (file: File) => void;
@@ -11,7 +12,7 @@ interface FileUploadProps {
 }
 
 interface UploadStatus {
-  status: 'idle' | 'uploading' | 'processing' | 'success' | 'error';
+  status: 'idle' | 'uploading' | 'processing' | 'pending' | 'success' | 'error';
   progress: number;
   message: string;
   fileName?: string;
@@ -75,24 +76,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (typeof jobId === 'number') {
         setUploadStatus({ status: 'processing', progress: 100,
           message: `${file.name} uploaded. Processing text...`, fileName: file.name });
-        while (!controller.signal.aborted) {
-          const jobResponse = await fetch(`/api/v1/jobs/${jobId}`, { signal: controller.signal });
-          if (!jobResponse.ok) throw new Error('Could not check file processing status.');
-          const job = await jobResponse.json();
-          if (controller.signal.aborted) return;
-          if (job.status === 'failed') throw new Error(job.error || 'File processing failed.');
-          if (job.status === 'succeeded') break;
-          await new Promise<void>((resolve, reject) => {
-            const onAbort = () => {
-              window.clearTimeout(timer);
-              reject(new DOMException('Aborted', 'AbortError'));
-            };
-            const timer = window.setTimeout(() => {
-              controller.signal.removeEventListener('abort', onAbort);
-              resolve();
-            }, 1000);
-            controller.signal.addEventListener('abort', onAbort, { once: true });
-          });
+        const ready = await waitForFileJob(jobId, controller.signal);
+        if (controller.signal.aborted) return;
+        if (!ready) {
+          setUploadStatus({ status: 'pending', progress: 100,
+            message: `${file.name} uploaded. Processing may still be running; check Files later.`,
+            fileName: file.name });
+          return;
         }
       }
       if (controller.signal.aborted) return;
@@ -138,6 +128,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onFileUpload(file);
       }
       await uploadFile(file);
+      if (uploadController.current?.signal.aborted) break;
     }
   }, [onFileUpload, uploadFile]);
 

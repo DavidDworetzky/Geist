@@ -101,7 +101,9 @@ async def test_upload_storage_does_not_block_event_loop(monkeypatch):
         return {"success": True, "file_id": 1, "filename": "notes.txt", "duplicate": False}
 
     monkeypatch.setattr(files.FileStorageService, "store_file", store)
-    monkeypatch.setattr(files, "enqueue", lambda *a, **kw: SimpleNamespace(job_id=1))
+    monkeypatch.setattr(
+        files, "enqueue_file_processing", lambda *a, **kw: SimpleNamespace(job_id=1)
+    )
     app = FastAPI()
     app.include_router(files.router)
     app.dependency_overrides[get_current_workspace] = lambda: SimpleNamespace(workspace_id=1)
@@ -123,7 +125,7 @@ def test_duplicate_waits_for_processing(file_app, monkeypatch):
         data = client.post("/files/upload", files={"file": ("notes.txt", b"hello")}).json()
         duplicate = client.post("/files/upload", files={"file": ("notes.txt", b"hello")}).json()
         assert duplicate["duplicate"]
-        assert duplicate["processing_status"]["job_id"]
+        assert duplicate["processing_status"]["job_id"] == data["processing_status"]["job_id"]
         assert duplicate["file_id"] == data["file_id"]
         worker = JobWorker()
         worker.run_once()
@@ -141,6 +143,26 @@ def test_foreign_workspace_cannot_reprocess_or_observe_job(file_app):
         )
         assert client.post(f"/files/{data['file_id']}/reprocess").status_code == 403
         assert client.get(f"/jobs/{data['processing_status']['job_id']}").status_code == 404
-        assert (
-            client.post("/files/upload", files={"file": ("notes.txt", b"hello")}).status_code == 403
-        )
+        from app.models.database.database import SessionLocal
+        from app.models.database.geist_user import GeistUser
+
+        with SessionLocal() as session:
+            session.add(GeistUser(user_id=999, workspace_key="other"))
+            session.commit()
+        other = client.post("/files/upload", files={"file": ("notes.txt", b"hello")})
+        assert other.status_code == 200
+        assert other.json()["file_id"] != data["file_id"]
+        assert not other.json()["duplicate"]
+        assert get_file_upload_by_id(other.json()["file_id"]).user_id == 999
+
+
+def test_repeated_upload_reuses_running_job(file_app):
+    from app.models.database.job import claim_next_job
+
+    with TestClient(file_app) as client:
+        data = client.post("/files/upload", files={"file": ("notes.txt", b"hello")}).json()
+        running = claim_next_job()
+        assert running.job_id == data["processing_status"]["job_id"]
+        duplicate = client.post("/files/upload", files={"file": ("notes.txt", b"hello")}).json()
+        assert duplicate["processing_status"]["job_id"] == running.job_id
+        assert claim_next_job() is None

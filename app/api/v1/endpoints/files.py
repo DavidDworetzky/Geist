@@ -13,7 +13,7 @@ from app.models.database.file_upload import (
 from app.services.document_search import DocumentSearchService
 from app.services.file_processor import FileProcessingService
 from app.services.file_storage import FileStorageService
-from app.services.job_queue import enqueue
+from app.services.job_queue import enqueue, enqueue_file_processing
 
 
 router = APIRouter()
@@ -53,11 +53,9 @@ async def upload_file(
                 }
         if needs_processing:
             job = await run_in_threadpool(
-                enqueue,
-                "file.process",
-                payload={"file_id": file_id, "user_id": current_workspace.workspace_id},
-                user_id=current_workspace.workspace_id,
-                max_attempts=1,
+                enqueue_file_processing,
+                file_id,
+                current_workspace.workspace_id,
             )
             storage_result["processing_status"] = {"status": "queued", "job_id": job.job_id}
 

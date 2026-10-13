@@ -113,7 +113,7 @@ const ChatTurn = memo(({ element, onToolApproval }: {
                 {element.orchestration.tasks.map((task) => (
                   <li key={task.id} className={`agentic-task agentic-task-${task.status}`}>
                     <span aria-hidden="true">
-                      {task.status === 'completed' ? 'Ã¢Å“â€œ' : task.status === 'blocked' ? '!' : 'Ã¢â€”â€¹'}
+                      {task.status === 'completed' ? '\u2713' : task.status === 'blocked' ? '!' : '\u25cb'}
                     </span>
                     <span>
                       <strong>{task.title}</strong>

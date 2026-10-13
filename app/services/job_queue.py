@@ -301,3 +301,36 @@ def _run_file_processing_job(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(result.get("error", "File processing failed"))
     # Extracted content lives in the file table, not a second copy in the queue.
     return {"file_id": file_id, "success": True}
+
+
+_file_enqueue_lock = threading.Lock()
+
+
+def enqueue_file_processing(file_id: int, user_id: int) -> Job:
+    """Reuse queued/running extraction on the single-process local server."""
+    from app.models.database.database import SessionLocal
+    from app.models.database.job import JobStatus
+
+    key = f"file.process:{file_id}"
+    with _file_enqueue_lock:
+        with SessionLocal() as session:
+            existing = (
+                session.query(Job)
+                .filter(
+                    Job.kind == "file.process",
+                    Job.user_id == user_id,
+                    Job.dedupe_key == key,
+                    Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
+                )
+                .first()
+            )
+            if existing is not None:
+                session.expunge(existing)
+                return existing
+        return enqueue(
+            "file.process",
+            payload={"file_id": file_id, "user_id": user_id},
+            user_id=user_id,
+            max_attempts=1,
+            dedupe_key=key,
+        )
