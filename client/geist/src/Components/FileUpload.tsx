@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 
 interface FileUploadProps {
@@ -11,7 +11,7 @@ interface FileUploadProps {
 }
 
 interface UploadStatus {
-  status: 'idle' | 'uploading' | 'success' | 'error';
+  status: 'idle' | 'uploading' | 'processing' | 'success' | 'error';
   progress: number;
   message: string;
   fileName?: string;
@@ -31,7 +31,19 @@ const FileUpload: React.FC<FileUploadProps> = ({
     message: ''
   });
 
+  const uploadController = useRef<AbortController | null>(null);
+  const resetTimer = useRef<number | undefined>();
+  useEffect(() => () => {
+    uploadController.current?.abort();
+    window.clearTimeout(resetTimer.current);
+  }, []);
+
   const uploadFile = useCallback(async (file: File) => {
+    uploadController.current?.abort();
+    window.clearTimeout(resetTimer.current);
+    const controller = new AbortController();
+    uploadController.current = controller;
+
     setUploadStatus({
       status: 'uploading',
       progress: 0,
@@ -45,6 +57,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
       const response = await fetch('/api/v1/files/upload', {
         method: 'POST',
+        signal: controller.signal,
         body: formData
       });
 
@@ -54,6 +67,35 @@ const FileUpload: React.FC<FileUploadProps> = ({
       }
 
       const result = await response.json();
+      if (controller.signal.aborted) return;
+      if (result.processing_status?.status === 'failed') {
+        throw new Error(result.processing_status.error || 'File processing failed.');
+      }
+      const jobId = result.processing_status?.job_id;
+      if (typeof jobId === 'number') {
+        setUploadStatus({ status: 'processing', progress: 100,
+          message: `${file.name} uploaded. Processing text...`, fileName: file.name });
+        while (!controller.signal.aborted) {
+          const jobResponse = await fetch(`/api/v1/jobs/${jobId}`, { signal: controller.signal });
+          if (!jobResponse.ok) throw new Error('Could not check file processing status.');
+          const job = await jobResponse.json();
+          if (controller.signal.aborted) return;
+          if (job.status === 'failed') throw new Error(job.error || 'File processing failed.');
+          if (job.status === 'succeeded') break;
+          await new Promise<void>((resolve, reject) => {
+            const onAbort = () => {
+              window.clearTimeout(timer);
+              reject(new DOMException('Aborted', 'AbortError'));
+            };
+            const timer = window.setTimeout(() => {
+              controller.signal.removeEventListener('abort', onAbort);
+              resolve();
+            }, 1000);
+            controller.signal.addEventListener('abort', onAbort, { once: true });
+          });
+        }
+      }
+      if (controller.signal.aborted) return;
 
       setUploadStatus({
         status: 'success',
@@ -66,10 +108,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onUploadComplete(result);
       }
 
-      setTimeout(() => {
+      resetTimer.current = window.setTimeout(() => {
         setUploadStatus({ status: 'idle', progress: 0, message: '' });
       }, 3000);
     } catch (error) {
+      if (controller.signal.aborted) return;
       const errorMessage = error instanceof Error ? error.message : 'Upload failed';
 
       setUploadStatus({
@@ -83,7 +126,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onUploadError(errorMessage);
       }
 
-      setTimeout(() => {
+      resetTimer.current = window.setTimeout(() => {
         setUploadStatus({ status: 'idle', progress: 0, message: '' });
       }, 5000);
     }
@@ -116,7 +159,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         {...getRootProps()}
         className={`file-dropzone ${isDragActive ? 'drag-active' : ''} file-upload-${uploadStatus.status}`}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps()} aria-label="Choose files to upload" />
         <div className="file-upload-status-label">{statusLabel}</div>
 
         {uploadStatus.status === 'idle' ? (

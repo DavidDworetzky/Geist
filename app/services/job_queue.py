@@ -282,3 +282,22 @@ def _run_workflow_job(payload: dict[str, Any]) -> dict[str, Any]:
         "status": run.status,
         "error_message": run.error_message,
     }
+
+
+@job_handler("file.process")
+def _run_file_processing_job(payload: dict[str, Any]) -> dict[str, Any]:
+    from app.models.database.file_upload import get_file_upload_by_id
+    from app.services.file_processor import FileProcessingService
+
+    file_id = int(payload["file_id"])
+    uploaded = get_file_upload_by_id(file_id)
+    if uploaded is None or uploaded.user_id != payload["user_id"]:
+        raise ValueError("File not found in this workspace")
+    if payload.get("reprocess"):
+        result = FileProcessingService.reprocess_file(file_id, force=bool(payload.get("force")))
+    else:
+        result = FileProcessingService.process_file_sync(file_id)
+    if not result["success"]:
+        raise RuntimeError(result.get("error", "File processing failed"))
+    # Extracted content lives in the file table, not a second copy in the queue.
+    return {"file_id": file_id, "success": True}

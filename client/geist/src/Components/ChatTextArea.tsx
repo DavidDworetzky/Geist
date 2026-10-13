@@ -1,5 +1,5 @@
-import React, { forwardRef, useState } from 'react';
-import { ChatHistory, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
+import React, { forwardRef, memo, useState } from 'react';
+import { ChatHistory, ChatPair, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
 const statusLabel = (status: ToolCallStatus | string): string =>
@@ -28,8 +28,10 @@ interface ChatTextAreaProps extends ChatHistory {
   ) => void | Promise<void>;
 }
 
-const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
-  const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+const ChatTurn = memo(({ element, onToolApproval }: {
+  element: ChatPair;
+  onToolApproval: ChatTextAreaProps['onToolApproval'];
+}) => {
   const [answeredCallIds, setAnsweredCallIds] = useState<Set<string>>(new Set());
   const [standingGrantUnavailable, setStandingGrantUnavailable] = useState<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
@@ -39,7 +41,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
     setAnsweredCallIds((prev) => new Set(prev).add(key));
     setApprovalErrors((prev) => ({ ...prev, [key]: '' }));
     try {
-      await props.onToolApproval?.(runId, callId, decision);
+      await onToolApproval?.(runId, callId, decision);
     } catch (error) {
       if (error instanceof Error && error.name === 'ApprovalUnavailable') {
         setApprovalErrors((prev) => ({ ...prev, [key]: 'This approval or decision is no longer available. Wait for an updated tool call.' }));
@@ -60,12 +62,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
   };
 
   return (
-    <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
-      {isEmpty && (
-        <div className="chat-empty-state">Start a conversation with Geist.</div>
-      )}
-      {props.chatHistory.map((element, index) => (
-        <div key={element.run_id ?? index} className="chat-turn">
+        <div className="chat-turn">
           <div className="chat-message chat-message-user">
             <span className="chat-speaker">User</span>
             {element.user}
@@ -116,7 +113,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 {element.orchestration.tasks.map((task) => (
                   <li key={task.id} className={`agentic-task agentic-task-${task.status}`}>
                     <span aria-hidden="true">
-                      {task.status === 'completed' ? '✓' : task.status === 'blocked' ? '!' : '○'}
+                      {task.status === 'completed' ? 'Ã¢Å“â€œ' : task.status === 'blocked' ? '!' : 'Ã¢â€”â€¹'}
                     </span>
                     <span>
                       <strong>{task.title}</strong>
@@ -174,7 +171,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 )}
                 {toolCall.status === 'awaiting_approval'
                   && element.run_id
-                  && props.onToolApproval
+                  && onToolApproval
                   && (
                   <div
                     role="group"
@@ -246,6 +243,19 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             );
           })}
         </div>
+  );
+});
+ChatTurn.displayName = 'ChatTurn';
+
+const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
+  const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+  return (
+    <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
+      {isEmpty && (
+        <div className="chat-empty-state">Start a conversation with Geist.</div>
+      )}
+      {props.chatHistory.map((element, index) => (
+        <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />
       ))}
       {props.isLoading && (
         <div

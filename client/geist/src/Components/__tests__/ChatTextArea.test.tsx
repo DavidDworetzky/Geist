@@ -275,3 +275,14 @@ describe('ChatTextArea approval decisions', () => {
     expect(approve).toHaveBeenCalledTimes(2);
   });
 });
+
+
+it('does not render a completed turn again when only streaming text changes', () => {
+  const content = jest.fn(() => 'completed answer');
+  const completed = { user: 'old question', get ai() { return content(); }, run_id: 'old' };
+  const { rerender } = render(<ChatTextArea chatHistory={[completed, { user: 'new', ai: 'a', run_id: 'new' }]} />);
+  content.mockClear();
+  rerender(<ChatTextArea chatHistory={[completed, { user: 'new', ai: 'ab', run_id: 'new' }]} />);
+  expect(screen.getByText('ab')).toBeInTheDocument();
+  expect(content).not.toHaveBeenCalled();
+});
