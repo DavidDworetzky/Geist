@@ -428,6 +428,35 @@ def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_claude_haiku_55_metadata_is_explicit_and_server_backed():
+    haiku = get_model_spec("anthropic/claude-haiku-5.5")
+
+    assert haiku.provider == "openrouter"
+    assert haiku.backend == "openai_compatible"
+    assert haiku.local is False
+    assert haiku.family == "claude"
+    assert haiku.context_window == 1000000
+    assert haiku.max_output_tokens == 128000
+    assert haiku.parameter_count is None
+    assert haiku.activated_parameters is None
+    assert haiku.supports_vision is True
+    assert haiku.supports_function_calling is True
+    assert haiku.supports_reasoning is True
+    assert haiku.supports_streaming is True
+    assert haiku.recommended is True
+    assert haiku.mandatory_reasoning_effort is None
+    assert haiku.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert haiku.performance_note is not None
+    assert "Enforce OpenRouter ZDR routing" in haiku.performance_note
+    assert get_provider_endpoint(haiku.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -619,6 +648,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-haiku-5.5",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -680,6 +710,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "x-ai/grok-4.7",
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-haiku-5.5",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -842,6 +873,9 @@ def test_model_routes_serialize_string_backed_providers():
     )
     assert any(
         model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
