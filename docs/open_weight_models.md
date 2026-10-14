@@ -311,6 +311,25 @@ explicitly enabled. The sole upstream Meta endpoint, however, has a documented
 30-day retention policy and is not on OpenRouter's ZDR endpoint list. Do not
 send confidential workloads to this model.
 
+## OpenRouter-hosted Muse Wonder
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-wonder`. The stable October 12, 2026 route has a 1,048,576-token
+context, a 943,718-token maximum output, text/image/file/audio/video input,
+streaming, native tools and tool choice, and JSON-schema structured output.
+Reasoning is mandatory; Geist supplies OpenRouter's documented default
+`medium` effort and omits unsupported `n`, frequency-penalty,
+presence-penalty, and stop parameters. OpenRouter lists pricing at $4/M input,
+$20/M output, and $0.20/M cached input.
+
+Meta does not disclose a parameter count. OpenRouter lists the sole Meta route
+as no-training with 30-day retention, and the exact model is absent from its
+ZDR inventory. Do not send confidential or regulated workloads to this model.
+See the [OpenRouter model page](https://openrouter.ai/meta/muse-wonder),
+[endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-wonder-20261012/endpoints),
+Meta's [October 12 release](https://research.meta.ai/blog/muse-wonder), and the
+[independent Artificial Analysis evaluation](https://artificialanalysis.ai/articles/muse-wonder).
+
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and
 served model name:

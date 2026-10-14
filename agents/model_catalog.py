@@ -707,6 +707,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "meta/muse-wonder",
+        "Muse Wonder",
+        "muse",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable Meta frontier model hosted through OpenRouter with mandatory "
+            "reasoning and native tools. Meta retains requests for 30 days and the "
+            "route is not ZDR-eligible; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "muse-spark-1.1",
         "Muse Spark 1.1",
         "muse",
