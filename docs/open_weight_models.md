@@ -11,9 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3
-Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
-intentionally server-backed. For models with published
+and OpenRouter's Gemini 4 Argon, Fireworks Ember-1, Claude Opus 5.5, Claude
+Sonnet 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1
+Flash routes are also intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -121,6 +121,38 @@ routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
 confidential workloads; ordinary provider policy and availability can change.
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled.
+
+## OpenRouter-hosted Gemini 4 Argon
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`google/gemini-4-argon`. OpenRouter added this stable route on October 13,
+2026. It accepts text, image, file, audio, and video input, has a unified
+1,048,576-token context window and a 65,536-token synchronous output limit, and
+supports streaming, native function calling, automatic or forced tool choice,
+and JSON-schema structured output. Reasoning is mandatory; Geist sends the
+documented default `medium` effort. Google's migration guide says sampling
+parameters are ignored, so Geist omits `n`, temperature, `top_p`,
+frequency-penalty, and presence-penalty while retaining `stop`.
+
+OpenRouter lists introductory pricing of $2 per million input tokens, $10 per
+million output/reasoning tokens, and $0.10 per million cached input tokens.
+Google states that pricing doubles after November 30, 2026. At review time,
+OpenRouter exposed Google Vertex and Google AI Studio routes, reported 99.99%
+three-day reachability and 97.92% three-day availability, and showed roughly
+52 output tokens per second from the fastest standard route.
+
+Independent Vals AI evaluation places Argon first on its broad Index at 68.90%
+and reports 91.91% Vibe Code Bench, 68.17% Code Migration, and 57.58%
+Terminal-Bench 4.0. OpenRouter's Artificial Analysis feed reports a 52.6
+Intelligence Index and 57.1% Terminal-Bench 4.0. These results support Argon as
+a frontier coding and agent option, although long agent runs can be expensive.
+
+The exact model appears in OpenRouter's ZDR inventory. OpenRouter lists Google
+Vertex as no-training and zero-retention, but Google AI Studio as no-training
+with 55-day retention. Default routing can use either provider, so enforce
+OpenRouter ZDR routing before sending confidential workloads. OpenRouter itself
+does not retain prompt or response content unless logging is explicitly
+enabled.
 
 ## OpenRouter-hosted Claude Sonnet 5.5
 
