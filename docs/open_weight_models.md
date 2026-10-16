@@ -311,6 +311,26 @@ explicitly enabled. The sole upstream Meta endpoint, however, has a documented
 30-day retention policy and is not on OpenRouter's ZDR endpoint list. Do not
 send confidential workloads to this model.
 
+## OpenRouter-hosted Muse Spark Open
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-spark-open`. The stable October 15, 2026 route has a
+1,048,576-token context, a 943,718-token maximum output, and accepts text,
+images, files, audio, and video while returning text. It supports streaming,
+native tools and tool choice, and JSON-schema structured output. Reasoning is
+mandatory; Geist supplies OpenRouter's documented default `medium` effort and
+omits only the unsupported generic `n` parameter. OpenRouter lists pricing at
+$1.25/M input, $4.25/M output, and $0.15/M cached input.
+
+Meta discloses 816B total parameters with 42B active per token. The exact model
+is present in OpenRouter's ZDR inventory, and all four current OpenRouter
+providers are listed as no-training and zero-retention. Enforce ZDR routing and
+re-check endpoint policy before confidential workloads. See the
+[OpenRouter model page](https://openrouter.ai/meta/muse-spark-open),
+[endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-spark-open-20261015/endpoints),
+[Meta model card](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B),
+and [independent Plotly evaluation](https://plotly.com/blog/meta-muse-spark-open-first-look/).
+
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and
 served model name:
