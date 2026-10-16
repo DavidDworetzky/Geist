@@ -323,9 +323,9 @@ omits only the unsupported generic `n` parameter. OpenRouter lists pricing at
 $1.25/M input, $4.25/M output, and $0.15/M cached input.
 
 Meta discloses 816B total parameters with 42B active per token. The exact model
-is present in OpenRouter's ZDR inventory, and all four current OpenRouter
-providers are listed as no-training and zero-retention. Enforce ZDR routing and
-re-check endpoint policy before confidential workloads. See the
+is present in OpenRouter's ZDR inventory. Enforce ZDR routing and re-check
+endpoint policy before confidential workloads because provider availability and
+data policies can change. See the
 [OpenRouter model page](https://openrouter.ai/meta/muse-spark-open),
 [endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-spark-open-20261015/endpoints),
 [Meta model card](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B),
