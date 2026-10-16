@@ -588,6 +588,35 @@ def test_openrouter_claude_haiku_55_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(haiku.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_gemini_4_argon_metadata_is_explicit_and_server_backed():
+    argon = get_model_spec("google/gemini-4-argon")
+
+    assert argon.provider == "openrouter"
+    assert argon.backend == "openai_compatible"
+    assert argon.local is False
+    assert argon.family == "gemini"
+    assert argon.context_window == 1048576
+    assert argon.max_output_tokens == 65536
+    assert argon.parameter_count is None
+    assert argon.activated_parameters is None
+    assert argon.supports_vision is True
+    assert argon.supports_function_calling is True
+    assert argon.supports_reasoning is True
+    assert argon.supports_streaming is True
+    assert argon.recommended is True
+    assert argon.mandatory_reasoning_effort == "medium"
+    assert argon.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert argon.performance_note is not None
+    assert "Enforce OpenRouter ZDR routing" in argon.performance_note
+    assert get_provider_endpoint(argon.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -784,6 +813,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "openai/gpt-6.1-terra-20261026",
         "particle-ai/particle-1",
         "particle-ai/particle-1-20261027",
+        "google/gemini-4-argon",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
         "qwen/qwen3.8-max",
@@ -864,6 +894,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-haiku-5.5",
         "particle-ai/particle-1",
         "particle-ai/particle-1-20261027",
+        "google/gemini-4-argon",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
         "qwen/qwen3.8-max",
@@ -1035,6 +1066,7 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "particle-ai/particle-1" for model in response.providers["openrouter"])
+    assert any(model.id == "google/gemini-4-argon" for model in response.providers["openrouter"])
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(
         model.id == "inclusionai/ling-3.1-flash" for model in response.providers["openrouter"]
