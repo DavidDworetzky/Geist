@@ -709,6 +709,30 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "meta/muse-spark-open",
+        "Muse Spark Open",
+        "muse",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="816B",
+        activated_parameters="42B",
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable open-weight coding and agent model hosted through OpenRouter with "
+            "mandatory reasoning, native tools, and multiple zero-retention routes. "
+            "Enforce OpenRouter ZDR routing before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "muse-spark-1.1",
         "Muse Spark 1.1",
         "muse",
