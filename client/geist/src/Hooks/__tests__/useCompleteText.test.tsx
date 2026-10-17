@@ -703,3 +703,63 @@ describe('useCompleteText', () => {
     expect(result.current.completedTurn).toBeNull();
   });
 });
+
+
+describe('stream text batching', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; jest.restoreAllMocks(); });
+
+  const controlledStream = () => {
+    let deliver: (value: { done: boolean; value?: Uint8Array }) => void;
+    const read = jest.fn(() => new Promise(resolve => { deliver = resolve; }));
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, body: { getReader: () => ({ read }) } });
+    return async (chunk?: string) => {
+      await act(async () => {
+        deliver(chunk === undefined ? { done: true } : { done: false, value: encode(chunk) });
+      });
+    };
+  };
+
+  it('coalesces deltas per frame and flushes partial text before errors', async () => {
+    const frames: FrameRequestCallback[] = [];
+    jest.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => frames.push(callback));
+    const cancel = jest.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const send = controlledStream();
+    const { result } = renderHook(() => useCompleteText());
+    let completion: Promise<void>;
+    await act(async () => { completion = result.current.completeText('hello'); });
+    await send('event: run_started\ndata: {"run_id":"batched"}\n\n');
+    await send('event: delta\ndata: {"text":"one"}\n\n');
+    await send('event: delta\ndata: {"text":" two"}\n\n');
+    expect(result.current.streamingText).toBe('');
+    expect(frames).toHaveLength(1);
+    act(() => frames[0](0));
+    expect(result.current.streamingText).toBe('one two');
+    await send('event: delta\ndata: {"text":" three"}\n\n');
+    await send('event: error\ndata: {"message":"disconnected"}\n\n');
+    expect(result.current.activeTurn?.message).toBe('one two three');
+    expect(result.current.error).toBe('disconnected');
+    expect(cancel).toHaveBeenCalled();
+    await send();
+    await act(async () => { await completion; });
+  });
+
+  it('discards buffered text on reset and cancels its scheduled frame', async () => {
+    let frame: FrameRequestCallback = () => {};
+    jest.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frame = callback; return 7; });
+    const cancel = jest.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const send = controlledStream();
+    const { result, unmount } = renderHook(() => useCompleteText());
+    let completion: Promise<void>;
+    await act(async () => { completion = result.current.completeText('hello'); });
+    await send('event: delta\ndata: {"text":"old chat"}\n\n');
+    act(() => result.current.resetChatSession());
+    expect(cancel).toHaveBeenCalledWith(7);
+    act(() => frame(0));
+    expect(result.current.streamingText).toBe('');
+    expect(result.current.activeTurn).toBeNull();
+    await send();
+    await act(async () => { await completion; });
+    unmount();
+  });
+});

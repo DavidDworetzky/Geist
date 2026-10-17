@@ -11,8 +11,9 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
-Flash routes are also intentionally server-backed. For models with published
+and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3
+Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
+intentionally server-backed. For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -77,6 +78,79 @@ explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
 
+## OpenRouter-hosted Grok 4.7
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`x-ai/grok-4.7`. OpenRouter added the stable route on September 21, 2026. It
+accepts text, image, and file input, has a 500,000-token context window and a
+450,000-token output ceiling, and supports streaming, native function calling,
+forced function selection, and JSON-schema structured output. Reasoning is
+always on; Geist sends OpenRouter's documented default `high` effort and omits
+unsupported `n`, frequency-penalty, presence-penalty, and stop parameters.
+
+OpenRouter lists $2 per million input tokens, $6 per million output tokens, and
+$0.50 per million cached input tokens; input and output rates double beyond
+200,000 input tokens. SpaceXAI reports strong gains over Grok 4.6 on long-running
+coding and agent benchmarks, while independent measurements and arena results
+are more mixed. The model is therefore an additional hosted option rather than
+a universal default.
+
+OpenRouter lists xAI's ordinary provider policy as no training with 30-day
+retention, and also exposes several Grok 4.7 endpoints in its ZDR inventory.
+Enforce OpenRouter ZDR routing before sending confidential workloads. OpenRouter
+itself does not retain prompt or response content unless logging is explicitly
+enabled.
+
+## OpenRouter-hosted Claude Opus 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-opus-5.5`. OpenRouter added this stable route on September
+22, 2026. It accepts text and image input, has a 1,000,000-token context window
+and 128,000-token output limit, and supports streaming, native function
+calling, and JSON-schema structured output. Reasoning is always on; Geist sends
+OpenRouter's documented default `high` effort. Geist retains automatic tool
+choice and omits `n`, `temperature`, `top_p`, frequency-penalty, and
+presence-penalty parameters. The aggregate route advertises temperature through
+Azure, but the recommended ZDR endpoints omit it. Forced function selection is
+not supported.
+
+OpenRouter lists $4 per million input tokens, $20 per million output tokens,
+and $0.20 per million cached input tokens. At review time, three Amazon Bedrock
+routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
+99.80% one-day uptime. Enforce OpenRouter ZDR routing before sending
+confidential workloads; ordinary provider policy and availability can change.
+OpenRouter itself does not retain prompt or response content unless logging is
+explicitly enabled.
+
+## OpenRouter-hosted Claude Sonnet 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-sonnet-5.5`. OpenRouter added this stable route on September
+28, 2026. It accepts text, image, and file input, has a 1,000,000-token context
+window and 128,000-token output limit, and supports streaming, native function
+calling, automatic or forced tool choice, and JSON-schema structured output.
+Reasoning is always on; Geist sends OpenRouter's documented default `high`
+effort. Geist retains stop while omitting `n`, temperature, `top_p`,
+frequency-penalty, and presence-penalty parameters. The aggregate route
+advertises temperature through Azure, but six other upstreams omit it.
+
+OpenRouter lists $2 per million input tokens, $10 per million output tokens,
+$0.20 per million cached input tokens, and $2.50 per million five-minute cache
+writes. Anthropic reports materially faster, more token-efficient routine work
+than Sonnet 5. Independent Vals AI measurements place Sonnet 5.5 near the top
+of its broad suite and first on its code-migration and vibe-coding evaluations;
+hands-on Electricity Bench results are more mixed, supporting its role as a
+high-volume worker rather than a universal replacement for Opus 5.5.
+
+OpenRouter exposed eight live upstream routes at review time. Its provider
+directory lists Google Vertex, Amazon Bedrock, and Azure as no-training and
+zero-retention providers. The exact Sonnet 5.5 route appeared in OpenRouter's
+ZDR endpoint inventory on September 30, 2026, but default routing can still
+reach Anthropic or Claude Platform on AWS, which OpenRouter lists as no-training
+with 30-day retention. Enforce ZDR routing before sending confidential
+workloads. OpenRouter itself does not retain prompt or response content unless
+logging is explicitly enabled.
+
 ## Meta-hosted Muse Spark
 
 Set `MODEL_API_KEY` and select provider `meta`. Geist offers the direct Meta
@@ -91,6 +165,30 @@ Meta describes open weights as future work.
 The Contributor tier remains under provider `openrouter`. Although Meta lists
 the tier, direct Chat Completions availability has not been reliable enough to
 make it a first-party provider option in Geist.
+
+## OpenRouter-hosted Fireworks Ember-1
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`fireworks/ember-1`. The stable route accepts text and image input, has a
+1,048,576-token context window and 943,718-token maximum output, and supports
+optional reasoning, streaming, native function calling, and JSON-schema
+structured outputs. Geist omits the unsupported `n` parameter while preserving
+the route's supported sampling, stop, tool, and response-format parameters.
+OpenRouter lists the current price as $3 per million input tokens, $15 per
+million output tokens, and $0.30 per million cached input tokens.
+
+[Fireworks' September 23, 2026 launch report](https://fireworks.ai/blog/ember-1)
+describes Ember-1 as a Kimi K3 specialization trained to shorten reasoning.
+Its provider-run evaluation reports 82.0% on Terminal-Bench 2.1, 92.2% on
+SWE-bench Verified, 20.0% on SWE-Interact, 75.2% on DeepSWE 1.1, and 66% on
+tau2-bench Airline, with 35–50% fewer reasoning tokens than Kimi K3 across the
+reported evaluations. These are provider claims, not independent measurements;
+qualify the model on Geist workloads before making it a default.
+
+The route currently has one Fireworks endpoint, so there is no provider
+fallback diversity. OpenRouter lists Fireworks as zero retention and not using
+prompts for training as of September 24, 2026. Re-check the live endpoint and
+provider policy before sending confidential or regulated workloads.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
@@ -173,6 +271,31 @@ OpenRouter may route this model across providers with different context limits,
 supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
+
+## OpenRouter-hosted Union Alpha (Preview)
+
+Create an API key in [OpenRouter's key settings](https://openrouter.ai/settings/keys)
+and supply it to the Geist backend as `OPENROUTER_API_KEY`, using your existing
+secret manager or local environment configuration. Restart the backend after
+changing the key. In Settings, choose Online mode, provider **OpenRouter**, and
+model **Union Alpha (Preview)** (`stealth/union-alpha`), then save.
+This uses Geist's existing OpenRouter credential support; no Cloudflare token
+or account ID is required.
+
+The [OpenRouter model page](https://openrouter.ai/stealth/union-alpha) and
+[endpoint metadata](https://openrouter.ai/api/v1/models/stealth/union-alpha/endpoints),
+checked September 17, 2026, list a 262,144-token context, 131,072-token maximum
+output, text and image input, and native tools with automatic tool choice.
+The endpoint supports JSON output via `response_format`, without JSON-schema
+enforcement. It does not advertise configurable reasoning. Geist omits the
+unsupported `n`, `frequency_penalty`, `presence_penalty`, and `stop` parameters.
+
+Union Alpha's developer is anonymous. Cloudflare's catalog also labels it as
+[a third-party model](https://developers.cloudflare.com/ai/models/stealth/union-alpha/);
+that listing does not establish Cloudflare as its developer. Preview access is
+currently free, but availability and pricing can change. Prompts and completions
+may be retained by the provider but are not used for training; review
+OpenRouter's linked Stealth Model Terms before use.
 
 ## OpenRouter-hosted Muse Spark 1.2 Contributor
 

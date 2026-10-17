@@ -3,6 +3,7 @@ import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
 import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
 import useVoiceChat from '../Hooks/useVoiceChat';
+import LiveCallPanel from './LiveCallPanel';
 
 interface EnhancedChatInputProps {
   value: string;
@@ -48,28 +49,28 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+  const [voiceError, setVoiceError] = useState('');
 
   const {
     isRecording,
     isProcessing,
     partialTranscript,
+    assistantText,
+    status,
+    audioLevel,
     toggleRecording
   } = useVoiceChat({
     sessionId,
+    mode: voiceSelection.mode,
     sttProvider: voiceSelection.sttProvider,
     ttsProvider: voiceSelection.ttsProvider,
     ttsModel: voiceSelection.ttsModel,
     ttsVoice: voiceSelection.ttsVoice,
-    ttsLanguage: voiceSelection.ttsLanguage,
     onTranscriptFinal: (text) => {
-      onChange(text);
-    },
-    onAssistantText: (text) => {
-      console.log('Assistant text chunk:', text);
+      if (text) onChange(value + (value && !/\s$/.test(value) ? ' ' : '') + text);
     },
     onError: (error) => {
-      console.error('Voice error:', error);
-      alert('Voice error: ' + error);
+      setVoiceError(error);
     }
   });
 
@@ -119,12 +120,16 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   };
 
   const handleSubmit = () => {
-    if (value.trim() && !disabled) {
+    if (value.trim() && !disabled && !isRecording && !isProcessing) {
       onSubmit(value);
     }
   };
 
   const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((isRecording || isProcessing) && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
     if (externalHandleKeyDown) {
       externalHandleKeyDown(e);
       if (e.defaultPrevented) return;
@@ -168,12 +173,10 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
   return (
     <div className="enhanced-input">
-      {partialTranscript && (
-        <div className="input-banner">
-          <strong>Listening...</strong>
-          <div>{partialTranscript}</div>
-        </div>
-      )}
+      {enableVoice && voiceSelection.mode === 'live' && <LiveCallPanel active={isRecording}
+        status={status} audioLevel={audioLevel} userText={partialTranscript} assistantText={assistantText} />}
+      {voiceError && <div className="input-banner input-banner-warning" role="alert">{voiceError}</div>}
+      {voiceSelection.mode === 'dictation' && status && <div className="input-banner" role="status">{status}</div>}
 
       {hasFileReferences && (
         <div className={`input-banner ${hasUnresolvedReferences ? 'input-banner-warning' : 'input-banner-success'}`}>
@@ -190,7 +193,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       )}
 
       <div className="input-row">
-        <div className="chat-input-field">
+        {(!enableVoice || voiceSelection.mode === 'dictation') && (
+          <div className="chat-input-field">
           <textarea
             ref={textareaRef}
             value={hasInputStatus ? '' : value}
@@ -220,6 +224,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             </div>
           )}
         </div>
+        )}
 
         <div className="input-actions">
           {enableVoice && (
@@ -227,26 +232,27 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
               <VoiceSettings
                 selection={voiceSelection}
                 onChange={setVoiceSelection}
-                disabled={disabled || isRecording}
+                disabled={isRecording || isProcessing}
               />
               <VoiceButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
-                onClick={toggleRecording}
-                disabled={disabled}
+                onClick={() => { setVoiceError(''); toggleRecording(); }}
+                disabled={voiceSelection.mode === 'dictation' && disabled}
+                mode={voiceSelection.mode}
               />
             </>
           )}
 
           {secondaryAction}
-          <button
+          {(!enableVoice || voiceSelection.mode === 'dictation') && <button
             type="button"
             onClick={handleSubmit}
-            disabled={disabled || !value.trim()}
+            disabled={disabled || isRecording || isProcessing || !value.trim()}
             className="send-button"
           >
             {submitLabel}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -269,7 +275,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
         </div>
       )}
 
-      <div className="input-help">Use @ to reference files. Press Tab or Enter to accept suggestions.</div>
+      {voiceSelection.mode === 'dictation' && <div className="input-help">Dictation adds text to your message. Review it, then Send.</div>}
     </div>
   );
 };

@@ -409,8 +409,28 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   const [steeringStatus, setSteeringStatus] = useState<string | null>(null);
   const [isSteering, setIsSteering] = useState(false);
   const instructionSequenceRef = useRef(0);
+  const pendingTextRef = useRef('');
+  const textFrameRef = useRef<number | null>(null);
+
+  const clearPendingText = () => {
+    if (textFrameRef.current !== null) window.cancelAnimationFrame(textFrameRef.current);
+    textFrameRef.current = null;
+    pendingTextRef.current = '';
+  };
+  const flushPendingText = () => {
+    const text = pendingTextRef.current;
+    clearPendingText();
+    if (text) dispatch({ type: 'TEXT_DELTA', text });
+  };
+  const queueText = (text: string) => {
+    pendingTextRef.current += text;
+    if (textFrameRef.current === null) {
+      textFrameRef.current = window.requestAnimationFrame(flushPendingText);
+    }
+  };
 
   useEffect(() => () => {
+    clearPendingText();
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
   }, []);
@@ -489,13 +509,14 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     if (!parsedEvent) return null;
 
     const { event, data } = parsedEvent;
+    if (event !== 'delta') flushPendingText();
     if (event === 'run_started' && isRecord(data) && typeof data.run_id === 'string') {
       const chatId = typeof data.chat_id === 'number' ? data.chat_id : null;
       activeRunIdRef.current = data.run_id;
       if (chatId !== null) setStateChatId(chatId);
       dispatch({ type: 'RUN_STARTED', runId: data.run_id, chatId });
     } else if (event === 'delta' && isRecord(data)) {
-      dispatch({ type: 'TEXT_DELTA', text: typeof data.text === 'string' ? data.text : '' });
+      queueText(typeof data.text === 'string' ? data.text : '');
     } else if (event === 'tool_call' && isRecord(data) && typeof data.id === 'string') {
       dispatch({ type: 'TOOL_UPSERT', toolCall: data as unknown as ToolCallUpdate });
     } else if (event === 'artifact' && isRecord(data) && typeof data.id === 'string') {
@@ -568,6 +589,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       folder_id: number | null;
     },
   ) => {
+    clearPendingText();
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -647,6 +669,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
           terminalEventSeen = true;
         }
       }
+      flushPendingText();
       if (!terminalEventSeen && ownsStream()) {
         dispatch({
           type: 'ERROR',
@@ -657,6 +680,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       if (abortControllerRef.current !== abortController) {
         return;
       }
+      flushPendingText();
       if ((err as { name?: string })?.name === 'AbortError') {
         dispatch({ type: 'CANCELLED' });
       } else {
@@ -707,6 +731,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   };
 
   const cancelGeneration = async () => {
+    flushPendingText();
     const runId = activeRunIdRef.current;
     if (!runId) {
       abortControllerRef.current?.abort();
@@ -732,6 +757,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         });
         return;
       }
+      flushPendingText();
       abortControllerRef.current?.abort();
       dispatch({ type: 'CANCELLED' });
     } catch (error) {
@@ -747,6 +773,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
   };
 
   const resetChatSession = () => {
+    clearPendingText();
     const runId = activeRunIdRef.current;
     if (runId) {
       void fetch(`/agent/runs/${encodeURIComponent(runId)}/cancel`, {

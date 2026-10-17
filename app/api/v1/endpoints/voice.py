@@ -6,16 +6,37 @@ import base64
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from starlette.concurrency import run_in_threadpool
 from starlette.websockets import WebSocketState
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.prompt.prompt import AGENT_PROMPTS
+from app.models.live_voice import (
+    LiveSessionRequest,
+    LiveSessionResponse,
+)
+from app.models.local_live_voice import LocalLiveVoiceConfig
 from app.models.user_settings import AgentConfigRequest
 from app.services.agent_context_provider import get_default_agent_context
+from app.services.dictation import MAX_DICTATION_BYTES, transcribe_dictation
+from app.services.live_voice import LIVE_PROVIDER, create_live_session
+from app.services.local_live_voice import (
+    local_voice_backend,
+    local_voice_provider,
+    serve_local_voice,
+)
 from app.services.user_settings_service import UserSettingsService
 
 
@@ -107,12 +128,49 @@ def _build_provider_kwargs(
 @router.get("/models")
 async def list_voice_models():
     """Return supported voice/TTS providers and model options for frontend selection."""
-    from app.services.tts import get_supported_tts_providers
+    from app.services.voice_catalog import get_supported_tts_providers
 
     return {
         "default_provider": "sesame",
-        "providers": get_supported_tts_providers(),
+        "providers": [*get_supported_tts_providers(), LIVE_PROVIDER, local_voice_provider()],
     }
+
+
+@router.post("/live/session", response_model=LiveSessionResponse, status_code=201)
+async def live_session(offer: LiveSessionRequest) -> LiveSessionResponse:
+    return await create_live_session(offer)
+
+
+@router.get("/live/local", response_model=LocalLiveVoiceConfig)
+async def local_voice_config() -> LocalLiveVoiceConfig:
+    return local_voice_backend().transport
+
+
+@router.websocket("/live/local")
+async def local_live_voice(websocket: WebSocket) -> None:
+    await serve_local_voice(websocket)
+
+
+@router.post("/transcribe")
+async def transcribe_voice(
+    audio_file: UploadFile = File(...),
+    provider: Literal["mms", "whisper"] = Query("mms"),
+) -> dict[str, str]:
+    try:
+        audio = await audio_file.read(MAX_DICTATION_BYTES + 1)
+        if len(audio) > MAX_DICTATION_BYTES:
+            raise HTTPException(413, "Dictation is limited to two minutes.")
+        text = await run_in_threadpool(transcribe_dictation, audio, provider)
+        return {"text": text}
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.warning("Dictation failed (%s)", type(error).__name__)
+        raise HTTPException(
+            502, "Speech transcription failed. Check the selected provider."
+        ) from error
+    finally:
+        await audio_file.close()
 
 
 @router.websocket("/stream")

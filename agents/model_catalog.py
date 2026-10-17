@@ -307,6 +307,81 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enable OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "x-ai/grok-4.7",
+        "Grok 4.7",
+        "grok",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=500000,
+        max_output_tokens=450000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "anthropic/claude-opus-5.5",
+        "Claude Opus 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "anthropic/claude-sonnet-5.5",
+        "Claude Sonnet 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
@@ -469,6 +544,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "fireworks/ember-1",
+        "Fireworks Ember-1",
+        "ember",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Fireworks-hosted Kimi K3 specialization with optional reasoning, native "
+            "tools, and shorter reasoning traces. The current Fireworks route is zero "
+            "retention; re-check endpoint policy before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
@@ -570,6 +666,25 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Hosted through OpenRouter; Geist applies Z.AI's recommended max reasoning "
             "effort. Enable OpenRouter ZDR routing for confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "stealth/union-alpha",
+        "Union Alpha (Preview)",
+        "stealth",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=262144,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_streaming=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        local=False,
+        performance_note=(
+            "Anonymous third-party preview on OpenRouter for research, coding, and "
+            "agentic workflows. Prompts and completions may be retained by the "
+            "provider but are not used for training."
         ),
     ),
     ModelSpec(
