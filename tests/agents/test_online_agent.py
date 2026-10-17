@@ -215,6 +215,7 @@ class TestOnlineAgentInitialization:
             "anthropic/claude-sonnet-5.5",
             "fireworks/ember-1",
             "qwen/qwen3.8-flash",
+            "deepseek/deepseek-v4.1-flash-1017",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
@@ -555,14 +556,18 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        ["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"],
+    )
+    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="deepseek/deepseek-v4.1-flash",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -572,7 +577,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "deepseek/deepseek-v4.1-flash",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 0.7,
