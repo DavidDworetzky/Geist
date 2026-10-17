@@ -272,6 +272,30 @@ def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(ember.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_ling31_flash_metadata_is_explicit_and_server_backed():
+    ling = get_model_spec("inclusionai/ling-3.1-flash")
+
+    assert ling.provider == "openrouter"
+    assert ling.backend == "openai_compatible"
+    assert ling.local is False
+    assert ling.family == "ling"
+    assert ling.context_window == 262144
+    assert ling.max_output_tokens == 32768
+    assert ling.parameter_count == "560B"
+    assert ling.activated_parameters == "25B"
+    assert ling.supports_vision is False
+    assert ling.supports_function_calling is True
+    assert ling.supports_reasoning is True
+    assert ling.supports_streaming is True
+    assert ling.recommended is False
+    assert ling.mandatory_reasoning_effort is None
+    assert ling.unsupported_parameters == ("n",)
+    assert ling.performance_note is not None
+    assert "Novita" in ling.performance_note
+    assert "zero retention" in ling.performance_note
+    assert get_provider_endpoint(ling.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("deepseek/deepseek-v4.1-flash")
 
@@ -620,6 +644,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
         "fireworks/ember-1",
+        "inclusionai/ling-3.1-flash",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -681,6 +706,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
         "fireworks/ember-1",
+        "inclusionai/ling-3.1-flash",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -844,6 +870,9 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "inclusionai/ling-3.1-flash" for model in response.providers["openrouter"]
+    )
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]

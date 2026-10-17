@@ -565,6 +565,28 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "inclusionai/ling-3.1-flash",
+        "Ling 3.1 Flash",
+        "ling",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=262144,
+        max_output_tokens=32768,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=False,
+        parameter_count="560B",
+        activated_parameters="25B",
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Stable text-only OpenRouter route with optional reasoning and native tools. "
+            "The current single-provider Novita route is free and zero retention; "
+            "re-check pricing, availability, and endpoint policy before production use."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
