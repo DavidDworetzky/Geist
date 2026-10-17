@@ -1,8 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { waitForFileJob } from '../Utils/waitForFileJob';
 
 interface FileUploadProps {
   onFileUpload?: (file: File) => void;
+  onUploadStored?: () => void;
   onUploadComplete?: (response: any) => void;
   onUploadError?: (error: string) => void;
   multiple?: boolean;
@@ -11,7 +13,7 @@ interface FileUploadProps {
 }
 
 interface UploadStatus {
-  status: 'idle' | 'uploading' | 'success' | 'error';
+  status: 'idle' | 'uploading' | 'processing' | 'pending' | 'success' | 'error';
   progress: number;
   message: string;
   fileName?: string;
@@ -19,6 +21,7 @@ interface UploadStatus {
 
 const FileUpload: React.FC<FileUploadProps> = ({
   onFileUpload,
+  onUploadStored,
   onUploadComplete,
   onUploadError,
   multiple = false,
@@ -31,7 +34,21 @@ const FileUpload: React.FC<FileUploadProps> = ({
     message: ''
   });
 
+  const batchId = useRef(0);
+  const uploadController = useRef<AbortController | null>(null);
+  const resetTimer = useRef<number | undefined>();
+  useEffect(() => () => {
+    batchId.current += 1;
+    uploadController.current?.abort();
+    window.clearTimeout(resetTimer.current);
+  }, []);
+
   const uploadFile = useCallback(async (file: File) => {
+    uploadController.current?.abort();
+    window.clearTimeout(resetTimer.current);
+    const controller = new AbortController();
+    uploadController.current = controller;
+
     setUploadStatus({
       status: 'uploading',
       progress: 0,
@@ -39,12 +56,14 @@ const FileUpload: React.FC<FileUploadProps> = ({
       fileName: file.name
     });
 
+    let stored = false;
     try {
       const formData = new FormData();
       formData.append('file', file);
 
       const response = await fetch('/api/v1/files/upload', {
         method: 'POST',
+        signal: controller.signal,
         body: formData
       });
 
@@ -54,6 +73,26 @@ const FileUpload: React.FC<FileUploadProps> = ({
       }
 
       const result = await response.json();
+      if (controller.signal.aborted) return;
+      stored = true;
+      onUploadStored?.();
+      if (result.processing_status?.status === 'failed') {
+        throw new Error(result.processing_status.error || 'File processing failed.');
+      }
+      const jobId = result.processing_status?.job_id;
+      if (typeof jobId === 'number') {
+        setUploadStatus({ status: 'processing', progress: 100,
+          message: `${file.name} uploaded. Processing text...`, fileName: file.name });
+        const ready = await waitForFileJob(jobId, controller.signal);
+        if (controller.signal.aborted) return;
+        if (!ready) {
+          setUploadStatus({ status: 'pending', progress: 100,
+            message: `${file.name} uploaded. Processing may still be running; check Files later.`,
+            fileName: file.name });
+          return;
+        }
+      }
+      if (controller.signal.aborted) return;
 
       setUploadStatus({
         status: 'success',
@@ -66,10 +105,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onUploadComplete(result);
       }
 
-      setTimeout(() => {
+      resetTimer.current = window.setTimeout(() => {
         setUploadStatus({ status: 'idle', progress: 0, message: '' });
       }, 3000);
     } catch (error) {
+      if (controller.signal.aborted) return;
       const errorMessage = error instanceof Error ? error.message : 'Upload failed';
 
       setUploadStatus({
@@ -83,18 +123,23 @@ const FileUpload: React.FC<FileUploadProps> = ({
         onUploadError(errorMessage);
       }
 
-      setTimeout(() => {
+      resetTimer.current = window.setTimeout(() => {
         setUploadStatus({ status: 'idle', progress: 0, message: '' });
       }, 5000);
+    } finally {
+      if (stored && !controller.signal.aborted) onUploadStored?.();
     }
-  }, [onUploadComplete, onUploadError]);
+  }, [onUploadComplete, onUploadError, onUploadStored]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const currentBatch = ++batchId.current;
     for (const file of acceptedFiles) {
+      if (batchId.current !== currentBatch) break;
       if (onFileUpload) {
         onFileUpload(file);
       }
       await uploadFile(file);
+      if (batchId.current !== currentBatch) break;
     }
   }, [onFileUpload, uploadFile]);
 
@@ -116,7 +161,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
         {...getRootProps()}
         className={`file-dropzone ${isDragActive ? 'drag-active' : ''} file-upload-${uploadStatus.status}`}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps()} aria-label="Choose files to upload" />
         <div className="file-upload-status-label">{statusLabel}</div>
 
         {uploadStatus.status === 'idle' ? (
