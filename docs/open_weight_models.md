@@ -11,11 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, GLM 5.3
-Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also
-intentionally server-backed. For models with published
-weights, their total resident weights make an in-process laptop load impractical
-even when their mixture-of-experts active-parameter count is much smaller.
+and OpenRouter's Mistral Large 4 Public Preview, Fireworks Ember-1, Claude Opus
+5.5, Claude Sonnet 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and
+DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+with published weights, their total resident weights make an in-process laptop
+load impractical even when their mixture-of-experts active-parameter count is
+much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -150,6 +151,37 @@ reach Anthropic or Claude Platform on AWS, which OpenRouter lists as no-training
 with 30-day retention. Enforce ZDR routing before sending confidential
 workloads. OpenRouter itself does not retain prompt or response content unless
 logging is explicitly enabled.
+
+## OpenRouter-hosted Mistral Large 4 Public Preview
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`mistralai/mistral-large-4-0`. OpenRouter added the named route on October 6,
+2026. It accepts text and image input, has a 1,048,576-token context window and a
+262,144-token output ceiling, and supports streaming, native function calling,
+all advertised tool-choice modes, JSON-schema structured output, and optional
+reasoning that defaults to high effort. Geist preserves the supported sampling,
+reasoning, and tool fields and omits only unsupported `n`.
+
+Mistral discloses a 1.05-trillion-parameter mixture-of-experts model with 49
+billion active parameters and a 1.6-billion-parameter vision encoder. OpenRouter
+lists $0.68 per million input tokens, $2.09 per million output tokens, and $0.07
+per million cached input tokens. As of October 12, OpenRouter exposes standard,
+ZDR, and EU-tagged Mistral routes. The standard and ZDR routes advertise the full
+1,048,576-token context; the EU route advertises 524,288 tokens.
+
+[Mistral's October 6 launch report](https://mistral.ai/news/mistral-large-4/)
+publishes exact-model results of 62 on Artificial Analysis DeepSWE 1.1, 28 on
+Terminal-Bench 4, 54.7 on Vals AI Finance Agent v2, and 15.8 on Vals AI's
+Harvey Legal Agent Benchmark. The Artificial Analysis charts say the scores
+were privately evaluated ahead of the harness's public launch, and same-day
+community discussion does not yet provide repeatable hands-on validation. Treat
+the model as an evaluation option, not a proven default.
+
+This release is a public preview: Mistral says the reinforcement-learning run
+is still in flight and weights will arrive later in October. OpenRouter now
+offers an exact-model ZDR route alongside standard and EU routes. Enforce ZDR
+routing before sending confidential or regulated workloads, and re-check
+preview status, endpoint policy, and reliability before production use.
 
 ## Meta-hosted Muse Spark
 

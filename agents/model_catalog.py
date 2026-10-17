@@ -382,6 +382,29 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enforce OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "mistralai/mistral-large-4-0",
+        "Mistral Large 4 (Public Preview)",
+        "mistral",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=262144,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        parameter_count="1.05T",
+        activated_parameters="49B",
+        unsupported_parameters=("n",),
+        local=False,
+        aliases=("mistralai/mistral-large-4-0-20261006",),
+        performance_note=(
+            "Named OpenRouter public preview with native tools and structured output. "
+            "OpenRouter offers a ZDR route; enforce ZDR routing before sending confidential "
+            "or regulated workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
@@ -809,6 +832,8 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
     # trillion-parameter load.
     if "qwen3.8-max" in value:
         return get_model_spec("qwen/qwen3.8-max")
+    if "mistral-large-4" in value:
+        return get_model_spec("mistralai/mistral-large-4-0")
     if "moonshotai/kimi-k2" in value:
         return get_model_spec("kimi-k2.5")
     if "zai-org/glm-5" in value:
