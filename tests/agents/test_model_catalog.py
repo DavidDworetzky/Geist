@@ -162,6 +162,32 @@ def test_heavyweight_models_are_server_backed():
         "stop",
     )
 
+    muse_wonder = get_model_spec("meta/muse-wonder")
+    assert muse_wonder.backend == "openai_compatible"
+    assert muse_wonder.provider == "openrouter"
+    assert muse_wonder.local is False
+    assert muse_wonder.family == "muse"
+    assert muse_wonder.context_window == 1048576
+    assert muse_wonder.max_output_tokens == 943718
+    assert muse_wonder.parameter_count is None
+    assert muse_wonder.activated_parameters is None
+    assert muse_wonder.supports_vision is True
+    assert muse_wonder.supports_function_calling is True
+    assert muse_wonder.supports_reasoning is True
+    assert muse_wonder.supports_streaming is True
+    assert muse_wonder.recommended is False
+    assert muse_wonder.mandatory_reasoning_effort == "medium"
+    assert muse_wonder.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert muse_wonder.performance_note is not None
+    assert "not ZDR-eligible" in muse_wonder.performance_note
+    assert "do not use for confidential workloads" in muse_wonder.performance_note
+    assert get_provider_endpoint(muse_wonder.provider) == "https://openrouter.ai/api/v1"
+
     muse_open = get_model_spec("meta/muse-spark-open")
     assert muse_open.backend == "openai_compatible"
     assert muse_open.provider == "openrouter"
@@ -650,6 +676,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
+        "meta/muse-wonder",
         "meta/muse-spark-open",
         "stealth/union-alpha",
         "muse-spark-1.1",
@@ -713,6 +740,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
+        "meta/muse-wonder",
         "meta/muse-spark-open",
         "stealth/union-alpha",
     ],
@@ -881,6 +909,8 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "meta/muse-wonder" for model in response.providers["openrouter"])
+
     assert any(model.id == "meta/muse-spark-open" for model in response.providers["openrouter"])
     assert {
         "muse-spark-1.1",

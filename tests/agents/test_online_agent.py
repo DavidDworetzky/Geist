@@ -220,6 +220,7 @@ class TestOnlineAgentInitialization:
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
             "stealth/union-alpha",
+            "meta/muse-wonder",
             "meta/muse-spark-open",
         ],
     )
@@ -325,6 +326,7 @@ class TestOnlineAgentAPIRequests:
             ("x-ai/grok-4.6", "high"),
             ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
         ],
     )
     def test_openrouter_models_apply_request_constraints(self, model_id, reasoning_effort):
@@ -356,7 +358,7 @@ class TestOnlineAgentAPIRequests:
                 )
 
                 payload = mock_post.call_args.kwargs["json"]
-                if model_id == "x-ai/grok-4.7":
+                if model_id in {"x-ai/grok-4.7", "meta/muse-wonder"}:
                     assert "n" not in payload
                 else:
                     assert payload["n"] == 2
@@ -1077,6 +1079,7 @@ class TestOnlineAgentRetryLogic:
             ("x-ai/grok-4.6", "high"),
             ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
         ],
     )
     def test_openrouter_constraints_do_not_leak_to_backup_provider(

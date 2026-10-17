@@ -298,6 +298,59 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Gemini 3.8 Flash' })).toBeInTheDocument();
     });
 
+    it('shows Muse models from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-wonder',
+                name: 'Muse Wonder',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-wonder"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Wonder' })).toBeInTheDocument();
+    });
+
     it('shows Muse Spark models from live OpenRouter catalog data', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
