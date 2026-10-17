@@ -244,6 +244,18 @@ describe('AgentConfigSection', () => {
                 recommended: true,
                 family: 'grok',
               },
+              {
+                id: 'google/gemini-4-argon',
+                name: 'Gemini 4 Argon',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 65536,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'gemini',
+              },
             ],
           },
           last_updated: null,
@@ -261,6 +273,7 @@ describe('AgentConfigSection', () => {
       expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Grok 4.7' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Gemini 4 Argon' })).toBeInTheDocument();
     });
 
     it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {

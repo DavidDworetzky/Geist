@@ -382,6 +382,33 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Enforce OpenRouter ZDR routing before sending confidential workloads."
         ),
     ),
+    ModelSpec(
+        "google/gemini-4-argon",
+        "Gemini 4 Argon",
+        "gemini",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=65536,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable flagship Gemini route with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
