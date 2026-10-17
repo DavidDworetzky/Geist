@@ -437,6 +437,45 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows DeepSeek V4.1 Flash 1017 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'October 2026 snapshot; enforce OpenRouter ZDR for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'deepseek/deepseek-v4.1-flash-1017',
+              name: 'DeepSeek V4.1 Flash 1017',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 393216,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'deepseek',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="deepseek/deepseek-v4.1-flash-1017"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'DeepSeek V4.1 Flash 1017',
+      })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
       const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
       global.fetch = jest.fn().mockResolvedValue({
