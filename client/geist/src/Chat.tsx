@@ -1143,24 +1143,24 @@ const Chat = () => {
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}
                 enableVoice={!isLoading}
+                secondaryAction={isLoading && (
+                  <button
+                    className="button chat-stop-button"
+                    type="button"
+                    onClick={() => void cancelGeneration()}
+                    disabled={activeTurn?.status === 'cancelling'}
+                    aria-label="Stop"
+                    title={activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
+                    aria-busy={activeTurn?.status === 'cancelling'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+                    </svg>
+                  </button>
+                )}
               />
               {steeringError && <p role="alert">{steeringError}</p>}
               {steeringStatus && <p role="status">{steeringStatus}</p>}
-              {isLoading && (
-                <button
-                  className="button chat-stop-button"
-                  type="button"
-                  onClick={() => void cancelGeneration()}
-                  disabled={activeTurn?.status === 'cancelling'}
-                  aria-label="Stop"
-                  title={activeTurn?.status === 'cancelling' ? 'Stopping…' : 'Stop'}
-                  aria-busy={activeTurn?.status === 'cancelling'}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                    <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
-                  </svg>
-                </button>
-              )}
             </div>
 
             {(error || fileError) && (
