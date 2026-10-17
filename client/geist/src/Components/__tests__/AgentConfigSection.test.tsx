@@ -351,6 +351,59 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Muse Wonder' })).toBeInTheDocument();
     });
 
+    it('shows Muse Spark models from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-spark-open',
+                name: 'Muse Spark Open',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-spark-open"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark Open' })).toBeInTheDocument();
+    });
+
     it('shows direct Muse Spark options from Meta Model API catalog data', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
@@ -450,6 +503,45 @@ describe('AgentConfigSection', () => {
       );
 
       expect(await screen.findByRole('option', { name: 'Qwen 3.8 Flash' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows DeepSeek V4.1 Flash 1017 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'October 2026 snapshot; enforce OpenRouter ZDR for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'deepseek/deepseek-v4.1-flash-1017',
+              name: 'DeepSeek V4.1 Flash 1017',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 393216,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'deepseek',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="deepseek/deepseek-v4.1-flash-1017"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'DeepSeek V4.1 Flash 1017',
+      })).toBeInTheDocument();
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 

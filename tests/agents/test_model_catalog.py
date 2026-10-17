@@ -188,6 +188,27 @@ def test_heavyweight_models_are_server_backed():
     assert "do not use for confidential workloads" in muse_wonder.performance_note
     assert get_provider_endpoint(muse_wonder.provider) == "https://openrouter.ai/api/v1"
 
+    muse_open = get_model_spec("meta/muse-spark-open")
+    assert muse_open.backend == "openai_compatible"
+    assert muse_open.provider == "openrouter"
+    assert muse_open.local is False
+    assert muse_open.family == "muse"
+    assert muse_open.context_window == 1048576
+    assert muse_open.max_output_tokens == 943718
+    assert muse_open.parameter_count == "816B"
+    assert muse_open.activated_parameters == "42B"
+    assert muse_open.supports_vision is True
+    assert muse_open.supports_function_calling is True
+    assert muse_open.supports_reasoning is True
+    assert muse_open.supports_streaming is True
+    assert muse_open.recommended is True
+    assert muse_open.mandatory_reasoning_effort == "medium"
+    assert muse_open.unsupported_parameters == ("n",)
+    assert muse_open.performance_note is not None
+    assert "zero-retention routes" in muse_open.performance_note
+    assert "Enforce OpenRouter ZDR" in muse_open.performance_note
+    assert get_provider_endpoint(muse_open.provider) == "https://openrouter.ai/api/v1"
+
 
 def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
     from agents.architectures.registry import get_all_models, provider_from_string
@@ -298,15 +319,15 @@ def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(ember.provider) == "https://openrouter.ai/api/v1"
 
 
-def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
-    flash = get_model_spec("deepseek/deepseek-v4.1-flash")
+def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("deepseek/deepseek-v4.1-flash-1017")
 
     assert flash.provider == "openrouter"
     assert flash.backend == "openai_compatible"
     assert flash.local is False
     assert flash.family == "deepseek"
     assert flash.context_window == 1048576
-    assert flash.max_output_tokens == 384000
+    assert flash.max_output_tokens == 393216
     assert flash.parameter_count is None
     assert flash.activated_parameters is None
     assert flash.supports_vision is True
@@ -319,6 +340,7 @@ def test_openrouter_deepseek_v41_flash_metadata_is_explicit_and_server_backed():
     assert flash.performance_note is not None
     assert "enforce OpenRouter ZDR" in flash.performance_note
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+    assert resolve_request_spec("deepseek/deepseek-v4.1-flash") is flash
 
 
 def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
@@ -649,11 +671,13 @@ def test_existing_llama_id_preserves_optimized_runner():
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
         "meta/muse-wonder",
+        "meta/muse-spark-open",
         "stealth/union-alpha",
         "muse-spark-1.1",
         "muse-spark-1.2",
@@ -711,11 +735,13 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
         "meta/muse-wonder",
+        "meta/muse-spark-open",
         "stealth/union-alpha",
     ],
 )
@@ -874,7 +900,8 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
-        model.id == "deepseek/deepseek-v4.1-flash" for model in response.providers["openrouter"]
+        model.id == "deepseek/deepseek-v4.1-flash-1017"
+        for model in response.providers["openrouter"]
     )
     assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
@@ -883,6 +910,8 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
     )
     assert any(model.id == "meta/muse-wonder" for model in response.providers["openrouter"])
+
+    assert any(model.id == "meta/muse-spark-open" for model in response.providers["openrouter"])
     assert {
         "muse-spark-1.1",
         "muse-spark-1.2",

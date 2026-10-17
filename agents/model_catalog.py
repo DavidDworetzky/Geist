@@ -604,13 +604,13 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
-        "deepseek/deepseek-v4.1-flash",
-        "DeepSeek V4.1 Flash",
+        "deepseek/deepseek-v4.1-flash-1017",
+        "DeepSeek V4.1 Flash 1017",
         "deepseek",
         provider="openrouter",
         backend="openai_compatible",
         context_window=1048576,
-        max_output_tokens=384000,
+        max_output_tokens=393216,
         supports_vision=True,
         supports_function_calling=True,
         supports_reasoning=True,
@@ -619,10 +619,12 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         unsupported_parameters=("n",),
         local=False,
         performance_note=(
-            "Stable multimodal OpenRouter route with optional reasoning. Default "
-            "routing can use DeepSeek's retaining/training endpoint; enforce "
-            "OpenRouter ZDR for confidential workloads."
+            "October 2026 stable snapshot with optional reasoning, native tools, "
+            "and stronger coding/agent results. Default routing can use DeepSeek's "
+            "retaining/training endpoint; enforce OpenRouter ZDR for confidential "
+            "workloads."
         ),
+        aliases=("deepseek/deepseek-v4.1-flash",),
     ),
     ModelSpec(
         "tencent/hy4-preview",
@@ -725,6 +727,30 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Stable Meta frontier model hosted through OpenRouter with mandatory "
             "reasoning and native tools. Meta retains requests for 30 days and the "
             "route is not ZDR-eligible; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "meta/muse-spark-open",
+        "Muse Spark Open",
+        "muse",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="816B",
+        activated_parameters="42B",
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable open-weight coding and agent model hosted through OpenRouter with "
+            "mandatory reasoning, native tools, and multiple zero-retention routes. "
+            "Enforce OpenRouter ZDR routing before confidential workloads."
         ),
     ),
     ModelSpec(

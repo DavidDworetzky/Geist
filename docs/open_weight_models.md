@@ -229,35 +229,39 @@ zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
 
-## OpenRouter-hosted DeepSeek V4.1 Flash
+## OpenRouter-hosted DeepSeek V4.1 Flash 1017
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
-`deepseek/deepseek-v4.1-flash`. OpenRouter added this stable route on September
-10, 2026. It accepts text and image input, has a 1,048,576-token context window
-and advertised 384,000-token maximum output, and supports optional reasoning,
-streaming, native function calling, and response-format JSON. JSON-schema
-enforcement varies by upstream. Geist omits the unsupported `n` parameter and
-otherwise preserves the route's supported sampling and tool parameters.
+`deepseek/deepseek-v4.1-flash-1017`. The previous
+`deepseek/deepseek-v4.1-flash` ID remains a routing/request alias. OpenRouter
+added the stable snapshot on October 17, 2026. It accepts text and image input,
+has a 1,048,576-token context window and advertised 393,216-token maximum
+output, and supports optional reasoning, streaming, native function calling,
+and response-format JSON. JSON-schema enforcement varies by upstream. Geist
+omits the unsupported `n` parameter and otherwise preserves supported sampling
+and tool parameters.
 
-OpenRouter listed four upstreams at review time. Its routed three-day
-availability was 99.92%, with a 134-token/second best-provider median and a
-1.40-second best-provider median latency. The displayed off-peak prices were
-$0.15 per million input tokens, $0.60 per million output tokens, and $0.003 per
-million cached input tokens; weekday peak windows double those rates.
+OpenRouter listed six routes at review time: InferenceNet, Cloudflare, three
+DeepInfra service tiers, and DeepSeek. Active routes reported 100% 30-minute
+uptime, while the routed model page reported 99.48% 24-hour availability.
+Route-level pricing started at $0.10 per million input tokens, $0.50 per million
+output tokens, and $0.002 per million cached input tokens; the first-party
+DeepSeek route displayed $0.15/$0.60/$0.003 with weekday peak overrides.
 
-DeepSeek's launch results include 90.6 on Terminal-Bench 2.1, 74.2 on DeepSWE
-v1.1, and 54.8 on AutomationBench at maximum reasoning effort. Those are
-provider-run results, even though the model card publishes harness settings and
-reproduction instructions. Independent launch-day benchmarking was not yet
-available, and early hands-on reports were mixed, so qualify the model on your
-own workloads before making it a default.
+DeepSeek reports exact-snapshot gains over the preceding release: 42.3 versus
+31.2 on Terminal-Bench 4.0, 77.0 versus 74.2 on DeepSWE v1.1, 60.5 versus 54.8
+on AutomationBench, and 29.1 versus 20.3 on ProgramBench. These remain
+provider-run results even though the model card names harnesses and publishes
+reproduction details. Artificial Analysis and Vals had evaluated the preceding
+snapshot, but no separate exact-1017 independent rerun was available on release
+day, so qualify it on your own workload before changing defaults.
 
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled. The first-party DeepSeek endpoint, however, retains prompts
-and may train on them. DeepInfra, Novita, and Venice instances of this exact
-route appeared in OpenRouter's ZDR inventory on September 10, 2026. Enforce
-OpenRouter ZDR routing before sending confidential workloads; default routing
-does not make that guarantee.
+and may train on them. InferenceNet, Cloudflare, and DeepInfra routes are listed
+as no-training/zero-retention, and the exact model appears in OpenRouter's ZDR
+inventory. Enforce OpenRouter ZDR routing before sending confidential or
+regulated workloads; default routing does not make that guarantee.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 
@@ -329,6 +333,26 @@ See the [OpenRouter model page](https://openrouter.ai/meta/muse-wonder),
 [endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-wonder-20261012/endpoints),
 Meta's [October 12 release](https://research.meta.ai/blog/muse-wonder), and the
 [independent Artificial Analysis evaluation](https://artificialanalysis.ai/articles/muse-wonder).
+
+## OpenRouter-hosted Muse Spark Open
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-spark-open`. The stable October 15, 2026 route has a
+1,048,576-token context, a 943,718-token maximum output, and accepts text,
+images, files, audio, and video while returning text. It supports streaming,
+native tools and tool choice, and JSON-schema structured output. Reasoning is
+mandatory; Geist supplies OpenRouter's documented default `medium` effort and
+omits only the unsupported generic `n` parameter. OpenRouter lists pricing at
+$1.25/M input, $4.25/M output, and $0.15/M cached input.
+
+Meta discloses 816B total parameters with 42B active per token. The exact model
+is present in OpenRouter's ZDR inventory. Enforce ZDR routing and re-check
+endpoint policy before confidential workloads because provider availability and
+data policies can change. See the
+[OpenRouter model page](https://openrouter.ai/meta/muse-spark-open),
+[endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-spark-open-20261015/endpoints),
+[Meta model card](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B),
+and [independent Plotly evaluation](https://plotly.com/blog/meta-muse-spark-open-first-look/).
 
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and

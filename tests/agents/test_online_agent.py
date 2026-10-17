@@ -215,11 +215,13 @@ class TestOnlineAgentInitialization:
             "anthropic/claude-sonnet-5.5",
             "fireworks/ember-1",
             "qwen/qwen3.8-flash",
+            "deepseek/deepseek-v4.1-flash-1017",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
             "stealth/union-alpha",
             "meta/muse-wonder",
+            "meta/muse-spark-open",
         ],
     )
     def test_openrouter_initialization(self, model_id):
@@ -557,14 +559,64 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self):
+    def test_muse_spark_open_applies_reasoning_and_preserves_native_tools(self):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="deepseek/deepseek-v4.1-flash",
+                model="meta/muse-spark-open",
+            )
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+
+            with patch.object(agent.client, "post", return_value=mock_response) as mock_post:
+                agent._make_request(
+                    {
+                        "model": "meta/muse-spark-open",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 1.0
+                assert payload["top_p"] == 1.0
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "medium"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"],
+    )
+    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -574,7 +626,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "deepseek/deepseek-v4.1-flash",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 0.7,
