@@ -43,8 +43,8 @@ MAX_FINDINGS = 20
 MAX_INLINE_COMMENTS = 12
 MAX_FINDING_CHARS = 4_000
 MAX_COMMENT_CHARS = 60_000
-OPENROUTER_TIMEOUT_SECONDS = 420
-OPENROUTER_ATTEMPTS = 3
+OPENROUTER_TIMEOUT_SECONDS = 240
+OPENROUTER_ATTEMPTS = 2
 RETRY_BASE_SECONDS = 5
 RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
@@ -66,7 +66,7 @@ TEST_PATH_PATTERN = re.compile(
 )
 DOC_PATH_PATTERN = re.compile(r"(^|/)(docs|plans)/|\.(md|rst|txt)$", re.IGNORECASE)
 HUNK_HEADER_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-CODE_SPAN_PATTERN = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+BACKTICK_RUN_PATTERN = re.compile(r"`+")
 MENTION_PATTERN = re.compile(r"(?<!\w)@(?=\w)")
 
 SYSTEM_PROMPT = """\
@@ -526,7 +526,9 @@ def build_messages(
         lines.append(
             "Files skipped or not reviewed: " + listed + (f" and {more} more" if more > 0 else "")
         )
-    lines.extend(["<changed_files>", "\n\n".join(item.section for item in chunk), "</changed_files>"])
+    lines.extend(
+        ["<changed_files>", "\n\n".join(item.section for item in chunk), "</changed_files>"]
+    )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(lines)},
@@ -633,7 +635,9 @@ def normalize_findings(raw_findings: list[Any]) -> list[Finding]:
                 severity=severity if severity in SEVERITIES else "low",
                 category=category if category in CATEGORIES else "correctness",
                 path=str(item.get("path") or "").strip(),
-                line=line if isinstance(line, int) and not isinstance(line, bool) and line > 0 else 0,
+                line=line
+                if isinstance(line, int) and not isinstance(line, bool) and line > 0
+                else 0,
                 title=title,
                 detail=detail,
                 suggestion=str(item.get("suggestion") or "").strip(),
@@ -657,6 +661,9 @@ def run_review(
     usage = Usage()
     summaries: list[str] = []
     raw_findings: list[Any] = []
+    completed_chunks: list[list[PreparedFile]] = []
+    failed_paths: list[str] = []
+    first_error: ReviewError | None = None
     for index, chunk in enumerate(chunks, start=1):
         messages = build_messages(
             pull_request,
@@ -666,20 +673,37 @@ def run_review(
             conventions=conventions,
             omitted_paths=omitted,
         )
-        review, chunk_usage = complete(messages)
+        try:
+            review, chunk_usage = complete(messages)
+        except ReviewError as error:
+            first_error = first_error or error
+            failed_paths.extend(item.path for item in chunk)
+            summaries.append(
+                f"**Part {index}/{len(chunks)}:** Review unavailable; "
+                "the files in this part were not reviewed."
+            )
+            print(f"::warning::Qwen review part {index}/{len(chunks)} failed: {error}")
+            continue
+        completed_chunks.append(chunk)
         usage.add(chunk_usage)
         summary = str(review.get("summary") or "").strip()
         if summary:
-            summaries.append(summary if len(chunks) == 1 else f"**Part {index}/{len(chunks)}:** {summary}")
+            summaries.append(
+                summary if len(chunks) == 1 else f"**Part {index}/{len(chunks)}:** {summary}"
+            )
         if isinstance(review.get("findings"), list):
             raw_findings.extend(review["findings"])
+    if first_error is not None and not completed_chunks:
+        raise first_error
     return ReviewOutcome(
         summary="\n\n".join(summaries) or "No reviewable changes were found.",
         findings=normalize_findings(raw_findings),
-        commentable_lines={item.path: item.commentable_lines for chunk in chunks for item in chunk},
-        reviewed_paths=[item.path for chunk in chunks for item in chunk],
+        commentable_lines={
+            item.path: item.commentable_lines for chunk in completed_chunks for item in chunk
+        },
+        reviewed_paths=[item.path for chunk in completed_chunks for item in chunk],
         skipped=skipped,
-        unreviewed=unreviewed,
+        unreviewed=unreviewed + failed_paths,
         usage=usage,
     )
 
@@ -704,11 +728,28 @@ def sanitize_markdown(text: str, limit: int) -> str:
     # Model output is shaped by untrusted PR content: it must not ping users or teams,
     # and must not forge HTML-comment markers such as Pitchblend's command marker.
     text = text.replace("<!--", "&lt;!--")
-    parts = CODE_SPAN_PATTERN.split(text)
-    text = "".join(
-        part if index % 2 else MENTION_PATTERN.sub("@\u200b", part)
-        for index, part in enumerate(parts)
-    )
+    runs = list(BACKTICK_RUN_PATTERN.finditer(text))
+    next_same_length: list[int | None] = [None] * len(runs)
+    next_by_length: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        length = len(runs[index].group())
+        next_same_length[index] = next_by_length.get(length)
+        next_by_length[length] = index
+    parts: list[str] = []
+    position = 0
+    run_index = 0
+    while run_index < len(runs):
+        opener = runs[run_index]
+        closing_index = next_same_length[run_index]
+        if closing_index is None:
+            break
+        closer = runs[closing_index]
+        parts.append(MENTION_PATTERN.sub("@\u200b", text[position : opener.start()]))
+        parts.append(text[opener.start() : closer.end()])
+        position = closer.end()
+        run_index = closing_index + 1
+    parts.append(MENTION_PATTERN.sub("@\u200b", text[position:]))
+    text = "".join(parts)
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
@@ -769,7 +810,14 @@ def format_review_body(
             + ", ".join(f"`{path}`" for path in outcome.unreviewed)
         )
     sections.extend(
-        ["", "<details><summary>Review scope and token usage</summary>", "", *scope, "", "</details>"]
+        [
+            "",
+            "<details><summary>Review scope and token usage</summary>",
+            "",
+            *scope,
+            "",
+            "</details>",
+        ]
     )
     return sanitize_markdown("\n".join(sections), MAX_COMMENT_CHARS)
 
@@ -784,7 +832,12 @@ def publish_review(
     fallback_body: str,
 ) -> None:
     comments = [
-        {"path": finding.path, "line": finding.line, "side": "RIGHT", "body": format_finding(finding)}
+        {
+            "path": finding.path,
+            "line": finding.line,
+            "side": "RIGHT",
+            "body": format_finding(finding),
+        }
         for finding in inline
     ]
     try:

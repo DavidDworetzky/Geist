@@ -74,7 +74,9 @@ def test_review_target_handles_auto_and_mention_events() -> None:
     pull_request = {"number": 7, "draft": False}
 
     assert qwen.review_target("pull_request", {"pull_request": pull_request}) == 7
-    assert qwen.review_target("pull_request", {"pull_request": {"number": 7, "draft": True}}) is None
+    assert (
+        qwen.review_target("pull_request", {"pull_request": {"number": 7, "draft": True}}) is None
+    )
     assert (
         qwen.review_target(
             "issue_comment", {"issue": {"number": 9, "pull_request": {}}, "comment": trusted}
@@ -201,7 +203,9 @@ def test_prepare_files_orders_code_first_and_fetches_context_for_modified_files(
 def test_prepare_files_marks_truncated_patches() -> None:
     huge_patch = "@@ -1,1 +1,5000 @@\n" + "\n".join(f"+{'y' * 20}" for _ in range(5000))
 
-    prepared, _ = qwen.prepare_files([changed_file("app/a.py", huge_patch, "added")], lambda _: None)
+    prepared, _ = qwen.prepare_files(
+        [changed_file("app/a.py", huge_patch, "added")], lambda _: None
+    )
 
     assert "(diff truncated to fit the review budget)" in prepared[0].section
     assert len(prepared[0].section) < qwen.MAX_FILE_PATCH_CHARS * 2
@@ -224,7 +228,7 @@ def test_build_messages_uses_system_prompt_and_bounds_untrusted_text() -> None:
         "base": {"ref": "main"},
         "head": {"ref": "feature"},
     }
-    chunk = [qwen.PreparedFile("app/a.py", "<file path=\"app/a.py\">", frozenset())]
+    chunk = [qwen.PreparedFile("app/a.py", '<file path="app/a.py">', frozenset())]
 
     messages = qwen.build_messages(
         pull_request,
@@ -303,10 +307,23 @@ def test_post_with_retries_retries_transient_failures_only() -> None:
     assert request.call_count == 1
 
 
+def test_openrouter_retry_budget_fits_the_workflow_timeout() -> None:
+    retry_wait = sum(
+        qwen.RETRY_BASE_SECONDS * 3**attempt for attempt in range(qwen.OPENROUTER_ATTEMPTS - 1)
+    )
+    worst_case_seconds = qwen.MAX_CHUNKS * (
+        qwen.OPENROUTER_ATTEMPTS * qwen.OPENROUTER_TIMEOUT_SECONDS + retry_wait
+    )
+
+    assert worst_case_seconds < 30 * 60
+
+
 def test_request_review_sends_structured_output_and_configured_model() -> None:
     body = json.dumps(completion('{"summary": "fine", "findings": []}')).encode()
     with mock.patch.object(qwen, "post_with_retries", return_value=body) as post:
-        review, _ = qwen.request_review("key", "qwen/test", "medium", [{"role": "user", "content": "x"}])
+        review, _ = qwen.request_review(
+            "key", "qwen/test", "medium", [{"role": "user", "content": "x"}]
+        )
 
     url, headers, payload = post.call_args.args
     assert url == qwen.OPENROUTER_CHAT_URL
@@ -374,6 +391,12 @@ def test_sanitize_markdown_neutralizes_mentions_and_markers_outside_code() -> No
     assert qwen.sanitize_markdown("x" * 20, 10) == "x" * 9 + "…"
 
 
+def test_sanitize_markdown_does_not_trust_mismatched_backtick_runs() -> None:
+    sanitized = qwen.sanitize_markdown("````\n@Org/team\n```", 1_000)
+
+    assert "@\u200bOrg/team" in sanitized
+
+
 def test_format_finding_renders_severity_location_and_suggestion() -> None:
     rendered = qwen.format_finding(finding(), with_location=True)
 
@@ -426,7 +449,10 @@ def test_run_review_chunks_requests_and_aggregates_results() -> None:
     responses = iter(
         [
             ({"summary": "first", "findings": [{"severity": "low", "title": "a"}]}, {"cost": 0.01}),
-            ({"summary": "second", "findings": [{"severity": "high", "title": "b"}]}, {"cost": 0.02}),
+            (
+                {"summary": "second", "findings": [{"severity": "high", "title": "b"}]},
+                {"cost": 0.02},
+            ),
         ]
     )
     complete = mock.Mock(side_effect=lambda _: next(responses))
@@ -448,6 +474,48 @@ def test_run_review_chunks_requests_and_aggregates_results() -> None:
     assert outcome.usage.requests == 2
     assert round(outcome.usage.cost, 4) == 0.03
     assert "app/m2.py" in complete.call_args_list[0].args[0][1]["content"]
+
+
+def test_run_review_preserves_completed_chunks_when_a_later_chunk_fails() -> None:
+    files = [changed_file(f"app/m{index}.py", status="added") for index in range(2)]
+    complete = mock.Mock(
+        side_effect=[
+            ({"summary": "first", "findings": [{"severity": "low", "title": "a"}]}, {}),
+            qwen.ReviewError("timed out"),
+        ]
+    )
+
+    small_chunks = functools.partial(qwen.pack_chunks, limit=400, max_chunks=2)
+    with mock.patch.object(qwen, "pack_chunks", small_chunks):
+        outcome = qwen.run_review(
+            {"number": 1, "title": "t"},
+            files,
+            fetch_source=lambda _: None,
+            complete=complete,
+            conventions="",
+        )
+
+    assert outcome.reviewed_paths == ["app/m0.py"]
+    assert outcome.unreviewed == ["app/m1.py"]
+    assert "Review unavailable" in outcome.summary
+    assert [item.title for item in outcome.findings] == ["a"]
+
+
+def test_run_review_raises_when_every_chunk_fails() -> None:
+    chunks = [[qwen.PreparedFile("a", "x", frozenset())]]
+    with mock.patch.object(qwen, "pack_chunks", return_value=(chunks, [])):
+        try:
+            qwen.run_review(
+                {"number": 1, "title": "t"},
+                [changed_file("a")],
+                fetch_source=lambda _: None,
+                complete=mock.Mock(side_effect=qwen.ReviewError("down")),
+                conventions="",
+            )
+        except qwen.ReviewError as error:
+            assert str(error) == "down"
+        else:
+            raise AssertionError("expected ReviewError")
 
 
 def test_publish_review_posts_comment_review_and_falls_back_on_rejection() -> None:
