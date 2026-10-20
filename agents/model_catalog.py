@@ -592,6 +592,26 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "inception/mercury-3",
+        "Inception Mercury 3",
+        "mercury",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=131072,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        local=False,
+        performance_note=(
+            "Low-latency diffusion model for short, tool-using agent steps with optional "
+            "reasoning and structured output. The current Inception route is zero "
+            "retention; enforce OpenRouter ZDR and retain retry/fallback handling."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
