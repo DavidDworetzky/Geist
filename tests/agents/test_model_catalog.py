@@ -334,7 +334,7 @@ def test_openrouter_mercury3_metadata_is_explicit_and_server_backed():
     assert mercury.supports_function_calling is True
     assert mercury.supports_reasoning is True
     assert mercury.supports_streaming is True
-    assert mercury.recommended is True
+    assert mercury.recommended is False
     assert mercury.mandatory_reasoning_effort is None
     assert mercury.unsupported_parameters == (
         "n",

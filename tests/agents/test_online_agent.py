@@ -644,6 +644,7 @@ class TestOnlineAgentAPIRequests:
                             "type": "json_schema",
                             "json_schema": {"name": "result", "schema": {"type": "object"}},
                         },
+                        "reasoning": {"effort": "high"},
                     }
                 )
 
@@ -652,7 +653,7 @@ class TestOnlineAgentAPIRequests:
                 assert "top_p" not in payload
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
-                assert "reasoning" not in payload
+                assert payload["reasoning"] == {"effort": "high"}
                 assert payload["temperature"] == 0.7
                 assert payload["stop"] == "END"
                 assert payload["tools"][0]["function"]["name"] == "lookup"
