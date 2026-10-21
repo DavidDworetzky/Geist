@@ -561,7 +561,7 @@ describe('AgentConfigSection', () => {
               supports_function_calling: true,
               supports_reasoning: true,
               supports_streaming: true,
-              recommended: true,
+              recommended: false,
               family: 'mercury',
               performance_note: performanceNote,
             }],
