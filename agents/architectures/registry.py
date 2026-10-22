@@ -1,6 +1,7 @@
 """
 Initialize and register all available runners.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -282,9 +283,7 @@ def register_all_runners(registry: RunnerRegistry | None = None) -> None:
 
     logger.info("Registering all available runners...")
 
-    registry.register_lazy(
-        "mlx_llama", "agents.architectures.mlx_llama_runner", "MLXLlamaRunner"
-    )
+    registry.register_lazy("mlx_llama", "agents.architectures.mlx_llama_runner", "MLXLlamaRunner")
     registry.register_lazy(
         "transformers", "agents.architectures.transformers_runner", "TransformersRunner"
     )
@@ -792,28 +791,30 @@ for _spec in MODEL_SPECS:
         _existing.local = _spec.local
         _existing.performance_note = _spec.performance_note
         continue
-    _models.append(ModelInfo(
-        id=_spec.id,
-        name=_spec.name,
-        provider=_provider,
-        context_window=_spec.context_window,
-        max_output_tokens=_spec.max_output_tokens,
-        supports_vision=_spec.supports_vision,
-        supports_function_calling=_spec.supports_function_calling,
-        supports_streaming=_spec.supports_streaming,
-        recommended=_spec.recommended,
-        family=_spec.family,
-        backend=_spec.backend,
-        supports_reasoning=_spec.supports_reasoning,
-        gated=_spec.gated,
-        requires_remote_code=_spec.requires_remote_code,
-        min_transformers_version=_spec.min_transformers_version,
-        parameter_count=_spec.parameter_count,
-        activated_parameters=_spec.activated_parameters,
-        optional_dependencies=_spec.optional_dependencies,
-        local=_spec.local,
-        performance_note=_spec.performance_note,
-    ))
+    _models.append(
+        ModelInfo(
+            id=_spec.id,
+            name=_spec.name,
+            provider=_provider,
+            context_window=_spec.context_window,
+            max_output_tokens=_spec.max_output_tokens,
+            supports_vision=_spec.supports_vision,
+            supports_function_calling=_spec.supports_function_calling,
+            supports_streaming=_spec.supports_streaming,
+            recommended=_spec.recommended,
+            family=_spec.family,
+            backend=_spec.backend,
+            supports_reasoning=_spec.supports_reasoning,
+            gated=_spec.gated,
+            requires_remote_code=_spec.requires_remote_code,
+            min_transformers_version=_spec.min_transformers_version,
+            parameter_count=_spec.parameter_count,
+            activated_parameters=_spec.activated_parameters,
+            optional_dependencies=_spec.optional_dependencies,
+            local=_spec.local,
+            performance_note=_spec.performance_note,
+        )
+    )
 
 
 # Dynamic registry - populated by sync script
@@ -822,6 +823,26 @@ for _spec in MODEL_SPECS:
 
 DISCOVERED_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     OnlineModelProviders.OPENAI: [
+        ModelInfo(
+            id="gpt-6-astra",
+            name="GPT-6 Astra",
+            provider=OnlineModelProviders.OPENAI,
+            context_window=1050000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="gpt-6",
+            backend="openai_compatible",
+            supports_reasoning=True,
+            local=False,
+            performance_note=(
+                "Rolling out first through OpenAI Trusted Access; broader API access "
+                "is not yet generally available. Tool calling requires the Responses "
+                "API, which Geist's current Chat Completions transport does not expose."
+            ),
+        ),
         ModelInfo(
             id="gpt-4-0613",
             name="GPT 4 0613",
@@ -1554,9 +1575,7 @@ def get_model_by_id(model_id: str) -> ModelInfo | None:
     )
 
 
-def update_discovered_models(
-    provider: OnlineModelProviders | str, models: list[ModelInfo]
-) -> None:
+def update_discovered_models(provider: OnlineModelProviders | str, models: list[ModelInfo]) -> None:
     """
     Update the discovered models for a provider.
 
