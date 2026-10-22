@@ -545,6 +545,45 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Inception Mercury 3 guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Low-latency tool route; enforce OpenRouter ZDR.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'inception/mercury-3',
+              name: 'Inception Mercury 3',
+              provider: 'openrouter',
+              context_window: 1000000,
+              max_output_tokens: 131072,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'mercury',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="inception/mercury-3"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'Inception Mercury 3',
+      })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
       const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
       global.fetch = jest.fn().mockResolvedValue({

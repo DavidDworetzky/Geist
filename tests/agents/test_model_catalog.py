@@ -319,6 +319,34 @@ def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(ember.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_mercury3_metadata_is_explicit_and_server_backed():
+    mercury = get_model_spec("inception/mercury-3")
+
+    assert mercury.provider == "openrouter"
+    assert mercury.backend == "openai_compatible"
+    assert mercury.local is False
+    assert mercury.family == "mercury"
+    assert mercury.context_window == 1000000
+    assert mercury.max_output_tokens == 131072
+    assert mercury.parameter_count is None
+    assert mercury.activated_parameters is None
+    assert mercury.supports_vision is False
+    assert mercury.supports_function_calling is True
+    assert mercury.supports_reasoning is True
+    assert mercury.supports_streaming is True
+    assert mercury.recommended is False
+    assert mercury.mandatory_reasoning_effort is None
+    assert mercury.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert mercury.performance_note is not None
+    assert "enforce OpenRouter ZDR" in mercury.performance_note
+    assert get_provider_endpoint(mercury.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("deepseek/deepseek-v4.1-flash-1017")
 
@@ -698,6 +726,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
         "fireworks/ember-1",
+        "inception/mercury-3",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -763,6 +792,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
         "fireworks/ember-1",
+        "inception/mercury-3",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -932,6 +962,7 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
+    assert any(model.id == "inception/mercury-3" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash-1017"

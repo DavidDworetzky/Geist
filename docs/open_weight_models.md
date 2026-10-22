@@ -11,9 +11,10 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, Claude
-Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash
-routes are also intentionally server-backed. For models with published
+and OpenRouter's Inception Mercury 3, Fireworks Ember-1, Claude Opus 5.5,
+Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8
+Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed.
+For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -221,6 +222,44 @@ The route currently has one Fireworks endpoint, so there is no provider
 fallback diversity. OpenRouter lists Fireworks as zero retention and not using
 prompts for training as of September 24, 2026. Re-check the live endpoint and
 provider policy before sending confidential or regulated workloads.
+
+## OpenRouter-hosted Inception Mercury 3
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`inception/mercury-3`. OpenRouter's API timestamps the route to October 16,
+2026, and Inception announced it on October 19. It accepts text input, has a
+1,000,000-token context window and 131,072-token maximum output, and supports
+optional reasoning, streaming, native function calling, and JSON-schema
+structured output. Reasoning is enabled by default at medium effort but is not
+forced by Geist. Geist omits the unsupported generic `n`, `top_p`,
+frequency-penalty, and presence-penalty parameters while preserving
+temperature, stop, tools, tool choice, response format, and caller-supplied
+reasoning controls.
+
+OpenRouter listed one active Inception endpoint at review time, with 100%
+30-minute uptime and approximately 99.92% one-day uptime. Launch pricing was
+$0.10 per million input tokens, $0.35 per million output tokens, and $0.01 per
+million cached input tokens; Inception lists the undiscounted rates as
+$0.20/$0.70/$0.02. There is no provider fallback diversity, so retain normal
+retry and fallback handling.
+
+Inception reports 1,068 output tokens per second and stronger results than
+other speed-optimized models on most of its launch table. Those are provider
+claims. Independent October 20 tests found strong speed and useful short-task
+coding performance, but weaker long multi-turn coding and business analysis;
+qualify Mercury 3 on the target workflow before changing defaults.
+
+OpenRouter's provider directory lists Inception as no-training and
+zero-retention, and the exact endpoint appears in its ZDR inventory. Inception's
+general direct-service terms separately permit model training unless a direct
+account opts out. Enforce OpenRouter ZDR routing and re-check the endpoint
+policy before sending confidential or regulated workloads.
+
+Sources: [OpenRouter model page](https://openrouter.ai/inception/mercury-3),
+[endpoint API](https://openrouter.ai/api/v1/models/inception/mercury-3-20261019/endpoints),
+[Inception launch](https://www.inceptionlabs.ai/blog/introducing-mercury-3),
+[Bito coding evaluation](https://bito.ai/blog/inception-mercury-3-diffusion-model-coding-benchmark/),
+and [Spring Prompt hands-on evaluation](https://springprompt.com/blog/mercury-3-review).
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
