@@ -582,6 +582,45 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows MiniMax M3.1 Flash guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Mandatory reasoning model; enforce OpenRouter ZDR.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'minimax/minimax-m3.1-flash',
+              name: 'MiniMax M3.1 Flash',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 524288,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'minimax',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="minimax/minimax-m3.1-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'MiniMax M3.1 Flash',
+      })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({

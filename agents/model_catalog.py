@@ -592,6 +592,31 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "minimax/minimax-m3.1-flash",
+        "MiniMax M3.1 Flash",
+        "minimax",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=524288,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="428B",
+        activated_parameters="23B",
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="max",
+        local=False,
+        performance_note=(
+            "Stable multimodal agent model with mandatory reasoning, native tools, "
+            "structured outputs, and several zero-retention routes. Default max "
+            "reasoning can be slow and token-heavy; enforce OpenRouter ZDR before "
+            "sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
