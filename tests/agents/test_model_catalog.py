@@ -296,6 +296,29 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_kimi_k31_pro_metadata_is_explicit_and_server_backed():
+    kimi = get_model_spec("moonshotai/kimi-k3.1-pro")
+
+    assert kimi.provider == "openrouter"
+    assert kimi.backend == "openai_compatible"
+    assert kimi.local is False
+    assert kimi.family == "kimi"
+    assert kimi.context_window == 1048576
+    assert kimi.max_output_tokens == 943718
+    assert kimi.parameter_count is None
+    assert kimi.activated_parameters is None
+    assert kimi.supports_vision is True
+    assert kimi.supports_function_calling is True
+    assert kimi.supports_reasoning is True
+    assert kimi.supports_streaming is True
+    assert kimi.recommended is True
+    assert kimi.mandatory_reasoning_effort == "max"
+    assert kimi.unsupported_parameters == ("n", "temperature", "top_p")
+    assert kimi.performance_note is not None
+    assert "enforce OpenRouter ZDR" in kimi.performance_note
+    assert get_provider_endpoint(kimi.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
     ember = get_model_spec("fireworks/ember-1")
 
@@ -786,6 +809,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "moonshotai/kimi-k3.1-pro",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -866,6 +890,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "moonshotai/kimi-k3.1-pro",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -1039,6 +1064,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "inclusionai/ling-3.1-flash" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "moonshotai/kimi-k3.1-pro" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash-1017"
