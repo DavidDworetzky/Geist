@@ -11,9 +11,10 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, Claude
-Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash
-routes are also intentionally server-backed. For models with published
+and OpenRouter's MiniMax M3.1 Flash, Fireworks Ember-1, Claude Opus 5.5,
+Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8
+Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed.
+For models with published
 weights, their total resident weights make an in-process laptop load impractical
 even when their mixture-of-experts active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
@@ -221,6 +222,54 @@ The route currently has one Fireworks endpoint, so there is no provider
 fallback diversity. OpenRouter lists Fireworks as zero retention and not using
 prompts for training as of September 24, 2026. Re-check the live endpoint and
 provider policy before sending confidential or regulated workloads.
+
+## OpenRouter-hosted MiniMax M3.1 Flash
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`minimax/minimax-m3.1-flash`. OpenRouter lists the stable October 19, 2026
+release with a 1,048,576-token context window, a cataloged 524,288-token
+maximum output, text/image/video input, streaming, native function calling,
+and JSON-schema structured outputs. The model has 428B total and 23B active
+parameters, as disclosed by MiniMax and OpenRouter. Geist omits only the
+unsupported generic `n` parameter and applies the model's mandatory default
+`max` reasoning effort when the caller does not provide one. OpenRouter also
+advertises lower explicit efforts for integrations that expose that control.
+
+On October 23, 2026, OpenRouter listed eight providers with automatic failover,
+six of them in its ZDR endpoint inventory. The lowest observed routed price was
+$0.10 per million input tokens, $0.55 per million output tokens, and $0.01 per
+million cached input tokens; MiniMax's list price was $0.15/$0.60/$0.015. Seven
+routes reported healthy status and one was degraded when checked. The model
+page reported 99.42% availability over the prior three days.
+
+MiniMax reports 73.7% on DeepSWE v1.1, 61.7 on OSWorld V2, 29.6 on Agents' Last
+Exam, 76.2 on BankerToolBench, and 82.2% on CyberGym. These are provider claims.
+Independent October 20 evaluations are mixed but credible: Vals measured
+53.78% overall and 73.94% on Vibe Code, but only 25.25% on Terminal-Bench 4.0
+and 7.50% on its long-horizon agent benchmark; Plotly measured 41/43 on its
+data-analytics exam but found the model slow and token-heavy. Atomic Agent's
+exact-model coding task passed every hidden test at low and max effort, while
+max effort took about twelve times longer.
+
+OpenRouter defines ZDR endpoints as retaining no prompt data and therefore
+being unable to train on it. The default routing pool also includes two
+non-ZDR endpoints, so confidential or regulated workloads must explicitly
+enforce OpenRouter ZDR rather than relying on the model choice alone. Geist
+does not currently send OpenRouter's per-request `provider.zdr` preference, so
+enable ZDR in OpenRouter's account or guardrail settings before using this
+route with confidential data. MiniMax's direct API privacy policy permits
+retention as necessary or permitted, so it does not replace the endpoint-
+specific OpenRouter ZDR control.
+
+Sources (accessed October 23, 2026): [OpenRouter model page](https://openrouter.ai/minimax/minimax-m3.1-flash),
+[endpoint API](https://openrouter.ai/api/v1/models/minimax/minimax-m3.1-flash-20261019/endpoints),
+[ZDR inventory](https://openrouter.ai/api/v1/endpoints/zdr),
+[ZDR guide](https://openrouter.ai/docs/guides/features/zdr),
+[MiniMax launch](https://www.minimax.io/blog/minimax-m31f),
+[Vals evaluation](https://www.vals.ai/models/minimax_MiniMax-M3.1-flash),
+[Plotly evaluation](https://plotly.com/blog/minimax-m3-1-flash-plotly-data-analytics-bench/),
+[Atomic Agent evaluation](https://atomicagent.io/blog/minimax-m3-1-flash/), and
+[MiniMax API privacy policy](https://platform.minimax.io/protocol/privacy-policy).
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
