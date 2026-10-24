@@ -659,6 +659,32 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
+    def test_minimax_m31_flash_preserves_caller_reasoning_effort(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="minimax/minimax-m3.1-flash",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "minimax/minimax-m3.1-flash",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "reasoning": {"effort": "low"},
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert payload["reasoning"] == {"effort": "low"}
+
     def test_muse_spark_open_applies_reasoning_and_preserves_native_tools(self):
         context = create_mock_agent_context()
 

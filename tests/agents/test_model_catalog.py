@@ -334,11 +334,11 @@ def test_openrouter_minimax_m31_flash_metadata_is_explicit_and_server_backed():
     assert minimax.supports_function_calling is True
     assert minimax.supports_reasoning is True
     assert minimax.supports_streaming is True
-    assert minimax.recommended is True
+    assert minimax.recommended is False
     assert minimax.mandatory_reasoning_effort == "max"
     assert minimax.unsupported_parameters == ("n",)
     assert minimax.performance_note is not None
-    assert "enforce OpenRouter ZDR" in minimax.performance_note
+    assert "enable ZDR in OpenRouter" in minimax.performance_note
     assert get_provider_endpoint(minimax.provider) == "https://openrouter.ai/api/v1"
 
 

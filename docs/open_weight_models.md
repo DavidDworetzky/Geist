@@ -254,9 +254,12 @@ max effort took about twelve times longer.
 OpenRouter defines ZDR endpoints as retaining no prompt data and therefore
 being unable to train on it. The default routing pool also includes two
 non-ZDR endpoints, so confidential or regulated workloads must explicitly
-enforce OpenRouter ZDR rather than relying on the model choice alone. MiniMax's
-direct API privacy policy permits retention as necessary or permitted, so it
-does not replace the endpoint-specific OpenRouter ZDR control.
+enforce OpenRouter ZDR rather than relying on the model choice alone. Geist
+does not currently send OpenRouter's per-request `provider.zdr` preference, so
+enable ZDR in OpenRouter's account or guardrail settings before using this
+route with confidential data. MiniMax's direct API privacy policy permits
+retention as necessary or permitted, so it does not replace the endpoint-
+specific OpenRouter ZDR control.
 
 Sources (accessed October 23, 2026): [OpenRouter model page](https://openrouter.ai/minimax/minimax-m3.1-flash),
 [endpoint API](https://openrouter.ai/api/v1/models/minimax/minimax-m3.1-flash-20261019/endpoints),

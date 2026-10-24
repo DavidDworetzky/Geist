@@ -603,7 +603,6 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_function_calling=True,
         supports_reasoning=True,
         supports_streaming=True,
-        recommended=True,
         parameter_count="428B",
         activated_parameters="23B",
         unsupported_parameters=("n",),
@@ -612,8 +611,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Stable multimodal agent model with mandatory reasoning, native tools, "
             "structured outputs, and several zero-retention routes. Default max "
-            "reasoning can be slow and token-heavy; enforce OpenRouter ZDR before "
-            "sending confidential workloads."
+            "reasoning can be slow and token-heavy; enable ZDR in OpenRouter account "
+            "or guardrail settings before sending confidential workloads."
         ),
     ),
     ModelSpec(
