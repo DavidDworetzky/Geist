@@ -314,6 +314,8 @@ def test_openrouter_kimi_k31_pro_metadata_is_explicit_and_server_backed():
     assert kimi.recommended is True
     assert kimi.mandatory_reasoning_effort == "max"
     assert kimi.unsupported_parameters == ("n", "temperature", "top_p")
+    assert kimi.aliases == ("moonshotai/kimi-k3.1-pro-20261023",)
+    assert resolve_request_spec(kimi.aliases[0]) is kimi
     assert kimi.performance_note is not None
     assert "enforce OpenRouter ZDR" in kimi.performance_note
     assert get_provider_endpoint(kimi.provider) == "https://openrouter.ai/api/v1"
@@ -810,6 +812,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
         "moonshotai/kimi-k3.1-pro",
+        "moonshotai/kimi-k3.1-pro-20261023",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -891,6 +894,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
         "moonshotai/kimi-k3.1-pro",
+        "moonshotai/kimi-k3.1-pro-20261023",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
