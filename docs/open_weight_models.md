@@ -12,10 +12,11 @@ Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
 and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, Claude
-Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash
-routes are also intentionally server-backed. For models with published
-weights, their total resident weights make an in-process laptop load impractical
-even when their mixture-of-experts active-parameter count is much smaller.
+Haiku 5.5, Kimi K3.1 Pro, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and
+DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+with published weights, their total resident weights make an in-process laptop
+load impractical even when their mixture-of-experts active-parameter count is
+much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -64,6 +65,37 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter-hosted Kimi K3.1 Pro
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`moonshotai/kimi-k3.1-pro`. OpenRouter added this stable route on October 23,
+2026. It exposes a 1,048,576-token context window and a cataloged 943,718-token
+output ceiling, with text, image, and video input and text output. Geist's
+current chat path uses text and native tools; video upload is not yet part of
+the generic OnlineAgent message contract.
+
+Kimi K3.1 Pro supports streaming, native tools, tool choice, and JSON-schema
+structured output. Moonshot documents reasoning as always enabled with `max`
+as the default effort, so Geist supplies `max` when the caller does not specify
+reasoning. The first-party API fixes `n=1`, `temperature=1.0`, and `top_p=0.95`
+and recommends omitting them; Geist therefore removes those generic defaults
+while preserving supported penalties, stop sequences, tools, and structured
+output.
+
+OpenRouter listed standard and high-speed Moonshot routes at review time. The
+standard route cost $2/M input, $10/M output, and $0.20/M cache reads; the
+high-speed tier cost $4/M input and $20/M output. Both appeared in OpenRouter's
+ZDR inventory, and OpenRouter's provider directory listed Moonshot as no
+training and zero retention. The release was less than one day old, so retain
+normal retry behavior, enforce ZDR, and re-check endpoint policy before sending
+confidential or regulated data.
+
+Moonshot's additional coding, finance, 3D, and agent results are provider-run.
+Independent evaluation from Artificial Analysis reported a 55 Intelligence
+Index and 67% Terminal-Bench 4.0 score; LiveBench 2.0 reported 76.7 overall.
+The route is a material capability upgrade over Kimi K3, but max-effort output
+is relatively verbose and should be monitored for latency and cost.
 
 ## OpenRouter-hosted Grok 4.6
 

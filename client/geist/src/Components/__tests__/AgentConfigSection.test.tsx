@@ -582,6 +582,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Kimi K3.1 Pro guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Mandatory max reasoning; enforce OpenRouter ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'moonshotai/kimi-k3.1-pro',
+              name: 'Kimi K3.1 Pro',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'kimi',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="moonshotai/kimi-k3.1-pro"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Kimi K3.1 Pro' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({

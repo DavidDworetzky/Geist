@@ -539,6 +539,29 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Server-only baseline; the official repository is hundreds of GB.",
     ),
     ModelSpec(
+        "moonshotai/kimi-k3.1-pro",
+        "Kimi K3.1 Pro",
+        "kimi",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "temperature", "top_p"),
+        mandatory_reasoning_effort="max",
+        aliases=("moonshotai/kimi-k3.1-pro-20261023",),
+        local=False,
+        performance_note=(
+            "Named multimodal flagship route with mandatory reasoning, native tools, "
+            "and structured output. Both current Moonshot endpoints are zero retention; "
+            "enforce OpenRouter ZDR and re-check route policy before confidential use."
+        ),
+    ),
+    ModelSpec(
         "glm-5.2",
         "GLM 5.2",
         "glm",
