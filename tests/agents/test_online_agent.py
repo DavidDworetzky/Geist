@@ -613,14 +613,18 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_kimi_k31_pro_applies_max_reasoning_and_preserves_native_tools(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        ["moonshotai/kimi-k3.1-pro", "moonshotai/kimi-k3.1-pro-20261023"],
+    )
+    def test_kimi_k31_pro_applies_max_reasoning_and_preserves_native_tools(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="moonshotai/kimi-k3.1-pro",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -630,7 +634,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "moonshotai/kimi-k3.1-pro",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 1.0,
@@ -658,6 +662,17 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
+
+    def test_kimi_k31_pro_preserves_explicit_reasoning_effort(self):
+        payload = OnlineAgent._apply_model_request_requirements(
+            {
+                "model": "moonshotai/kimi-k3.1-pro-20261023",
+                "messages": [{"role": "user", "content": "Test prompt"}],
+                "reasoning": {"effort": "low"},
+            }
+        )
+
+        assert payload["reasoning"] == {"effort": "low"}
 
     def test_muse_spark_open_applies_reasoning_and_preserves_native_tools(self):
         context = create_mock_agent_context()

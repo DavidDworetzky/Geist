@@ -553,6 +553,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         recommended=True,
         unsupported_parameters=("n", "temperature", "top_p"),
         mandatory_reasoning_effort="max",
+        aliases=("moonshotai/kimi-k3.1-pro-20261023",),
         local=False,
         performance_note=(
             "Named multimodal flagship route with mandatory reasoning, native tools, "
