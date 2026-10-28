@@ -598,7 +598,7 @@ describe('AgentConfigSection', () => {
               supports_function_calling: true,
               supports_reasoning: true,
               supports_streaming: true,
-              recommended: true,
+              recommended: false,
               family: 'gpt',
               performance_note: performanceNote,
             }],

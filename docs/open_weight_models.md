@@ -89,7 +89,8 @@ The standard route costs $1 per million input tokens, $5 per million output
 tokens, $0.05 per million cached input tokens, and $1.25 per million cache
 writes. OpenRouter also lists lower-cost Flex and higher-cost Fast service
 tiers. Prompts above 272,000 tokens use higher tiered rates. The live endpoint
-API reported all three routes healthy with 100% one-day uptime when checked.
+API reported four routes (OpenAI Flex, standard, and Fast plus Azure) healthy;
+standard, Fast, and Azure had 100% one-day uptime while Flex was about 99.6%.
 
 OpenAI reports a 50.3% Terminal-Bench 4.0 score at max reasoning and materially
 better computer-use, visual-reasoning, and factuality results than GPT-5.6
@@ -101,9 +102,10 @@ everyday agent/coding option, not the preferred model for the hardest coding or
 high-stakes accounting tasks.
 
 OpenRouter's provider directory lists OpenAI as no-training but
-prompt-retaining, and none of the exact Terra routes appeared in the ZDR
-inventory at review time. Do not use this model for confidential or regulated
-workloads until an exact ZDR route is available and verified.
+prompt-retaining. The exact Azure Terra endpoint appears in OpenRouter's ZDR
+inventory and Azure is listed as zero retention/no training. Default routing
+can still select a retaining OpenAI endpoint, so confidential or regulated
+workloads must explicitly enforce OpenRouter ZDR and re-check endpoint policy.
 
 ## OpenRouter-hosted Grok 4.6
 

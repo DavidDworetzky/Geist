@@ -334,7 +334,7 @@ def test_openrouter_gpt61_terra_metadata_is_explicit_and_server_backed():
     assert terra.supports_function_calling is True
     assert terra.supports_reasoning is True
     assert terra.supports_streaming is True
-    assert terra.recommended is True
+    assert terra.recommended is False
     assert terra.mandatory_reasoning_effort is None
     assert terra.unsupported_parameters == (
         "n",
@@ -345,8 +345,8 @@ def test_openrouter_gpt61_terra_metadata_is_explicit_and_server_backed():
         "stop",
     )
     assert terra.performance_note is not None
-    assert "not ZDR-eligible" in terra.performance_note
-    assert "do not use for confidential workloads" in terra.performance_note
+    assert "Azure provides a zero-retention route" in terra.performance_note
+    assert "enforce OpenRouter ZDR" in terra.performance_note
     assert get_provider_endpoint(terra.provider) == "https://openrouter.ai/api/v1"
 
 

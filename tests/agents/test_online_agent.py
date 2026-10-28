@@ -613,7 +613,8 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(self):
+    @pytest.mark.parametrize("reasoning", [None, {"effort": "low"}])
+    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(self, reasoning):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
@@ -628,24 +629,26 @@ class TestOnlineAgentAPIRequests:
                 mock_response.json.return_value = OPENAI_RESPONSE
                 mock_post.return_value = mock_response
 
-                agent._make_request(
-                    {
-                        "model": "openai/gpt-6.1-terra",
-                        "messages": [{"role": "user", "content": "Test prompt"}],
-                        "n": 1,
-                        "temperature": 0.7,
-                        "top_p": 0.9,
-                        "frequency_penalty": 0.2,
-                        "presence_penalty": 0.1,
-                        "stop": "END",
-                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
-                        "tool_choice": "auto",
-                        "response_format": {
-                            "type": "json_schema",
-                            "json_schema": {"name": "result", "schema": {"type": "object"}},
-                        },
-                    }
-                )
+                request = {
+                    "model": "openai/gpt-6.1-terra",
+                    "messages": [{"role": "user", "content": "Test prompt"}],
+                    "n": 1,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "frequency_penalty": 0.2,
+                    "presence_penalty": 0.1,
+                    "stop": "END",
+                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    "tool_choice": "auto",
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": "result", "schema": {"type": "object"}},
+                    },
+                }
+                if reasoning is not None:
+                    request["reasoning"] = reasoning
+
+                agent._make_request(request)
 
                 payload = mock_post.call_args.kwargs["json"]
                 assert (
@@ -659,7 +662,10 @@ class TestOnlineAgentAPIRequests:
                     }
                     & payload.keys()
                 )
-                assert "reasoning" not in payload
+                if reasoning is None:
+                    assert "reasoning" not in payload
+                else:
+                    assert payload["reasoning"] == reasoning
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"

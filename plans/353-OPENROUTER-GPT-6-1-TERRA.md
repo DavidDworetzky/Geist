@@ -16,9 +16,9 @@ model pages, endpoint inventory, `origin/main`, and every open pull request.
 | Capability value | 5 | 1.05M multimodal context, strong computer-use evidence, and competitive coding-agent results at half the token price of GPT-6.1 Sol |
 | Evidence quality | 5 | OpenAI and OpenRouter contracts plus current Artificial Analysis and independent hands-on results |
 | Geist fit | 5 | The stable OpenRouter ID exposes chat completions, streaming, tools, and structured output through the existing OnlineAgent |
-| Operational safety | 3 | OpenAI reports no training, but the current routes retain prompts and are absent from OpenRouter's ZDR inventory |
+| Operational safety | 4 | OpenRouter lists OpenAI as no-training and exposes an Azure ZDR route; the new route still requires explicit ZDR enforcement and operational qualification |
 | Implementation confidence | 5 | Exact request limits and unsupported defaults are published and match existing catalog-driven filtering |
-| **Total** | **23/25** | Clears the required 20/25 gate with no dimension below 3 |
+| **Total** | **24/25** | Clears the required 20/25 gate with no dimension below 3 |
 
 `openai/gpt-6.1-terra-pro` is deferred because it is the same underlying model
 locked to expensive pro reasoning, OpenRouter recommends standard Terra for
@@ -40,22 +40,24 @@ interactive-use requirement.
   `frequency_penalty`, `presence_penalty`, and `stop`
 - Standard pricing: $1/M input, $5/M output, $0.05/M cache read, and $1.25/M
   cache write; long prompts above 272,000 tokens use higher tiered rates
-- Current routes: OpenAI Flex, standard, and Fast; all reported status `0` and
-  100% one-day uptime when checked
+- Current routes: OpenAI Flex, standard, and Fast plus Azure; all reported
+  status `0`; three had 100% one-day uptime and Flex had about 99.6% when checked
 - No parameter count or undisclosed architecture attribution
 
 ## Privacy and evidence
 
 OpenRouter's provider directory lists OpenAI as no-training but
-prompt-retaining. None of the exact Terra routes appeared in OpenRouter's ZDR
-endpoint inventory on October 28, 2026. The model must not be recommended for
-confidential or regulated workloads until an exact ZDR route appears.
+prompt-retaining. The exact Azure endpoint appeared in OpenRouter's ZDR
+inventory on October 28, 2026, and Azure is listed as no-training and zero
+retention. Default routing can still use a retaining first-party OpenAI route,
+so confidential or regulated workloads must explicitly enforce OpenRouter ZDR
+and re-check the selected endpoint policy.
 
 Verified sources:
 
 - OpenRouter catalog and exact endpoint API (checked 2026-10-28):
   https://openrouter.ai/api/v1/models and
-  https://openrouter.ai/api/v1/models/openai/gpt-6.1-terra/endpoints
+  https://openrouter.ai/api/v1/models/openai/gpt-6.1-terra-20261026/endpoints
 - OpenRouter model page (checked 2026-10-28):
   https://openrouter.ai/openai/gpt-6.1-terra
 - OpenRouter provider and ZDR inventories (checked 2026-10-28):
@@ -66,12 +68,17 @@ Verified sources:
   https://developers.openai.com/api/docs/models/gpt-6.1-terra
 - Artificial Analysis release evaluation (published 2026-10-26):
   https://artificialanalysis.ai/models/releases/gpt-6-1-terra
+- Vals AI evaluation (published 2026-10-26):
+  https://www.vals.ai/models/openai_gpt-6.1-terra
+- Plotly data-analytics evaluation (published 2026-10-26):
+  https://plotly.com/blog/gpt-6-1-terra-plotly-data-analytics-bench/
 - DualEntry hands-on accounting evaluation (published 2026-10-26):
   https://www.dualentry.com/blog/gpt-6-1-terra-accounting-benchmark
 
 OpenAI's launch benchmark results are provider claims. Artificial Analysis and
-DualEntry are independent evidence. Early community reports are supporting
-evidence only and are not used to set the gate score.
+Vals are established independent benchmark providers; Plotly and DualEntry are
+independent hands-on evidence. Early community reports are supporting evidence
+only and are not used to set the gate score.
 
 ## Implementation
 

@@ -421,7 +421,6 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_function_calling=True,
         supports_reasoning=True,
         supports_streaming=True,
-        recommended=True,
         unsupported_parameters=(
             "n",
             "temperature",
@@ -433,8 +432,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         local=False,
         performance_note=(
             "Fast million-token OpenRouter route with optional reasoning, native tools, "
-            "and structured output. OpenAI retains prompts and the current routes are "
-            "not ZDR-eligible; do not use for confidential workloads."
+            "and structured output. OpenAI retains prompts, while Azure provides a "
+            "zero-retention route; enforce OpenRouter ZDR before confidential workloads."
         ),
     ),
     # Heavyweight models are deliberately server-backed.
