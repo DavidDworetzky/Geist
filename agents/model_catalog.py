@@ -409,6 +409,34 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "confidential workloads."
         ),
     ),
+    ModelSpec(
+        "openai/gpt-6.1-terra",
+        "GPT-6.1 Terra",
+        "gpt",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1050000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+        ),
+        local=False,
+        performance_note=(
+            "Fast million-token OpenRouter route with optional reasoning, native tools, "
+            "and structured output. OpenAI retains prompts and the current routes are "
+            "not ZDR-eligible; do not use for confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
