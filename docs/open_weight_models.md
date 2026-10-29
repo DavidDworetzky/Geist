@@ -11,11 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's Fireworks Ember-1, Claude Opus 5.5, Claude Sonnet 5.5, Claude
-Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash, and DeepSeek V4.1 Flash
-routes are also intentionally server-backed. For models with published
-weights, their total resident weights make an in-process laptop load impractical
-even when their mixture-of-experts active-parameter count is much smaller.
+and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
+Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
+and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+with published weights, their total resident weights make an in-process laptop
+load impractical even when their mixture-of-experts active-parameter count is
+much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -64,6 +65,47 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter-hosted GPT-6.1 Terra
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`openai/gpt-6.1-terra`. OpenRouter added this stable route on October 26, 2026.
+It accepts text, image, and file input, has a 1,050,000-token context window and
+128,000-token output limit, and supports streaming, native function calling,
+all tool-choice modes, and JSON-schema structured output. Geist's current
+generic message contract uses text, images, and native tools; it does not yet
+send provider-native file inputs.
+
+Reasoning is optional and supports none, low, medium, high, xhigh, and max;
+OpenRouter enables medium by default, so Geist does not force an effort. The
+route omits `n`, temperature, `top_p`, frequency-penalty, presence-penalty, and
+stop from its request contract. Geist filters those generic defaults while
+preserving tools, tool choice, structured output, and caller-supplied reasoning.
+OpenAI's direct API requires the Responses API for tools, while OpenRouter
+advertises and adapts the same native tool contract through its OpenAI-compatible
+chat endpoint.
+
+The standard route costs $1 per million input tokens, $5 per million output
+tokens, $0.05 per million cached input tokens, and $1.25 per million cache
+writes. OpenRouter also lists lower-cost Flex and higher-cost Fast service
+tiers. Prompts above 272,000 tokens use higher tiered rates. The live endpoint
+API reported four routes (OpenAI Flex, standard, and Fast plus Azure) healthy;
+standard, Fast, and Azure had 100% one-day uptime while Flex was about 99.6%.
+
+OpenAI reports a 50.3% Terminal-Bench 4.0 score at max reasoning and materially
+better computer-use, visual-reasoning, and factuality results than GPT-5.6
+Terra; those are provider claims. Independent Artificial Analysis measured a
+48 Intelligence Index and 55.6% Terminal-Bench 4.0 result at max, while
+DualEntry found strong speed but only 78.2% accuracy and 65.3% three-run
+consistency on its accounting benchmark. Terra is therefore a cost-efficient
+everyday agent/coding option, not the preferred model for the hardest coding or
+high-stakes accounting tasks.
+
+OpenRouter's provider directory lists OpenAI as no-training but
+prompt-retaining. The exact Azure Terra endpoint appears in OpenRouter's ZDR
+inventory and Azure is listed as zero retention/no training. Default routing
+can still select a retaining OpenAI endpoint, so confidential or regulated
+workloads must explicitly enforce OpenRouter ZDR and re-check endpoint policy.
 
 ## OpenRouter-hosted Grok 4.6
 
