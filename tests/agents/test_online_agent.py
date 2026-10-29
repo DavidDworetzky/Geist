@@ -215,6 +215,7 @@ class TestOnlineAgentInitialization:
             "anthropic/claude-sonnet-5.5",
             "anthropic/claude-haiku-5.5",
             "openai/gpt-6.1-terra",
+            "openai/gpt-6.1-terra-20261026",
             "fireworks/ember-1",
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash-1017",
@@ -613,15 +614,23 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    @pytest.mark.parametrize("reasoning", [None, {"effort": "low"}])
-    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(self, reasoning):
+    @pytest.mark.parametrize(
+        "model_id,reasoning",
+        [
+            ("openai/gpt-6.1-terra", None),
+            ("openai/gpt-6.1-terra-20261026", {"effort": "low"}),
+        ],
+    )
+    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(
+        self, model_id, reasoning
+    ):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="openai/gpt-6.1-terra",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -630,7 +639,7 @@ class TestOnlineAgentAPIRequests:
                 mock_post.return_value = mock_response
 
                 request = {
-                    "model": "openai/gpt-6.1-terra",
+                    "model": model_id,
                     "messages": [{"role": "user", "content": "Test prompt"}],
                     "n": 1,
                     "temperature": 0.7,

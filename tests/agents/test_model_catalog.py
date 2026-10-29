@@ -344,6 +344,8 @@ def test_openrouter_gpt61_terra_metadata_is_explicit_and_server_backed():
         "presence_penalty",
         "stop",
     )
+    assert terra.aliases == ("openai/gpt-6.1-terra-20261026",)
+    assert resolve_request_spec(terra.aliases[0]) is terra
     assert terra.performance_note is not None
     assert "Azure provides a zero-retention route" in terra.performance_note
     assert "enforce OpenRouter ZDR" in terra.performance_note
@@ -729,6 +731,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
         "openai/gpt-6.1-terra",
+        "openai/gpt-6.1-terra-20261026",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -767,10 +770,14 @@ def test_hosted_glm_infers_zai_endpoint():
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
 
 
-def test_gpt61_terra_infers_openrouter_endpoint():
+@pytest.mark.parametrize(
+    "model_id",
+    ["openai/gpt-6.1-terra", "openai/gpt-6.1-terra-20261026"],
+)
+def test_gpt61_terra_infers_openrouter_endpoint(model_id):
     context = MagicMock()
     with patch("agents.online_agent.OnlineAgent") as online_agent:
-        AgentFactory.create_agent("online", context, model="openai/gpt-6.1-terra")
+        AgentFactory.create_agent("online", context, model=model_id)
 
     assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
 

@@ -429,6 +429,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "presence_penalty",
             "stop",
         ),
+        aliases=("openai/gpt-6.1-terra-20261026",),
         local=False,
         performance_note=(
             "Fast million-token OpenRouter route with optional reasoning, native tools, "
