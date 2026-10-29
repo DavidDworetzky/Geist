@@ -163,6 +163,8 @@ def test_heavyweight_models_are_server_backed():
         "presence_penalty",
         "stop",
     )
+    assert glm_flashx.aliases == ("z-ai/glm-5.3-flashx-20260918",)
+    assert resolve_request_spec(glm_flashx.aliases[0]) is glm_flashx
     assert get_provider_endpoint(glm_flashx.provider) == "https://openrouter.ai/api/v1"
     assert get_model_spec("stealth/ox-alpha") is None
 
@@ -536,6 +538,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3-flashx",
+        "z-ai/glm-5.3-flashx-20260918",
         "meta/muse-spark-1.2-contributor",
         "stealth/union-alpha",
         "muse-spark-1.1",
@@ -594,6 +597,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3-flashx",
+        "z-ai/glm-5.3-flashx-20260918",
         "meta/muse-spark-1.2-contributor",
         "stealth/union-alpha",
     ],

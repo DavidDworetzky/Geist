@@ -589,11 +589,14 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         activated_parameters="18B",
         unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
         mandatory_reasoning_effort="max",
+        aliases=("z-ai/glm-5.3-flashx-20260918",),
         local=False,
         performance_note=(
             "High-speed single-provider GLM 5.3 Flash tier through OpenRouter. "
-            "Geist applies Z.AI's recommended max reasoning effort; re-check the "
-            "fresh route's availability and data policy before sensitive deployments."
+            "Geist applies Z.AI's recommended max reasoning effort and omits n, "
+            "frequency_penalty, presence_penalty, and stop because OpenRouter does not "
+            "advertise them for this route; re-check availability and data policy "
+            "before sensitive deployments."
         ),
     ),
     ModelSpec(
