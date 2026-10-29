@@ -225,6 +225,7 @@ class TestOnlineAgentInitialization:
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
             "z-ai/glm-5.3-flashx",
+            "z-ai/glm-5.3-flashx-20260918",
             "stealth/union-alpha",
             "meta/muse-wonder",
             "meta/muse-spark-open",
@@ -542,14 +543,18 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_glm53_flashx_applies_reasoning_and_omits_unsupported_parameters(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        ["z-ai/glm-5.3-flashx", "z-ai/glm-5.3-flashx-20260918"],
+    )
+    def test_glm53_flashx_applies_reasoning_and_omits_unsupported_parameters(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="z-ai/glm-5.3-flashx",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -559,7 +564,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "z-ai/glm-5.3-flashx",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 2,
                         "frequency_penalty": 0.5,
