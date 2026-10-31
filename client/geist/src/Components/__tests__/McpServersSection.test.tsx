@@ -93,6 +93,31 @@ describe('McpServersSection', () => {
     });
   });
 
+  it.each(['custom', 'proton'])('edits an existing %s server without changing its connector kind', async (kind) => {
+    let server = { ...stdioServer, connector_kind: kind };
+    const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url.endsWith('/email-connectors/profiles')) return jsonResponse([]);
+      if (options?.method === 'PUT') {
+        const body = JSON.parse(options.body as string);
+        if ('connector_kind' in body) return jsonResponse({ detail: 'Extra inputs are not permitted' }, 422);
+        server = { ...server, ...body };
+        return jsonResponse(server);
+      }
+      return jsonResponse([server]);
+    });
+    global.fetch = fetchMock as any;
+    render(<McpServersSection />);
+    await screen.findByText('filesystem');
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'updated-server' } });
+    fireEvent.click(screen.getByText('Save Server'));
+    expect(await screen.findByText('updated-server')).toBeInTheDocument();
+    const [, options] = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'PUT')!;
+    const payload = JSON.parse(options!.body as string);
+    expect(payload).not.toHaveProperty('connector_kind');
+    expect(payload.name).toBe('updated-server');
+  });
+
   it('requires a command before submitting a stdio server', async () => {
     global.fetch = jest.fn(() => jsonResponse([])) as any;
 
