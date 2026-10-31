@@ -189,7 +189,8 @@ async def voice_stream_websocket(
         "mms", description="STT provider (mms, whisper, faster_whisper, or parakeet)"
     ),
     tts_provider: str = Query(
-        "sesame", description="TTS provider (sesame, openai, qwen3, kokoro, or cosyvoice2)"
+        "sesame",
+        description="TTS provider (sesame, openai, qwen3, kokoro_pytorch, or cosyvoice2)",
     ),
     stt_model: str | None = Query(None, description="STT model ID override"),
     tts_model: str | None = Query(None, description="TTS model ID override"),

@@ -4,8 +4,12 @@ from typing import Any
 
 
 DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
-DEFAULT_KOKORO_MODEL = "hexgrad/Kokoro-82M"
 DEFAULT_COSYVOICE2_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
+# The pip `kokoro` runtime (CPU/CUDA). The plain "kokoro" provider id is
+# reserved for the managed MLX artifact on Apple Silicon.
+KOKORO_PYTORCH_PROVIDER = "kokoro_pytorch"
+DEFAULT_KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
+KOKORO_DEFAULT_VOICE = "af_heart"
 
 # Kokoro selects its G2P pipeline by single-letter language code.
 KOKORO_LANG_CODES = {
@@ -148,13 +152,13 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
         ],
     },
     {
-        "provider": "kokoro",
-        "display_name": "Kokoro",
+        "provider": KOKORO_PYTORCH_PROVIDER,
+        "display_name": "Kokoro (PyTorch, CPU/CUDA)",
         "type": "local",
-        "default_model": DEFAULT_KOKORO_MODEL,
+        "default_model": DEFAULT_KOKORO_TTS_MODEL,
         "models": [
             {
-                "id": DEFAULT_KOKORO_MODEL,
+                "id": DEFAULT_KOKORO_TTS_MODEL,
                 "display_name": "Kokoro 82M",
                 "sample_rate": 24000,
                 "supports_streaming": True,
@@ -162,7 +166,7 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
                 "supports_instruction_control": False,
                 "supports_voice_cloning": False,
                 "voices": [
-                    {"id": "af_heart", "display_name": "Heart (US female)"},
+                    {"id": KOKORO_DEFAULT_VOICE, "display_name": "Heart (US female)"},
                     {"id": "af_bella", "display_name": "Bella (US female)"},
                     {"id": "af_nicole", "display_name": "Nicole (US female)"},
                     {"id": "af_sky", "display_name": "Sky (US female)"},
@@ -189,7 +193,7 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
     },
     {
         "provider": "cosyvoice2",
-        "display_name": "CosyVoice2",
+        "display_name": "CosyVoice2 (experimental)",
         "type": "local",
         "default_model": DEFAULT_COSYVOICE2_MODEL,
         "models": [
@@ -212,6 +216,17 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
         ],
     },
 ]
+
+
+def allowed_voices_for_tts_model(provider_type: str, model: str) -> list[str]:
+    """Published voice ids for one provider model."""
+    for entry in SUPPORTED_TTS_PROVIDERS:
+        if entry["provider"] != provider_type:
+            continue
+        for published in entry.get("models", []):
+            if published["id"] == model:
+                return [voice["id"] for voice in published.get("voices", [])]
+    return []
 
 
 def get_supported_tts_providers() -> list[dict[str, Any]]:

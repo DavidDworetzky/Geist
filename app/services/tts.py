@@ -11,12 +11,16 @@ import numpy as np
 import torch
 import torchaudio
 
+from adapters.shared_model_cache import SharedModel, get_shared_model
 from app.services.voice_catalog import (
     DEFAULT_COSYVOICE2_MODEL,
-    DEFAULT_KOKORO_MODEL,
+    DEFAULT_KOKORO_TTS_MODEL,
     DEFAULT_QWEN3_TTS_MODEL,
+    KOKORO_DEFAULT_VOICE,
     KOKORO_LANG_CODES,
+    KOKORO_PYTORCH_PROVIDER,
     SUPPORTED_TTS_PROVIDERS,
+    allowed_voices_for_tts_model,
 )
 from app.services.voice_catalog import (
     get_supported_tts_providers as get_supported_tts_providers,
@@ -448,47 +452,69 @@ class Qwen3TTSProvider(TTSProvider):
         return self._sample_rate
 
 
-class KokoroTTSProvider(TTSProvider):
+class KokoroPyTorchTTSProvider(TTSProvider):
     """
-    TTS provider using the Kokoro-82M model (optional 'kokoro' package).
+    Kokoro-82M through the pip 'kokoro' runtime (PyTorch, CPU or CUDA).
 
     Lightweight enough for CPU; streams audio per text segment as the
-    pipeline produces it.
+    pipeline produces it. The pipeline is shared across sessions.
     """
 
     def __init__(
         self,
-        voice: str = "af_heart",
+        voice: str = KOKORO_DEFAULT_VOICE,
         language: str = "en",
         speed: float = 1.0,
         device: str | None = None,
     ):
+        # KPipeline treats voice strings ending in ".pt" as local paths it
+        # torch.loads, and comma-separated strings as blends, so only the
+        # published voice ids may reach it.
+        allowed_voices = allowed_voices_for_tts_model(
+            KOKORO_PYTORCH_PROVIDER, DEFAULT_KOKORO_TTS_MODEL
+        )
+        if voice not in allowed_voices:
+            raise ValueError(
+                f"Voice '{voice}' is not a supported Kokoro voice. "
+                f"Supported voices: {allowed_voices}"
+            )
+        if language.lower() not in KOKORO_LANG_CODES:
+            raise ValueError(
+                f"Language '{language}' is not supported by Kokoro. "
+                f"Supported languages: {sorted(KOKORO_LANG_CODES)}"
+            )
+        if not 0.5 <= speed <= 2.0:
+            raise ValueError("Kokoro speed must be between 0.5 and 2.0")
         self.voice = voice
-        self.language = language
+        self.language = language.lower()
         self.speed = speed
         self.device = device
-        self._pipeline = None
+        self._shared: SharedModel | None = None
         self._sample_rate = 24000
         self.logger = logging.getLogger(__name__)
 
-    def _ensure_initialized(self):
-        if self._pipeline is not None:
-            return
-
+    def _load_pipeline(self, lang_code: str) -> Any:
         try:
             from kokoro import KPipeline
         except ImportError as e:
             raise RuntimeError(
-                "The kokoro TTS provider requires the optional 'kokoro' "
-                "package (pip install kokoro==0.9.4). Install it or select "
-                "another tts_provider. "
+                f"The {KOKORO_PYTORCH_PROVIDER} TTS provider requires the optional "
+                "'kokoro' package (install the voice-sota extra). Install it or "
+                "select another tts_provider. "
                 f"Import failed with: {e}"
             ) from e
 
-        lang_code = KOKORO_LANG_CODES.get(self.language.lower(), "a")
         self.logger.info(f"Initializing Kokoro TTS (lang_code={lang_code})")
-        self._pipeline = KPipeline(
-            lang_code=lang_code, repo_id=DEFAULT_KOKORO_MODEL, device=self.device
+        return KPipeline(lang_code=lang_code, repo_id=DEFAULT_KOKORO_TTS_MODEL, device=self.device)
+
+    def _ensure_initialized(self):
+        if self._shared is not None:
+            return
+
+        lang_code = KOKORO_LANG_CODES[self.language]
+        self._shared = get_shared_model(
+            (KOKORO_PYTORCH_PROVIDER, lang_code, self.device),
+            lambda: self._load_pipeline(lang_code),
         )
 
     @staticmethod
@@ -504,11 +530,18 @@ class KokoroTTSProvider(TTSProvider):
 
     def _segments(self, text: str) -> Iterator[torch.Tensor]:
         self._ensure_initialized()
-        pipeline = self._pipeline
-        if pipeline is None:
+        shared = self._shared
+        if shared is None:
             raise RuntimeError("Kokoro TTS pipeline failed to initialize")
 
-        for item in pipeline(text, voice=self.voice, speed=self.speed):
+        # Lock per segment so a slow consumer never stalls other sessions.
+        with shared.lock:
+            results = iter(shared.model(text, voice=self.voice, speed=self.speed))
+        while True:
+            with shared.lock:
+                item = next(results, None)
+            if item is None:
+                return
             yield self._segment_audio(item)
 
     def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
@@ -556,13 +589,13 @@ class CosyVoice2TTSProvider(TTSProvider):
         self.voice = voice
         self.speed = speed
         self._sample_rate = sample_rate
-        self._engine = None
+        self._shared: SharedModel | None = None
         self._prompt_speech: torch.Tensor | None = None
         self._prompt_text: str | None = None
         self.logger = logging.getLogger(__name__)
 
     def _ensure_initialized(self):
-        if self._engine is not None:
+        if self._shared is not None:
             return
 
         try:
@@ -577,10 +610,12 @@ class CosyVoice2TTSProvider(TTSProvider):
 
         from huggingface_hub import snapshot_download
 
-        self.logger.info(f"Initializing CosyVoice2 TTS: {self.model}")
-        model_dir = snapshot_download(self.model)
-        self._engine = CosyVoice2(model_dir)
-        self._sample_rate = int(getattr(self._engine, "sample_rate", self._sample_rate))
+        def load_engine() -> Any:
+            self.logger.info(f"Initializing CosyVoice2 TTS: {self.model}")
+            return CosyVoice2(snapshot_download(self.model))
+
+        self._shared = get_shared_model(("cosyvoice2", self.model), load_engine)
+        self._sample_rate = int(getattr(self._shared.model, "sample_rate", self._sample_rate))
         self._load_prompt_voice()
 
     def _load_prompt_voice(self):
@@ -601,9 +636,10 @@ class CosyVoice2TTSProvider(TTSProvider):
 
     def _stream_outputs(self, text: str, stream: bool) -> Iterator[torch.Tensor]:
         self._ensure_initialized()
-        engine = self._engine
-        if engine is None:
+        shared = self._shared
+        if shared is None:
             raise RuntimeError("CosyVoice2 engine failed to initialize")
+        engine = shared.model
 
         if self._prompt_speech is not None and self._prompt_text is not None:
             outputs = engine.inference_zero_shot(
@@ -622,7 +658,12 @@ class CosyVoice2TTSProvider(TTSProvider):
             spk_id = self.voice if self.voice in available else available[0]
             outputs = engine.inference_sft(text, spk_id, stream=stream, speed=self.speed)
 
-        for output in outputs:
+        outputs = iter(outputs)
+        while True:
+            with shared.lock:
+                output = next(outputs, None)
+            if output is None:
+                return
             speech = output["tts_speech"] if isinstance(output, dict) else output
             yield speech.detach().cpu().float().squeeze()
 
@@ -651,7 +692,7 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
 
     Args:
         provider_type: Type of provider ("sesame", "openai", "qwen3",
-            "kokoro", or "cosyvoice2")
+            "kokoro_pytorch", or "cosyvoice2")
         **kwargs: Provider-specific arguments
 
     Returns:
@@ -677,10 +718,12 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
             device=kwargs.get("device"),
             sample_rate=int(kwargs.get("sample_rate", 24000)),
         )
-    elif provider_type.lower() == "kokoro":
-        _validate_tts_model("kokoro", kwargs.get("model", DEFAULT_KOKORO_MODEL))
-        return KokoroTTSProvider(
-            voice=kwargs.get("voice", "af_heart"),
+    elif provider_type.lower() == KOKORO_PYTORCH_PROVIDER:
+        _validate_tts_model(
+            KOKORO_PYTORCH_PROVIDER, kwargs.get("model", DEFAULT_KOKORO_TTS_MODEL)
+        )
+        return KokoroPyTorchTTSProvider(
+            voice=kwargs.get("voice", KOKORO_DEFAULT_VOICE),
             language=kwargs.get("language", "en"),
             speed=float(kwargs.get("speed", 1.0)),
             device=kwargs.get("device"),
