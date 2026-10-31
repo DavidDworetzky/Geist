@@ -582,6 +582,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows GPT-6.1 Terra guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fast million-token route; do not use for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'openai/gpt-6.1-terra',
+              name: 'GPT-6.1 Terra',
+              provider: 'openrouter',
+              context_window: 1050000,
+              max_output_tokens: 128000,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'gpt',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="openai/gpt-6.1-terra"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'GPT-6.1 Terra' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({
