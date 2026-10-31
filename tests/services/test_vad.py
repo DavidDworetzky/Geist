@@ -71,7 +71,12 @@ def test_create_vad_silero_fails_at_setup_when_package_missing(monkeypatch):
 def test_create_vad_auto_uses_rms_when_silero_fails_to_load(monkeypatch):
     import importlib.util
 
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *args: object() if name == "silero_vad" else real_find_spec(name, *args),
+    )
     _block_silero_import(monkeypatch)
 
     assert isinstance(create_vad("auto"), RMSVAD)
