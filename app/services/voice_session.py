@@ -39,6 +39,7 @@ class VoiceSessionService:
         vad_provider: str = "auto",
         silence_duration_ms: int = 800,
         chunk_duration_ms: int = 100,
+        partial_interval_ms: int = 1000,
         **provider_kwargs,
     ):
         """
@@ -49,12 +50,13 @@ class VoiceSessionService:
             stt_provider: STT provider ("mms", "whisper", "faster_whisper",
                 or "parakeet")
             tts_provider: TTS provider ("sesame", "openai", "qwen3",
-                "kokoro", or "cosyvoice2")
+                "kokoro_pytorch", or "cosyvoice2")
             sample_rate: Audio sample rate in Hz
             vad_threshold: Voice activity detection threshold (RMS)
             vad_provider: VAD provider ("silero", "rms", or "auto")
             silence_duration_ms: Silence duration to trigger phrase boundary (ms)
             chunk_duration_ms: Audio chunk duration for processing (ms)
+            partial_interval_ms: Minimum new audio between partial transcripts (ms)
             **provider_kwargs: Additional provider-specific arguments
         """
         self.agent = agent
@@ -79,6 +81,8 @@ class VoiceSessionService:
         self.transcript_buffer = ""
         self.silence_frames = 0
         self.silence_threshold_frames = int(silence_duration_ms / chunk_duration_ms)
+        self.partial_interval_chunks = max(1, int(partial_interval_ms / chunk_duration_ms))
+        self.chunks_since_partial = 0
 
         self.logger = logging.getLogger(__name__)
 
@@ -112,8 +116,14 @@ class VoiceSessionService:
         else:
             self.silence_frames += 1
 
-        # If we have enough audio, run STT for partial transcript
-        if len(self.audio_buffer) >= 10:  # ~1 second at 100ms chunks
+        # Partial STT re-reads the whole buffer, so run it at most once per
+        # partial_interval_ms of new audio rather than on every chunk.
+        self.chunks_since_partial += 1
+        if (
+            len(self.audio_buffer) >= self.partial_interval_chunks
+            and self.chunks_since_partial >= self.partial_interval_chunks
+        ):
+            self.chunks_since_partial = 0
             try:
                 combined_audio = np.concatenate(list(self.audio_buffer))
                 # MMS expects 16kHz
@@ -154,12 +164,14 @@ class VoiceSessionService:
             # Clear buffer
             self.audio_buffer.clear()
             self.silence_frames = 0
+            self.chunks_since_partial = 0
 
             return transcript
         except Exception as e:
             self.logger.error(f"Final STT failed: {e}")
             self.audio_buffer.clear()
             self.silence_frames = 0
+            self.chunks_since_partial = 0
             return ""
 
     async def process_with_agent(
@@ -257,5 +269,6 @@ class VoiceSessionService:
         self.audio_buffer.clear()
         self.transcript_buffer = ""
         self.silence_frames = 0
+        self.chunks_since_partial = 0
         self.vad.reset()
         self.logger.info("Voice session reset")

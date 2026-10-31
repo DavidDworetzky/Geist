@@ -105,6 +105,21 @@ class TestVoiceSessionService:
         # Should have called STT
         assert mock_stt.transcribe.called
 
+    def test_partial_transcripts_run_once_per_interval(self, voice_service, mock_stt):
+        """Partial STT must not re-transcribe the whole buffer on every chunk."""
+        audio_bytes = (np.ones(1600) * 0.1 * 32768).astype(np.int16).tobytes()
+
+        partials = [voice_service.add_audio_chunk(audio_bytes) for _ in range(35)]
+
+        # 100 ms chunks with a 1 s interval: partials at chunks 10, 20 and 30.
+        assert mock_stt.transcribe.call_count == 3
+        assert [i + 1 for i, text in enumerate(partials) if text] == [10, 20, 30]
+
+        voice_service.reset()
+        for _ in range(9):
+            voice_service.add_audio_chunk(audio_bytes)
+        assert mock_stt.transcribe.call_count == 3
+
     def test_phrase_boundary_detection(self, voice_service):
         """Test phrase boundary detection."""
         # Add silent chunks
