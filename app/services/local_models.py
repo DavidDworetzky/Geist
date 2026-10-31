@@ -713,13 +713,7 @@ class LocalModelManager:
                 f"Local GGUF size {stats.st_size} does not match expected {artifact.size_bytes}"
             )
 
-        cached = self._verified_files.get(artifact.id)
-        fingerprint = (stats.st_mtime_ns, stats.st_size)
-        if cached is not None and cached[:2] == fingerprint:
-            checksum = cached[2]
-        else:
-            checksum = _sha256_file(path)
-            self._verified_files[artifact.id] = (*fingerprint, checksum)
+        checksum = self._file_sha256(artifact.id, path)
         if artifact.sha256 is not None and checksum.casefold() != artifact.sha256.casefold():
             self._verified_files.pop(artifact.id, None)
             raise ValueError("Local GGUF SHA-256 does not match the managed artifact")
@@ -806,9 +800,23 @@ class LocalModelManager:
                 raise ValueError("Managed MLX snapshot is missing safetensors weights")
         return str(manifest.get("revision") or artifact.revision or "snapshot")
 
+    def _file_sha256(self, cache_key: str, path: Path) -> str:
+        """Hash a file once per (mtime, size) fingerprint."""
+        stats = path.stat()
+        fingerprint = (stats.st_mtime_ns, stats.st_size)
+        cached = self._verified_files.get(cache_key)
+        if cached is not None and cached[:2] == fingerprint:
+            return cached[2]
+        checksum = _sha256_file(path)
+        self._verified_files[cache_key] = (*fingerprint, checksum)
+        return checksum
+
     @staticmethod
+    def _component_cache_key(artifact: LocalModelArtifact, component: LocalModelComponent) -> str:
+        return f"{artifact.id}-{component.id}"
+
     def _verify_bundle(
-        artifact: LocalModelArtifact, path: Path, *, verify_weights: bool = True
+        self, artifact: LocalModelArtifact, path: Path, *, verify_weights: bool = True
     ) -> str:
         if not path.is_dir():
             raise ValueError("Managed voice bundle is not a directory")
@@ -839,7 +847,10 @@ class LocalModelManager:
                 if (
                     verify_weights
                     and component.sha256
-                    and _sha256_file(component_path).casefold() != component.sha256.casefold()
+                    and self._file_sha256(
+                        self._component_cache_key(artifact, component), component_path
+                    ).casefold()
+                    != component.sha256.casefold()
                 ):
                     raise ValueError(f"Voice component {component.id} failed SHA-256 verification")
             for relative in component.required_files:
@@ -882,7 +893,7 @@ class LocalModelManager:
                     self._save_index_locked()
                 except OSError:
                     logger.warning("Could not persist reconciled local-model state", exc_info=True)
-        for artifact, item in zip(selected_artifacts, result, strict=False):
+        for artifact, item in zip(selected_artifacts, result, strict=True):
             runtime_ready, runtime_detail = local_artifact_runtime_status(artifact)
             item.update(runtime_ready=runtime_ready, runtime_detail=runtime_detail)
         return result
@@ -1308,13 +1319,16 @@ class LocalModelManager:
                 size = target.stat().st_size
                 if size == component.size_bytes and (
                     component.sha256 is None
-                    or _sha256_file(target).casefold() == component.sha256.casefold()
+                    or self._file_sha256(
+                        self._component_cache_key(artifact, component), target
+                    ).casefold()
+                    == component.sha256.casefold()
                 ):
                     return
                 if size >= component.size_bytes:
                     target.unlink()
             component_artifact = LocalModelArtifact(
-                id=f"{artifact.id}-{component.id}",
+                id=self._component_cache_key(artifact, component),
                 model_id=artifact.model_id,
                 display_name=f"{artifact.display_name}: {component.id}",
                 format="gguf",

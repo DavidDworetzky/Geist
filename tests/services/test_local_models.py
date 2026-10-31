@@ -345,6 +345,58 @@ def test_bundle_retry_skips_verified_completed_component(tmp_path, managers, mon
     assert manager.require_installed(artifact.id)[1] == path
 
 
+def test_bundle_retry_hashes_completed_component_once(tmp_path, managers, monkeypatch):
+    from app.services import local_models
+
+    component = LocalModelComponent(
+        id="model",
+        repo_id="test/model",
+        revision="a" * 40,
+        destination="model",
+        filename="model.gguf",
+        size_bytes=len(MODEL_BYTES),
+        sha256=hashlib.sha256(MODEL_BYTES).hexdigest(),
+    )
+    tokenizer = LocalModelComponent(
+        id="tokenizer",
+        repo_id="test/model",
+        revision="a" * 40,
+        destination="tokenizer",
+        required_files=("vocab.txt",),
+    )
+    artifact = _artifact(format="bundle", filename="bundle", components=(component, tokenizer))
+    manager = LocalModelManager(tmp_path, artifacts=(artifact,), artifact_support=lambda _: True)
+    managers.append(manager)
+    hashed: list[Path] = []
+    real_sha256 = local_models._sha256_file
+
+    def counting_sha256(path: Path) -> str:
+        hashed.append(path)
+        return real_sha256(path)
+
+    attempts = 0
+
+    def snapshot_download(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("network interruption")
+        (Path(kwargs["local_dir"]) / "vocab.txt").write_text("test")
+
+    monkeypatch.setattr(
+        manager,
+        "_download_hugging_face_artifact",
+        lambda _artifact, destination, _progress: destination.write_bytes(MODEL_BYTES),
+    )
+    monkeypatch.setattr(local_models, "_sha256_file", counting_sha256)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", snapshot_download)
+    with pytest.raises(OSError, match="network interruption"):
+        manager.download_artifact(artifact.id)
+    manager.download_artifact(artifact.id)
+    manager.require_installed(artifact.id)
+    assert len(hashed) == 1
+
+
 def test_nemo_runtime_caches_misses_and_refreshes(monkeypatch):
     from app.services import local_models
 
