@@ -42,7 +42,7 @@ def test_silero_vad_rejects_unsupported_sample_rate():
         SileroVAD(sample_rate=44100)
 
 
-def test_silero_missing_package_raises_friendly_error(monkeypatch):
+def _block_silero_import(monkeypatch):
     import builtins
 
     real_import = builtins.__import__
@@ -53,9 +53,36 @@ def test_silero_missing_package_raises_friendly_error(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", failing_import)
+
+
+def test_silero_missing_package_raises_friendly_error(monkeypatch):
+    _block_silero_import(monkeypatch)
     vad = SileroVAD()
     with pytest.raises(RuntimeError, match="silero-vad"):
-        vad.is_speech(np.zeros(1600, dtype=np.float32))
+        vad.load()
+
+
+def test_create_vad_silero_fails_at_setup_when_package_missing(monkeypatch):
+    _block_silero_import(monkeypatch)
+    with pytest.raises(RuntimeError, match="silero-vad"):
+        create_vad("silero")
+
+
+def test_create_vad_auto_uses_rms_when_silero_fails_to_load(monkeypatch):
+    import importlib.util
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    _block_silero_import(monkeypatch)
+
+    assert isinstance(create_vad("auto"), RMSVAD)
+
+
+def test_silero_is_speech_never_raises_when_package_missing(monkeypatch):
+    _block_silero_import(monkeypatch)
+    vad = SileroVAD(rms_fallback_threshold=0.01)
+
+    assert vad.is_speech(np.ones(1600, dtype=np.float32) * 0.05)
+    assert vad._failed
 
 
 class FakeSileroModel:
@@ -111,6 +138,19 @@ def test_silero_vad_degrades_to_rms_on_inference_failure():
     vad._model = BrokenModel()
 
     # First call fails and flips to RMS fallback; loud audio is still speech.
+    assert vad.is_speech(np.ones(1600, dtype=np.float32) * 0.05)
+    assert vad._failed
+    assert not vad.is_speech(np.zeros(1600, dtype=np.float32))
+
+
+def test_silero_vad_degrades_to_rms_on_torch_runtime_error():
+    class ShapeMismatchModel:
+        def __call__(self, window, sample_rate):
+            raise RuntimeError("Expected 3D input, got 1D")
+
+    vad = SileroVAD(threshold=0.5, rms_fallback_threshold=0.01)
+    vad._model = ShapeMismatchModel()
+
     assert vad.is_speech(np.ones(1600, dtype=np.float32) * 0.05)
     assert vad._failed
     assert not vad.is_speech(np.zeros(1600, dtype=np.float32))

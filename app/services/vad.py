@@ -47,7 +47,8 @@ class SileroVAD(VADProvider):
     """
     Neural VAD using the Silero VAD model (optional 'silero-vad' package).
 
-    The model is stateful across calls; degrades permanently to an RMS
+    The model is stateful across calls, so each session loads its own copy
+    (about 2 MB) rather than sharing one. Degrades permanently to an RMS
     fallback if inference fails at runtime so a broken VAD never takes
     down a live voice session.
     """
@@ -70,7 +71,8 @@ class SileroVAD(VADProvider):
         self._fallback = RMSVAD(threshold=rms_fallback_threshold)
         self._failed = False
 
-    def _ensure_model(self):
+    def load(self) -> None:
+        """Load the model; raises RuntimeError if 'silero-vad' is not installed."""
         if self._model is not None:
             return
 
@@ -79,7 +81,7 @@ class SileroVAD(VADProvider):
         except ImportError as e:
             raise RuntimeError(
                 "The silero VAD provider requires the optional 'silero-vad' "
-                "package (pip install silero-vad==6.2.1). Install it or "
+                "package (install the voice-sota extra). Install it or "
                 "select vad_provider=rms. "
                 f"Import failed with: {e}"
             ) from e
@@ -93,7 +95,7 @@ class SileroVAD(VADProvider):
         try:
             import torch
 
-            self._ensure_model()
+            self.load()
 
             audio = np.asarray(audio_chunk, dtype=np.float32)
             if len(audio) < self.window_size:
@@ -106,10 +108,9 @@ class SileroVAD(VADProvider):
                 max_prob = max(max_prob, prob)
 
             return max_prob >= self.threshold
-        except RuntimeError:
-            # Missing package: surface the actionable error to the caller.
-            raise
         except Exception as e:
+            # Includes torch RuntimeErrors (shape/dtype/device): a broken VAD
+            # must degrade, not end the live voice session.
             logger.error(f"Silero VAD inference failed, falling back to RMS: {e}")
             self._failed = True
             return self._fallback.is_speech(audio_chunk)
@@ -141,20 +142,28 @@ def create_vad(
         return RMSVAD(threshold=rms_threshold)
 
     if provider == "silero":
-        return SileroVAD(
+        silero = SileroVAD(
             threshold=silero_threshold,
             sample_rate=sample_rate,
             rms_fallback_threshold=rms_threshold,
         )
+        silero.load()
+        return silero
 
     if provider == "auto":
         if importlib.util.find_spec("silero_vad") is not None:
-            return SileroVAD(
+            silero = SileroVAD(
                 threshold=silero_threshold,
                 sample_rate=sample_rate,
                 rms_fallback_threshold=rms_threshold,
             )
-        logger.info("silero-vad not installed; using RMS energy VAD")
+            try:
+                silero.load()
+                return silero
+            except Exception as e:
+                logger.warning(f"Silero VAD failed to load; using RMS energy VAD: {e}")
+        else:
+            logger.info("silero-vad not installed; using RMS energy VAD")
         return RMSVAD(threshold=rms_threshold)
 
     raise ValueError(f"Unknown VAD provider: {provider}")
