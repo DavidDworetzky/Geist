@@ -173,7 +173,8 @@ const McpServersSection: React.FC = () => {
         throw new Error('Remote servers require a URL');
       }
       if (editingId !== null) {
-        await updateServer(editingId, input);
+        const { connector_kind, ...update } = input;
+        await updateServer(editingId, update);
       } else if (input.connector_kind !== 'custom') {
         await createEmailConnector(input);
       } else {
