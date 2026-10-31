@@ -2,6 +2,15 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from '../VoiceSettings';
 
+const qwen3 = {
+  provider: 'qwen3', display_name: 'Qwen3 TTS (local MLX)', type: 'local', default_model: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice',
+  models: [{
+    id: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice', display_name: 'Qwen3 TTS 0.6B Custom Voice',
+    voices: [{ id: 'Aiden', display_name: 'Aiden' }],
+    languages: [{ code: 'English', display_name: 'English' }, { code: 'Chinese', display_name: 'Chinese' }],
+    artifact: { id: 'qwen3-tts-0.6b-customvoice-mlx-6bit', status: 'installed', supported: true, runtime_ready: true },
+  }],
+};
 const catalog = { providers: [
   { provider: 'openai', display_name: 'OpenAI TTS', type: 'api', default_model: 'tts-1', models: [{ id: 'tts-1', display_name: 'TTS 1', voices: [] }] },
   { provider: 'openai_live', display_name: 'OpenAI GPT-Live', type: 'api', mode: 'conversation', default_model: 'gpt-live-1',
@@ -9,6 +18,7 @@ const catalog = { providers: [
   { provider: 'local_live', display_name: 'Local live voice', description: 'Configured local voice engine', type: 'local', mode: 'conversation', default_model: 'kyutai/moshiko-mlx-q4',
     models: [{ id: 'kyutai/moshiko-mlx-q4', display_name: 'Moshiko 7B', voices: [{ id: 'moshiko', display_name: 'Moshiko' }] }] }
 ] };
+const catalogWithLocalVoice = { providers: [...catalog.providers, qwen3] };
 
 function Settings() {
   const [selection, setSelection] = React.useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
@@ -56,6 +66,33 @@ describe('voice modes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Live chat' }));
     fireEvent.click(screen.getByLabelText('Voice settings'));
     expect(await screen.findByText('Catalog unavailable')).toBeInTheDocument();
+  });
+
+  it('offers installed local voices in live chat and resets voice and language', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => catalogWithLocalVoice });
+    render(<Settings />);
+    fireEvent.click(screen.getByRole('button', { name: 'Live chat' }));
+    fireEvent.click(screen.getByLabelText('Voice settings'));
+    await screen.findByRole('option', { name: /Qwen3 TTS 0.6B/ });
+    fireEvent.change(screen.getByLabelText('Live voice model'),
+      { target: { value: 'qwen3/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice' } });
+    expect(screen.getByLabelText('Voice')).toHaveValue('Aiden');
+    expect(screen.getByLabelText('Language')).toHaveValue('English');
+    expect(screen.getByLabelText('Speech to text')).toHaveValue('mms');
+  });
+
+  it('disables a local voice until its weights and runtime are ready', async () => {
+    const unavailable = JSON.parse(JSON.stringify(catalogWithLocalVoice));
+    Object.assign(unavailable.providers[3].models[0].artifact, { status: 'not_installed', runtime_ready: false });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => unavailable });
+    const onChange = jest.fn();
+    render(<VoiceSettings selection={{ ...DEFAULT_VOICE_SELECTION, mode: 'live' }} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('Voice settings'));
+    const option = await screen.findByRole('option', { name: /Qwen3 TTS.*download or runtime required/ });
+    expect(option).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Live voice model'),
+      { target: { value: 'qwen3/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice' } });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

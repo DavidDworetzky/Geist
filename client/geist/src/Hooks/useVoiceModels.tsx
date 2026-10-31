@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface VoiceOption {
   id: string;
@@ -20,6 +20,15 @@ export interface TTSModelInfo {
   supports_voice_cloning: boolean;
   voices: VoiceOption[];
   languages: LanguageOption[];
+  artifact?: {
+    id: string;
+    status: string;
+    supported: boolean;
+    runtime_ready: boolean;
+    runtime_detail?: string | null;
+    license?: string | null;
+    license_url?: string | null;
+  };
 }
 
 export interface TTSProviderInfo {
@@ -37,7 +46,7 @@ export interface VoiceModelsResponse {
   providers: TTSProviderInfo[];
 }
 
-interface UseVoiceModelsReturn {
+export interface UseVoiceModelsReturn {
   data: VoiceModelsResponse | null;
   loading: boolean;
   error: string | null;
@@ -52,16 +61,13 @@ const useVoiceModels = (enabled: boolean): UseVoiceModelsReturn => {
   const [data, setData] = useState<VoiceModelsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestedRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || requestedRef.current) {
+    if (!enabled) {
       return;
     }
-    requestedRef.current = true;
 
     let cancelled = false;
-    let completed = false;
     setLoading(true);
 
     fetch('/api/v1/voice/models')
@@ -83,7 +89,6 @@ const useVoiceModels = (enabled: boolean): UseVoiceModelsReturn => {
         }
       })
       .finally(() => {
-        completed = true;
         if (!cancelled) {
           setLoading(false);
         }
@@ -91,7 +96,7 @@ const useVoiceModels = (enabled: boolean): UseVoiceModelsReturn => {
 
     return () => {
       cancelled = true;
-      if (!completed) requestedRef.current = false;
+      setLoading(false);
     };
   }, [enabled]);
 

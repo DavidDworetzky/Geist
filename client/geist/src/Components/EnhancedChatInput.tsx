@@ -1,7 +1,8 @@
 import React, { useState, useRef, useId, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
-import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
+import VoiceSettings, { usesVoicePipeline } from './VoiceSettings';
+import useVoiceSelection from '../Hooks/useVoiceSelection';
 import useVoiceChat from '../Hooks/useVoiceChat';
 import LiveCallPanel from './LiveCallPanel';
 
@@ -14,6 +15,7 @@ interface EnhancedChatInputProps {
   rows?: number;
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   sessionId?: number;
+  agentType?: string;
   enableVoice?: boolean;
   submitLabel?: string;
   secondaryAction?: React.ReactNode;
@@ -34,6 +36,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   rows = 3,
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
+  agentType,
   enableVoice = true,
   submitLabel = 'Send',
   secondaryAction,
@@ -48,7 +51,8 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+  const { selection: voiceSelection, setSelection: setVoiceSelection, catalog, ready: voiceReady }
+    = useVoiceSelection(enableVoice);
   const [voiceError, setVoiceError] = useState('');
 
   const {
@@ -62,10 +66,12 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   } = useVoiceChat({
     sessionId,
     mode: voiceSelection.mode,
+    agentType,
     sttProvider: voiceSelection.sttProvider,
     ttsProvider: voiceSelection.ttsProvider,
     ttsModel: voiceSelection.ttsModel,
     ttsVoice: voiceSelection.ttsVoice,
+    ttsLanguage: voiceSelection.ttsLanguage,
     onTranscriptFinal: (text) => {
       if (text) onChange(value + (value && !/\s$/.test(value) ? ' ' : '') + text);
     },
@@ -73,6 +79,18 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       setVoiceError(error);
     }
   });
+
+  const showVoice = enableVoice || isRecording || isProcessing;
+  const live = showVoice && voiceSelection.mode === 'live';
+  const pipeline = usesVoicePipeline(voiceSelection);
+  let voiceUnavailable = '';
+  if (!voiceReady) {
+    voiceUnavailable = catalog.loading ? 'Loading voice models…' : 'Choose an installed voice in voice settings.';
+  } else if (pipeline && !agentType) {
+    voiceUnavailable = 'This voice needs your chat settings, which could not be loaded.';
+  } else if (pipeline && disabled) {
+    voiceUnavailable = 'This voice needs an available chat model.';
+  }
 
   const handleInputChange = (newValue: string) => {
     onChange(newValue);
@@ -173,8 +191,9 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
   return (
     <div className="enhanced-input">
-      {enableVoice && voiceSelection.mode === 'live' && <LiveCallPanel active={isRecording}
-        status={status} audioLevel={audioLevel} userText={partialTranscript} assistantText={assistantText} />}
+      {live && <LiveCallPanel active={isRecording}
+        status={status || voiceUnavailable} audioLevel={audioLevel} userText={partialTranscript} assistantText={assistantText}
+        interruptible={!pipeline} />}
       {voiceError && <div className="input-banner input-banner-warning" role="alert">{voiceError}</div>}
       {voiceSelection.mode === 'dictation' && status && <div className="input-banner" role="status">{status}</div>}
 
@@ -193,7 +212,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       )}
 
       <div className="input-row">
-        {(!enableVoice || voiceSelection.mode === 'dictation') && (
+        {!live && (
           <div className="chat-input-field">
           <textarea
             ref={textareaRef}
@@ -227,25 +246,26 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
         )}
 
         <div className="input-actions">
-          {enableVoice && (
+          {showVoice && (
             <>
               <VoiceSettings
                 selection={voiceSelection}
                 onChange={setVoiceSelection}
+                catalog={catalog}
                 disabled={isRecording || isProcessing}
               />
               <VoiceButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
                 onClick={() => { setVoiceError(''); toggleRecording(); }}
-                disabled={voiceSelection.mode === 'dictation' && disabled}
+                disabled={Boolean(voiceUnavailable) || (voiceSelection.mode === 'dictation' && disabled)}
                 mode={voiceSelection.mode}
               />
             </>
           )}
 
           {secondaryAction}
-          {(!enableVoice || voiceSelection.mode === 'dictation') && <button
+          {!live && <button
             type="button"
             onClick={handleSubmit}
             disabled={disabled || isRecording || isProcessing || !value.trim()}
