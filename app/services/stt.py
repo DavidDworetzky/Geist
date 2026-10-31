@@ -6,6 +6,7 @@ for the frontend, a model-id allowlist (the model string is client-controlled
 and reaches model loaders), and a string-keyed factory.
 """
 
+import importlib.util
 import logging
 from typing import Any, Protocol
 
@@ -142,9 +143,34 @@ def _validate_stt_model(provider_type: str, model: str) -> str:
     return model
 
 
+# Optional runtime each local provider needs, with the install hint shown
+# when it is missing.
+STT_PROVIDER_PACKAGES: dict[str, tuple[str, str]] = {
+    "faster_whisper": ("faster_whisper", "install the voice-sota extra"),
+    "parakeet": ("nemo", "pip install 'nemo-toolkit[asr]'"),
+}
+
+
+def _require_stt_package(provider: str) -> None:
+    """Fail at session setup, not on the first audio chunk, when a runtime is missing."""
+    package = STT_PROVIDER_PACKAGES.get(provider)
+    if package is None:
+        return
+    module, install_hint = package
+    if importlib.util.find_spec(module) is None:
+        raise RuntimeError(
+            f"The {provider} STT provider requires the optional '{module}' package "
+            f"({install_hint}). Install it or select another stt_provider."
+        )
+
+
 def create_stt_adapter(provider_type: str = "mms", **kwargs) -> STTAdapter:
     """
     Factory function to create an STT adapter.
+
+    Local optional providers are loaded eagerly (and shared across sessions)
+    so a missing package or failed download is reported before the voice
+    session reports ready.
 
     Args:
         provider_type: "mms", "whisper", "faster_whisper", or "parakeet"
@@ -162,18 +188,24 @@ def create_stt_adapter(provider_type: str = "mms", **kwargs) -> STTAdapter:
 
         return WhisperAdapter(api_key=kwargs.get("whisper_api_key"))
     if provider == "faster_whisper":
-        from adapters.faster_whisper_adapter import FasterWhisperAdapter
-
         model = _validate_stt_model(
             "faster_whisper", kwargs.get("stt_model") or DEFAULT_FASTER_WHISPER_MODEL
         )
-        return FasterWhisperAdapter(model=model, device=kwargs.get("stt_device"))
-    if provider == "parakeet":
-        from adapters.parakeet_adapter import ParakeetAdapter
+        _require_stt_package(provider)
+        from adapters.faster_whisper_adapter import FasterWhisperAdapter
 
+        faster_whisper = FasterWhisperAdapter(model=model, device=kwargs.get("stt_device"))
+        faster_whisper.load()
+        return faster_whisper
+    if provider == "parakeet":
         model = _validate_stt_model(
             "parakeet", kwargs.get("stt_model") or DEFAULT_PARAKEET_MODEL
         )
-        return ParakeetAdapter(model=model)
+        _require_stt_package(provider)
+        from adapters.parakeet_adapter import ParakeetAdapter
+
+        parakeet = ParakeetAdapter(model=model)
+        parakeet.load()
+        return parakeet
 
     raise ValueError(f"Unknown STT provider: {provider_type}")
