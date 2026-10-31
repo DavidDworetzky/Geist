@@ -11,7 +11,9 @@ KOKORO_PYTORCH_PROVIDER = "kokoro_pytorch"
 DEFAULT_KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
 KOKORO_DEFAULT_VOICE = "af_heart"
 
-# Kokoro selects its G2P pipeline by single-letter language code.
+# Kokoro selects its G2P pipeline by single-letter language code. Japanese
+# and Chinese need misaki[ja]/misaki[zh] on top of kokoro, so they are not
+# offered.
 KOKORO_LANG_CODES = {
     "en": "a",
     "en-us": "a",
@@ -20,9 +22,7 @@ KOKORO_LANG_CODES = {
     "fr": "f",
     "hi": "h",
     "it": "i",
-    "ja": "j",
     "pt": "p",
-    "zh": "z",
 }
 
 SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
@@ -184,9 +184,7 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
                     {"code": "fr", "display_name": "French"},
                     {"code": "hi", "display_name": "Hindi"},
                     {"code": "it", "display_name": "Italian"},
-                    {"code": "ja", "display_name": "Japanese"},
                     {"code": "pt", "display_name": "Portuguese"},
-                    {"code": "zh", "display_name": "Chinese"},
                 ],
             }
         ],

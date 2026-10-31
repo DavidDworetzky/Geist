@@ -13,7 +13,7 @@ class FasterWhisperAdapter(InertAdapter):
     '''
     FasterWhisperAdapter runs OpenAI Whisper models locally via the
     faster-whisper (CTranslate2) runtime. Requires the optional
-    'faster-whisper' package (the `voice-sota` extra).
+    'faster-whisper' package.
     '''
 
     def __init__(
@@ -37,7 +37,7 @@ class FasterWhisperAdapter(InertAdapter):
         except ImportError as e:
             raise RuntimeError(
                 "The faster_whisper STT provider requires the optional "
-                "'faster-whisper' package (install the voice-sota extra). "
+                "'faster-whisper' package (pip install faster-whisper==1.2.1). "
                 "Install it or select another stt_provider. "
                 f"Import failed with: {e}"
             ) from e

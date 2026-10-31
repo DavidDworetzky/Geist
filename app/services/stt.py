@@ -146,7 +146,7 @@ def _validate_stt_model(provider_type: str, model: str) -> str:
 # Optional runtime each local provider needs, with the install hint shown
 # when it is missing.
 STT_PROVIDER_PACKAGES: dict[str, tuple[str, str]] = {
-    "faster_whisper": ("faster_whisper", "install the voice-sota extra"),
+    "faster_whisper": ("faster_whisper", "pip install faster-whisper==1.2.1"),
     "parakeet": ("nemo", "pip install 'nemo-toolkit[asr]'"),
 }
 

@@ -81,7 +81,7 @@ class SileroVAD(VADProvider):
         except ImportError as e:
             raise RuntimeError(
                 "The silero VAD provider requires the optional 'silero-vad' "
-                "package (install the voice-sota extra). Install it or "
+                "package (pip install silero-vad==6.2.3). Install it or "
                 "select vad_provider=rms. "
                 f"Import failed with: {e}"
             ) from e

@@ -499,7 +499,7 @@ class KokoroPyTorchTTSProvider(TTSProvider):
         except ImportError as e:
             raise RuntimeError(
                 f"The {KOKORO_PYTORCH_PROVIDER} TTS provider requires the optional "
-                "'kokoro' package (install the voice-sota extra). Install it or "
+                "'kokoro' package (pip install kokoro==0.9.4). Install it or "
                 "select another tts_provider. "
                 f"Import failed with: {e}"
             ) from e
