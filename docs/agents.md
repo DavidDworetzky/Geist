@@ -236,7 +236,7 @@ overrides = AgentConfigRequest(
 )
 
 agent = UserSettingsService.create_agent_from_default_user(
-    context, 
+    context,
     overrides=overrides
 )
 ```
@@ -250,11 +250,11 @@ class MyCustomRunner(BaseRunner):
     def load(self, model_id: str, device_config=None):
         # Load your model
         pass
-    
+
     def generate(self, prompt: str, generation_config: GenerationConfig):
         # Generate text
         pass
-    
+
     def complete(self, system_prompt: str, user_prompt: str, generation_config: GenerationConfig):
         # Complete conversation
         pass
@@ -277,7 +277,7 @@ and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
    ```python
    # Old
    agent = LlamaAgent(agent_context, ckpt_dir=None)
-   
+
    # New
    agent = AgentFactory.create_agent(
        agent_type="local",
@@ -290,7 +290,7 @@ and `OnlineAgent` are the only agent implementations. The legacy `LLAMA` and
    ```python
    # Old
    result = agent.complete_text(prompt="Hello")
-   
+
    # New (same interface)
    result = agent.complete_text(prompt="Hello")
    ```
@@ -311,7 +311,7 @@ agent = LlamaAgent(agent_context, ckpt_dir=None)
 # New user settings based approach
 settings = UserSettingsService.get_or_create_user_settings_by_id(user_id)
 agent = UserSettingsService.create_agent_from_user_settings(
-    user_id, 
+    user_id,
     agent_context
 )
 ```
