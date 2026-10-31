@@ -8,6 +8,7 @@ outputs/*.json
 *.pyc
 .DS_Store
 /.env
+/data/workspace/
 
 # C extensions
 *.so
@@ -71,6 +72,7 @@ db.sqlite3-journal
 # Local SQLite database (default provider)
 data/*.sqlite3
 data/*.sqlite3-journal
+data/operator-token
 
 # Flask stuff:
 instance/

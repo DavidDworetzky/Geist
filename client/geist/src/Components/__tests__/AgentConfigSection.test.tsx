@@ -6,13 +6,17 @@ describe('AgentConfigSection', () => {
   const originalFetch = global.fetch;
   const defaultProps = {
     agentType: 'online',
-    localModel: 'Meta-Llama-3.1-8B-Instruct',
+    localModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
     onlineProvider: 'openai',
     onlineModel: 'gpt-4',
+    llamaBackend: null,
+    llamaGpuDeviceIds: [],
     onAgentTypeChange: jest.fn(),
-    onLocalModelChange: jest.fn(),
     onOnlineProviderChange: jest.fn(),
     onOnlineModelChange: jest.fn(),
+    onLlamaBackendChange: jest.fn(),
+    onLlamaGpuDeviceIdsChange: jest.fn(),
+    onLlamaComputeValidityChange: jest.fn(),
   };
 
   beforeEach(() => {
@@ -47,6 +51,8 @@ describe('AgentConfigSection', () => {
 
       const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
 
+      expect(optionValues).toContain('claude-fable-5-1');
+      expect(optionValues).toContain('claude-mythos-5-1');
       expect(optionValues).toContain('claude-3-opus-20240229');
       expect(optionValues).toContain('claude-3-sonnet-20240229');
       expect(optionValues).not.toContain('gpt-4');
@@ -88,7 +94,7 @@ describe('AgentConfigSection', () => {
       fireEvent.change(providerSelect, { target: { value: 'anthropic' } });
 
       expect(onOnlineProviderChange).toHaveBeenCalledWith('anthropic');
-      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-3-opus-20240229');
+      expect(onOnlineModelChange).toHaveBeenCalledWith('claude-fable-5-1');
     });
 
     it('resets model to first available when switching from Anthropic to OpenAI', () => {
@@ -141,27 +147,30 @@ describe('AgentConfigSection', () => {
   });
 
   describe('Agent type switching', () => {
-    it('shows local model options when agent type is local', () => {
+    it('directs local model management to the compatible artifact inventory', () => {
       render(<AgentConfigSection {...defaultProps} agentType="local" />);
 
-      expect(screen.getByLabelText('Local Model')).toBeInTheDocument();
+      expect(screen.getByText('Local model')).toBeInTheDocument();
       expect(screen.queryByLabelText('Online Provider')).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Online Model')).not.toBeInTheDocument();
-
-      const modelSelect = screen.getByLabelText('Local Model');
-      const options = modelSelect.querySelectorAll('option');
-      const optionValues = Array.from(options).map((opt) => opt.getAttribute('value'));
-
-      // STATIC_MODELS.offline only contains Meta-Llama-3.1-8B-Instruct
-      expect(optionValues).toContain('Meta-Llama-3.1-8B-Instruct');
+      expect(screen.queryByLabelText('Local Model')).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Manage local models' }))
+        .toHaveAttribute('href', '/models');
     });
 
-    it('shows online provider and model options when agent type is online', () => {
+    it('shows online provider and model options for the persisted online agent type', () => {
       render(<AgentConfigSection {...defaultProps} agentType="online" />);
 
       expect(screen.queryByLabelText('Local Model')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('Online Provider')).toBeInTheDocument();
+      const providerSelect = screen.getByLabelText('Online Provider');
+      expect(providerSelect).toBeInTheDocument();
       expect(screen.getByLabelText('Online Model')).toBeInTheDocument();
+
+      const providerValues = Array.from(providerSelect.querySelectorAll('option'))
+        .map(option => option.getAttribute('value'));
+      expect(providerValues).not.toContain('offline');
+      expect(providerValues).not.toContain('huggingface');
+      expect(providerValues).not.toContain('self-hosted');
     });
   });
 
@@ -183,22 +192,6 @@ describe('AgentConfigSection', () => {
       expect(onOnlineModelChange).toHaveBeenCalledWith('gpt-4-turbo');
     });
 
-    it('calls onLocalModelChange when a local model is selected', () => {
-      const onLocalModelChange = jest.fn();
-
-      render(
-        <AgentConfigSection
-          {...defaultProps}
-          agentType="local"
-          onLocalModelChange={onLocalModelChange}
-        />
-      );
-
-      const modelSelect = screen.getByLabelText('Local Model');
-      fireEvent.change(modelSelect, { target: { value: 'Meta-Llama-3.1-8B-Instruct' } });
-
-      expect(onLocalModelChange).toHaveBeenCalledWith('Meta-Llama-3.1-8B-Instruct');
-    });
   });
 
   describe('Rendering', () => {
@@ -226,18 +219,32 @@ describe('AgentConfigSection', () => {
         ok: true,
         json: async () => ({
           providers: {
-            openrouter: [{
-              id: 'x-ai/grok-4.6',
-              name: 'Grok 4.6',
-              provider: 'openrouter',
-              context_window: 500000,
-              max_output_tokens: null,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_streaming: true,
-              recommended: true,
-              family: 'grok',
-            }],
+            openrouter: [
+              {
+                id: 'x-ai/grok-4.6',
+                name: 'Grok 4.6',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+              {
+                id: 'x-ai/grok-4.7',
+                name: 'Grok 4.7',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: 450000,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+            ],
           },
           last_updated: null,
         }),
@@ -253,12 +260,443 @@ describe('AgentConfigSection', () => {
 
       expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Grok 4.7' })).toBeInTheDocument();
+    });
+
+    it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            google: [{
+              id: 'gemini-3.8-flash',
+              name: 'Gemini 3.8 Flash',
+              provider: 'google',
+              context_window: 1048576,
+              max_output_tokens: 65536,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'gemini',
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="google"
+          onlineModel="gemini-3.8-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Gemini 3.8 Flash' })).toBeInTheDocument();
+    });
+
+    it('shows Muse models from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-wonder',
+                name: 'Muse Wonder',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-wonder"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Wonder' })).toBeInTheDocument();
+    });
+
+    it('shows Muse Spark models from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-spark-open',
+                name: 'Muse Spark Open',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-spark-open"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark Open' })).toBeInTheDocument();
+    });
+
+    it('shows direct Muse Spark options from Meta Model API catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            meta: [
+              {
+                id: 'muse-spark-1.1',
+                name: 'Muse Spark 1.1',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'muse-spark-1.2',
+                name: 'Muse Spark 1.2',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'muse-spark-1.3',
+                name: 'Muse Spark 1.3',
+                provider: 'meta',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="meta"
+          onlineModel="muse-spark-1.3"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Meta Model API' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.1' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.2' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark 1.3' })).toBeInTheDocument();
+    });
+
+    it('shows Qwen3.8 Flash privacy guidance from live catalog data', async () => {
+      const performanceNote = 'The current endpoint is not OpenRouter ZDR; do not use it for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'qwen/qwen3.8-flash',
+              name: 'Qwen 3.8 Flash',
+              provider: 'openrouter',
+              context_window: 1000000,
+              max_output_tokens: 131072,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'qwen',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="qwen/qwen3.8-flash"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Qwen 3.8 Flash' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows DeepSeek V4.1 Flash 1017 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'October 2026 snapshot; enforce OpenRouter ZDR for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'deepseek/deepseek-v4.1-flash-1017',
+              name: 'DeepSeek V4.1 Flash 1017',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 393216,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'deepseek',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="deepseek/deepseek-v4.1-flash-1017"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'DeepSeek V4.1 Flash 1017',
+      })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'fireworks/ember-1',
+              name: 'Fireworks Ember-1',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'ember',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="fireworks/ember-1"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Fireworks Ember-1' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows GPT-6.1 Terra guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fast million-token route; do not use for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'openai/gpt-6.1-terra',
+              name: 'GPT-6.1 Terra',
+              provider: 'openrouter',
+              context_window: 1050000,
+              max_output_tokens: 128000,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'gpt',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="openai/gpt-6.1-terra"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'GPT-6.1 Terra' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'anthropic/claude-haiku-5.5',
+              name: 'Claude Haiku 5.5',
+              provider: 'openrouter',
+              context_window: 1000000,
+              max_output_tokens: 128000,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'claude',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="anthropic/claude-haiku-5.5"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Claude Haiku 5.5' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Tencent Hy4 Preview guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Single Tencent FP8 preview route; enforce ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'tencent/hy4-preview',
+              name: 'Tencent Hy4 Preview',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 64000,
+              supports_vision: false,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'hy',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="tencent/hy4-preview"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Tencent Hy4 Preview' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
     it('displays correct descriptions for settings', () => {
       render(<AgentConfigSection {...defaultProps} />);
 
-      expect(screen.getByText('Select your preferred online API provider.')).toBeInTheDocument();
+      expect(screen.getByText('Select the online API provider Geist should use.')).toBeInTheDocument();
       // Description may show "Loading models..." or the actual text depending on loading state
       expect(screen.getByText(/Choose which model from the provider to use|Loading models.../)).toBeInTheDocument();
     });
@@ -296,7 +734,9 @@ describe('AgentConfigSection', () => {
       );
 
       expect(await screen.findByText(performanceNote)).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Future Model 3B' })).toBeInTheDocument();
+      expect(screen.getByText('Future Model 3B')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Manage local models' }))
+        .toHaveAttribute('href', '/models');
     });
   });
 });

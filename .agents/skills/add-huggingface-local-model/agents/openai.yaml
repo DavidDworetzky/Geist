@@ -1,0 +1,3 @@
+interface:
+  display_name: "Add Hugging Face Local Model"
+  short_description: "Wire Hugging Face weights into Geist local inference"

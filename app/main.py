@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import json
 import logging
@@ -8,33 +9,47 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
+import anyio
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
+from adapters.image_generation_adapter import ImageGenerationAdapter
 from agents.agent_context import AgentContext
 from agents.agent_settings import AgentSettings
 from agents.agent_type import AgentType
 
 # Initialize agent architecture registry
+from agents.architectures.llama_devices import llama_compute_managed_by_environment
 from agents.architectures.registry import register_all_runners
 from agents.factory import AgentFactory
 from agents.model_catalog import default_local_model_id
+from agents.model_load_errors import ModelMemoryError
+from agents.model_load_status import model_load_status_registry
 from agents.models.agent_completion import AgentCompletion
 from agents.models.tool_calling import ModelRequestConfig, ToolContext
 from agents.online_agent import OnlineAgent
 from agents.prompt.prompt import AGENT_PROMPTS, TOOL_USE_PROMPT
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.jobs import router as jobs_router
+from app.api.v1.endpoints.mcp import router as mcp_router
 from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.models import router as models_router
+from app.api.v1.endpoints.plugins import router as plugins_router
+from app.api.v1.endpoints.routines import router as routines_router
 from app.api.v1.endpoints.user_settings import router as user_settings_router
 from app.api.v1.endpoints.voice import router as voice_router
 from app.api.v1.endpoints.workflows import router as workflow_router
 from app.environment import load_environment_dictionary
 from app.loopback_security import install_loopback_security
-from app.models.completion import CompleteTextParams, InitializeAgentParams
+from app.models.completion import (
+    CompleteTextParams,
+    InitializeAgentParams,
+    RunInstructionParams,
+    ToolApprovalParams,
+)
 from app.models.database.agent_preset import AgentPreset
 from app.models.database.chat_session import (
     get_all_chat_history,
@@ -43,15 +58,27 @@ from app.models.database.chat_session import (
     get_paginated_chat_sessions,
 )
 from app.models.database.database import SessionLocal
-from app.models.database.geist_user import get_default_user
+from app.models.database.geist_user import get_default_workspace
 from app.models.database.memory import MemoryFolder
 from app.models.user_settings import AgentConfigRequest, AgentFactoryConfig
 from app.runtime_config import application_version
-from app.services.chat_orchestrator import ChatOrchestrator, RunControlRegistry
+from app.security.middleware import OperatorAuthenticationMiddleware
+from app.security.operator import (
+    OperatorCapability,
+    OperatorPrincipal,
+    require_operator_capability,
+)
+from app.services.chat_orchestrator import ChatOrchestrator, ChatStreamEvent, RunControlRegistry
+from app.services.goal_runtime import DatabaseGoalStore, GoalRuntimeRegistry
 from app.services.job_queue import start_worker, stop_worker
+from app.services.mcp_tool_source import get_mcp_tool_source
 from app.services.memory_context import build_memory_context
 from app.services.memory_scheduler import MEMORY_JOB_KIND  # noqa: F401
 from app.services.memory_service import get_chat_memory_settings
+from app.services.plugin_context import build_plugin_skills_context, install_plugin_support
+from app.services.routine_scheduler import RoutineScheduler
+from app.services.tool_approvals import approval_registry as tool_approval_registry
+from app.services.tool_intent_router import ToolIntentRouter
 from app.services.tool_registry import build_default_tool_registry
 from app.services.user_settings_service import UserSettingsService
 from app.static_web import install_spa
@@ -65,6 +92,7 @@ DEFAULT_PROMPT = AGENT_PROMPTS["default"]
 load_dotenv()
 DEFAULT_API_URL = "https://api.openai.com/v1"
 DEFAULT_LOCAL_MODEL = default_local_model_id()
+UI_HIDDEN_TOOL_NAMES = frozenset({"adapter.JobStatusAdapter.check_async_tool"})
 openai_key = os.getenv("OPENAI_API_KEY")
 enhanced_logging = (os.getenv("ENHANCED_LOGGING") or "").strip().lower() in ("true", "1", "yes")
 
@@ -81,6 +109,18 @@ _agent_cache_signatures: dict[AgentType, str | None] = {
     agent_type: None for agent_type in agent_cache
 }
 _agent_cache_lock = threading.RLock()
+_local_agent_creation_lock = threading.Lock()
+_local_agent_loading_model_id: str | None = None
+_pending_detection_warning: tuple[str, str] | None = None
+
+
+class LocalModelBusyError(RuntimeError):
+    """An existing load owns the local runtime; this is not that load failing."""
+
+    def __init__(self, model_id: str | None):
+        super().__init__("Local model is loading or switching; retry when it is ready")
+        self.model_id = model_id
+
 
 # mapping from public AgentType values to the agent factory's "local"/"online" types
 AGENT_TYPE_TO_FACTORY_TYPE = {
@@ -94,9 +134,16 @@ AGENT_TYPE_TO_FACTORY_TYPE = {
 api_version = 1.0
 default_agent_type = AgentType.LLAMA
 run_controls = RunControlRegistry()
+goal_runtime_registry = GoalRuntimeRegistry()
+_tool_registry = build_default_tool_registry(goal_runtime_registry)
+_tool_registry.add_source(get_mcp_tool_source())
+install_plugin_support(_tool_registry)
 chat_orchestrator = ChatOrchestrator(
-    build_default_tool_registry(),
+    _tool_registry,
     run_controls=run_controls,
+    orchestration_runs=goal_runtime_registry,
+    goal_store=DatabaseGoalStore(),
+    intent_router=ToolIntentRouter(),
 )
 
 if enhanced_logging:
@@ -105,6 +152,7 @@ if enhanced_logging:
     )
     logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
+_require_tool_operator = require_operator_capability(OperatorCapability.TOOLS_EXECUTE)
 
 
 def get_envs() -> dict[str, str]:
@@ -123,6 +171,9 @@ def get_or_create_agent(agent_type: AgentType):
 
 
 def _get_or_create_local_agent(agent_type: AgentType):
+    global _local_agent_loading_model_id
+    reusable_agent = None
+    stale_agents: list[Any] = []
     with _agent_cache_lock:
         requested_agent = agent_cache[agent_type]
         requested_signature = _agent_cache_signatures[agent_type]
@@ -143,6 +194,7 @@ def _get_or_create_local_agent(agent_type: AgentType):
             return requested_agent
 
         factory_config = _get_local_agent_factory_config()
+        model_id = factory_config.model or DEFAULT_LOCAL_MODEL
         signature = _local_agent_configuration_signature(factory_config)
 
         local_entries = [
@@ -156,15 +208,42 @@ def _get_or_create_local_agent(agent_type: AgentType):
                 entry_agent is cached_agent and entry_signature == signature
                 for entry_agent, entry_signature in local_entries
             ):
-                _set_local_agent_cache(cached_agent, signature)
-                return cached_agent
+                reusable_agent = cached_agent
 
-        stale_agents = _clear_local_agent_cache()
+        # Do not hold the shared cache lock while a local model waits for an
+        # active stream to close. Other model switches fail busy, not queued.
+        if reusable_agent is None:
+            if not _local_agent_creation_lock.acquire(blocking=False):
+                raise LocalModelBusyError(_local_agent_loading_model_id)
+            try:
+                _local_agent_loading_model_id = model_id
+                stale_agents = _clear_local_agent_cache()
+            except BaseException as error:
+                _local_agent_loading_model_id = None
+                _local_agent_creation_lock.release()
+                model_load_status_registry.mark_failed(model_id, str(error))
+                raise
+
+    if reusable_agent is not None:
+        signature = _persist_first_use_llama_backend(reusable_agent, factory_config, signature)
+        with _agent_cache_lock:
+            # Persistence must not resurrect an agent replaced by another request.
+            if all(agent_cache[local_type] is reusable_agent for local_type in _LOCAL_AGENT_TYPES):
+                _set_local_agent_cache(reusable_agent, signature)
+        # Like every cache read, reuse is best-effort: a concurrent model switch
+        # can phase the agent out after the lock is released.
+        return reusable_agent
+
+    load_error: BaseException | None = None
+    try:
         for stale_agent in stale_agents:
             _phase_out_agent_safely(stale_agent)
 
         new_agent = _create_local_agent(factory_config)
-        _set_local_agent_cache(new_agent, signature)
+        signature = _persist_first_use_llama_backend(new_agent, factory_config, signature)
+        with _agent_cache_lock:
+            _set_local_agent_cache(new_agent, signature)
+            model_load_status_registry.mark_ready(model_id)
         logger.info(
             "Created local agent for model %s (artifact=%s, runner=%s)",
             factory_config.model,
@@ -172,14 +251,83 @@ def _get_or_create_local_agent(agent_type: AgentType):
             factory_config.runner_type or "auto",
         )
         return new_agent
+    except BaseException as error:
+        load_error = error
+        raise
+    finally:
+        with _agent_cache_lock:
+            _local_agent_loading_model_id = None
+            _local_agent_creation_lock.release()
+            if load_error is not None:
+                model_load_status_registry.mark_failed(
+                    model_id,
+                    str(load_error),
+                    error_code=load_error.code
+                    if isinstance(load_error, ModelMemoryError)
+                    else None,
+                    can_offload_to_system_ram=(
+                        isinstance(load_error, ModelMemoryError)
+                        and load_error.can_offload_to_system_ram
+                    ),
+                )
 
 
 def _get_local_agent_factory_config() -> AgentFactoryConfig:
-    settings = UserSettingsService.get_default_user_settings()
+    settings = UserSettingsService.get_default_workspace_settings()
     return AgentFactoryConfig.from_user_settings(
         settings,
         AgentConfigRequest(agent_type="local"),
     )
+
+
+def _persist_first_use_llama_backend(
+    agent,
+    factory_config: AgentFactoryConfig,
+    signature: str,
+) -> str:
+    global _pending_detection_warning
+    if (
+        factory_config.device_config.get("llama_backend") != "auto"
+        or _llama_selection_managed_by_environment()
+    ):
+        return signature
+
+    runtime_selection = getattr(agent, "runtime_selection", None)
+    selection = runtime_selection() if callable(runtime_selection) else None
+    if selection is None:
+        return signature
+
+    backend, device_ids = selection
+    detection_error_reader = getattr(agent, "runtime_selection_detection_error", None)
+    detection_error = detection_error_reader() if callable(detection_error_reader) else None
+    if backend == "cpu" and detection_error is not None:
+        warning_key = (str(factory_config.model), str(detection_error))
+        with _agent_cache_lock:
+            should_warn = _pending_detection_warning != warning_key
+            _pending_detection_warning = warning_key
+        if should_warn:
+            logger.warning("First-use compute detection remains pending for %s: %s", *warning_key)
+        return signature
+    with _agent_cache_lock:
+        _pending_detection_warning = None
+
+    try:
+        workspace = get_default_workspace()
+        persisted = UserSettingsService.persist_detected_llama_backend(
+            workspace.workspace_id,
+            backend,
+            device_ids,
+        )
+        if persisted is not None and persisted.llama_backend is not None:
+            # A user can save a manual choice while automatic startup is in
+            # flight. Cache this agent under what it actually loaded; a
+            # different persisted choice will force a restart on the next use.
+            factory_config.device_config["llama_backend"] = backend
+            factory_config.device_config["llama_gpu_device_ids"] = list(device_ids)
+            return _local_agent_configuration_signature(factory_config)
+    except Exception:
+        logger.exception("Unable to persist detected llama.cpp compute backend")
+    return signature
 
 
 def _local_agent_configuration_signature(factory_config: AgentFactoryConfig) -> str:
@@ -275,18 +423,27 @@ def chat_system_prompt(enable_tools: bool, memory_context: str = "") -> str:
     sections = [DEFAULT_PROMPT]
     if enable_tools:
         sections.append(TOOL_USE_PROMPT)
+        # Skills are only actionable when the model can call skills.load.
+        skills_context = build_plugin_skills_context()
+        if skills_context:
+            sections.append(skills_context)
     if memory_context:
         sections.append(memory_context)
     return "\n\n".join(sections)
 
 
+def intent_router_enabled(workspace_id: int) -> bool:
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+    return settings.ui_preferences.get("intentRouterEnabled") is True
+
+
 def resolved_memory_settings(
     params: CompleteTextParams,
     chat_id: int | None,
-    user_id: int,
+    workspace_id: int,
 ) -> tuple[bool, str, int | None]:
     if chat_id is not None:
-        current = get_chat_memory_settings(user_id, chat_id)
+        current = get_chat_memory_settings(workspace_id, chat_id)
         if current is not None:
             return (
                 bool(current["memory_enabled"]),
@@ -301,7 +458,7 @@ def resolved_memory_settings(
                 session.query(MemoryFolder)
                 .filter(
                     MemoryFolder.folder_id == folder_id,
-                    MemoryFolder.user_id == user_id,
+                    MemoryFolder.user_id == workspace_id,
                 )
                 .first()
             )
@@ -311,16 +468,24 @@ def resolved_memory_settings(
     return params.memory_enabled, memory_mode, folder_id
 
 
+def resolved_agentic_mode(params: CompleteTextParams, user_id: int) -> bool:
+    if params.agentic_mode is not None:
+        return params.agentic_mode
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(user_id)
+    return bool(settings.agentic_mode_enabled)
+
+
 def run_chat_completion(
     params: CompleteTextParams,
     chat_id: int | None = None,
     agent=None,
 ) -> AgentCompletion:
     active_agent = agent or get_active_agent(resolve_agent_type(params.agent_type))
-    user_id = int(get_default_user().user_id)
-    memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, user_id)
+    workspace_id = get_default_workspace().workspace_id
+    agentic_mode = resolved_agentic_mode(params, workspace_id)
+    memory_enabled, memory_mode, folder_id = resolved_memory_settings(params, chat_id, workspace_id)
     memory_context = build_memory_context(
-        user_id,
+        workspace_id,
         params.prompt,
         chat_session_id=chat_id,
         memory_enabled=memory_enabled,
@@ -348,46 +513,59 @@ def run_chat_completion(
     return chat_orchestrator.complete(
         backend=active_agent,
         prompt=params.prompt,
-        user_id=user_id,
+        workspace_id=workspace_id,
         chat_id=chat_id,
         config=model_request_config(params),
-        system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+        system_prompt=chat_system_prompt(
+            params.enable_tools or agentic_mode,
+            memory_context,
+        ),
         enable_tools=params.enable_tools,
+        agentic_mode=agentic_mode,
+        enable_intent_router=intent_router_enabled(workspace_id),
         memory_enabled=memory_enabled,
         memory_mode=memory_mode,
         folder_id=folder_id,
     )
 
 
-def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+def stream_chat_events(
+    params: CompleteTextParams, chat_id: int | None = None, *, yield_approval_wait: bool = False
+):
     try:
         agent = get_active_agent(resolve_agent_type(params.agent_type))
         if hasattr(agent, "stream_model_turn"):
-            user_id = int(get_default_user().user_id)
+            workspace_id = get_default_workspace().workspace_id
+            agentic_mode = resolved_agentic_mode(params, workspace_id)
             memory_enabled, memory_mode, folder_id = resolved_memory_settings(
-                params, chat_id, user_id
+                params, chat_id, workspace_id
             )
             memory_context = build_memory_context(
-                user_id,
+                workspace_id,
                 params.prompt,
                 chat_session_id=chat_id,
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
             )
-            for event in chat_orchestrator.stream(
+            yield from chat_orchestrator.stream(
                 backend=agent,
                 prompt=params.prompt,
-                user_id=user_id,
+                workspace_id=workspace_id,
                 chat_id=chat_id,
                 config=model_request_config(params),
-                system_prompt=chat_system_prompt(params.enable_tools, memory_context),
+                system_prompt=chat_system_prompt(
+                    params.enable_tools or agentic_mode,
+                    memory_context,
+                ),
                 enable_tools=params.enable_tools,
+                agentic_mode=agentic_mode,
+                enable_intent_router=intent_router_enabled(workspace_id),
                 memory_enabled=memory_enabled,
                 memory_mode=memory_mode,
                 folder_id=folder_id,
-            ):
-                yield sse_event(event.event, event.payload)
+                yield_approval_wait=yield_approval_wait,
+            )
             return
 
         # Legacy agents retain text-only behavior. Generate once and adapt the
@@ -414,27 +592,109 @@ def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = Non
         for chunk in chunk_completion_text(
             completion_object.message[0] if completion_object.message else ""
         ):
-            yield sse_event("delta", {"text": chunk})
+            yield ChatStreamEvent("delta", {"text": chunk})
 
-        yield sse_event("final", completion_object)
-        yield sse_event(
+        yield ChatStreamEvent("final", completion_object)
+        yield ChatStreamEvent(
             "done",
             {"run_id": completion_object.run_id, "chat_id": completion_object.chat_id},
         )
-    except Exception:
+    except Exception as error:
         logger.exception("Chat stream failed before a terminal event")
-        yield sse_event(
+        yield ChatStreamEvent(
             "error",
             {
                 "code": "chat_backend_error",
-                "message": (
+                "message": str(error)
+                if isinstance(error, ModelMemoryError)
+                else (
                     "Chat backend failed to start. Check the configured model, "
                     "local weights, and required credentials."
+                ),
+                **(
+                    {"model_load": error.to_status()} if isinstance(error, ModelMemoryError) else {}
                 ),
                 "chat_id": chat_id,
             },
         )
-        yield sse_event("done", {"run_id": None, "chat_id": chat_id})
+        yield ChatStreamEvent("done", {"run_id": None, "chat_id": chat_id})
+
+
+def stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+    for event in stream_chat_events(params, chat_id):
+        yield sse_event(event.event, event.payload)
+
+
+async def async_stream_chat_completion(params: CompleteTextParams, chat_id: int | None = None):
+    events = stream_chat_events(params, chat_id, yield_approval_wait=True)
+    run_id: str | None = None
+    completed = False
+    workspace = await run_in_threadpool(get_default_workspace)
+    workspace_id = workspace.workspace_id
+    try:
+        async for event in iterate_in_threadpool(events):
+            if event.event == "run_started":
+                run_id = event.payload["run_id"]
+            elif event.event == "done":
+                completed = True
+            if event.event == "approval_wait":
+                yield ": approval pending\n\n"
+                await asyncio.sleep(1)
+            else:
+                yield sse_event(event.event, event.payload)
+    finally:
+        # Starlette cancels this iterator on disconnect. Shield the durable
+        # cancellation and close only after its threadpool next() has returned.
+        with anyio.CancelScope(shield=True):
+            if run_id is not None and not completed:
+                await run_in_threadpool(run_controls.cancel, run_id, workspace_id=workspace_id)
+            await run_in_threadpool(events.close)
+
+
+def run_routine(routine, cancellation: threading.Event | None = None) -> None:
+    """Execute one scheduled routine through the orchestrator, unattended.
+
+    interactive=False makes the orchestrator deny approval-gated tools
+    immediately instead of waiting for a user who is not present. The run
+    persists as a normal chat session, so results are visible in the UI.
+    """
+    workspace_id = int(routine.user_id)
+    if get_default_workspace().workspace_id != workspace_id:
+        raise ValueError("Routine owner is not the active workspace")
+    settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
+    agent = get_active_agent(default_agent_type)
+    if not hasattr(agent, "stream_model_turn"):
+        logger.warning(
+            "Routine %s skipped: active agent has no native tool loop",
+            routine.routine_id,
+        )
+        return
+    params = CompleteTextParams(
+        prompt=f"[Scheduled routine #{routine.routine_id}: {routine.name}]\n\n{routine.prompt}",
+        max_tokens=settings.default_max_tokens,
+        temperature=settings.default_temperature,
+        top_p=settings.default_top_p,
+        frequency_penalty=settings.default_frequency_penalty,
+        presence_penalty=settings.default_presence_penalty,
+        enable_tools=True,
+    )
+    for event in chat_orchestrator.stream(
+        backend=agent,
+        prompt=params.prompt,
+        workspace_id=workspace_id,
+        chat_id=None,
+        config=model_request_config(params),
+        system_prompt=chat_system_prompt(True, ""),
+        enable_tools=True,
+        agentic_mode=False,
+        interactive=False,
+        cancellation=cancellation,
+    ):
+        if event.event in {"error", "cancelled"}:
+            raise RuntimeError("Routine did not complete successfully")
+
+
+routine_scheduler = RoutineScheduler(run_routine)
 
 
 # App factory function
@@ -446,7 +706,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
+            chat_orchestrator.registry.startup()
             app.state.job_worker = start_worker()
+            routine_scheduler.start()
             app.state.ready = True
             yield
         finally:
@@ -454,10 +716,12 @@ def create_app(
             _stop_runtime_services()
 
     app = FastAPI(lifespan=lifespan)
+    app.add_middleware(OperatorAuthenticationMiddleware)
     if loopback_only:
         install_loopback_security(app)
     app.state.ready = False
     app.state.job_worker = None
+    app.state.routine_scheduler = routine_scheduler
 
     # agent routes, for agentic flows.
     agent_router = APIRouter()
@@ -485,7 +749,7 @@ def create_app(
         agent_context = get_default_agent_context()
 
         # Create agent using user settings
-        agent = UserSettingsService.create_agent_from_default_user(agent_context, overrides)
+        agent = UserSettingsService.create_agent_from_default_workspace(agent_context, overrides)
 
         return run_chat_completion(params, agent=agent)
 
@@ -496,7 +760,7 @@ def create_app(
     @agent_router.post("/complete_text_stream")
     async def complete_text_stream_endpoint(params: CompleteTextParams):
         return StreamingResponse(
-            stream_chat_completion(params),
+            async_stream_chat_completion(params),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -506,7 +770,7 @@ def create_app(
         params: CompleteTextParams, session_id: int
     ):
         return StreamingResponse(
-            stream_chat_completion(params, chat_id=session_id),
+            async_stream_chat_completion(params, chat_id=session_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -516,8 +780,59 @@ def create_app(
         return run_chat_completion(params, chat_id=session_id)
 
     @agent_router.post("/runs/{run_id}/cancel")
-    def cancel_chat_run(run_id: str):
-        return {"run_id": run_id, "cancelled": run_controls.cancel(run_id)}
+    def cancel_chat_run(
+        run_id: str,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        return {
+            "run_id": run_id,
+            "cancelled": run_controls.cancel(run_id, workspace_id=operator.workspace_id),
+        }
+
+    @agent_router.post("/runs/{run_id}/tool_approval")
+    def resolve_tool_approval(
+        run_id: str,
+        params: ToolApprovalParams,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        try:
+            resolved = tool_approval_registry.resolve(
+                run_id,
+                params.call_id,
+                params.decision,
+                workspace_id=operator.workspace_id,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if not resolved:
+            raise HTTPException(
+                status_code=404,
+                detail="No pending approval for this run and call",
+            )
+        return {
+            "run_id": run_id,
+            "call_id": params.call_id,
+            "decision": params.decision,
+        }
+
+    @agent_router.post("/runs/{run_id}/instructions")
+    def add_run_instruction(
+        run_id: str,
+        params: RunInstructionParams,
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        try:
+            instruction = run_controls.enqueue(
+                run_id, operator.workspace_id, params.instruction_id, params.text
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if instruction is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This run is no longer accepting instructions. Send a new chat message to resume.",
+            )
+        return {"run_id": run_id, "instruction": instruction}
 
     @agent_router.get("/chat_history/{session_id}")
     async def get_chat_history_endpoint(session_id: int):
@@ -539,27 +854,50 @@ def create_app(
         return chat_sessions
 
     @agent_router.get("/tools")
-    async def get_chat_tool_catalog():
-        user = get_default_user()
-        enabled_names = {
-            tool.name
-            for tool in chat_orchestrator.registry.definitions_for_context(
-                ToolContext(user_id=user.user_id, chat_id=None, run_id="catalog")
-            )
-        }
+    async def get_chat_tool_catalog(
+        operator: OperatorPrincipal = Depends(_require_tool_operator),
+    ):
+        context = ToolContext(
+            workspace_id=operator.workspace_id,
+            chat_id=None,
+            run_id="catalog",
+        )
+        catalog = await run_in_threadpool(chat_orchestrator.registry.catalog, context)
+        image_configuration = ImageGenerationAdapter()
         return {
             "tools": [
                 {
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.parameters_schema(),
-                    "enabled": tool.name in enabled_names,
+                    "enabled": chat_orchestrator.registry.is_enabled(tool)
+                    and (tool.availability is None or tool.availability(context)),
                     "enabled_by_default": tool.enabled_by_default,
                     "requires_approval": tool.requires_approval,
+                    "requires_per_call_approval": tool.requires_per_call_approval,
+                    "allows_standing_grant": tool.allows_standing_grant,
                     "side_effect": tool.side_effect,
                     "source_adapter": tool.source_adapter,
+                    "semantic_tags": sorted(tool.semantic_tags),
+                    "configuration": (
+                        {
+                            "kind": "environment",
+                            "provider": "OpenAI-compatible image API",
+                            "api_key_configured": bool(image_configuration.api_key),
+                            "base_url": image_configuration.base_url,
+                            "model": image_configuration.model,
+                            "environment_variables": {
+                                "api_key": "OPENAI_API_KEY",
+                                "base_url": "OPENAI_IMAGE_BASE_URL",
+                                "model": "OPENAI_IMAGE_MODEL",
+                            },
+                        }
+                        if tool.name == "image.generate"
+                        else None
+                    ),
                 }
-                for tool in chat_orchestrator.registry.catalog()
+                for tool in catalog
+                if not tool.approval_exempt and tool.name not in UI_HIDDEN_TOOL_NAMES
             ]
         }
 
@@ -604,6 +942,12 @@ def create_app(
     app.include_router(models_router, prefix="/api/v1/models", tags=["models"])
     app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
     app.include_router(memory_router, prefix="/api/v1/memory", tags=["memory"])
+    app.include_router(routines_router, prefix="/api/v1/routines", tags=["routines"])
+    app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+    from app.api.v1.endpoints.mcp_oauth import router as mcp_oauth_router
+
+    app.include_router(mcp_oauth_router, prefix="/api/v1/mcp", tags=["mcp"])
+    app.include_router(plugins_router, prefix="/api/v1/plugins", tags=["plugins"])
 
     @app.get("/health", include_in_schema=False)
     def health():
@@ -654,12 +998,14 @@ def create_app(
 
 def _configured_inference_info() -> dict[str, str | None]:
     try:
-        settings = UserSettingsService.get_default_user_settings()
+        settings = UserSettingsService.get_default_workspace_settings()
         factory_config = AgentFactoryConfig.from_user_settings(settings)
     except Exception as error:
         logger.warning("Unable to read configured inference settings: %s", error)
         fallback_runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(DEFAULT_LOCAL_MODEL)
+        fallback_runner_type = fallback_runner_type or AgentFactory._infer_runner_type(
+            DEFAULT_LOCAL_MODEL
+        )
         return {
             "mode": "local",
             "engine": fallback_runner_type,
@@ -677,30 +1023,53 @@ def _configured_inference_info() -> dict[str, str | None]:
             "acceleration": None,
         }
 
-    runner_type = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip() or factory_config.runner_type
-    artifact_id = settings.default_local_artifact_id
-    if artifact_id:
-        try:
-            from app.services.local_models import get_local_model_manager
-
-            runner_type = get_local_model_manager().get_artifact(artifact_id).backend
-        except KeyError:
-            logger.warning("Configured local artifact %s is not available", artifact_id)
-
-    runner_type = runner_type or AgentFactory._infer_runner_type(factory_config.model)
+    try:
+        runner_type, _runner_was_explicit = AgentFactory._resolve_local_runner_type(
+            factory_config.model,
+            factory_config.runner_type,
+            factory_config.device_config,
+        )
+    except ValueError as error:
+        logger.warning("Configured local inference runtime is unavailable: %s", error)
+        runner_type = "unavailable"
     return {
         "mode": "local",
         "engine": runner_type,
         "model": factory_config.model,
         "provider": None,
-        "acceleration": _llama_acceleration(runner_type),
+        "acceleration": _llama_acceleration(
+            runner_type, settings.llama_backend, factory_config.model
+        ),
     }
 
 
-def _llama_acceleration(runner_type: str) -> str | None:
+def _llama_acceleration(
+    runner_type: str,
+    selected_backend: str | None = None,
+    model_id: str | None = None,
+) -> str | None:
     if runner_type != "llama_server":
         return None
-    return (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    if os.getenv("GEIST_LLAMA_SERVER_PATH", "").strip():
+        return None
+    if model_id is not None:
+        from agents.architectures.llama_server_process import get_llama_server_manager
+
+        status = get_llama_server_manager().public_status()
+        if status.get("status") == "ready" and status.get("model_id") == model_id:
+            backend = status.get("backend")
+            if backend in {"cpu", "vulkan"}:
+                return str(backend)
+    acceleration = (os.getenv("GEIST_LLAMA_ACCELERATION") or "auto").strip().lower()
+    if acceleration in {"cpu", "vulkan"}:
+        return acceleration
+    if selected_backend == "gpu":
+        return "vulkan"
+    return selected_backend or "auto"
+
+
+def _llama_selection_managed_by_environment() -> bool:
+    return llama_compute_managed_by_environment(os.environ)
 
 
 def _parse_agent_type(agent_type: str) -> AgentType:
@@ -755,7 +1124,7 @@ def _create_local_agent(factory_config: AgentFactoryConfig):
 def get_online_agent():
     agent_context = get_default_agent_context()
     # Get user settings to determine provider-specific configuration
-    settings = UserSettingsService.get_default_user_settings()
+    settings = UserSettingsService.get_default_workspace_settings()
     factory_config = AgentFactoryConfig.from_user_settings(settings)
 
     return AgentFactory.create_agent(
@@ -853,6 +1222,16 @@ def _database_is_ready() -> bool:
 
 def _stop_runtime_services() -> None:
     try:
+        routine_scheduler.stop()
+    except Exception:
+        logger.exception("Failed to stop the routine scheduler")
+
+    try:
+        chat_orchestrator.registry.shutdown()
+    except Exception:
+        logger.exception("Failed to stop tool execution sessions")
+
+    try:
         stop_worker()
     except Exception:
         logger.exception("Failed to stop the job worker")
@@ -877,6 +1256,7 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        # Container entry point; operator authentication protects exposed routes.
+        host="0.0.0.0",  # nosec B104
         port=8000,  # 1MB (1024 * 1024 bytes)
     )

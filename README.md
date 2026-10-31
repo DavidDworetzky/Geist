@@ -1,6 +1,24 @@
 # Geist
-FOSS Project for private local AI. Chat and Agents / Assistants.
-Geist is a framework for multiple natural language AI Assistants to interact, train, and do work.
+
+## Local model memory
+
+On Windows and Linux, Settings > Models and Providers includes **Allow system
+RAM** beside the GPU selection. It is off by default. Enable it to let llama.cpp
+fit model layers across GPU and system memory when GPU memory is insufficient;
+responses may be slower. Explicit `GEIST_LLAMA_GPU_LAYERS` launch overrides still
+take precedence. Saving the setting applies it on the next model load.
+
+Model load failures open a dismissible dialog with recovery actions. Confirmed
+memory failures explain the limit and link to model selection. The offload
+suggestion and memory-settings link appear only for llama.cpp GPU failures when
+system-RAM offloading is disabled and the setting can affect the runtime.
+On Apple Silicon, catchable MLX memory failures during loading or generation
+show shared-memory guidance without an offload option. A native runtime abort
+or an OS process termination cannot be handled by this in-process dialog path.
+The **See more…** badge beside **Model unavailable** in the composer reopens the
+dialog without changing the chat layout. Draft messages are retained.
+
+Geist is a local first, privacy first, voice enabled harness for AI agents.
 
 # Roadmap
 1. Create core OODA architecture for AI Assistants using various LLM transformer architectures.
@@ -9,11 +27,12 @@ Geist is a framework for multiple natural language AI Assistants to interact, tr
 4. Create external world adapters for agents to interact with the real world, such as VoIP, Slack, Notion, etc.
 5. Voice and text modality with useful integrations and memory, as well as interaction with your local Obsidian archive. 
 
-# Different Agents
-1. Software engineer agent.  (Reviews PRs, creates design docs, creates code from natural language description of features.)
-2. Virtual assistant agent.  (Summarize and respond to emails, keep track of birthdays, order gifts, do shopping.)
-3. Business manager agent.   (Generate business ideas, affiliate marketing, etc. and provide detailed blueprints for execution.)
-4. Research assistant agent. (Summarize arxiv posts on machine learning / deep learning, provide briefs on latest changes in the field.)
+# Different Use Cases
+1. Virtual Assistance (taking care of docs, tax prep, etc.)
+2. Automatic crons for routine tasks. (coding, etc.)
+3. Coding harness.
+4. Personal doc maintenance (personal knowledge base).
+5. Offloading tasks (having your agent make calls, cancel subscriptions, etc. on your behalf.)
 
 # Core Architecture
 
@@ -111,6 +130,9 @@ Tests and alternate application entry points can inject `DatabaseConfig(provider
     - Downloads are resumable, cancellable, verified before inference, and
       stored beneath the user-writable `GEIST_MODEL_HOME`/data directory.
       `LOCAL_WEIGHTS_DIR` remains available for legacy MLX installations.
+    - Voice (STT/TTS) models can be pre-fetched into the Hugging Face cache with
+      `python scripts/download_models.py --voice_model <name|all>`; list the
+      available names with `--list_voice_models`.
 
 
 client/geist/.env settings:

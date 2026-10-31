@@ -106,6 +106,30 @@ const STATIC_MODELS: AvailableModels = {
     ],
     anthropic: [
       {
+        id: 'claude-fable-5-1',
+        name: 'Claude Fable 5.1',
+        provider: 'anthropic',
+        context_window: 1000000,
+        max_output_tokens: 128000,
+        supports_vision: true,
+        supports_function_calling: true,
+        supports_streaming: true,
+        recommended: true,
+        family: 'claude-fable',
+      },
+      {
+        id: 'claude-mythos-5-1',
+        name: 'Claude Mythos 5.1 (Invite Only)',
+        provider: 'anthropic',
+        context_window: 1000000,
+        max_output_tokens: 128000,
+        supports_vision: true,
+        supports_function_calling: true,
+        supports_streaming: true,
+        recommended: false,
+        family: 'claude-mythos',
+      },
+      {
         id: 'claude-3-opus-20240229',
         name: 'Claude 3 Opus',
         provider: 'anthropic',
@@ -184,7 +208,7 @@ const STATIC_MODELS: AvailableModels = {
     ],
     offline: [
       {
-        id: 'Meta-Llama-3.1-8B-Instruct',
+        id: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
         name: 'Meta Llama 3.1 8B Instruct (Local)',
         provider: 'offline',
         context_window: 131072,

@@ -7,6 +7,7 @@ Tests cover:
 - Groq API
 - Grok (X.AI) API
 """
+
 from unittest.mock import Mock, patch
 
 import httpx
@@ -30,24 +31,20 @@ OPENAI_RESPONSE = {
             "message": {
                 "role": "assistant",
                 "content": "This is a test response from OpenAI.",
-                "refusal": None
+                "refusal": None,
             },
             "logprobs": None,
-            "finish_reason": "stop"
+            "finish_reason": "stop",
         }
     ],
     "usage": {
         "prompt_tokens": 14,
         "completion_tokens": 8,
         "total_tokens": 22,
-        "prompt_tokens_details": {
-            "cached_tokens": 0
-        },
-        "completion_tokens_details": {
-            "reasoning_tokens": 0
-        }
+        "prompt_tokens_details": {"cached_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
     },
-    "system_fingerprint": None
+    "system_fingerprint": None,
 }
 
 ANTHROPIC_RESPONSE = {
@@ -61,23 +58,19 @@ ANTHROPIC_RESPONSE = {
             "message": {
                 "role": "assistant",
                 "content": "This is a test response from Anthropic Claude.",
-                "refusal": None
+                "refusal": None,
             },
             "logprobs": None,
-            "finish_reason": "stop"
+            "finish_reason": "stop",
         }
     ],
     "usage": {
         "prompt_tokens": 14,
         "completion_tokens": 9,
         "total_tokens": 23,
-        "prompt_tokens_details": {
-            "cached_tokens": 0
-        },
-        "completion_tokens_details": {
-            "reasoning_tokens": 0
-        }
-    }
+        "prompt_tokens_details": {"cached_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+    },
 }
 
 GROQ_RESPONSE = {
@@ -91,23 +84,19 @@ GROQ_RESPONSE = {
             "message": {
                 "role": "assistant",
                 "content": "This is a test response from Groq.",
-                "refusal": None
+                "refusal": None,
             },
             "logprobs": None,
-            "finish_reason": "stop"
+            "finish_reason": "stop",
         }
     ],
     "usage": {
         "prompt_tokens": 14,
         "completion_tokens": 7,
         "total_tokens": 21,
-        "prompt_tokens_details": {
-            "cached_tokens": 0
-        },
-        "completion_tokens_details": {
-            "reasoning_tokens": 0
-        }
-    }
+        "prompt_tokens_details": {"cached_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+    },
 }
 
 GROK_RESPONSE = {
@@ -121,23 +110,19 @@ GROK_RESPONSE = {
             "message": {
                 "role": "assistant",
                 "content": "This is a test response from Grok.",
-                "refusal": None
+                "refusal": None,
             },
             "logprobs": None,
-            "finish_reason": "stop"
+            "finish_reason": "stop",
         }
     ],
     "usage": {
         "prompt_tokens": 14,
         "completion_tokens": 7,
         "total_tokens": 21,
-        "prompt_tokens_details": {
-            "cached_tokens": 0
-        },
-        "completion_tokens_details": {
-            "reasoning_tokens": 0
-        }
-    }
+        "prompt_tokens_details": {"cached_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+    },
 }
 
 
@@ -153,7 +138,7 @@ def create_mock_agent_context(include_world_processing: bool = False) -> AgentCo
         top_p=1.0,
         frequency_penalty=0.0,
         presence_penalty=0.0,
-        include_world_processing=include_world_processing
+        include_world_processing=include_world_processing,
     )
     env = load_environment_dictionary()
     context = AgentContext(settings=settings, envs=env)
@@ -167,11 +152,9 @@ class TestOnlineAgentInitialization:
         """Test initialization with OpenAI configuration."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-openai-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
             assert agent.base_url == "https://api.openai.com/v1"
@@ -184,11 +167,11 @@ class TestOnlineAgentInitialization:
         """Test initialization with Anthropic configuration."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-anthropic-key'}):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-anthropic-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.anthropic.com/v1",
-                model="claude-3-5-sonnet-20241022"
+                model="claude-3-5-sonnet-20241022",
             )
 
             assert agent.base_url == "https://api.anthropic.com/v1"
@@ -199,11 +182,11 @@ class TestOnlineAgentInitialization:
         """Test initialization with Groq configuration."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROQ_API_KEY': 'test-groq-key'}):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "test-groq-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.groq.com/openai/v1",
-                model="llama-3.1-70b-versatile"
+                model="llama-3.1-70b-versatile",
             )
 
             assert agent.base_url == "https://api.groq.com/openai/v1"
@@ -214,18 +197,37 @@ class TestOnlineAgentInitialization:
         """Test initialization with Grok (X.AI) configuration."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROK_API_KEY': 'test-grok-key'}):
+        with patch.dict("os.environ", {"GROK_API_KEY": "test-grok-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.x.ai/v1",
-                model="grok-2"
+                agent_context=context, base_url="https://api.x.ai/v1", model="grok-2"
             )
 
             assert agent.base_url == "https://api.x.ai/v1"
             assert agent.model == "grok-2"
             assert agent.api_key == "test-grok-key"
 
-    def test_openrouter_initialization(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "x-ai/grok-4.6",
+            "x-ai/grok-4.7",
+            "anthropic/claude-opus-5.5",
+            "anthropic/claude-sonnet-5.5",
+            "anthropic/claude-haiku-5.5",
+            "openai/gpt-6.1-terra",
+            "openai/gpt-6.1-terra-20261026",
+            "fireworks/ember-1",
+            "qwen/qwen3.8-flash",
+            "deepseek/deepseek-v4.1-flash-1017",
+            "deepseek/deepseek-v4.1-flash",
+            "tencent/hy4-preview",
+            "z-ai/glm-5.3-flash",
+            "stealth/union-alpha",
+            "meta/muse-wonder",
+            "meta/muse-spark-open",
+        ],
+    )
+    def test_openrouter_initialization(self, model_id):
         """Test OpenRouter key discovery and native tool support."""
         context = create_mock_agent_context()
 
@@ -233,11 +235,25 @@ class TestOnlineAgentInitialization:
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="x-ai/grok-4.6",
+                model=model_id,
             )
 
             assert agent.api_key == "test-openrouter-key"
             assert agent.headers["Authorization"] == "Bearer test-openrouter-key"
+            assert agent.supports_native_tool_calling is True
+
+    def test_meta_model_api_initialization(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"MODEL_API_KEY": "test-meta-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.meta.ai/v1",
+                model="muse-spark-1.3",
+            )
+
+            assert agent.api_key == "test-meta-key"
+            assert agent.headers["Authorization"] == "Bearer test-meta-key"
             assert agent.supports_native_tool_calling is True
 
     def test_explicit_api_key(self):
@@ -248,10 +264,37 @@ class TestOnlineAgentInitialization:
             agent_context=context,
             base_url="https://api.openai.com/v1",
             model="gpt-4o",
-            api_key="explicit-api-key"
+            api_key="explicit-api-key",
         )
 
         assert agent.api_key == "explicit-api-key"
+
+    def test_google_gemini_initialization(self):
+        """Test Gemini key discovery and native tool support."""
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                model="gemini-3.8-flash",
+            )
+
+            assert agent.api_key == "test-gemini-key"
+            assert agent.headers["Authorization"] == "Bearer test-gemini-key"
+            assert agent.supports_native_tool_calling is True
+
+    def test_native_gemini_endpoint_does_not_claim_openai_tool_support(self):
+        context = create_mock_agent_context()
+
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model="gemini-3.8-flash",
+            api_key="test-gemini-key",
+        )
+
+        assert agent.supports_native_tool_calling is False
 
     def test_backup_providers_configuration(self):
         """Test initialization with backup providers."""
@@ -261,7 +304,7 @@ class TestOnlineAgentInitialization:
             {
                 "base_url": "https://api.groq.com/openai/v1",
                 "model": "llama-3.1-70b-versatile",
-                "api_key": "backup-groq-key"
+                "api_key": "backup-groq-key",
             }
         ]
 
@@ -270,7 +313,7 @@ class TestOnlineAgentInitialization:
             base_url="https://api.openai.com/v1",
             model="gpt-4o",
             api_key="primary-key",
-            backup_providers=backup_providers
+            backup_providers=backup_providers,
         )
 
         assert len(agent.backup_providers) == 1
@@ -280,14 +323,23 @@ class TestOnlineAgentInitialization:
 class TestOnlineAgentAPIRequests:
     """Test API request handling for different providers."""
 
-    def test_grok_46_applies_openrouter_request_constraints(self):
+    @pytest.mark.parametrize(
+        ("model_id", "reasoning_effort"),
+        [
+            ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
+            ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
+        ],
+    )
+    def test_openrouter_models_apply_request_constraints(self, model_id, reasoning_effort):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="x-ai/grok-4.6",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -298,8 +350,9 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "x-ai/grok-4.6",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 2,
                         "frequency_penalty": 0.5,
                         "presence_penalty": 0.5,
                         "stop": "END",
@@ -308,35 +361,580 @@ class TestOnlineAgentAPIRequests:
                 )
 
                 payload = mock_post.call_args.kwargs["json"]
+                if model_id in {"x-ai/grok-4.7", "meta/muse-wonder"}:
+                    assert "n" not in payload
+                else:
+                    assert payload["n"] == 2
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
                 assert "stop" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["reasoning"] == {"effort": reasoning_effort}
+
+    def test_meta_model_api_removes_unsupported_parameters(self, caplog):
+        context = create_mock_agent_context()
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://api.meta.ai/v1",
+            model="muse-spark-1.3",
+            api_key="test-meta-key",
+        )
+
+        with patch.object(agent.client, "post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = mock_response
+
+            with caplog.at_level("DEBUG", logger="agents.online_agent"):
+                agent._make_request(
+                    {
+                        "model": "muse-spark-1.3",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "n": 2,
+                    }
+                )
+
+            payload = mock_post.call_args.kwargs["json"]
+            assert "frequency_penalty" not in payload
+            assert "presence_penalty" not in payload
+            assert "stop" not in payload
+            assert "n" not in payload
+            assert "Removed unsupported request parameters" in caplog.text
+            assert "frequency_penalty, presence_penalty, stop, n" in caplog.text
+
+    def test_glm53_flash_applies_reasoning_without_dropping_supported_parameters(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="z-ai/glm-5.3-flash",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "z-ai/glm-5.3-flash",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert payload["frequency_penalty"] == 0.5
+                assert payload["presence_penalty"] == 0.5
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "max"}
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"],
+    )
+    def test_claude_55_filters_sampling_defaults_and_keeps_native_tools(self, model_id: str):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "temperature" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
                 assert payload["reasoning"] == {"effort": "high"}
+
+    def test_claude_haiku_55_keeps_optional_reasoning_and_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="anthropic/claude-haiku-5.5",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "anthropic/claude-haiku-5.5",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "reasoning": {"effort": "low"},
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "temperature",
+                        "top_p",
+                        "frequency_penalty",
+                        "presence_penalty",
+                    }
+                    & payload.keys()
+                )
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "low"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    def test_qwen38_flash_omits_unsupported_n_without_forcing_reasoning(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="qwen/qwen3.8-flash",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "qwen/qwen3.8-flash",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "reasoning" not in payload
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_ember1_omits_unsupported_n_and_preserves_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="fireworks/ember-1",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "fireworks/ember-1",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "reasoning" not in payload
+                assert payload["temperature"] == 0.7
+                assert payload["top_p"] == 0.9
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id,reasoning",
+        [
+            ("openai/gpt-6.1-terra", None),
+            ("openai/gpt-6.1-terra-20261026", {"effort": "low"}),
+        ],
+    )
+    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(
+        self, model_id, reasoning
+    ):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                request = {
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "Test prompt"}],
+                    "n": 1,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "frequency_penalty": 0.2,
+                    "presence_penalty": 0.1,
+                    "stop": "END",
+                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    "tool_choice": "auto",
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": "result", "schema": {"type": "object"}},
+                    },
+                }
+                if reasoning is not None:
+                    request["reasoning"] = reasoning
+
+                agent._make_request(request)
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "temperature",
+                        "top_p",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "stop",
+                    }
+                    & payload.keys()
+                )
+                if reasoning is None:
+                    assert "reasoning" not in payload
+                else:
+                    assert payload["reasoning"] == reasoning
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    def test_muse_spark_open_applies_reasoning_and_preserves_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="meta/muse-spark-open",
+            )
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+
+            with patch.object(agent.client, "post", return_value=mock_response) as mock_post:
+                agent._make_request(
+                    {
+                        "model": "meta/muse-spark-open",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 1.0
+                assert payload["top_p"] == 1.0
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "medium"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"],
+    )
+    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 0.7
+                assert "reasoning" not in payload
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+
+    def test_inferred_self_hosted_model_keeps_request_parameters_unchanged(self):
+        payload = {
+            "model": "myorg/qwen3.8-max-tuned",
+            "messages": [{"role": "user", "content": "Test prompt"}],
+            "n": 2,
+            "temperature": 0.2,
+            "top_p": 0.8,
+            "frequency_penalty": 0.1,
+            "presence_penalty": 0.1,
+        }
+
+        constrained = OnlineAgent._apply_model_request_requirements(payload)
+
+        assert constrained == payload
+
+    def test_routing_only_gemini_sibling_keeps_request_parameters_unchanged(self):
+        payload = {
+            "model": "gemini-3.8-flash-lite",
+            "messages": [{"role": "user", "content": "Test prompt"}],
+            "n": 1,
+            "temperature": 0.2,
+            "top_p": 0.8,
+        }
+
+        constrained = OnlineAgent._apply_model_request_requirements(payload)
+
+        assert constrained == payload
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "gemini-3.8-flash",
+            "models/gemini-3.8-flash",
+            "google/gemini-3.8-flash",
+            "models/gemini-3.8-flash-latest",
+            "google/gemini-3.8-flash-preview",
+        ],
+    )
+    def test_gemini38_flash_omits_deprecated_sampling_parameters(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "temperature" not in payload
+                assert "top_p" not in payload
+                assert payload["frequency_penalty"] == 0.0
+                assert payload["presence_penalty"] == 0.0
+                assert payload["stop"] == "END"
+
+    def test_hy4_preview_omits_unsupported_defaults_and_keeps_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="tencent/hy4-preview",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "tencent/hy4-preview",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "temperature": 0.9,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert "reasoning" not in payload
+                assert payload["temperature"] == 0.9
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    def test_union_alpha_completion_uses_openrouter_key_and_supported_parameters(self):
+        context = create_mock_agent_context()
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="stealth/union-alpha",
+            )
+
+        with patch.object(agent.client, "post") as mock_post:
+            response = Mock(status_code=200)
+            response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = response
+            result = agent.complete_text(
+                prompt="Hello",
+                max_tokens=100,
+                n=1,
+                temperature=0.7,
+                top_p=0.9,
+                frequency_penalty=0.5,
+                presence_penalty=0.5,
+                stop="END",
+            )
+
+        assert result.choices[0].message.content == "This is a test response from OpenAI."
+        assert mock_post.call_args.args[0] == "https://openrouter.ai/api/v1/chat/completions"
+        assert (
+            mock_post.call_args.kwargs["headers"]["Authorization"] == "Bearer test-openrouter-key"
+        )
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == "stealth/union-alpha"
+        assert payload["max_tokens"] == 100
+        assert payload["temperature"] == 0.7
+        assert payload["top_p"] == 0.9
+        assert (
+            not {"n", "frequency_penalty", "presence_penalty", "stop", "reasoning"} & payload.keys()
+        )
 
     def test_openai_complete_text(self):
         """Test complete_text with OpenAI API."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-openai-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-openai-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
             # Mock the HTTP client
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = OPENAI_RESPONSE
                 mock_post.return_value = mock_response
 
-                result = agent.complete_text(
-                    prompt="Test prompt",
-                    max_tokens=100,
-                    temperature=0.7
-                )
+                result = agent.complete_text(prompt="Test prompt", max_tokens=100, temperature=0.7)
 
                 # Verify the request was made
                 assert mock_post.called
@@ -344,11 +942,11 @@ class TestOnlineAgentAPIRequests:
                 assert "https://api.openai.com/v1/chat/completions" in call_args[0][0]
 
                 # Verify the payload
-                payload = call_args[1]['json']
-                assert payload['model'] == "gpt-4o"
-                assert payload['messages'][-1]['content'] == "Test prompt"
-                assert payload['max_tokens'] == 100
-                assert payload['temperature'] == 0.7
+                payload = call_args[1]["json"]
+                assert payload["model"] == "gpt-4o"
+                assert payload["messages"][-1]["content"] == "Test prompt"
+                assert payload["max_tokens"] == 100
+                assert payload["temperature"] == 0.7
 
                 # Verify the response
                 assert result.choices[0].message.content == "This is a test response from OpenAI."
@@ -357,23 +955,21 @@ class TestOnlineAgentAPIRequests:
         """Test complete_text with Anthropic API."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-anthropic-key'}):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-anthropic-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.anthropic.com/v1",
-                model="claude-3-5-sonnet-20241022"
+                model="claude-3-5-sonnet-20241022",
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = ANTHROPIC_RESPONSE
                 mock_post.return_value = mock_response
 
                 result = agent.complete_text(
-                    prompt="Test prompt for Claude",
-                    max_tokens=150,
-                    temperature=0.5
+                    prompt="Test prompt for Claude", max_tokens=150, temperature=0.5
                 )
 
                 # Verify the request
@@ -381,36 +977,37 @@ class TestOnlineAgentAPIRequests:
                 call_args = mock_post.call_args
 
                 # Verify the payload
-                payload = call_args[1]['json']
-                assert payload['model'] == "claude-3-5-sonnet-20241022"
-                assert payload['messages'][-1]['content'] == "Test prompt for Claude"
-                assert payload['max_tokens'] == 150
-                assert payload['temperature'] == 0.5
+                payload = call_args[1]["json"]
+                assert payload["model"] == "claude-3-5-sonnet-20241022"
+                assert payload["messages"][-1]["content"] == "Test prompt for Claude"
+                assert payload["max_tokens"] == 150
+                assert payload["temperature"] == 0.5
 
                 # Verify the response
-                assert result.choices[0].message.content == "This is a test response from Anthropic Claude."
+                assert (
+                    result.choices[0].message.content
+                    == "This is a test response from Anthropic Claude."
+                )
 
     def test_groq_complete_text(self):
         """Test complete_text with Groq API."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROQ_API_KEY': 'test-groq-key'}):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "test-groq-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.groq.com/openai/v1",
-                model="llama-3.1-70b-versatile"
+                model="llama-3.1-70b-versatile",
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = GROQ_RESPONSE
                 mock_post.return_value = mock_response
 
                 result = agent.complete_text(
-                    prompt="Test prompt for Groq",
-                    max_tokens=200,
-                    temperature=0.8
+                    prompt="Test prompt for Groq", max_tokens=200, temperature=0.8
                 )
 
                 # Verify the request
@@ -419,10 +1016,10 @@ class TestOnlineAgentAPIRequests:
                 assert "https://api.groq.com/openai/v1/chat/completions" in call_args[0][0]
 
                 # Verify the payload
-                payload = call_args[1]['json']
-                assert payload['model'] == "llama-3.1-70b-versatile"
-                assert payload['messages'][-1]['content'] == "Test prompt for Groq"
-                assert payload['max_tokens'] == 200
+                payload = call_args[1]["json"]
+                assert payload["model"] == "llama-3.1-70b-versatile"
+                assert payload["messages"][-1]["content"] == "Test prompt for Groq"
+                assert payload["max_tokens"] == 200
 
                 # Verify the response
                 assert result.choices[0].message.content == "This is a test response from Groq."
@@ -431,23 +1028,19 @@ class TestOnlineAgentAPIRequests:
         """Test complete_text with Grok (X.AI) API."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROK_API_KEY': 'test-grok-key'}):
+        with patch.dict("os.environ", {"GROK_API_KEY": "test-grok-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.x.ai/v1",
-                model="grok-2"
+                agent_context=context, base_url="https://api.x.ai/v1", model="grok-2"
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = GROK_RESPONSE
                 mock_post.return_value = mock_response
 
                 result = agent.complete_text(
-                    prompt="Test prompt for Grok",
-                    max_tokens=120,
-                    temperature=0.9
+                    prompt="Test prompt for Grok", max_tokens=120, temperature=0.9
                 )
 
                 # Verify the request
@@ -456,10 +1049,10 @@ class TestOnlineAgentAPIRequests:
                 assert "https://api.x.ai/v1/chat/completions" in call_args[0][0]
 
                 # Verify the payload
-                payload = call_args[1]['json']
-                assert payload['model'] == "grok-2"
-                assert payload['messages'][-1]['content'] == "Test prompt for Grok"
-                assert payload['max_tokens'] == 120
+                payload = call_args[1]["json"]
+                assert payload["model"] == "grok-2"
+                assert payload["messages"][-1]["content"] == "Test prompt for Grok"
+                assert payload["max_tokens"] == 120
 
                 # Verify the response
                 assert result.choices[0].message.content == "This is a test response from Grok."
@@ -468,14 +1061,12 @@ class TestOnlineAgentAPIRequests:
         """Test that system prompt is correctly included in the request."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = OPENAI_RESPONSE
@@ -484,16 +1075,16 @@ class TestOnlineAgentAPIRequests:
                 agent.complete_text(
                     prompt="User message",
                     system_prompt="You are a helpful assistant.",
-                    max_tokens=50
+                    max_tokens=50,
                 )
 
                 # Verify system prompt is in the payload
-                payload = mock_post.call_args[1]['json']
-                assert len(payload['messages']) == 2
-                assert payload['messages'][0]['role'] == "system"
-                assert payload['messages'][0]['content'] == "You are a helpful assistant."
-                assert payload['messages'][1]['role'] == "user"
-                assert payload['messages'][1]['content'] == "User message"
+                payload = mock_post.call_args[1]["json"]
+                assert len(payload["messages"]) == 2
+                assert payload["messages"][0]["role"] == "system"
+                assert payload["messages"][0]["content"] == "You are a helpful assistant."
+                assert payload["messages"][1]["role"] == "user"
+                assert payload["messages"][1]["content"] == "User message"
 
 
 class TestOnlineAgentRetryLogic:
@@ -503,15 +1094,15 @@ class TestOnlineAgentRetryLogic:
         """Test that the agent retries on request failures."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.openai.com/v1",
                 model="gpt-4o",
-                max_retries=3
+                max_retries=3,
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 # First two attempts fail, third succeeds
                 mock_response_fail = Mock()
                 mock_response_fail.status_code = 500
@@ -524,7 +1115,7 @@ class TestOnlineAgentRetryLogic:
                 mock_post.side_effect = [
                     mock_response_fail,
                     mock_response_fail,
-                    mock_response_success
+                    mock_response_success,
                 ]
 
                 result = agent.complete_text(prompt="Test prompt", max_tokens=50)
@@ -539,15 +1130,15 @@ class TestOnlineAgentRetryLogic:
         """Test that an exception is raised when max retries is exceeded."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.openai.com/v1",
                 model="gpt-4o",
-                max_retries=2
+                max_retries=2,
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 500
                 mock_response.text = "Internal Server Error"
@@ -567,20 +1158,20 @@ class TestOnlineAgentRetryLogic:
             {
                 "base_url": "https://api.groq.com/openai/v1",
                 "model": "llama-3.1-70b-versatile",
-                "api_key": "backup-key"
+                "api_key": "backup-key",
             }
         ]
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.openai.com/v1",
                 model="gpt-4o",
                 backup_providers=backup_providers,
-                max_retries=1
+                max_retries=1,
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 # Primary provider fails with 500
                 mock_response_fail = Mock()
                 mock_response_fail.status_code = 500
@@ -591,10 +1182,7 @@ class TestOnlineAgentRetryLogic:
                 mock_response_success.status_code = 200
                 mock_response_success.json.return_value = GROQ_RESPONSE
 
-                mock_post.side_effect = [
-                    mock_response_fail,
-                    mock_response_success
-                ]
+                mock_post.side_effect = [mock_response_fail, mock_response_success]
 
                 agent.complete_text(prompt="Test prompt", max_tokens=50)
 
@@ -605,7 +1193,18 @@ class TestOnlineAgentRetryLogic:
                 second_call_args = mock_post.call_args_list[1]
                 assert "groq.com" in second_call_args[0][0]
 
-    def test_grok_46_constraints_do_not_leak_to_backup_provider(self):
+    @pytest.mark.parametrize(
+        ("model_id", "reasoning_effort"),
+        [
+            ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
+            ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
+        ],
+    )
+    def test_openrouter_constraints_do_not_leak_to_backup_provider(
+        self, model_id, reasoning_effort
+    ):
         """Apply model-specific constraints independently for backup models."""
         context = create_mock_agent_context()
         backup_providers = [
@@ -620,34 +1219,38 @@ class TestOnlineAgentRetryLogic:
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="x-ai/grok-4.6",
+                model=model_id,
                 backup_providers=backup_providers,
                 max_retries=1,
             )
 
             with patch.object(agent.client, "post") as mock_post:
-                mock_response_fail = Mock()
-                mock_response_fail.status_code = 500
-                mock_response_fail.text = "Internal Server Error"
-                mock_response_success = Mock()
-                mock_response_success.status_code = 200
-                mock_response_success.json.return_value = GROQ_RESPONSE
-                mock_post.side_effect = [mock_response_fail, mock_response_success]
+                primary_failure = Mock(status_code=500, text="Internal Server Error")
+                backup_success = Mock(status_code=200)
+                backup_success.json.return_value = GROQ_RESPONSE
+                mock_post.side_effect = [primary_failure, backup_success]
 
                 agent._make_request(
                     {
-                        "model": "x-ai/grok-4.6",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
                     }
                 )
 
                 primary_payload = mock_post.call_args_list[0].kwargs["json"]
                 backup_payload = mock_post.call_args_list[1].kwargs["json"]
-                assert primary_payload["reasoning"] == {"effort": "high"}
+                assert primary_payload["reasoning"] == {"effort": reasoning_effort}
                 assert "frequency_penalty" not in primary_payload
-                assert "reasoning" not in backup_payload
+                assert "presence_penalty" not in primary_payload
+                assert "stop" not in primary_payload
+                assert backup_payload["model"] == "llama-3.1-70b-versatile"
                 assert backup_payload["frequency_penalty"] == 0.5
+                assert backup_payload["presence_penalty"] == 0.5
+                assert backup_payload["stop"] == "END"
+                assert "reasoning" not in backup_payload
 
     def test_request_error_with_backup(self):
         """Test backup provider is used on request errors."""
@@ -657,20 +1260,20 @@ class TestOnlineAgentRetryLogic:
             {
                 "base_url": "https://api.groq.com/openai/v1",
                 "model": "llama-3.1-70b-versatile",
-                "api_key": "backup-key"
+                "api_key": "backup-key",
             }
         ]
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.openai.com/v1",
                 model="gpt-4o",
                 backup_providers=backup_providers,
-                max_retries=2
+                max_retries=2,
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 # Primary provider has network error
                 mock_response_success = Mock()
                 mock_response_success.status_code = 200
@@ -680,7 +1283,7 @@ class TestOnlineAgentRetryLogic:
                     httpx.RequestError("Connection failed"),
                     httpx.RequestError("Connection failed"),
                     # Backup provider succeeds
-                    mock_response_success
+                    mock_response_success,
                 ]
 
                 agent.complete_text(prompt="Test prompt", max_tokens=50)
@@ -696,20 +1299,16 @@ class TestOnlineAgentEdgeCases:
         """Test that URLs are normalized correctly."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             # URL without trailing slash
             agent1 = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
             assert agent1.base_url == "https://api.openai.com/v1"
 
             # URL with trailing slash
             agent2 = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1/",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1/", model="gpt-4o"
             )
             assert agent2.base_url == "https://api.openai.com/v1"
 
@@ -717,42 +1316,34 @@ class TestOnlineAgentEdgeCases:
         """Test that stop sequences are included in the request."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = OPENAI_RESPONSE
                 mock_post.return_value = mock_response
 
-                agent.complete_text(
-                    prompt="Test prompt",
-                    max_tokens=50,
-                    stop="END"
-                )
+                agent.complete_text(prompt="Test prompt", max_tokens=50, stop="END")
 
                 # Verify stop sequence is in payload
-                payload = mock_post.call_args[1]['json']
-                assert 'stop' in payload
-                assert payload['stop'] == "END"
+                payload = mock_post.call_args[1]["json"]
+                assert "stop" in payload
+                assert payload["stop"] == "END"
 
     def test_all_generation_parameters(self):
         """Test that all generation parameters are correctly passed."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = OPENAI_RESPONSE
@@ -766,29 +1357,47 @@ class TestOnlineAgentEdgeCases:
                     top_p=0.95,
                     frequency_penalty=0.5,
                     presence_penalty=0.3,
-                    stop="STOP"
+                    stop="STOP",
                 )
 
                 # Verify all parameters are in payload
-                payload = mock_post.call_args[1]['json']
-                assert payload['max_tokens'] == 256
-                assert payload['n'] == 2
-                assert payload['temperature'] == 0.75
-                assert payload['top_p'] == 0.95
-                assert payload['frequency_penalty'] == 0.5
-                assert payload['presence_penalty'] == 0.3
-                assert payload['stop'] == "STOP"
+                payload = mock_post.call_args[1]["json"]
+                assert payload["max_tokens"] == 256
+                assert payload["n"] == 2
+                assert payload["temperature"] == 0.75
+                assert payload["top_p"] == 0.95
+                assert payload["frequency_penalty"] == 0.5
+                assert payload["presence_penalty"] == 0.3
+                assert payload["stop"] == "STOP"
 
 
 class TestOnlineAgentMultiProvider:
     """Test scenarios involving multiple providers."""
 
-    @pytest.mark.parametrize("provider,base_url,model,expected_content", [
-        ("openai", "https://api.openai.com/v1", "gpt-4o", "This is a test response from OpenAI."),
-        ("anthropic", "https://api.anthropic.com/v1", "claude-3-5-sonnet-20241022", "This is a test response from Anthropic Claude."),
-        ("groq", "https://api.groq.com/openai/v1", "llama-3.1-70b-versatile", "This is a test response from Groq."),
-        ("grok", "https://api.x.ai/v1", "grok-2", "This is a test response from Grok."),
-    ])
+    @pytest.mark.parametrize(
+        "provider,base_url,model,expected_content",
+        [
+            (
+                "openai",
+                "https://api.openai.com/v1",
+                "gpt-4o",
+                "This is a test response from OpenAI.",
+            ),
+            (
+                "anthropic",
+                "https://api.anthropic.com/v1",
+                "claude-3-5-sonnet-20241022",
+                "This is a test response from Anthropic Claude.",
+            ),
+            (
+                "groq",
+                "https://api.groq.com/openai/v1",
+                "llama-3.1-70b-versatile",
+                "This is a test response from Groq.",
+            ),
+            ("grok", "https://api.x.ai/v1", "grok-2", "This is a test response from Grok."),
+        ],
+    )
     def test_multiple_providers(self, provider, base_url, model, expected_content):
         """Test that all providers work correctly with parameterized tests."""
         context = create_mock_agent_context()
@@ -798,28 +1407,21 @@ class TestOnlineAgentMultiProvider:
             "openai": (OPENAI_RESPONSE, "OPENAI_API_KEY"),
             "anthropic": (ANTHROPIC_RESPONSE, "ANTHROPIC_API_KEY"),
             "groq": (GROQ_RESPONSE, "GROQ_API_KEY"),
-            "grok": (GROK_RESPONSE, "GROK_API_KEY")
+            "grok": (GROK_RESPONSE, "GROK_API_KEY"),
         }
 
         response_data, env_var = response_map[provider]
 
-        with patch.dict('os.environ', {env_var: f'test-{provider}-key'}):
-            agent = OnlineAgent(
-                agent_context=context,
-                base_url=base_url,
-                model=model
-            )
+        with patch.dict("os.environ", {env_var: f"test-{provider}-key"}):
+            agent = OnlineAgent(agent_context=context, base_url=base_url, model=model)
 
-            with patch.object(agent.client, 'post') as mock_post:
+            with patch.object(agent.client, "post") as mock_post:
                 mock_response = Mock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = response_data
                 mock_post.return_value = mock_response
 
-                result = agent.complete_text(
-                    prompt=f"Test prompt for {provider}",
-                    max_tokens=100
-                )
+                result = agent.complete_text(prompt=f"Test prompt for {provider}", max_tokens=100)
 
                 # Verify the request was made to the correct endpoint
                 assert mock_post.called
@@ -837,11 +1439,9 @@ class TestOnlineAgentAPIKeyRetrieval:
         """Test OpenAI API key is retrieved from environment."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'env-openai-key'}, clear=True):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "env-openai-key"}, clear=True):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.openai.com/v1",
-                model="gpt-4o"
+                agent_context=context, base_url="https://api.openai.com/v1", model="gpt-4o"
             )
 
             assert agent.api_key == "env-openai-key"
@@ -850,11 +1450,11 @@ class TestOnlineAgentAPIKeyRetrieval:
         """Test Anthropic API key is retrieved from environment."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'env-anthropic-key'}, clear=True):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-anthropic-key"}, clear=True):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.anthropic.com/v1",
-                model="claude-3-5-sonnet-20241022"
+                model="claude-3-5-sonnet-20241022",
             )
 
             assert agent.api_key == "env-anthropic-key"
@@ -863,11 +1463,11 @@ class TestOnlineAgentAPIKeyRetrieval:
         """Test Groq API key is retrieved from environment."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROQ_API_KEY': 'env-groq-key'}, clear=True):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "env-groq-key"}, clear=True):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.groq.com/openai/v1",
-                model="llama-3.1-70b-versatile"
+                model="llama-3.1-70b-versatile",
             )
 
             assert agent.api_key == "env-groq-key"
@@ -876,24 +1476,34 @@ class TestOnlineAgentAPIKeyRetrieval:
         """Test Grok API key is retrieved from environment."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'GROK_API_KEY': 'env-grok-key'}, clear=True):
+        with patch.dict("os.environ", {"GROK_API_KEY": "env-grok-key"}, clear=True):
             agent = OnlineAgent(
-                agent_context=context,
-                base_url="https://api.x.ai/v1",
-                model="grok-2"
+                agent_context=context, base_url="https://api.x.ai/v1", model="grok-2"
             )
 
             assert agent.api_key == "env-grok-key"
+
+    def test_meta_model_api_key_from_env(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"MODEL_API_KEY": "env-meta-key"}, clear=True):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://api.meta.ai/v1",
+                model="muse-spark-1.3",
+            )
+
+            assert agent.api_key == "env-meta-key"
 
     def test_custom_provider_requires_explicit_api_key(self):
         """Test custom endpoints do not use a generic API_KEY fallback."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
+        with patch.dict("os.environ", {"API_KEY": "generic-api-key"}, clear=True):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.custom-provider.com/v1",
-                model="custom-model"
+                model="custom-model",
             )
 
             assert agent.api_key is None
@@ -902,12 +1512,12 @@ class TestOnlineAgentAPIKeyRetrieval:
         """Test custom endpoints can still receive an explicit API key."""
         context = create_mock_agent_context()
 
-        with patch.dict('os.environ', {'API_KEY': 'generic-api-key'}, clear=True):
+        with patch.dict("os.environ", {"API_KEY": "generic-api-key"}, clear=True):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://api.custom-provider.com/v1",
                 model="custom-model",
-                api_key="explicit-key"
+                api_key="explicit-key",
             )
 
             assert agent.api_key == "explicit-key"

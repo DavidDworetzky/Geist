@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
@@ -16,6 +17,8 @@ from agents.models.tool_calling import (
     ToolExecutionOutput,
 )
 from agents.online_agent import NativeProviderError, OnlineAgent
+from app.services.chat_orchestrator import ChatOrchestrator
+from app.services.tool_registry import ToolRegistry
 
 
 class SearchArguments(BaseModel):
@@ -98,8 +101,201 @@ class SequencedOpenAIClient(OpenAIClient):
         return next(self.responses)
 
 
-def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
+def test_opus_reasoning_survives_tool_continuation_history_and_checkpoint():
+    model = "anthropic/claude-opus-5.5"
+    details = [
+        {
+            "type": "reasoning.text",
+            "text": "Private ",
+            "index": 0,
+            "id": "reasoning-1",
+            "format": "anthropic-claude-v1",
+            "signature": None,
+        },
+        {"type": "reasoning.text", "text": "thought", "index": 0},
+        {"type": "reasoning.text", "text": "", "signature": "signed-state", "index": 0},
+        {
+            "type": "reasoning.encrypted",
+            "data": "opaque-state",
+            "index": 1,
+            "id": "reasoning-2",
+            "format": "anthropic-claude-v1",
+        },
+    ]
     provider_name = OnlineAgent._provider_tool_name("web.search")
+    chunks = [
+        {"reasoning_details": [details[0]]},
+        {"reasoning_details": details[1:3]},
+        {
+            "reasoning_details": [details[3]],
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": "provider-call",
+                    "function": {"name": provider_name, "arguments": '{"query":"news"}'},
+                }
+            ],
+        },
+    ]
+    first = FakeStreamResponse(
+        [
+            *("data: " + json.dumps({"choices": [{"delta": delta}]}) for delta in chunks),
+            'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+            "data: [DONE]",
+        ]
+    )
+    answer = FakeStreamResponse(
+        [
+            'data: {"choices":[{"delta":{"content":"Found it"},"finish_reason":"stop"}]}',
+            "data: [DONE]",
+        ]
+    )
+    agent = OnlineAgent(context(), "https://openrouter.ai/api/v1", model, api_key="test")
+    agent.client.close()
+    client = SequencedOpenAIClient([first, answer, answer])
+    agent.client = client
+    writes = []
+    calls = []
+
+    def lookup(tool_context, arguments):
+        calls.append(arguments.query)
+        return ToolExecutionOutput(content="Search result")
+
+    definition = tool_definition()
+    definition.handler = lookup
+    registry = ToolRegistry()
+    registry.register(definition)
+
+    def write_history(**kwargs):
+        writes.append(kwargs)
+        return SimpleNamespace(chat_session_id=42)
+
+    orchestrator = ChatOrchestrator(registry, history_writer=write_history)
+    events = list(
+        orchestrator.stream(
+            backend=agent,
+            prompt="Find news",
+            workspace_id=1,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt=None,
+        )
+    )
+    assert calls == ["news"]
+    continuation = client.requests[1]["json"]["messages"]
+    assistant = next(message for message in continuation if message["role"] == "assistant")
+    assert assistant["reasoning_details"] == details
+    assert "reasoning_model" not in assistant
+    assert "reasoning_endpoint" not in assistant
+    assert assistant["content"] is None
+    assert continuation[-1]["content"] == "Search result"
+    assert continuation[-1]["tool_call_id"] == assistant["tool_calls"][0]["id"]
+    assert continuation[-1]["tool_call_id"] != "provider-call"
+    assert [e.payload["text"] for e in events if e.event == "delta"] == ["Found it"]
+    assert next(e.payload for e in events if e.event == "final").message == ["Found it"]
+
+    saved = json.loads(json.dumps(writes[0]["transcript"]))
+    history = orchestrator._history_messages([{"transcript": saved, "status": "completed"}])
+    assert all(not message.reasoning_details for message in history)
+    restored = [ChatMessage.from_dict(item) for item in saved]
+    checkpoint = orchestrator._checkpoint_messages(restored)
+    restored = [orchestrator._checkpoint_message(item) for item in checkpoint]
+    restored.append(ChatMessage(role="user", content="Continue"))
+    list(agent.stream_model_turn(restored, [definition], ModelRequestConfig()))
+    replayed = next(m for m in client.requests[2]["json"]["messages"] if m["role"] == "assistant")
+    assert replayed["reasoning_details"] == details
+
+
+@pytest.mark.parametrize("target_model", [None, "other-model", "anthropic/claude-opus-5.5"])
+@pytest.mark.parametrize(
+    "target_endpoint",
+    [
+        None,
+        "https://backup.example/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ],
+)
+def test_reasoning_replay_is_source_scoped_and_does_not_mutate_history(target_model, target_endpoint):
+    model = "anthropic/claude-opus-5.5"
+    endpoint = "https://openrouter.ai/api/v1/chat/completions"
+    saved = {
+        "role": "assistant",
+        "content": None,
+        "reasoning_model": model,
+        "reasoning_endpoint": endpoint,
+        "reasoning_details": [{"type": "reasoning.encrypted", "data": "opaque"}],
+    }
+    message = ChatMessage.from_dict(saved)
+    payload = message.to_openai(reasoning_model=target_model, reasoning_endpoint=target_endpoint)
+    if target_model == model and target_endpoint == endpoint:
+        assert payload["reasoning_details"] == saved["reasoning_details"]
+        payload["reasoning_details"][0]["data"] = "modified"
+    else:
+        assert "reasoning_details" not in payload
+    serialized = message.to_dict()
+    serialized["reasoning_details"][0]["data"] = "modified"
+    assert message.reasoning_details == saved["reasoning_details"]
+    message.reasoning_details[0]["data"] = "changed in memory"
+    assert saved["reasoning_details"][0]["data"] == "opaque"
+
+
+def test_legacy_and_non_assistant_messages_do_not_send_reasoning():
+    legacy = ChatMessage.from_dict({"role": "assistant", "content": "Old answer"})
+    assert legacy.to_openai(reasoning_model="opus") == legacy.to_dict()
+    for role in ("user", "tool", "system"):
+        message = ChatMessage(
+            role=role,
+            content="text",
+            reasoning_model="opus",
+            reasoning_details=[{"type": "reasoning.text", "text": "hidden"}],
+        )
+        assert "reasoning_details" not in message.to_openai(reasoning_model="opus")
+        assert "reasoning_details" not in message.to_dict()
+
+
+def test_reasoning_from_interrupted_attempt_is_not_replayed():
+    class InterruptedResponse(FakeStreamResponse):
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"discard"}]}}]}'
+            raise httpx.ReadError("connection dropped")
+
+    success = FakeStreamResponse(
+        [
+            'data: {"choices":[{"delta":{"content":"recovered"},"finish_reason":"stop"}]}',
+            "data: [DONE]",
+        ]
+    )
+    agent = OnlineAgent(
+        context(),
+        "https://openrouter.ai/api/v1",
+        "anthropic/claude-opus-5.5",
+        api_key="test",
+        max_retries=2,
+    )
+    agent.client.close()
+    client = SequencedOpenAIClient([InterruptedResponse([]), success])
+    agent.client = client
+    events = list(
+        agent.stream_model_turn(
+            [ChatMessage(role="user", content="Hello")], [], ModelRequestConfig()
+        )
+    )
+    assert len(client.requests) == 2
+    assert events[-1].turn.reasoning_details == []
+    assert events[-1].turn.reasoning_model is None
+    assert events[-1].turn.reasoning_endpoint is None
+
+
+def _run_streamed_tool_call(
+    second_id=None, *, model="gpt-test", endpoint="https://api.openai.com/v1"
+):
+    provider_name = OnlineAgent._provider_tool_name("web.search")
+    second_tool_call = {
+        "index": 0,
+        "function": {"arguments": ' news"}'},
+    }
+    if second_id is not None:
+        second_tool_call["id"] = second_id
     lines = [
         "data: "
         + json.dumps(
@@ -127,9 +323,7 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
             {
                 "choices": [
                     {
-                        "delta": {
-                            "tool_calls": [{"index": 0, "function": {"arguments": ' news"}'}}]
-                        },
+                        "delta": {"tool_calls": [second_tool_call]},
                         "finish_reason": "tool_calls",
                     }
                 ]
@@ -137,7 +331,7 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
         ),
         "data: [DONE]",
     ]
-    agent = OnlineAgent(context(), "https://api.openai.com/v1", "gpt-test", api_key="key")
+    agent = OnlineAgent(context(), endpoint, model, api_key="key")
     agent.client.close()
     agent.client = OpenAIClient(lines)
 
@@ -148,8 +342,12 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
             ModelRequestConfig(max_tokens=256),
         )
     )
+    return events[-1].turn, agent, provider_name
 
-    turn = events[-1].turn
+
+def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
+    turn, agent, provider_name = _run_streamed_tool_call()
+
     assert turn.tool_calls[0].id == "call_1"
     assert turn.tool_calls[0].name == "web.search"
     assert turn.tool_calls[0].arguments == {"query": "today news"}
@@ -160,6 +358,39 @@ def test_openai_stream_reassembles_tool_arguments_and_sends_schema():
     assert payload["tools"][0]["function"]["name"] == provider_name
     assert provider_name != "web.search"
     assert payload["tools"][0]["function"]["parameters"]["required"] == ["query"]
+
+
+def test_union_alpha_stream_filters_defaults_and_preserves_automatic_tool_calling():
+    turn, agent, provider_name = _run_streamed_tool_call(
+        model="stealth/union-alpha", endpoint="https://openrouter.ai/api/v1"
+    )
+
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "today news"}
+    assert turn.finish_reason == "tool_calls"
+    assert agent.client.request["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    payload = agent.client.request["json"]
+    assert payload["model"] == "stealth/union-alpha"
+    assert payload["stream"] is True
+    assert payload["tool_choice"] == "auto"
+    assert payload["tools"][0]["function"]["name"] == provider_name
+    assert payload["temperature"] == 1.0
+    assert payload["top_p"] == 1.0
+    assert not {"n", "frequency_penalty", "presence_penalty", "stop", "reasoning"} & payload.keys()
+
+
+def test_openai_stream_accepts_repeated_tool_call_id():
+    turn, _agent, _provider_name = _run_streamed_tool_call("call_1")
+
+    assert turn.tool_calls[0].id == "call_1"
+
+
+def test_openai_stream_keeps_first_conflicting_tool_call_id(caplog):
+    with caplog.at_level("WARNING", logger="agents.online_agent"):
+        turn, _agent, _provider_name = _run_streamed_tool_call("call_2")
+
+    assert turn.tool_calls[0].id == "call_1"
+    assert "Ignoring conflicting tool-call ID" in caplog.text
 
 
 def test_native_turn_retries_before_any_text_is_emitted():
@@ -408,6 +639,7 @@ def test_native_tool_capability_is_known_provider_or_explicit_override():
 class LocalRunner:
     def __init__(self):
         self.messages = None
+        self.generation_config = None
 
     def complete(self, system_prompt, user_prompt, generation_config):
         return [
@@ -417,6 +649,7 @@ class LocalRunner:
 
     def complete_messages(self, messages, generation_config):
         self.messages = messages
+        self.generation_config = generation_config
         return [
             {"role": "user", "content": messages[-1]["content"]},
             {"role": "assistant", "content": "local answer"},
@@ -499,3 +732,17 @@ def test_local_runner_preserves_structured_conversation_roles():
         {"role": "assistant", "content": "I will remember cobalt."},
         {"role": "user", "content": "What should you remember?"},
     ]
+
+
+def test_local_runner_forwards_all_stop_sequences():
+    agent = local_agent_without_loading_model()
+
+    list(
+        agent.stream_model_turn(
+            [ChatMessage(role="user", content="hello")],
+            [],
+            ModelRequestConfig(stop=["STOP", "END"]),
+        )
+    )
+
+    assert agent.runner.generation_config.stop == ["STOP", "END"]

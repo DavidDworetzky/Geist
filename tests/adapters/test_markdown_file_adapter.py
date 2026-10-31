@@ -209,7 +209,7 @@ class TestMarkdownFileAdapter:
 
         result = self.adapter.get_files(file_root=custom_dir)
 
-        assert result == ["custom.md"]
+        assert result == ["custom/custom.md"]
 
     def test_get_files_nonexistent_directory(self):
         """Test get_files with non-existent directory"""
