@@ -15,27 +15,28 @@ branch_labels = None
 depends_on = None
 
 
+def _add_column(column: sa.Column) -> None:
+    columns = {item["name"] for item in sa.inspect(op.get_bind()).get_columns("mcp_server")}
+    if column.name not in columns:
+        op.add_column("mcp_server", column)
+
+
 def upgrade():
-    op.add_column("mcp_server", sa.Column("working_directory", sa.String(), nullable=True))
-    op.add_column(
-        "mcp_server",
+    _add_column(sa.Column("working_directory", sa.String(), nullable=True))
+    _add_column(
         sa.Column("connector_kind", sa.String(), nullable=False, server_default="custom"),
     )
-    op.add_column("mcp_server", sa.Column("account_label", sa.String(), nullable=True))
-    op.add_column(
-        "mcp_server",
+    _add_column(sa.Column("account_label", sa.String(), nullable=True))
+    _add_column(
         sa.Column("trusted", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    op.add_column(
-        "mcp_server",
+    _add_column(
         sa.Column("security_required", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    op.add_column(
-        "mcp_server",
+    _add_column(
         sa.Column("recipient_allowlist", sa.JSON(), nullable=True),
     )
-    op.add_column(
-        "mcp_server",
+    _add_column(
         sa.Column("max_writes_per_hour", sa.Integer(), nullable=False, server_default="20"),
     )
 

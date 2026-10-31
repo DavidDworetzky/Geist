@@ -2,18 +2,22 @@ import contextlib
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 from app.main import app
 from app.models.database.database import SessionLocal
-from app.models.database.geist_user import GeistUser
+from app.models.database.geist_user import get_default_workspace
 from app.models.database.workflow import Workflow, WorkflowStep
 
 
 @pytest.fixture
-def client():
+def client(test_workspace):
     """Test client fixture."""
-    return TestClient(app, base_url="http://127.0.0.1")
+    return TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+
 
 @pytest.fixture
 def db_session():
@@ -26,48 +30,30 @@ def db_session():
         with contextlib.suppress(Exception):
             session.rollback()
 
-        # Clean up created test users and workflows
+        # Clean up created workflows.
         try:
             session.query(WorkflowStep).delete()
             session.query(Workflow).delete()
-            session.query(GeistUser).filter(GeistUser.email == "test@example.com").delete()
             session.commit()
         except Exception:
             session.rollback()
         finally:
             session.close()
 
-@pytest.fixture
-def test_user(db_session: Session):
-    """Test user fixture. Creates a user in the database."""
-    # First, ensure no test user exists
-    existing_user = db_session.query(GeistUser).filter_by(email="test@example.com").first()
-    if existing_user:
-        db_session.delete(existing_user)
-        db_session.commit()
-
-    user_data = {
-        # Don't set user_id - let it auto-increment
-        "email": "test@example.com",
-        "username": "testuser",
-        "name": "Test User",
-        "password": "testpassword"
-    }
-    user = GeistUser(**user_data)
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)  # Refresh to get the auto-generated ID
-    return {
-        "user_id": user.user_id,  # Use the actual user_id from the DB
-        "email": user.email
-    }
 
 @pytest.fixture
-def auth_headers(test_user):
-    """Authentication headers fixture."""
-    return {"Authorization": f"Bearer test_token_{test_user['user_id']}"}
+def test_workspace(db_session):
+    """Return the singleton workspace used by workflow ownership checks."""
+    return get_default_workspace()
 
-def test_create_workflow(client, auth_headers, test_user):
+
+@pytest.fixture
+def auth_headers():
+    """Loopback requests authenticate without a configured operator token."""
+    return {}
+
+
+def test_create_workflow(client, auth_headers):
     """Test creating a new workflow."""
     workflow_data = {
         "name": "Test Workflow",
@@ -79,9 +65,9 @@ def test_create_workflow(client, auth_headers, test_user):
                 "display_x": 100,
                 "display_y": 100,
                 "command_str": "test_command",
-                "step_type": "custom"
+                "step_type": "custom",
             }
-        ]
+        ],
     }
 
     response = client.post("/api/v1/workflows/", json=workflow_data, headers=auth_headers)
@@ -91,19 +77,22 @@ def test_create_workflow(client, auth_headers, test_user):
     assert len(data["steps"]) == 1
     assert data["steps"][0]["step_name"] == workflow_data["steps"][0]["step_name"]
 
-def test_list_workflows(client, auth_headers, test_user, db_session):
-    """Test listing workflows for a user."""
+
+def test_list_workflows(client, auth_headers, test_workspace, db_session):
+    """Test listing workflows for the workspace."""
     # Create test workflows
-    workflow1 = Workflow(name="Workflow 1", user_id=test_user["user_id"])
-    workflow2 = Workflow(name="Workflow 2", user_id=test_user["user_id"])
+    workflow1 = Workflow(name="Workflow 1", user_id=test_workspace.workspace_id)
+    workflow2 = Workflow(name="Workflow 2", user_id=test_workspace.workspace_id)
     db_session.add_all([workflow1, workflow2])
     db_session.commit()
 
     # Debug: Verify workflows were created
-    created_workflows = db_session.query(Workflow).filter_by(user_id=test_user["user_id"]).all()
+    created_workflows = (
+        db_session.query(Workflow).filter_by(user_id=test_workspace.workspace_id).all()
+    )
     print(f"Created workflows: {[(w.workflow_id, w.name, w.user_id) for w in created_workflows]}")
     print(f"Auth headers: {auth_headers}")
-    print(f"Test user ID: {test_user['user_id']}")
+    print(f"Test workspace ID: {test_workspace.workspace_id}")
 
     response = client.get("/api/v1/workflows/", headers=auth_headers)
     print(f"Response status: {response.status_code}")
@@ -114,10 +103,11 @@ def test_list_workflows(client, auth_headers, test_user, db_session):
     assert len(data) == 2
     assert {w["name"] for w in data} == {"Workflow 1", "Workflow 2"}
 
-def test_get_workflow(client, auth_headers, test_user, db_session):
+
+def test_get_workflow(client, auth_headers, test_workspace, db_session):
     """Test retrieving a specific workflow."""
     # Create test workflow
-    workflow = Workflow(name="Test Workflow", user_id=test_user["user_id"])
+    workflow = Workflow(name="Test Workflow", user_id=test_workspace.workspace_id)
     db_session.add(workflow)
     db_session.commit()
 
@@ -127,10 +117,11 @@ def test_get_workflow(client, auth_headers, test_user, db_session):
     assert data["name"] == "Test Workflow"
     assert data["workflow_id"] == workflow.workflow_id
 
-def test_update_workflow(client, auth_headers, test_user, db_session):
+
+def test_update_workflow(client, auth_headers, test_workspace, db_session):
     """Test updating a workflow."""
     # Create test workflow
-    workflow = Workflow(name="Original Name", user_id=test_user["user_id"])
+    workflow = Workflow(name="Original Name", user_id=test_workspace.workspace_id)
     db_session.add(workflow)
     db_session.commit()
 
@@ -144,15 +135,13 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
                 "display_x": 200,
                 "display_y": 200,
                 "command_str": "new_command",
-                "step_type": "custom"
+                "step_type": "custom",
             }
-        ]
+        ],
     }
 
     response = client.put(
-        f"/api/v1/workflows/{workflow.workflow_id}",
-        json=update_data,
-        headers=auth_headers
+        f"/api/v1/workflows/{workflow.workflow_id}", json=update_data, headers=auth_headers
     )
     assert response.status_code == 200
     data = response.json()
@@ -160,10 +149,11 @@ def test_update_workflow(client, auth_headers, test_user, db_session):
     assert len(data["steps"]) == 1
     assert data["steps"][0]["step_name"] == "New Step"
 
-def test_delete_workflow(client, auth_headers, test_user, db_session):
+
+def test_delete_workflow(client, auth_headers, test_workspace, db_session):
     """Test deleting a workflow."""
     # Create test workflow
-    workflow = Workflow(name="To Delete", user_id=test_user["user_id"])
+    workflow = Workflow(name="To Delete", user_id=test_workspace.workspace_id)
     db_session.add(workflow)
     db_session.commit()
 
@@ -171,8 +161,11 @@ def test_delete_workflow(client, auth_headers, test_user, db_session):
     assert response.status_code == 204
 
     # Verify workflow is deleted
-    deleted_workflow = db_session.query(Workflow).filter_by(workflow_id=workflow.workflow_id).first()
+    deleted_workflow = (
+        db_session.query(Workflow).filter_by(workflow_id=workflow.workflow_id).first()
+    )
     assert deleted_workflow is None
+
 
 def test_get_nonexistent_workflow(client, auth_headers):
     """Test retrieving a non-existent workflow."""

@@ -9,6 +9,7 @@ Covers:
 - Factory auto-detection of Qwen 3 models
 - Factory weights_dir propagation
 """
+
 # ---------------------------------------------------------------------------
 # Mock out MLX before any project imports — MLX is Apple-Silicon-only and the
 # agents.architectures package transitively imports it via the llama runner.
@@ -21,6 +22,7 @@ Covers:
 import importlib
 import json
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, Mock, patch
 
@@ -39,13 +41,21 @@ for _mod_name in _MLX_SUBMODULES:
         sys.modules[_mod_name] = _mock
 
 from agents.architectures.base_runner import BaseRunner, GenerationConfig
+from agents.architectures.chat_template_tools import provider_tool_name
 from agents.architectures.registry import clear_registry, get_runner
 from agents.factory import AgentFactory
+from agents.models.tool_calling import (
+    ChatMessage,
+    ModelRequestConfig,
+    ToolDefinition,
+    ToolExecutionOutput,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_generation_config(**overrides):
     defaults = {"max_tokens": 64, "temperature": 0.7, "top_p": 0.9}
@@ -72,9 +82,23 @@ def _mock_model():
     return model
 
 
+def _search_tool():
+    return ToolDefinition(
+        name="web.search",
+        description="Search the web",
+        arguments_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        handler=lambda _context, _arguments: ToolExecutionOutput(content="unused"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Qwen3Runner: loading strategies
 # ---------------------------------------------------------------------------
+
 
 class TestQwen3RunnerLoadHub:
     """Loading from HuggingFace Hub (no local files)."""
@@ -97,6 +121,27 @@ class TestQwen3RunnerLoadHub:
         assert runner.model is not None
         assert runner.tokenizer is not None
 
+    @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
+    @patch("agents.architectures.vllm_runner.AutoTokenizer")
+    @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
+    def test_load_enables_tools_when_template_renders_catalog(
+        self, _mock_exists, mock_tok_cls, mock_model_cls
+    ):
+        tokenizer = _mock_tokenizer()
+        tokenizer.chat_template = "{{ tools }}"
+        tokenizer.apply_chat_template.side_effect = lambda _messages, **kwargs: str(
+            kwargs.get("tools") or []
+        )
+        mock_tok_cls.from_pretrained.return_value = tokenizer
+        mock_model_cls.from_pretrained.return_value = _mock_model()
+
+        from agents.architectures.qwen3_runner import Qwen3Runner
+
+        runner = Qwen3Runner()
+        runner.load("Qwen/Qwen3-8B")
+
+        assert runner.supports_native_tool_calling is True
+
     @patch("agents.architectures.vllm_runner.login")
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
@@ -117,7 +162,9 @@ class TestQwen3RunnerLoadHub:
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
-    def test_hub_no_login_without_token(self, mock_exists, mock_tok_cls, mock_model_cls, mock_login):
+    def test_hub_no_login_without_token(
+        self, mock_exists, mock_tok_cls, mock_model_cls, mock_login
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         mock_tok_cls.from_pretrained.return_value = _mock_tokenizer()
@@ -137,8 +184,10 @@ class TestQwen3RunnerLoadLocal:
         """Return True for config.json and model.safetensors.index.json."""
         hf_index_path = os.path.join(weights_dir, "model.safetensors.index.json")
         config_path = os.path.join(weights_dir, "config.json")
+
         def _side(path):
             return path in (config_path, hf_index_path)
+
         return _side
 
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
@@ -151,8 +200,10 @@ class TestQwen3RunnerLoadLocal:
 
         weights_dir = "app/model_weights/Qwen_Qwen3-8B"
 
-        with patch("agents.architectures.vllm_runner.os.path.exists",
-                    side_effect=self._exists_side_effect(weights_dir)):
+        with patch(
+            "agents.architectures.vllm_runner.os.path.exists",
+            side_effect=self._exists_side_effect(weights_dir),
+        ):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B")
 
@@ -170,8 +221,9 @@ class TestQwen3RunnerLoadSafetensors:
     @patch("agents.architectures.vllm_runner.AutoConfig")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.glob.glob")
-    def test_load_from_safetensors(self, mock_glob, mock_tok_cls, mock_config_cls,
-                                    mock_model_cls, mock_load_file):
+    def test_load_from_safetensors(
+        self, mock_glob, mock_tok_cls, mock_config_cls, mock_model_cls, mock_load_file
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         weights_dir = "/data/qwen3-weights"
@@ -183,8 +235,9 @@ class TestQwen3RunnerLoadSafetensors:
 
         # config.json exists but NO model.safetensors.index.json
         def _exists(path):
-            return path == os.path.join(weights_dir, "config.json") or \
-                   path == os.path.join(weights_dir, "tokenizer.json")
+            return path == os.path.join(weights_dir, "config.json") or path == os.path.join(
+                weights_dir, "tokenizer.json"
+            )
 
         mock_tok_cls.from_pretrained.return_value = _mock_tokenizer()
         mock_config = MagicMock()
@@ -196,8 +249,10 @@ class TestQwen3RunnerLoadSafetensors:
 
         config_data = {"torch_dtype": "bfloat16", "model_type": "qwen3"}
 
-        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
-             patch("builtins.open", create=True) as mock_open:
+        with (
+            patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists),
+            patch("builtins.open", create=True) as mock_open,
+        ):
             mock_open.return_value.__enter__ = lambda s: s
             mock_open.return_value.__exit__ = Mock(return_value=False)
             mock_open.return_value.read = Mock(return_value=json.dumps(config_data))
@@ -219,9 +274,9 @@ class TestQwen3RunnerLoadSafetensors:
     @patch("agents.architectures.vllm_runner.AutoConfig")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.glob.glob")
-    def test_safetensors_tokenizer_fallback_to_hub(self, mock_glob, mock_tok_cls,
-                                                    mock_config_cls, mock_model_cls,
-                                                    mock_load_file):
+    def test_safetensors_tokenizer_fallback_to_hub(
+        self, mock_glob, mock_tok_cls, mock_config_cls, mock_model_cls, mock_load_file
+    ):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
         weights_dir = "/data/weights"
@@ -242,9 +297,11 @@ class TestQwen3RunnerLoadSafetensors:
         mock_file.__enter__ = Mock(return_value=mock_file)
         mock_file.__exit__ = Mock(return_value=False)
 
-        with patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists), \
-             patch("builtins.open", return_value=mock_file), \
-             patch("agents.architectures.vllm_runner.json.load", return_value={}):
+        with (
+            patch("agents.architectures.vllm_runner.os.path.exists", side_effect=_exists),
+            patch("builtins.open", return_value=mock_file),
+            patch("agents.architectures.vllm_runner.json.load", return_value={}),
+        ):
             runner = Qwen3Runner()
             runner.load("Qwen/Qwen3-8B", device_config={"weights_dir": weights_dir})
 
@@ -256,8 +313,8 @@ class TestQwen3RunnerLoadSafetensors:
 # Qwen3Runner: device selection
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerDevice:
 
+class TestQwen3RunnerDevice:
     @patch("agents.architectures.vllm_runner.AutoModelForCausalLM")
     @patch("agents.architectures.vllm_runner.AutoTokenizer")
     @patch("agents.architectures.vllm_runner.os.path.exists", return_value=False)
@@ -279,8 +336,8 @@ class TestQwen3RunnerDevice:
 # Qwen3Runner: inference (complete / generate)
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerInference:
 
+class TestQwen3RunnerInference:
     def _create_loaded_runner(self):
         """Create a Qwen3Runner with mocked model/tokenizer already loaded."""
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -403,13 +460,64 @@ class TestQwen3RunnerInference:
         assert kwargs.get("do_sample") is False
         assert kwargs.get("temperature") is None
 
+    @pytest.mark.parametrize("tool_format", ["json", "xml"])
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
+    def test_compatibility_runner_returns_native_tool_turn(self, mock_pipeline_fn, tool_format):
+        runner = self._create_loaded_runner()
+        runner.supports_native_tool_calling = True
+        safe_name = provider_tool_name("web.search")
+        prompt_text = runner.tokenizer.apply_chat_template.return_value
+        response = (
+            f'<tool_call>{{"name":"{safe_name}","arguments":{{"query":"123"}}}}</tool_call>'
+            if tool_format == "json"
+            else f"<tool_call><function={safe_name}><parameter=query>123</parameter></function></tool_call>"
+        )
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [{"generated_text": prompt_text + response}]
+        mock_pipeline_fn.return_value = mock_pipe
+
+        events = list(
+            runner.stream_model_turn(
+                [ChatMessage(role="user", content="Search")],
+                [_search_tool()],
+                ModelRequestConfig(temperature=0.0),
+            )
+        )
+
+        template_kwargs = runner.tokenizer.apply_chat_template.call_args.kwargs
+        assert template_kwargs["tools"][0]["function"]["name"] == safe_name
+        assert template_kwargs["enable_thinking"] is False
+        turn = events[-1].turn
+        assert turn is not None
+        assert turn.tool_calls[0].name == "web.search"
+        assert turn.tool_calls[0].arguments == {"query": "123"}
+
+    @patch("agents.architectures.vllm_runner.transformers.pipeline")
+    def test_stream_without_tools_preserves_text_completion(self, mock_pipeline_fn):
+        runner = self._create_loaded_runner()
+        prompt_text = runner.tokenizer.apply_chat_template.return_value
+        mock_pipe = MagicMock(return_value=[{"generated_text": prompt_text + "Plain answer"}])
+        mock_pipeline_fn.return_value = mock_pipe
+
+        events = list(
+            runner.stream_model_turn(
+                [ChatMessage(role="user", content="hello")],
+                [],
+                ModelRequestConfig(temperature=0.0),
+            )
+        )
+
+        assert "tools" not in runner.tokenizer.apply_chat_template.call_args.kwargs
+        assert events[-1].turn is not None
+        assert events[-1].turn.text == "Plain answer"
+
 
 # ---------------------------------------------------------------------------
 # Qwen3Runner: pipeline caching
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerPipelineCaching:
 
+class TestQwen3RunnerPipelineCaching:
     @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_pipeline_created_once(self, mock_pipeline_fn):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -441,8 +549,8 @@ class TestQwen3RunnerPipelineCaching:
 # Qwen3Runner: cleanup
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerCleanup:
 
+class TestQwen3RunnerCleanup:
     def test_cleanup_releases_resources(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
 
@@ -469,8 +577,8 @@ class TestQwen3RunnerCleanup:
 # Qwen3Runner: ChatML fallback
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerChatMLFallback:
 
+class TestQwen3RunnerChatMLFallback:
     @patch("agents.architectures.vllm_runner.transformers.pipeline")
     def test_fallback_chatml_format(self, mock_pipeline_fn):
         from agents.architectures.qwen3_runner import Qwen3Runner
@@ -507,24 +615,27 @@ class TestQwen3RunnerChatMLFallback:
 # Runner registry
 # ---------------------------------------------------------------------------
 
-class TestQwen3RunnerRegistry:
 
+class TestQwen3RunnerRegistry:
     def setup_method(self):
         clear_registry()
 
     def test_qwen3_runner_registered(self):
         """After register_all_runners, 'qwen3' should be available."""
         from agents.architectures.registry import register_all_runners
+
         register_all_runners()
 
         runner_cls = get_runner("qwen3")
         assert runner_cls is not None
 
         from agents.architectures.qwen3_runner import Qwen3Runner
+
         assert runner_cls is Qwen3Runner
 
     def test_qwen3_runner_is_base_runner(self):
         from agents.architectures.qwen3_runner import Qwen3Runner
+
         assert issubclass(Qwen3Runner, BaseRunner)
 
 
@@ -532,20 +643,40 @@ class TestQwen3RunnerRegistry:
 # Factory: auto-detection and weights_dir
 # ---------------------------------------------------------------------------
 
-class TestFactoryGenericAutoDetection:
 
+@pytest.mark.skipif(
+    sys.platform != "darwin" or platform.machine().lower() not in {"arm64", "aarch64"},
+    reason="Qwen3.8 MLX dependencies are Apple Silicon-only",
+)
+def test_qwen3_8_declared_minimum_matches_installed_transformers():
+    from importlib import metadata
+
+    from packaging.version import Version
+    from transformers import AutoConfig
+
+    from agents.model_catalog import get_model_spec
+
+    required = get_model_spec("Qwen/Qwen3.8-27B").min_transformers_version
+
+    assert required is not None
+    assert Version(metadata.version("transformers")) >= Version(required)
+    assert AutoConfig.for_model("qwen3_5").model_type == "qwen3_5"
+
+
+class TestFactoryGenericAutoDetection:
     def test_infer_runner_type_qwen_models(self):
-        expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == expected
-        assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == expected
-        assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == expected
-        assert AgentFactory._infer_runner_type("qwen3-custom") == expected
+        with patch("agents.factory.sys.platform", "linux"):
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3.8-27B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3-8B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen3-4B") == "llama_server"
+            assert AgentFactory._infer_runner_type("Qwen/Qwen2.5-3B-Instruct") == "llama_server"
+            assert AgentFactory._infer_runner_type("qwen3-custom") == "llama_server"
 
     def test_infer_runner_type_non_qwen(self):
         native = sys.platform in {"win32", "linux"}
-        assert AgentFactory._infer_runner_type(
-            "meta-llama/Meta-Llama-3.1-8B-Instruct"
-        ) == ("llama_server" if native else "mlx_llama")
+        assert AgentFactory._infer_runner_type("meta-llama/Meta-Llama-3.1-8B-Instruct") == (
+            "llama_server" if native else "mlx_llama"
+        )
         assert AgentFactory._infer_runner_type("future-org/future-model") == (
             "llama_server" if native else "transformers"
         )
@@ -553,16 +684,20 @@ class TestFactoryGenericAutoDetection:
             AgentFactory._infer_runner_type("Qwen/Qwen2.5-72B-Instruct")
 
     def test_infer_runner_type_case_insensitive(self):
-        expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
-        assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == expected
-        assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == expected
+        with patch("agents.factory.sys.platform", "linux"):
+            assert AgentFactory._infer_runner_type("QWEN/QWEN3-8B") == "llama_server"
+            assert AgentFactory._infer_runner_type("qwen/qwen3-8b") == "llama_server"
 
     def test_factory_auto_detects_qwen3(self):
         """Qwen uses the same generic runner as other standard causal LMs."""
         context = Mock()
         context.settings = Mock()
 
-        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
+        with (
+            patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": ""}),
+            patch("agents.factory.sys.platform", "linux"),
+            patch("agents.local_agent.LocalAgent") as MockLocalAgent,
+        ):
             AgentFactory.create_agent(
                 agent_type="local",
                 agent_context=context,
@@ -571,8 +706,7 @@ class TestFactoryGenericAutoDetection:
 
             MockLocalAgent.assert_called_once()
             _, kwargs = MockLocalAgent.call_args
-            expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
-            assert kwargs["runner_type"] == expected
+            assert kwargs["runner_type"] == "llama_server"
             assert kwargs["model_id"] == "Qwen/Qwen3-8B"
 
     def test_factory_explicit_runner_overrides_auto(self):
@@ -650,8 +784,8 @@ class TestFactoryGenericAutoDetection:
 # Factory: create_from_config
 # ---------------------------------------------------------------------------
 
-class TestFactoryCreateFromConfig:
 
+class TestFactoryCreateFromConfig:
     def test_config_with_qwen3_model(self):
         context = Mock()
         context.settings = Mock()
@@ -662,13 +796,45 @@ class TestFactoryCreateFromConfig:
             "weights_dir": "/data/qwen3",
         }
 
-        with patch("agents.local_agent.LocalAgent") as MockLocalAgent:
+        with (
+            patch.dict(os.environ, {"GEIST_LOCAL_RUNNER": ""}),
+            patch("agents.factory.sys.platform", "linux"),
+            patch("agents.local_agent.LocalAgent") as MockLocalAgent,
+        ):
             AgentFactory.create_from_config(config, context)
 
             _, kwargs = MockLocalAgent.call_args
-            expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
-            assert kwargs["runner_type"] == expected
+            assert kwargs["runner_type"] == "llama_server"
             assert kwargs["device_config"]["weights_dir"] == "/data/qwen3"
+
+
+class TestSettingsDrivenQwen3Creation:
+    @patch("app.services.user_settings_service.AgentFactory.create_agent")
+    @patch("app.services.user_settings_service.AgentFactoryConfig.from_user_settings")
+    @patch(
+        "app.services.user_settings_service.UserSettingsService."
+        "get_or_create_workspace_settings_by_id"
+    )
+    def test_local_settings_do_not_forward_online_backup_providers(
+        self, mock_get_settings, mock_from_settings, mock_create_agent
+    ):
+        from app.services.user_settings_service import UserSettingsService
+
+        factory_config = Mock(
+            agent_type="local",
+            model="Qwen/Qwen3.8-27B",
+            endpoint=None,
+            api_key=None,
+            runner_type=None,
+            device_config={},
+            generation_config={"max_tokens": 8},
+            backup_providers=[],
+        )
+        mock_from_settings.return_value = factory_config
+
+        UserSettingsService.create_agent_from_workspace_settings(1, Mock())
+
+        assert "backup_providers" not in mock_create_agent.call_args.kwargs
 
 
 if __name__ == "__main__":

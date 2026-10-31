@@ -22,18 +22,56 @@ The default registry is intentionally explicit:
 | Tool | Backing implementation | Default | Policy |
 | --- | --- | --- | --- |
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
-| `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current user's uploaded files. |
+| `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current workspace's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
+| `workspace.list_files` | `WorkspaceFileAdapter.list_files` | yes | Lists bounded source paths under `GEIST_WORKSPACE_ROOT`; common generated/vendor directories and credential files are excluded. |
+| `workspace.read_file` | `WorkspaceFileAdapter.read_file` | yes | Reads bounded UTF-8 line ranges under the workspace root. |
+| `workspace.search` | `WorkspaceFileAdapter.search_text` | yes | Bounded literal search across workspace text files; the coding equivalent of `rg -F`/`grep -F`. |
+| `workspace.write_file` | `WorkspaceFileAdapter.write_file` | yes, approval required | Atomically creates or replaces a workspace text file. |
+| `workspace.edit_file` | `WorkspaceFileAdapter.edit_file` | yes, approval required | Exact-match edit that fails closed unless the expected replacement count matches. |
+| `terminal.run` | configured execution backend | when configured | Runs coding commands with bounded output/runtime. Isolated, offline sandboxes run directly; host-reaching or networked backends require fresh approval for every command. |
 | `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
 | `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
 | `workspace.write_markdown` | `MarkdownFileAdapter.write_file` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.email.send` | `SendGridAdapter.send_email` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 | `communication.sms.send` | `SMSAdapter.send_text` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
 
-The optional read-only Markdown list/read tools can be selected by the operator
-with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. Reads and writes accept
-only `.md`/`.markdown` paths contained under the configured root. Side-effect
-mappings remain unavailable even when named in that setting.
+Host coding tools require an explicit existing `GEIST_WORKSPACE_ROOT` or
+`GEIST_EXEC_WORKSPACE`; there is no process-directory fallback. When both are
+set they must resolve to the same directory. Misconfiguration logs an actionable
+error and disables coding tools, not chat. Docker/Podman without a host mount uses
+an isolated shared workspace. The table's default file tools are advertised only
+when one of these workspace configurations is available.
+
+File paths are relative and contained beneath the root; symlink escapes and
+common credentials (including AWS/SSH directories, npm/netrc/Postgres credentials,
+service-account JSON and secrets directories) are rejected. These exclusions are
+defense in depth, not a guarantee that an authorized root contains no secrets.
+Host writes and edits require a fresh per-call approval, even in auto-approve mode.
+Container file tools require a Python-capable image with bash and timeout; missing
+runtime commands return an actionable tool error.
+
+Terminal session/permanent grants and global auto-approve never bypass the
+per-command gate when execution can reach a host workspace or the network.
+Host-reaching commands and all shared sessions also pass through the hardline
+rejection floor, protecting accumulated work in isolated sessions as well.
+The floor is defense-in-depth; container isolation remains the security
+boundary for approval-free shell execution.
+
+The optional legacy Markdown list/read tools can still be selected by the
+operator with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. They accept
+only `.md`/`.markdown` paths contained under `GEIST_MARKDOWN_ROOT`.
+| `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | yes | Read-only paths contained under Geist's private workspace directory. |
+| `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | yes | Read-only paths contained under Geist's private workspace directory. |
+
+The read-only Markdown list/read tools default to
+`GEIST_DATA_DIR/workspace` (`~/Library/Application Support/Geist/workspace` on
+macOS, `~/.local/share/geist/workspace` on Linux, and `%LOCALAPPDATA%/Geist/workspace`
+on Windows). Operators can select a different directory with
+`GEIST_MARKDOWN_ROOT`. Reads accept only `.md`/`.markdown` paths contained under
+that root. The development Docker Compose stack sets this override to
+`<repository>/data/workspace`; other application data, including models and
+plugins, stays outside the checkout in the `geist_runtime_data` Docker volume.
 
 Adapters not mapped into chat tools:
 
@@ -72,13 +110,116 @@ run output associated with the chat in which the run started.
 Every terminal run is persisted with `completed`, `failed`, or `cancelled`
 status so completed tool activity is auditable even if a later model request
 fails. Recent-history and aggregate tool-result budgets bound provider context.
-Tool execution uses a bounded worker pool; Python cannot forcibly stop a handler
-already running after a timeout, which is another reason side-effect mappings
-remain unavailable.
+Tool execution uses a bounded worker pool. Cancellation is cooperative: MCP
+stdio requests observe the run cancellation event, while HTTP operations are
+bounded by the same end-to-end server deadline and have their connection closed
+when invalidated. Side-effect mappings additionally require an interactive,
+call-specific approval before dispatch.
 
-A future authenticated approve/reject-and-resume endpoint plus durable
-idempotency is required before filesystem writes, email, or SMS can become
-operational chat tools.
+## Terminal execution
+
+Set `GEIST_EXEC_BACKEND` to `docker`, `podman`, or `local`, and explicitly include
+`terminal.run` in `GEIST_ENABLED_CHAT_TOOLS`. `GEIST_EXEC_RUNTIME` pins a CLI and
+fails closed when missing. `GEIST_EXEC_DOCKER_IMAGE` must provide bash and GNU
+timeout (default `python:3.11-slim`). `GEIST_EXEC_DOCKER_NETWORK` defaults off;
+enabling it exposes egress, potentially including LAN/metadata endpoints, and
+requires fresh approval. `GEIST_EXEC_WORKSPACE` must identify an existing host
+directory; relative paths are resolved at startup and Docker uses a fail-closed
+bind mount. Commas in Docker paths are rejected. The path must exist on both the
+backend and daemon hosts; a missing daemon-side directory is not auto-created.
+
+Local execution is not sandboxed. Environment scrubbing cannot hide secrets in
+host files or inside a mounted workspace, and regex command checks are only a
+best-effort defense. Host/network approval cannot be waived by auto-approve or an
+always-allow grant. Interactive approval resume uses the authenticated, invocation-
+bound path inherited from main; unattended callers deny approval-requiring tools.
+
+Timeouts kill the local POSIX process group or attempt bounded removal of this
+invocation's uniquely named container. Cleanup cannot be guaranteed if the daemon
+is unavailable or a host descendant deliberately escapes its process group.
+Docker exit codes124/137 are treated as timeouts; a command deliberately exiting
+with those codes is indistinguishable. Policy refusals have `policy_blocked` tool
+errors, distinct from ordinary shell exit codes in the result body.
+
+Subprocess output is captured incrementally with at most 64 KiB retained per stream
+before model-facing truncation. Excess bytes are drained and discarded, not held
+in host memory; verbose commands retain their real exit status and report
+`truncated: true`. The deadline, not output volume, stops a workload and triggers
+container cleanup. The tool catalog marks fresh-approval tools explicitly;
+the UI cannot create ineffective standing grants for
+them, but existing grants can still be removed.
+
+The container root filesystem is read-only. Only the size-limited temporary
+mounts (and an explicitly approved host workspace, if configured) are writable.
+Background processes that retain output pipes can keep capture open until the
+command deadline; launch long-running services through a managed job instead.
+
+## Security and identity model
+
+Geist deliberately separates three identities that older code conflated:
+
+- The **workspace identity** is the durable local owner of chats, memories,
+  files, settings, workflows, jobs, and MCP configuration. It is the neutral
+  `geist_user` row with `workspace_key="default"`; its numeric primary key is
+  preserved when older databases are migrated. The physical table and several
+  legacy foreign keys retain the `user_id` column name for migration compatibility,
+  but application-facing ownership contracts use `workspace_id`. Display name and email are
+  profile metadata, not credentials, and the legacy password column is not an
+  authentication mechanism.
+- The **operator principal** is the process or person authorized to control the
+  local workspace. It is immutable and request-scoped, carries `workspace_id`,
+  an authentication method, loopback status, and explicit capabilities. It can
+  also carry controller-node, target-node, audience, expiry, and credential IDs
+  for a future multi-node deployment. There is no built-in admin user account
+  and no email-based login.
+- **Pitchblend Cloud identity** remains Pitchblend's OIDC login for account,
+  licensing, and sync. Its access and refresh tokens are not accepted by Geist
+  and never become local tool credentials.
+
+An unwrapped standalone Geist process accepts an operator only from a loopback
+client. The supported Docker Compose and native `make run` flows generate a
+local operator-token file. The backend and server-side development proxy read
+that file, and the proxy attaches the `GeistOperator` scheme without exposing
+the credential to the browser bundle. Compose publishes its UI, API, and debug
+ports on loopback only. A token-file principal is therefore local even when the
+development proxy reaches the backend over a private container address.
+
+A Pitchblend-managed launch instead generates a high-entropy secret for that
+process, passes it to the Geist child as `GEIST_OPERATOR_TOKEN`, and attaches
+the same authorization scheme inside a dedicated Electron webview session.
+The secret is not exposed to page JavaScript. When either supported credential
+source is configured, missing, duplicate, malformed, and incorrect credentials
+fail closed; conflicting environment and file credentials also fail closed.
+Pitchblend login and logout do not rotate workspace ownership or require a
+second Geist login.
+
+MCP configuration, connection tests, tool catalog inspection, approval, and
+run cancellation require operator capabilities. Stdio server configuration is
+accepted only from a local operator: a direct loopback request or the generated
+local token-file principal. A future remote wrapper-token deployment remains
+unable to configure process-spawning transports. A remote deployment must
+provide its own strong operator credential and transport boundary; it must not
+treat a Host or Origin header as authentication.
+
+Approval is authorization for one exact operation, not a reusable boolean.
+The pending record binds the operator's `workspace_id`, run ID, call ID, tool name,
+canonical argument hash, and tool-definition fingerprint. The definition
+fingerprint includes the MCP configuration revision. If arguments or server
+configuration change between review and dispatch, execution fails with a stale
+approval and the operator must review again. Non-streaming callers are always
+unattended and deny approval-requiring tools immediately instead of waiting for
+the interactive timeout.
+
+The authentication middleware protects HTTP and WebSocket requests globally;
+only health, readiness, and generated API-documentation endpoints are exempt.
+For a future Tailscale topology, each workstation remains a separate Geist node
+with its own local workspace and node-scoped credential. Pitchblend is the
+controller: it authenticates the human with OIDC, chooses a target node, and
+presents a short-lived operator credential whose audience and `target_node_id`
+match that Geist instance. Tailscale supplies encrypted reachability and device
+policy, but is defense in depth rather than the application authentication
+decision. Node credentials should not be shared or interpreted as a global
+multi-user database identity.
 
 ## MCP servers
 
@@ -99,6 +240,20 @@ initiated requests such as sampling are declined. Tool descriptions and
 results from MCP servers are untrusted third-party content — enable only
 servers you trust, since their tool output re-enters the model context.
 
+The transport boundary also:
+
+- inherits only a small process-launch environment allowlist; secrets are
+  passed to stdio servers only when explicitly configured for that server;
+- rejects HTTP redirects and credential-bearing URLs so an MCP endpoint cannot
+  redirect an authorized request into a different SSRF target;
+- applies one deadline across initialization and paginated discovery rather
+  than resetting the timeout on each page;
+- caps response bytes, SSE events, stdio line length, page count, discovered
+  tool count, and returned tool-result text;
+- performs server discovery off the FastAPI event loop, in bounded parallel
+  workers, with generation-aware single-flight caches so invalidation cannot
+  publish a stale tool definition or connection.
+
 ## Bridged adapter actions
 
 `AdapterToolSource` converts adapter reflection schemas
@@ -115,3 +270,18 @@ unified registry is follow-up work.
 (identical name and arguments) three times consecutively. The repeated call is
 not executed; the run fails with a `Doom loop detected` error so a stuck model
 cannot burn its round and tool budgets on identical requests.
+
+The approved coding write/edit tools are operational. Legacy Markdown writes,
+email and SMS remain unavailable until their approval/idempotency requirements
+are implemented.
+
+An omitted `agentic_mode` request inherits the stored (default-on) preference;
+explicit true/false overrides it. Scheduled routines explicitly retain direct mode.
+`goal_action: "new"` starts a fresh goal in the same chat without destroying the
+previous checkpoint; the default `"resume"` continues an unfinished goal.
+Invalid checkpoints return a recovery error and remain intact until the user
+chooses a new goal. Steering is streamed as `user_instruction` and persisted in
+an independent `instructions` history field, including non-agentic runs.
+
+Tool-output trimming is not semantic context compaction. Transcript and goal-state
+compaction/retention remain separate follow-up work.

@@ -1,6 +1,8 @@
 """Tests for generic model/provider catalog and runner routing."""
+
 import asyncio
 import os
+import platform
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -15,26 +17,87 @@ from agents.model_catalog import (
     get_model_spec,
     get_provider_endpoint,
     infer_model_spec,
+    resolve_request_spec,
 )
 
 
-def test_platform_default_preserves_apple_silicon_mlx_and_uses_gguf_on_windows():
+def test_platform_default_uses_qwen38_mlx_and_uses_gguf_on_windows():
     with (
         patch("agents.model_catalog.platform.system", return_value="Darwin"),
         patch("agents.model_catalog.platform.machine", return_value="arm64"),
     ):
-        assert default_local_model_id() == "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        assert default_local_model_id() == "Qwen/Qwen3.8-27B"
 
     with patch("agents.model_catalog.platform.system", return_value="Windows"):
         assert default_local_model_id() == "Qwen/Qwen3-4B"
 
 
+def test_union_alpha_is_an_openrouter_preview_with_verified_capabilities():
+    spec = get_model_spec("stealth/union-alpha")
+
+    assert spec.provider == "openrouter"
+    assert spec.family == "stealth"
+    assert spec.backend == "openai_compatible"
+    assert spec.local is False
+    assert spec.context_window == 262144
+    assert spec.max_output_tokens == 131072
+    assert spec.supports_vision is True
+    assert spec.supports_function_calling is True
+    assert spec.supports_streaming is True
+    assert spec.supports_reasoning is False
+    assert spec.mandatory_reasoning_effort is None
+    assert spec.unsupported_parameters == ("n", "frequency_penalty", "presence_penalty", "stop")
+    assert "may be retained" in spec.performance_note
+    assert "not used for training" in spec.performance_note
+    assert PROVIDERS[spec.provider].api_key_env == "OPENROUTER_API_KEY"
+
+
 def test_catalog_covers_requested_families():
     families = {spec.family for spec in MODEL_SPECS}
     assert {
-        "llama", "qwen", "mistral", "phi", "smollm", "gemma",
-        "granite", "olmo", "glm", "gpt-oss", "kimi", "deepseek",
+        "llama",
+        "qwen",
+        "mistral",
+        "phi",
+        "smollm",
+        "gemma",
+        "granite",
+        "olmo",
+        "glm",
+        "gpt-oss",
+        "kimi",
+        "deepseek",
+        "gemini",
     }.issubset(families)
+
+
+def test_qwen3_8_27b_declares_runtime_compatibility():
+    spec = get_model_spec("Qwen/Qwen3.8-27B")
+
+    assert spec.local is True
+    assert spec.backend == "mlx_llama"
+    assert spec.context_window == 262144
+    assert spec.max_output_tokens == 131072
+    assert spec.parameter_count == "27B"
+    assert spec.min_transformers_version == "5.8.0"
+    assert spec.supports_vision is False
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["Qwen/Qwen3-4B", "Qwen/Qwen3-8B", "Qwen/Qwen3-1.7B"],
+)
+def test_qwen3_models_declare_architecture_runtime_compatibility(model_id):
+    assert get_model_spec(model_id).min_transformers_version == "4.51.0"
+
+
+def test_registry_only_qwen3_model_declares_runtime_compatibility():
+    from agents.architectures.registry import OnlineModelProviders, get_models_for_provider
+
+    offline_models = get_models_for_provider(OnlineModelProviders.OFFLINE)
+    qwen3_06b = next(model for model in offline_models if model.id == "Qwen/Qwen3-0.6B")
+
+    assert qwen3_06b.min_transformers_version == "4.51.0"
 
 
 def test_family_inference_supports_future_finetunes():
@@ -58,22 +121,516 @@ def test_heavyweight_models_are_server_backed():
     assert hosted_glm.local is False
     assert get_provider_endpoint(hosted_glm.provider) == "https://api.z.ai/api/paas/v4"
 
+    qwen_max = get_model_spec("qwen/qwen3.8-max")
+    assert qwen_max.backend == "openai_compatible"
+    assert qwen_max.local is False
+    assert get_provider_endpoint(qwen_max.provider) == "https://openrouter.ai/api/v1"
 
-@pytest.mark.parametrize("model_id", [
-    "Qwen/Qwen2.5-3B-Instruct",
-    "Qwen/Qwen3-4B",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "microsoft/Phi-4-mini-instruct",
-    "HuggingFaceTB/SmolLM3-3B",
-    "google/gemma-3-1b-it",
-    "ibm-granite/granite-3.3-8b-instruct",
-    "allenai/Olmo-3-7B-Instruct",
-    "zai-org/glm-4-9b-chat-hf",
-    "openai/gpt-oss-20b",
-])
+    glm_flash = get_model_spec("z-ai/glm-5.3-flash")
+    assert glm_flash.backend == "openai_compatible"
+    assert glm_flash.provider == "openrouter"
+    assert glm_flash.local is False
+    assert glm_flash.context_window == 1048576
+    assert glm_flash.max_output_tokens == 131072
+    assert glm_flash.parameter_count == "320B"
+    assert glm_flash.activated_parameters == "18B"
+    assert glm_flash.supports_vision is True
+    assert glm_flash.supports_function_calling is True
+    assert glm_flash.supports_reasoning is True
+    assert glm_flash.supports_streaming is True
+    assert glm_flash.recommended is True
+    assert glm_flash.mandatory_reasoning_effort == "max"
+    assert glm_flash.unsupported_parameters == ()
+    assert get_provider_endpoint(glm_flash.provider) == "https://openrouter.ai/api/v1"
+    assert get_model_spec("stealth/ox-alpha") is None
+
+    muse = get_model_spec("meta/muse-spark-1.2-contributor")
+    assert muse.backend == "openai_compatible"
+    assert muse.provider == "openrouter"
+    assert muse.local is False
+    assert muse.context_window == 1048576
+    assert muse.max_output_tokens is None
+    assert muse.parameter_count is None
+    assert muse.supports_vision is True
+    assert muse.supports_function_calling is True
+    assert muse.supports_reasoning is True
+    assert muse.supports_streaming is True
+    assert muse.mandatory_reasoning_effort == "medium"
+    assert muse.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+
+    muse_wonder = get_model_spec("meta/muse-wonder")
+    assert muse_wonder.backend == "openai_compatible"
+    assert muse_wonder.provider == "openrouter"
+    assert muse_wonder.local is False
+    assert muse_wonder.family == "muse"
+    assert muse_wonder.context_window == 1048576
+    assert muse_wonder.max_output_tokens == 943718
+    assert muse_wonder.parameter_count is None
+    assert muse_wonder.activated_parameters is None
+    assert muse_wonder.supports_vision is True
+    assert muse_wonder.supports_function_calling is True
+    assert muse_wonder.supports_reasoning is True
+    assert muse_wonder.supports_streaming is True
+    assert muse_wonder.recommended is False
+    assert muse_wonder.mandatory_reasoning_effort == "medium"
+    assert muse_wonder.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert muse_wonder.performance_note is not None
+    assert "not ZDR-eligible" in muse_wonder.performance_note
+    assert "do not use for confidential workloads" in muse_wonder.performance_note
+    assert get_provider_endpoint(muse_wonder.provider) == "https://openrouter.ai/api/v1"
+
+    muse_open = get_model_spec("meta/muse-spark-open")
+    assert muse_open.backend == "openai_compatible"
+    assert muse_open.provider == "openrouter"
+    assert muse_open.local is False
+    assert muse_open.family == "muse"
+    assert muse_open.context_window == 1048576
+    assert muse_open.max_output_tokens == 943718
+    assert muse_open.parameter_count == "816B"
+    assert muse_open.activated_parameters == "42B"
+    assert muse_open.supports_vision is True
+    assert muse_open.supports_function_calling is True
+    assert muse_open.supports_reasoning is True
+    assert muse_open.supports_streaming is True
+    assert muse_open.recommended is True
+    assert muse_open.mandatory_reasoning_effort == "medium"
+    assert muse_open.unsupported_parameters == ("n",)
+    assert muse_open.performance_note is not None
+    assert "zero-retention routes" in muse_open.performance_note
+    assert "Enforce OpenRouter ZDR" in muse_open.performance_note
+    assert get_provider_endpoint(muse_open.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
+    from agents.architectures.registry import get_all_models, provider_from_string
+
+    assert provider_from_string("openrouter") == "openrouter"
+    assert "openrouter" in get_all_models()
+
+    for model_id in ("qwen3.8-max", "alibaba/qwen3.8-max", "Qwen/Qwen3.8-Max"):
+        spec = infer_model_spec(model_id)
+        assert spec.provider == "openrouter"
+        assert spec.local is False
+
+
+def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("gemini-3.8-flash")
+
+    assert flash.provider == "google"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.context_window == 1048576
+    assert flash.max_output_tokens == 65536
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.recommended is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n", "temperature", "top_p")
+    assert flash.performance_note is not None
+    assert "migration checklist by omitting n, temperature, and top_p" in (flash.performance_note)
+    assert get_provider_endpoint(flash.provider) == (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+        "gemini-3.8-flash-lite",
+    ],
+)
+def test_gemini38_id_variants_route_to_google(model_id):
+    spec = infer_model_spec(model_id)
+
+    assert spec.id == "gemini-3.8-flash"
+    assert spec.provider == "google"
+    assert spec.local is False
+
+
+def test_gemini_request_aliases_share_the_canonical_request_contract():
+    flash = get_model_spec("gemini-3.8-flash")
+
+    assert flash.aliases
+    assert all(resolve_request_spec(alias) is flash for alias in flash.aliases)
+
+
+def test_catalog_aliases_are_unique_and_do_not_shadow_canonical_ids():
+    canonical_ids = {spec.id.lower() for spec in MODEL_SPECS}
+    aliases = [alias.lower() for spec in MODEL_SPECS for alias in spec.aliases]
+
+    assert len(aliases) == len(set(aliases))
+    assert canonical_ids.isdisjoint(aliases)
+
+
+def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("qwen/qwen3.8-flash")
+
+    assert flash.provider == "openrouter"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.context_window == 1000000
+    assert flash.max_output_tokens == 131072
+    assert flash.parameter_count is None
+    assert flash.activated_parameters is None
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n",)
+    assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
+    ember = get_model_spec("fireworks/ember-1")
+
+    assert ember.provider == "openrouter"
+    assert ember.backend == "openai_compatible"
+    assert ember.local is False
+    assert ember.family == "ember"
+    assert ember.context_window == 1048576
+    assert ember.max_output_tokens == 943718
+    assert ember.parameter_count is None
+    assert ember.activated_parameters is None
+    assert ember.supports_vision is True
+    assert ember.supports_function_calling is True
+    assert ember.supports_reasoning is True
+    assert ember.supports_streaming is True
+    assert ember.recommended is True
+    assert ember.mandatory_reasoning_effort is None
+    assert ember.unsupported_parameters == ("n",)
+    assert ember.performance_note is not None
+    assert "zero retention" in ember.performance_note
+    assert get_provider_endpoint(ember.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_gpt61_terra_metadata_is_explicit_and_server_backed():
+    terra = get_model_spec("openai/gpt-6.1-terra")
+
+    assert terra.provider == "openrouter"
+    assert terra.backend == "openai_compatible"
+    assert terra.local is False
+    assert terra.family == "gpt"
+    assert terra.context_window == 1050000
+    assert terra.max_output_tokens == 128000
+    assert terra.parameter_count is None
+    assert terra.activated_parameters is None
+    assert terra.supports_vision is True
+    assert terra.supports_function_calling is True
+    assert terra.supports_reasoning is True
+    assert terra.supports_streaming is True
+    assert terra.recommended is False
+    assert terra.mandatory_reasoning_effort is None
+    assert terra.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert terra.aliases == ("openai/gpt-6.1-terra-20261026",)
+    assert resolve_request_spec(terra.aliases[0]) is terra
+    assert terra.performance_note is not None
+    assert "Azure provides a zero-retention route" in terra.performance_note
+    assert "enforce OpenRouter ZDR" in terra.performance_note
+    assert get_provider_endpoint(terra.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_backed():
+    flash = get_model_spec("deepseek/deepseek-v4.1-flash-1017")
+
+    assert flash.provider == "openrouter"
+    assert flash.backend == "openai_compatible"
+    assert flash.local is False
+    assert flash.family == "deepseek"
+    assert flash.context_window == 1048576
+    assert flash.max_output_tokens == 393216
+    assert flash.parameter_count is None
+    assert flash.activated_parameters is None
+    assert flash.supports_vision is True
+    assert flash.supports_function_calling is True
+    assert flash.supports_reasoning is True
+    assert flash.supports_streaming is True
+    assert flash.recommended is True
+    assert flash.mandatory_reasoning_effort is None
+    assert flash.unsupported_parameters == ("n",)
+    assert flash.performance_note is not None
+    assert "enforce OpenRouter ZDR" in flash.performance_note
+    assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
+    assert resolve_request_spec("deepseek/deepseek-v4.1-flash") is flash
+
+
+def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
+    hy4 = get_model_spec("tencent/hy4-preview")
+
+    assert hy4.provider == "openrouter"
+    assert hy4.backend == "openai_compatible"
+    assert hy4.local is False
+    assert hy4.family == "hy"
+    assert hy4.context_window == 1048576
+    assert hy4.max_output_tokens == 64000
+    assert hy4.parameter_count == "770B"
+    assert hy4.activated_parameters == "49B"
+    assert hy4.supports_vision is False
+    assert hy4.supports_function_calling is True
+    assert hy4.supports_reasoning is True
+    assert hy4.supports_streaming is True
+    assert hy4.mandatory_reasoning_effort is None
+    assert hy4.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
+    grok = get_model_spec("x-ai/grok-4.6")
+
+    assert grok.provider == "openrouter"
+    assert grok.backend == "openai_compatible"
+    assert grok.local is False
+    assert grok.context_window == 500000
+    assert grok.max_output_tokens is None
+    assert grok.parameter_count is None
+    assert grok.supports_vision is True
+    assert grok.supports_function_calling is True
+    assert grok.supports_reasoning is True
+    assert grok.supports_streaming is True
+    assert grok.mandatory_reasoning_effort == "high"
+    assert grok.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_grok_47_metadata_is_explicit_and_server_backed():
+    grok = get_model_spec("x-ai/grok-4.7")
+
+    assert grok.provider == "openrouter"
+    assert grok.backend == "openai_compatible"
+    assert grok.local is False
+    assert grok.family == "grok"
+    assert grok.context_window == 500000
+    assert grok.max_output_tokens == 450000
+    assert grok.parameter_count is None
+    assert grok.activated_parameters is None
+    assert grok.supports_vision is True
+    assert grok.supports_function_calling is True
+    assert grok.supports_reasoning is True
+    assert grok.supports_streaming is True
+    assert grok.recommended is True
+    assert grok.mandatory_reasoning_effort == "high"
+    assert grok.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert grok.performance_note is not None
+    assert "Enforce OpenRouter ZDR" in grok.performance_note
+    assert get_provider_endpoint(grok.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_claude_opus_55_metadata_is_explicit_and_server_backed():
+    opus = get_model_spec("anthropic/claude-opus-5.5")
+
+    assert opus.provider == "openrouter"
+    assert opus.backend == "openai_compatible"
+    assert opus.local is False
+    assert opus.family == "claude"
+    assert opus.context_window == 1000000
+    assert opus.max_output_tokens == 128000
+    assert opus.parameter_count is None
+    assert opus.activated_parameters is None
+    assert opus.supports_vision is True
+    assert opus.supports_function_calling is True
+    assert opus.supports_reasoning is True
+    assert opus.supports_streaming is True
+    assert opus.recommended is True
+    assert opus.mandatory_reasoning_effort == "high"
+    assert opus.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert opus.performance_note is not None
+    assert "Enforce OpenRouter ZDR" in opus.performance_note
+    assert get_provider_endpoint(opus.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_claude_sonnet_55_metadata_is_explicit_and_server_backed():
+    sonnet = get_model_spec("anthropic/claude-sonnet-5.5")
+
+    assert sonnet.provider == "openrouter"
+    assert sonnet.backend == "openai_compatible"
+    assert sonnet.local is False
+    assert sonnet.family == "claude"
+    assert sonnet.context_window == 1000000
+    assert sonnet.max_output_tokens == 128000
+    assert sonnet.parameter_count is None
+    assert sonnet.activated_parameters is None
+    assert sonnet.supports_vision is True
+    assert sonnet.supports_function_calling is True
+    assert sonnet.supports_reasoning is True
+    assert sonnet.supports_streaming is True
+    assert sonnet.recommended is True
+    assert sonnet.mandatory_reasoning_effort == "high"
+    assert sonnet.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert sonnet.performance_note is not None
+    assert "Enforce OpenRouter ZDR routing" in sonnet.performance_note
+    assert get_provider_endpoint(sonnet.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_claude_haiku_55_metadata_is_explicit_and_server_backed():
+    haiku = get_model_spec("anthropic/claude-haiku-5.5")
+
+    assert haiku.provider == "openrouter"
+    assert haiku.backend == "openai_compatible"
+    assert haiku.local is False
+    assert haiku.family == "claude"
+    assert haiku.context_window == 1000000
+    assert haiku.max_output_tokens == 128000
+    assert haiku.parameter_count is None
+    assert haiku.activated_parameters is None
+    assert haiku.supports_vision is True
+    assert haiku.supports_function_calling is True
+    assert haiku.supports_reasoning is True
+    assert haiku.supports_streaming is True
+    assert haiku.recommended is True
+    assert haiku.mandatory_reasoning_effort is None
+    assert haiku.unsupported_parameters == (
+        "n",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert haiku.performance_note is not None
+    assert "Enforce OpenRouter ZDR routing" in haiku.performance_note
+    assert get_provider_endpoint(haiku.provider) == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen3-4B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "microsoft/Phi-4-mini-instruct",
+        "HuggingFaceTB/SmolLM3-3B",
+        "google/gemma-3-1b-it",
+        "ibm-granite/granite-3.3-8b-instruct",
+        "allenai/Olmo-3-7B-Instruct",
+        "zai-org/glm-4-9b-chat-hf",
+        "openai/gpt-oss-20b",
+    ],
+)
 def test_standard_local_models_use_generic_runner(model_id):
-    expected = "llama_server" if sys.platform in {"win32", "linux"} else "transformers"
+    if sys.platform in {"win32", "linux"}:
+        expected = "llama_server"
+    elif sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        expected = "mlx_llama"
+    else:
+        expected = "transformers"
     assert AgentFactory._infer_runner_type(model_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("model_id", "recommended"),
+    [
+        ("muse-spark-1.1", False),
+        ("muse-spark-1.2", False),
+        ("muse-spark-1.3", True),
+    ],
+)
+def test_meta_model_api_catalog_options(model_id, recommended):
+    model = get_model_spec(model_id)
+
+    assert model.provider == "meta"
+    assert model.backend == "openai_compatible"
+    assert model.local is False
+    assert model.context_window == 1048576
+    assert model.max_output_tokens is None
+    assert model.parameter_count is None
+    assert model.supports_vision is True
+    assert model.supports_function_calling is True
+    assert model.supports_reasoning is True
+    assert model.supports_streaming is True
+    assert model.unsupported_parameters == (
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "n",
+    )
+    assert model.recommended is recommended
+    assert get_provider_endpoint(model.provider) == "https://api.meta.ai/v1"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "Qwen/Qwen3-4B",
+        "Qwen/Qwen3.8-27B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "microsoft/Phi-4-mini-instruct",
+        "HuggingFaceTB/SmolLM3-3B",
+        "google/gemma-3-1b-it",
+        "ibm-granite/granite-3.3-8b-instruct",
+        "allenai/Olmo-3-7B-Instruct",
+        "zai-org/glm-4-9b-chat-hf",
+        "openai/gpt-oss-20b",
+    ],
+)
+def test_local_catalog_models_use_managed_runner_on_linux(model_id):
+    with patch("agents.factory.sys.platform", "linux"):
+        assert AgentFactory._infer_runner_type(model_id) == "llama_server"
+
+
+@pytest.mark.parametrize(
+    "host_platform, machine, model_id, expected_runner",
+    [
+        ("linux", "x86_64", "Qwen/Qwen3-4B", "llama_server"),
+        ("win32", "AMD64", "Qwen/Qwen3-4B", "llama_server"),
+        ("darwin", "arm64", "Qwen/Qwen3-4B", "mlx_llama"),
+        ("darwin", "x86_64", "Qwen/Qwen3-4B", "transformers"),
+        ("darwin", "x86_64", "Qwen/Qwen3.8-27B", "mlx_llama"),
+    ],
+)
+def test_platform_runner_selection(host_platform, machine, model_id, expected_runner):
+    with (
+        patch("agents.factory.sys.platform", host_platform),
+        patch("agents.factory.platform.machine", return_value=machine),
+    ):
+        assert AgentFactory._infer_runner_type(model_id) == expected_runner
 
 
 def test_unknown_huggingface_model_uses_generic_runner():
@@ -123,9 +680,15 @@ def test_environment_runner_override_precedes_catalog_inference():
             "local",
             context,
             model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            device_config={
+                "device": "cpu",
+                "llama_backend": "gpu",
+                "llama_gpu_device_ids": ["gpu-inert"],
+            },
         )
 
     assert local_agent.call_args.kwargs["runner_type"] == "transformers"
+    assert local_agent.call_args.kwargs["device_config"] == {"device": "cpu"}
 
 
 def test_explicit_runner_argument_precedes_environment_override():
@@ -146,23 +709,47 @@ def test_explicit_runner_argument_precedes_environment_override():
 
 def test_existing_llama_id_preserves_optimized_runner():
     expected = "llama_server" if sys.platform in {"win32", "linux"} else "mlx_llama"
-    assert AgentFactory._infer_runner_type(
-        "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    ) == expected
+    assert AgentFactory._infer_runner_type("meta-llama/Meta-Llama-3.1-8B-Instruct") == expected
 
 
-@pytest.mark.parametrize("model_id", [
-    "kimi-k2.5",
-    "moonshotai/Kimi-K2.5",
-    "glm-4.7-flash",
-    "zai-org/GLM-4.7-Flash",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-    "openai/gpt-oss-120b",
-    "zai-org/GLM-5.2",
-    "deepseek-ai/DeepSeek-R1",
-])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "kimi-k2.5",
+        "moonshotai/Kimi-K2.5",
+        "glm-4.7-flash",
+        "zai-org/GLM-4.7-Flash",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "Qwen/Qwen2.5-72B-Instruct",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "openai/gpt-oss-120b",
+        "zai-org/GLM-5.2",
+        "deepseek-ai/DeepSeek-R1",
+        "x-ai/grok-4.6",
+        "x-ai/grok-4.7",
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-haiku-5.5",
+        "openai/gpt-6.1-terra",
+        "openai/gpt-6.1-terra-20261026",
+        "fireworks/ember-1",
+        "qwen/qwen3.8-max",
+        "qwen3.8-max",
+        "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash-1017",
+        "deepseek/deepseek-v4.1-flash",
+        "tencent/hy4-preview",
+        "z-ai/glm-5.3-flash",
+        "meta/muse-spark-1.2-contributor",
+        "meta/muse-wonder",
+        "meta/muse-spark-open",
+        "stealth/union-alpha",
+        "muse-spark-1.1",
+        "muse-spark-1.2",
+        "muse-spark-1.3",
+        "gemini-3.8-flash",
+    ],
+)
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
     with pytest.raises(ValueError, match="server-backed"):
         AgentFactory._infer_runner_type(model_id)
@@ -181,6 +768,77 @@ def test_hosted_glm_infers_zai_endpoint():
     with patch("agents.online_agent.OnlineAgent") as online_agent:
         AgentFactory.create_agent("online", context, model="glm-4.7-flash")
     assert online_agent.call_args.kwargs["base_url"] == "https://api.z.ai/api/paas/v4"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["openai/gpt-6.1-terra", "openai/gpt-6.1-terra-20261026"],
+)
+def test_gpt61_terra_infers_openrouter_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+
+    assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "google/gemini-3.8-flash",
+        "models/gemini-3.8-flash-latest",
+        "google/gemini-3.8-flash-preview",
+    ],
+)
+def test_google_gemini_model_infers_compatible_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "x-ai/grok-4.6",
+        "x-ai/grok-4.7",
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-haiku-5.5",
+        "fireworks/ember-1",
+        "qwen/qwen3.8-max",
+        "qwen3.8-max",
+        "qwen/qwen3.8-flash",
+        "deepseek/deepseek-v4.1-flash-1017",
+        "deepseek/deepseek-v4.1-flash",
+        "tencent/hy4-preview",
+        "z-ai/glm-5.3-flash",
+        "meta/muse-spark-1.2-contributor",
+        "meta/muse-wonder",
+        "meta/muse-spark-open",
+        "stealth/union-alpha",
+    ],
+)
+def test_openrouter_model_infers_openrouter_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["muse-spark-1.1", "muse-spark-1.2", "muse-spark-1.3"],
+)
+def test_meta_model_infers_first_party_endpoint(model_id):
+    context = MagicMock()
+    with patch("agents.online_agent.OnlineAgent") as online_agent:
+        AgentFactory.create_agent("online", context, model=model_id)
+    assert online_agent.call_args.kwargs["base_url"] == "https://api.meta.ai/v1"
 
 
 def test_self_hosted_model_requires_endpoint_or_environment():
@@ -225,9 +883,7 @@ def test_model_api_metadata_contains_performance_fields():
     )
 
     local_models = get_models_for_provider(OnlineModelProviders.OFFLINE)
-    local_glm = next(
-        model for model in local_models if model.id == "zai-org/glm-4-9b-chat-hf"
-    )
+    local_glm = next(model for model in local_models if model.id == "zai-org/glm-4-9b-chat-hf")
     assert local_glm.backend == "transformers"
     assert local_glm.local is True
 
@@ -283,6 +939,9 @@ def test_future_provider_does_not_require_enum_change(monkeypatch):
 
 
 def test_model_routes_serialize_string_backed_providers():
+    from fastapi import HTTPException
+
+    from agents.architectures.registry import get_all_models, provider_to_string
     from app.api.v1.endpoints.models import (
         get_available_models,
         get_models_by_provider,
@@ -290,15 +949,68 @@ def test_model_routes_serialize_string_backed_providers():
     )
 
     provider_ids = asyncio.run(get_providers())
-    assert "self-hosted" in provider_ids
+    assert "offline" in provider_ids
+    assert "anthropic" in provider_ids
     assert "moonshot" in provider_ids
+    assert "openrouter" in provider_ids
+    assert "meta" in provider_ids
+    assert "google" in provider_ids
+    assert "huggingface" not in provider_ids
+    assert "self-hosted" not in provider_ids
 
     response = asyncio.run(get_available_models())
-    assert "self-hosted" in response.providers
+    assert "offline" in response.providers
+    assert "anthropic" in response.providers
+    assert "openrouter" in response.providers
+    assert "meta" in response.providers
+    assert "google" in response.providers
+    assert "huggingface" not in response.providers
+    assert "self-hosted" not in response.providers
+    assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
+    assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
+    assert any(model.id == "x-ai/grok-4.7" for model in response.providers["openrouter"])
     assert any(
-        model.id == "openai/gpt-oss-120b"
-        for model in response.providers["self-hosted"]
+        model.id == "anthropic/claude-opus-5.5" for model in response.providers["openrouter"]
     )
+    assert any(
+        model.id == "anthropic/claude-sonnet-5.5" for model in response.providers["openrouter"]
+    )
+    assert any(
+        model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
+    )
+    assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
+    assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "deepseek/deepseek-v4.1-flash-1017"
+        for model in response.providers["openrouter"]
+    )
+    assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
+    assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
+    assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
+    )
+    assert any(model.id == "meta/muse-wonder" for model in response.providers["openrouter"])
 
-    hosted_models = asyncio.run(get_models_by_provider("self-hosted"))
-    assert all(model.provider == "self-hosted" for model in hosted_models)
+    assert any(model.id == "meta/muse-spark-open" for model in response.providers["openrouter"])
+    assert {
+        "muse-spark-1.1",
+        "muse-spark-1.2",
+        "muse-spark-1.3",
+    } <= {model.id for model in response.providers["meta"]}
+
+    internal_models = get_all_models()
+    internal_provider_ids = {provider_to_string(provider) for provider in internal_models}
+    assert "huggingface" in internal_provider_ids
+    assert "self-hosted" in internal_provider_ids
+    self_hosted_models = next(
+        models
+        for provider, models in internal_models.items()
+        if provider_to_string(provider) == "self-hosted"
+    )
+    assert any(model.id == "openai/gpt-oss-120b" for model in self_hosted_models)
+
+    for hidden_provider in ("huggingface", "self-hosted"):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_models_by_provider(hidden_provider))
+        assert exc_info.value.status_code == 400

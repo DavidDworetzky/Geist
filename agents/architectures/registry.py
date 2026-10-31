@@ -11,6 +11,11 @@ from enum import Enum
 from typing import Any, cast
 
 from agents.model_catalog import MODEL_SPECS, PROVIDERS
+from agents.model_ids import (
+    META_LLAMA_3_8B_INSTRUCT_ID,
+    META_LLAMA_31_8B_BASE_ID,
+    META_LLAMA_31_8B_INSTRUCT_ID,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +56,8 @@ class OnlineModelNames(Enum):
     GROK_2_VISION_2 = "grok-2-vision-2"
     GROK_3 = "grok-3"
     # Anthropic models
+    CLAUDE_FABLE_51 = "claude-fable-5-1"
+    CLAUDE_MYTHOS_51 = "claude-mythos-5-1"
     CLAUDE_3_OPUS = "claude-3-opus-20240229"
     CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
     CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
@@ -65,7 +72,7 @@ class OnlineModelNames(Enum):
     # Open Source / Huggingface Models
     QWEN3 = "qwen3"
     QWEN25_72B = "Qwen/Qwen2.5-72B-Instruct"
-    META_LLAMA_31_8B = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    META_LLAMA_31_8B = META_LLAMA_31_8B_INSTRUCT_ID
     MIXTRAL_8X7B_HF = "mistralai/Mixtral-8x7B-Instruct-v0.1"
     # Offline / Local models
     META_LLAMA_31_8B_LOCAL = "Meta-Llama-3.1-8B-Instruct"
@@ -492,6 +499,30 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     ],
     OnlineModelProviders.ANTHROPIC: [
         ModelInfo(
+            id="claude-fable-5-1",
+            name="Claude Fable 5.1",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=True,
+            family="claude-fable",
+        ),
+        ModelInfo(
+            id="claude-mythos-5-1",
+            name="Claude Mythos 5.1 (Invite Only)",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="claude-mythos",
+        ),
+        ModelInfo(
             id="claude-3-opus-20240229",
             name="Claude 3 Opus",
             provider=OnlineModelProviders.ANTHROPIC,
@@ -654,7 +685,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     ],
     OnlineModelProviders.OFFLINE: [
         ModelInfo(
-            id="Meta-Llama-3.1-8B-Instruct",
+            id=META_LLAMA_31_8B_INSTRUCT_ID,
             name="Meta Llama 3.1 8B Instruct (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=131072,
@@ -665,7 +696,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             family="llama-3",
         ),
         ModelInfo(
-            id="Meta-Llama-3.1-8B",
+            id=META_LLAMA_31_8B_BASE_ID,
             name="Meta Llama 3.1 8B (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=131072,
@@ -676,7 +707,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             family="llama-3",
         ),
         ModelInfo(
-            id="Meta-Llama-3-8B-Instruct",
+            id=META_LLAMA_3_8B_INSTRUCT_ID,
             name="Meta Llama 3 8B Instruct (Local)",
             provider=OnlineModelProviders.OFFLINE,
             context_window=8192,
@@ -729,6 +760,7 @@ STATIC_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
             supports_function_calling=False,
             recommended=False,
             family="qwen3",
+            min_transformers_version="4.51.0",
         ),
     ],
 }
@@ -1237,6 +1269,30 @@ DISCOVERED_MODELS: dict[OnlineModelProviders | str, list[ModelInfo]] = {
     ],
     OnlineModelProviders.ANTHROPIC: [
         ModelInfo(
+            id="claude-fable-5-1",
+            name="Claude Fable 5.1",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=True,
+            family="claude-fable",
+        ),
+        ModelInfo(
+            id="claude-mythos-5-1",
+            name="Claude Mythos 5.1 (Invite Only)",
+            provider=OnlineModelProviders.ANTHROPIC,
+            context_window=1000000,
+            max_output_tokens=128000,
+            supports_vision=True,
+            supports_function_calling=True,
+            supports_streaming=True,
+            recommended=False,
+            family="claude-mythos",
+        ),
+        ModelInfo(
             id="claude-opus-4-5-20251101",
             name="Claude Opus 4.5",
             provider=OnlineModelProviders.ANTHROPIC,
@@ -1523,18 +1579,24 @@ def get_last_model_sync_time() -> datetime | None:
     return _last_model_sync
 
 
+def is_user_selectable_provider(provider: OnlineModelProviders | str) -> bool:
+    """Expose local models or providers backed by a supported online API."""
+
+    provider_id = provider_to_string(provider)
+    if provider_id == OnlineModelProviders.OFFLINE.value:
+        return True
+    provider_spec = PROVIDERS.get(provider_id)
+    return provider_spec is not None and bool(provider_spec.base_url)
+
+
 def get_provider_ids() -> list[str]:
-    """List legacy, catalog, static, and discovered provider IDs once."""
-    provider_ids = [provider.value for provider in OnlineModelProviders]
-    for provider in PROVIDERS:
-        if provider not in provider_ids:
-            provider_ids.append(provider)
-    _provider_key: OnlineModelProviders | str
-    for _provider_key in (*STATIC_MODELS, *DISCOVERED_MODELS):
-        provider_id = provider_to_string(_provider_key)
-        if provider_id not in provider_ids:
-            provider_ids.append(provider_id)
-    return provider_ids
+    """List user-selectable local and online provider IDs once."""
+
+    return [
+        provider_to_string(provider)
+        for provider in get_all_models()
+        if is_user_selectable_provider(provider)
+    ]
 
 
 def provider_from_string(

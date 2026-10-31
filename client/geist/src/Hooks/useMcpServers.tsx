@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 export interface McpServer {
   mcp_server_id: number;
-  user_id: number;
+  workspace_id: number;
   name: string;
   transport: 'stdio' | 'http';
   command: string | null;
@@ -21,6 +21,7 @@ export interface McpServer {
   timeout_seconds: number;
   create_date: string;
   update_date: string;
+  oauth_configured?: boolean;
 }
 
 export interface McpServerInput {

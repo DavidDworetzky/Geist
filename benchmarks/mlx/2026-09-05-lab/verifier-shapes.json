@@ -1,0 +1,124 @@
+{
+  "device": {
+    "device_name": "Apple M2 Max",
+    "max_recommended_working_set_size": 83494174720,
+    "memory_size": 103079215104,
+    "architecture": "applegpu_g14s",
+    "max_buffer_length": 62620631040,
+    "resource_limit": 499000
+  },
+  "compiled": false,
+  "results": [
+    {
+      "rows": 1,
+      "verify_ms": 51.302541978657246,
+      "graph_build_ms": 2.689291723072529,
+      "perfect_target_only_tps": 19.49221152464565
+    },
+    {
+      "rows": 8,
+      "verify_ms": 165.16141733154655,
+      "graph_build_ms": 14.940417371690273,
+      "perfect_target_only_tps": 48.4374627516106
+    },
+    {
+      "rows": 16,
+      "verify_ms": 296.6580418869853,
+      "graph_build_ms": 7.623082958161831,
+      "perfect_target_only_tps": 53.934152259035514
+    },
+    {
+      "rows": 32,
+      "verify_ms": 275.57749999687076,
+      "graph_build_ms": 3.2737920992076397,
+      "perfect_target_only_tps": 116.11978481684233
+    },
+    {
+      "rows": 64,
+      "verify_ms": 517.3100000247359,
+      "graph_build_ms": 2.8689163736999035,
+      "perfect_target_only_tps": 123.71692021600153
+    },
+    {
+      "rows": 128,
+      "verify_ms": 976.127709262073,
+      "graph_build_ms": 2.9022921808063984,
+      "perfect_target_only_tps": 131.13038261844306
+    }
+  ],
+  "fenced_8row_seconds": {
+    "embedding": 0.00035566603764891624,
+    "normalization": 0.022802332881838083,
+    "gdn_with_projections": 0.05348762637004256,
+    "residual": 0.022127913776785135,
+    "mlp": 0.1086864173412323,
+    "attention_with_projections": 0.018277166411280632,
+    "lm_head": 0.006782500073313713
+  },
+  "fenced_path": "uncompiled; per-phase synchronization overhead included",
+  "tuning": [
+    {
+      "k": 5120,
+      "n": 248320,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.819224616469336,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 17408,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.991329554477296,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 17408,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 4,
+      "speedup": 1.873066955619872,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 6144,
+      "n": 5120,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.903339103375395,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 12288,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.9051196275510214,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 6144,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.8145226161692345,
+      "dependent_chain": true,
+      "chain_length": 12
+    },
+    {
+      "k": 5120,
+      "n": 10240,
+      "bits": 4,
+      "split_k": 8,
+      "speedup": 1.9620787043192303,
+      "dependent_chain": true,
+      "chain_length": 12
+    }
+  ]
+}

@@ -1,7 +1,9 @@
-import React, { useState, useRef, KeyboardEvent } from 'react';
+import React, { useState, useRef, useId, KeyboardEvent } from 'react';
 import { fileReferenceParser, FileItem } from '../Utils/fileReferenceParser';
 import VoiceButton from './VoiceButton';
+import VoiceSettings, { DEFAULT_VOICE_SELECTION, VoiceSelection } from './VoiceSettings';
 import useVoiceChat from '../Hooks/useVoiceChat';
+import LiveCallPanel from './LiveCallPanel';
 
 interface EnhancedChatInputProps {
   value: string;
@@ -13,6 +15,10 @@ interface EnhancedChatInputProps {
   handleKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   sessionId?: number;
   enableVoice?: boolean;
+  submitLabel?: string;
+  secondaryAction?: React.ReactNode;
+  modelLoading?: boolean;
+  onShowModelError?: () => void;
 }
 
 interface FileSuggestion extends FileItem {
@@ -28,30 +34,43 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   rows = 3,
   handleKeyDown: externalHandleKeyDown,
   sessionId = 1,
-  enableVoice = true
+  enableVoice = true,
+  submitLabel = 'Send',
+  secondaryAction,
+  modelLoading = false,
+  onShowModelError,
 }) => {
+  const inputStatusId = useId();
+  const hasInputStatus = modelLoading || Boolean(onShowModelError);
   const [showFileSuggestions, setShowFileSuggestions] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [currentAtPosition, setCurrentAtPosition] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const [voiceSelection, setVoiceSelection] = useState<VoiceSelection>(DEFAULT_VOICE_SELECTION);
+  const [voiceError, setVoiceError] = useState('');
+
   const {
     isRecording,
     isProcessing,
     partialTranscript,
+    assistantText,
+    status,
+    audioLevel,
     toggleRecording
   } = useVoiceChat({
     sessionId,
+    mode: voiceSelection.mode,
+    sttProvider: voiceSelection.sttProvider,
+    ttsProvider: voiceSelection.ttsProvider,
+    ttsModel: voiceSelection.ttsModel,
+    ttsVoice: voiceSelection.ttsVoice,
     onTranscriptFinal: (text) => {
-      onChange(text);
-    },
-    onAssistantText: (text) => {
-      console.log('Assistant text chunk:', text);
+      if (text) onChange(value + (value && !/\s$/.test(value) ? ' ' : '') + text);
     },
     onError: (error) => {
-      console.error('Voice error:', error);
-      alert('Voice error: ' + error);
+      setVoiceError(error);
     }
   });
 
@@ -101,12 +120,16 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   };
 
   const handleSubmit = () => {
-    if (value.trim() && !disabled) {
+    if (value.trim() && !disabled && !isRecording && !isProcessing) {
       onSubmit(value);
     }
   };
 
   const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((isRecording || isProcessing) && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
     if (externalHandleKeyDown) {
       externalHandleKeyDown(e);
       if (e.defaultPrevented) return;
@@ -150,12 +173,10 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
 
   return (
     <div className="enhanced-input">
-      {partialTranscript && (
-        <div className="input-banner">
-          <strong>Listening...</strong>
-          <div>{partialTranscript}</div>
-        </div>
-      )}
+      {enableVoice && voiceSelection.mode === 'live' && <LiveCallPanel active={isRecording}
+        status={status} audioLevel={audioLevel} userText={partialTranscript} assistantText={assistantText} />}
+      {voiceError && <div className="input-banner input-banner-warning" role="alert">{voiceError}</div>}
+      {voiceSelection.mode === 'dictation' && status && <div className="input-banner" role="status">{status}</div>}
 
       {hasFileReferences && (
         <div className={`input-banner ${hasUnresolvedReferences ? 'input-banner-warning' : 'input-banner-success'}`}>
@@ -172,35 +193,66 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
       )}
 
       <div className="input-row">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => handleInputChange(e.target.value)}
-          onKeyDown={internalHandleKeyDown}
-          rows={rows}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="chat-textarea"
-        />
+        {(!enableVoice || voiceSelection.mode === 'dictation') && (
+          <div className="chat-input-field">
+          <textarea
+            ref={textareaRef}
+            value={hasInputStatus ? '' : value}
+            onChange={(e) => handleInputChange(e.target.value)}
+            onKeyDown={internalHandleKeyDown}
+            rows={rows}
+            disabled={disabled}
+            placeholder={hasInputStatus ? '' : placeholder}
+            aria-label="Message"
+            aria-describedby={hasInputStatus ? inputStatusId : undefined}
+            aria-busy={modelLoading || undefined}
+            className="chat-textarea"
+          />
+          {onShowModelError ? (
+            <div className="chat-input-status chat-model-unavailable" id={inputStatusId}>
+              <span>Model unavailable</span>
+              <button className="model-error-badge" type="button" onClick={onShowModelError}>
+                See more…
+              </button>
+            </div>
+          ) : modelLoading && (
+            <div className="chat-input-status" id={inputStatusId} role="status">
+              <span className="chat-runtime-state">
+                <span className="runtime-model-spinner" aria-hidden="true" />
+                Loading model…
+              </span>
+            </div>
+          )}
+        </div>
+        )}
 
         <div className="input-actions">
           {enableVoice && (
-            <VoiceButton
-              isRecording={isRecording}
-              isProcessing={isProcessing}
-              onClick={toggleRecording}
-              disabled={disabled}
-            />
+            <>
+              <VoiceSettings
+                selection={voiceSelection}
+                onChange={setVoiceSelection}
+                disabled={isRecording || isProcessing}
+              />
+              <VoiceButton
+                isRecording={isRecording}
+                isProcessing={isProcessing}
+                onClick={() => { setVoiceError(''); toggleRecording(); }}
+                disabled={voiceSelection.mode === 'dictation' && disabled}
+                mode={voiceSelection.mode}
+              />
+            </>
           )}
 
-          <button
+          {secondaryAction}
+          {(!enableVoice || voiceSelection.mode === 'dictation') && <button
             type="button"
             onClick={handleSubmit}
-            disabled={disabled || !value.trim()}
+            disabled={disabled || isRecording || isProcessing || !value.trim()}
             className="send-button"
           >
-            Send
-          </button>
+            {submitLabel}
+          </button>}
         </div>
       </div>
 
@@ -223,7 +275,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
         </div>
       )}
 
-      <div className="input-help">Use @ to reference files. Press Tab or Enter to accept suggestions.</div>
+      {voiceSelection.mode === 'dictation' && <div className="input-help">Dictation adds text to your message. Review it, then Send.</div>}
     </div>
   );
 };

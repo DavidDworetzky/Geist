@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import uuid
 from collections.abc import Callable, Iterator
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel
 
@@ -22,6 +25,32 @@ ToolCallStatus = Literal[
     "cancelled",
 ]
 ToolSideEffect = Literal["read", "external_write", "filesystem_write", "process"]
+ToolIntent = Literal["answer", "sensitive_answer", "action", "image_generation"]
+ToolSemanticTag = Literal[
+    "public_retrieval",
+    "local_retrieval",
+    "action",
+    "image_generation",
+]
+
+# User-configurable approval posture for agentic tool execution.
+#   default          — per-tool requires_approval flags decide (side-effecting
+#                      tools ask, read-only tools run).
+#   auto_approve     — no tool ever waits for approval.
+#   require_approval — every tool call waits for approval unless the tool is
+#                      covered by an eligible standing grant; source-provided
+#                      tools cannot redeem name-only grants.
+PermissionMode = Literal["default", "auto_approve", "require_approval"]
+MAX_ALWAYS_ALLOWED_TOOLS = 256
+MAX_PERMISSION_TOOL_NAME_LENGTH = 256
+PERMISSION_MODE_DEFAULT: PermissionMode = "default"
+PERMISSION_MODE_AUTO_APPROVE: PermissionMode = "auto_approve"
+PERMISSION_MODE_REQUIRE_APPROVAL: PermissionMode = "require_approval"
+VALID_PERMISSION_MODES: frozenset[PermissionMode] = frozenset(get_args(PermissionMode))
+
+
+class MalformedToolCallError(ValueError):
+    """Invalid model tool syntax; the entire attempted turn must remain unexecuted."""
 
 
 @dataclass(frozen=True)
@@ -69,6 +98,10 @@ class ChatMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    preserve_content: bool = False
+    reasoning_details: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    reasoning_model: str | None = None
+    reasoning_endpoint: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ChatMessage:
@@ -82,6 +115,9 @@ class ChatMessage:
             tool_calls=calls,
             tool_call_id=value.get("tool_call_id"),
             name=value.get("name"),
+            reasoning_details=deepcopy(value.get("reasoning_details") or []),
+            reasoning_model=value.get("reasoning_model"),
+            reasoning_endpoint=value.get("reasoning_endpoint"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,9 +128,19 @@ class ChatMessage:
             value["tool_call_id"] = self.tool_call_id
         if self.name:
             value["name"] = self.name
+        if self.role == "assistant" and self.reasoning_details:
+            value["reasoning_details"] = deepcopy(self.reasoning_details)
+            value["reasoning_model"] = self.reasoning_model
+            value["reasoning_endpoint"] = self.reasoning_endpoint
         return value
 
-    def to_openai(self, tool_name_map: dict[str, str] | None = None) -> dict[str, Any]:
+    def to_openai(
+        self,
+        tool_name_map: dict[str, str] | None = None,
+        *,
+        reasoning_model: str | None = None,
+        reasoning_endpoint: str | None = None,
+    ) -> dict[str, Any]:
         value: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:
             value["tool_calls"] = [
@@ -107,15 +153,49 @@ class ChatMessage:
         # Anthropic serialization, but do not send it on role="tool".
         if self.name and self.role != "tool":
             value["name"] = (tool_name_map or {}).get(self.name, self.name)
+        if (
+            self.role == "assistant"
+            and self.reasoning_details
+            and reasoning_model is not None
+            and self.reasoning_model == reasoning_model
+            and reasoning_endpoint is not None
+            and self.reasoning_endpoint == reasoning_endpoint
+        ):
+            value["reasoning_details"] = deepcopy(self.reasoning_details)
         return value
 
 
 @dataclass
 class ToolContext:
-    user_id: int
+    workspace_id: int
     chat_id: int | None
     run_id: str
-    approved_call_ids: frozenset[str] = frozenset()
+    permission_mode: PermissionMode = PERMISSION_MODE_DEFAULT
+    always_allow_tools: frozenset[str] = frozenset()
+    agentic_mode: bool = False
+    coding_workspace_id: str | None = None
+    cancellation: threading.Event | None = None
+    invocation_approval: InvocationApproval | None = None
+
+
+class InvocationApproval:
+    """One-use authorization bound to one server-issued call and validated payload."""
+
+    def __init__(self, call: ToolCall) -> None:
+        self._lock = threading.Lock()
+        self._fingerprint = self._digest(call)
+        self._used = False
+
+    @staticmethod
+    def _digest(call: ToolCall) -> str:
+        return hashlib.sha256(json.dumps(call.to_dict(), sort_keys=True).encode()).hexdigest()
+
+    def consume(self, call: ToolCall) -> bool:
+        with self._lock:
+            if self._used or self._fingerprint != self._digest(call):
+                return False
+            self._used = True
+            return True
 
 
 @dataclass
@@ -123,6 +203,7 @@ class ToolExecutionOutput:
     content: str
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
+    error: str | None = None
 
 
 # Argument models are validated by ToolRegistry immediately before dispatch.
@@ -140,11 +221,16 @@ class ToolDefinition:
     handler: ToolHandler | None = None
     side_effect: ToolSideEffect = "read"
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
+    approval_exempt: bool = False
+    allows_standing_grant: bool = True
     enabled_by_default: bool = True
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
     source_adapter: str | None = None
+    source_revision: str | None = None
     availability: ToolAvailability | None = None
+    semantic_tags: frozenset[ToolSemanticTag] = field(default_factory=lambda: frozenset({"action"}))
     # Raw JSON-schema alternative to arguments_model for tools whose schemas
     # arrive at runtime (MCP servers, reflected adapters). Exactly one of the
     # two must be provided; handlers on this path receive a plain dict.
@@ -157,6 +243,8 @@ class ToolDefinition:
             raise ValueError(
                 f"Tool '{self.name}' requires exactly one of arguments_model or arguments_schema"
             )
+        if not self.semantic_tags:
+            raise ValueError(f"Tool '{self.name}' requires at least one semantic tag")
 
     def parameters_schema(self) -> dict[str, Any]:
         if self.arguments_model is not None:
@@ -167,6 +255,24 @@ class ToolDefinition:
         schema.setdefault("type", "object")
         schema.setdefault("properties", {})
         return schema
+
+    def approval_fingerprint(self) -> str:
+        payload = json.dumps(
+            {
+                "name": self.name,
+                "parameters": self.parameters_schema(),
+                "side_effect": self.side_effect,
+                "source_adapter": self.source_adapter,
+                "source_revision": self.source_revision,
+                "allows_standing_grant": self.allows_standing_grant,
+                "approval_exempt": self.approval_exempt,
+                "requires_per_call_approval": self.requires_per_call_approval,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def to_openai(self, provider_name: str | None = None) -> dict[str, Any]:
         return {
@@ -184,6 +290,27 @@ class ToolDefinition:
             "description": self.description,
             "input_schema": self.parameters_schema(),
         }
+
+
+def tool_requires_approval(definition: ToolDefinition, context: ToolContext) -> bool:
+    """Effective approval requirement for one call under the user's permissions.
+
+    Fresh per-call approval cannot be waived by any mode or standing grant.
+    Otherwise, auto-approve waives approval. Eligible static built-in
+    grants skip approval; require_approval asks for remaining tools; default
+    falls back to the tool's flag. Mutable sources cannot redeem name-only grants.
+    """
+    if definition.requires_per_call_approval:
+        return True
+    if definition.approval_exempt:
+        return False
+    if context.permission_mode == PERMISSION_MODE_AUTO_APPROVE:
+        return False
+    if definition.allows_standing_grant and definition.name in context.always_allow_tools:
+        return False
+    if context.permission_mode == PERMISSION_MODE_REQUIRE_APPROVAL:
+        return True
+    return definition.requires_approval
 
 
 @dataclass
@@ -213,6 +340,9 @@ class ModelTurn:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
+    reasoning_details: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    reasoning_model: str | None = None
+    reasoning_endpoint: str | None = None
 
 
 @dataclass

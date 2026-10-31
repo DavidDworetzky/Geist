@@ -51,7 +51,6 @@
 }
 
 .primary-nav-link .nav-icon,
-.brand-lockup .brand-mark-svg,
 .brand-lockup .brand-mark-image {
   transition: transform var(--geist-motion-standard) var(--geist-ease-emphasized);
 }
@@ -61,7 +60,6 @@
   transform: scale(1.04);
 }
 
-.brand-lockup:hover .brand-mark-svg,
 .brand-lockup:hover .brand-mark-image {
   transform: scale(1.035);
 }

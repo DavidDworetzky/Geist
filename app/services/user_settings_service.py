@@ -1,105 +1,98 @@
 """
 Service layer for user settings management.
 """
+
 import logging
+from typing import Any, Literal
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.factory import AgentFactory
-from app.models.database.geist_user import get_default_user
+from agents.model_ids import canonicalize_local_model_id
+from app.models.database.geist_user import get_default_workspace
 from app.models.database.user_settings import (
+    UserSettingsModel,
     get_or_create_user_settings,
     get_user_settings,
+    update_detected_llama_backend_if_unset,
     update_user_settings,
 )
 from app.models.user_settings import (
     AgentConfigRequest,
     AgentFactoryConfig,
+    AgentPermissionsSettings,
     UserSettingsResponse,
     UserSettingsUpdate,
 )
+from app.services.agent_permissions import normalize_agent_permissions
 
 
 logger = logging.getLogger(__name__)
 
+
+def _permissions_from_stored(raw: object) -> AgentPermissionsSettings:
+    """Tolerantly hydrate stored agent permissions; malformed rows fall back to defaults."""
+    try:
+        return AgentPermissionsSettings.model_validate(normalize_agent_permissions(raw))
+    except Exception:
+        logger.warning("Malformed stored agent_permissions; using defaults")
+        return AgentPermissionsSettings()
+
+
+def _to_user_settings_response(settings_model: UserSettingsModel) -> UserSettingsResponse:
+    payload = vars(settings_model).copy()
+    payload["agent_permissions"] = _permissions_from_stored(settings_model.agent_permissions)
+    response = UserSettingsResponse.model_validate(payload)
+    return response.model_copy(
+        update={"default_local_model": canonicalize_local_model_id(response.default_local_model)}
+    )
+
+
 class UserSettingsService:
-    """Service for managing user settings and agent configuration."""
+    """Service for managing workspace settings and agent configuration."""
 
     @staticmethod
-    def get_user_settings_by_id(user_id: int) -> UserSettingsResponse | None:
+    def get_workspace_settings_by_id(workspace_id: int) -> UserSettingsResponse | None:
         """
-        Get user settings by user ID.
+        Get settings owned by a workspace.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
 
         Returns:
             UserSettingsResponse if found, None otherwise
         """
-        settings_model = get_user_settings(user_id)
+        settings_model = get_user_settings(workspace_id)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=settings_model.default_local_model,
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date
-            )
+            return _to_user_settings_response(settings_model)
         return None
 
     @staticmethod
-    def get_or_create_user_settings_by_id(user_id: int) -> UserSettingsResponse:
+    def get_or_create_workspace_settings_by_id(workspace_id: int) -> UserSettingsResponse:
         """
-        Get user settings by user ID, creating default ones if they don't exist.
+        Get workspace settings, creating defaults when they do not exist.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
 
         Returns:
             UserSettingsResponse
         """
-        settings_model = get_or_create_user_settings(user_id)
-        return UserSettingsResponse(
-            user_settings_id=settings_model.user_settings_id,
-            user_id=settings_model.user_id,
-            default_agent_type=settings_model.default_agent_type,
-            default_local_model=settings_model.default_local_model,
-            default_local_artifact_id=settings_model.default_local_artifact_id,
-            default_online_model=settings_model.default_online_model,
-            default_online_provider=settings_model.default_online_provider,
-            default_file_archives=settings_model.default_file_archives,
-            enable_rag_by_default=settings_model.enable_rag_by_default,
-            default_max_tokens=settings_model.default_max_tokens,
-            default_temperature=settings_model.default_temperature,
-            default_top_p=settings_model.default_top_p,
-            default_frequency_penalty=settings_model.default_frequency_penalty,
-            default_presence_penalty=settings_model.default_presence_penalty,
-            backup_providers=settings_model.backup_providers,
-            ui_preferences=settings_model.ui_preferences,
-            create_date=settings_model.create_date,
-            update_date=settings_model.update_date
-        )
+        settings_model = get_or_create_user_settings(workspace_id)
+        return _to_user_settings_response(settings_model)
 
     @staticmethod
-    def update_user_settings_by_id(user_id: int, updates: UserSettingsUpdate) -> UserSettingsResponse | None:
+    def update_workspace_settings_by_id(
+        workspace_id: int,
+        updates: UserSettingsUpdate,
+        *,
+        allow_llama_redetection: bool = False,
+    ) -> UserSettingsResponse | None:
         """
         Update user settings.
 
         Args:
-            user_id: User ID
+            workspace_id: Workspace ID
             updates: Settings updates
 
         Returns:
@@ -108,14 +101,82 @@ class UserSettingsService:
         # Preserve explicitly supplied nulls so callers can clear a previously
         # selected concrete artifact when switching back to a catalog model.
         update_dict = updates.model_dump(exclude_unset=True)
-        current_settings = get_user_settings(user_id)
+        current_settings = get_user_settings(workspace_id)
         if current_settings is None:
             return None
 
+        if "default_local_model" in update_dict:
+            update_dict["default_local_model"] = canonicalize_local_model_id(
+                update_dict["default_local_model"]
+            )
+
+        current_local_model = canonicalize_local_model_id(current_settings.default_local_model)
+
+        compute_keys = {"llama_backend", "llama_gpu_device_ids"}
+        compute_supplied = any(key in update_dict for key in compute_keys)
+        compute_changed = any(
+            key in update_dict and update_dict[key] != getattr(current_settings, key)
+            for key in compute_keys
+        )
+        next_backend = update_dict.get("llama_backend", current_settings.llama_backend)
+        next_device_ids = update_dict.get(
+            "llama_gpu_device_ids", current_settings.llama_gpu_device_ids
+        )
+        if compute_changed or (compute_supplied and next_backend == "gpu"):
+            if (
+                next_backend is None
+                and current_settings.llama_backend is not None
+                and not allow_llama_redetection
+            ):
+                raise ValueError(
+                    "llama.cpp backend detection can only be reset with Reset to Defaults"
+                )
+            if next_backend is None:
+                if next_device_ids and not allow_llama_redetection:
+                    raise ValueError("Pending llama.cpp detection cannot select GPU devices")
+                update_dict["llama_gpu_device_ids"] = []
+
+            resetting_detection = allow_llama_redetection and next_backend is None
+            if not resetting_detection:
+                from agents.architectures.llama_devices import get_llama_device_service
+
+                try:
+                    inventory = get_llama_device_service().inventory()
+                except RuntimeError as error:
+                    raise ValueError(
+                        "GPU discovery failed; retry saving compute settings after a short wait"
+                    ) from error
+                if inventory.managed_by_environment:
+                    raise ValueError("llama.cpp compute selection is managed by the environment")
+                if next_backend == "gpu" and getattr(inventory, "selection_detection_error", None):
+                    raise ValueError(
+                        "GPU discovery failed; retry saving compute settings after a short wait"
+                    )
+                if next_backend == "gpu":
+                    if not next_device_ids:
+                        raise ValueError("Select at least one llama.cpp GPU device")
+                    if len(set(next_device_ids)) != len(next_device_ids):
+                        raise ValueError("llama.cpp GPU device selections must be unique")
+                    if not inventory.available:
+                        raise ValueError("Managed llama.cpp GPU selection is unavailable")
+                    # Validate against the exact snapshot used for the rest of this
+                    # update. Its resolver also accepts unambiguous compatibility
+                    # IDs from settings written before stable hardware IDs existed.
+                    canonical_device_ids = inventory.resolve_device_ids(next_device_ids)
+                    update_dict["llama_gpu_device_ids"] = list(canonical_device_ids)
+                elif next_backend == "cpu":
+                    update_dict["llama_gpu_device_ids"] = []
+
+        if "agent_permissions" in update_dict:
+            # Canonicalize (dedupe/sort/strip tool names) before hitting the
+            # JSON column; raises ValueError -> 422 on malformed payloads.
+            update_dict["agent_permissions"] = normalize_agent_permissions(
+                update_dict["agent_permissions"]
+            )
         if (
             "default_local_model" in update_dict
             and "default_local_artifact_id" not in update_dict
-            and update_dict["default_local_model"] != current_settings.default_local_model
+            and update_dict["default_local_model"] != current_local_model
         ):
             update_dict["default_local_artifact_id"] = None
 
@@ -123,10 +184,7 @@ class UserSettingsService:
         if selected_artifact_id:
             from app.services.local_models import get_local_model_manager
 
-            selected_model = (
-                update_dict.get("default_local_model")
-                or current_settings.default_local_model
-            )
+            selected_model = update_dict.get("default_local_model") or current_local_model
             manager = get_local_model_manager()
             try:
                 artifact = manager.get_artifact(str(selected_artifact_id))
@@ -139,108 +197,103 @@ class UserSettingsService:
             artifact_status = manager.status(artifact.id)
             if artifact_status.get("supported") is False:
                 raise ValueError(f"Artifact {artifact.id} is unavailable on this platform")
-            if artifact_status.get("status") != "installed":
-                raise ValueError(f"Artifact {artifact.id} must be installed before selection")
 
         # Backend validation: auto-infer agent_type based on model/provider changes
         # This acts as a safety net if the frontend doesn't set agent_type correctly
-        if 'default_agent_type' not in update_dict or update_dict.get('default_agent_type') is None:
+        if "default_agent_type" not in update_dict or update_dict.get("default_agent_type") is None:
             # If online model or online provider is being set, infer agent_type as 'online'
-            if 'default_online_model' in update_dict or 'default_online_provider' in update_dict:
-                provider = update_dict.get('default_online_provider', '')
+            if "default_online_model" in update_dict or "default_online_provider" in update_dict:
+                provider = update_dict.get("default_online_provider", "")
                 # Only set to online if provider is not 'offline'
-                if provider != 'offline':
-                    update_dict['default_agent_type'] = 'online'
-                    logger.info("Auto-inferred agent_type='online' based on online model/provider update")
+                if provider != "offline":
+                    update_dict["default_agent_type"] = "online"
+                    logger.info(
+                        "Auto-inferred agent_type='online' based on online model/provider update"
+                    )
             # If local model is being set, infer agent_type as 'local'
-            elif 'default_local_model' in update_dict or selected_artifact_id:
-                update_dict['default_agent_type'] = 'local'
+            elif "default_local_model" in update_dict or selected_artifact_id:
+                update_dict["default_agent_type"] = "local"
                 logger.info("Auto-inferred agent_type='local' based on local model update")
 
-        settings_model = update_user_settings(user_id, update_dict)
+        settings_model = update_user_settings(workspace_id, update_dict)
         if settings_model:
-            return UserSettingsResponse(
-                user_settings_id=settings_model.user_settings_id,
-                user_id=settings_model.user_id,
-                default_agent_type=settings_model.default_agent_type,
-                default_local_model=settings_model.default_local_model,
-                default_local_artifact_id=settings_model.default_local_artifact_id,
-                default_online_model=settings_model.default_online_model,
-                default_online_provider=settings_model.default_online_provider,
-                default_file_archives=settings_model.default_file_archives,
-                enable_rag_by_default=settings_model.enable_rag_by_default,
-                default_max_tokens=settings_model.default_max_tokens,
-                default_temperature=settings_model.default_temperature,
-                default_top_p=settings_model.default_top_p,
-                default_frequency_penalty=settings_model.default_frequency_penalty,
-                default_presence_penalty=settings_model.default_presence_penalty,
-                backup_providers=settings_model.backup_providers,
-                ui_preferences=settings_model.ui_preferences,
-                create_date=settings_model.create_date,
-                update_date=settings_model.update_date
-            )
+            return _to_user_settings_response(settings_model)
         return None
 
     @staticmethod
-    def get_default_user_settings() -> UserSettingsResponse:
-        """
-        Get default user settings (for the default user).
+    def persist_detected_llama_backend(
+        workspace_id: int,
+        backend: Literal["cpu", "gpu"],
+        device_ids: tuple[str, ...],
+    ) -> UserSettingsResponse | None:
+        """Persist a first-use result without overwriting a concurrent user choice."""
 
-        Returns:
-            UserSettingsResponse for default user
-        """
-        default_user = get_default_user()
-        return UserSettingsService.get_or_create_user_settings_by_id(default_user.user_id)
+        current_settings = get_user_settings(workspace_id)
+        if current_settings is None or current_settings.llama_backend is not None:
+            return UserSettingsService.get_workspace_settings_by_id(workspace_id)
+        if backend not in {"cpu", "gpu"}:
+            raise ValueError("Detected llama.cpp backend must be cpu or gpu")
+        update_detected_llama_backend_if_unset(
+            workspace_id,
+            backend,
+            list(device_ids) if backend == "gpu" else [],
+        )
+        return UserSettingsService.get_workspace_settings_by_id(workspace_id)
 
     @staticmethod
-    def create_agent_from_user_settings(
-        user_id: int,
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+    def get_default_workspace_settings() -> UserSettingsResponse:
+        workspace = get_default_workspace()
+        return UserSettingsService.get_or_create_workspace_settings_by_id(workspace.workspace_id)
+
+    @staticmethod
+    def create_agent_from_workspace_settings(
+        workspace_id: int, agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
-        Create an agent instance based on user settings and optional overrides.
+        Create an agent instance based on workspace settings and optional overrides.
 
         Args:
-            user_id: User ID to get settings for
+            workspace_id: Workspace ID to get settings for
             agent_context: Agent context object
             overrides: Optional configuration overrides
 
         Returns:
             Agent instance
         """
-        # Get user settings
-        settings = UserSettingsService.get_or_create_user_settings_by_id(user_id)
+        settings = UserSettingsService.get_or_create_workspace_settings_by_id(workspace_id)
 
         # Create agent factory config
         factory_config = AgentFactoryConfig.from_user_settings(settings, overrides)
 
         logger.info(f"Creating agent with config: {factory_config}")
 
-        # Create agent using factory
-        agent = AgentFactory.create_agent(
-            agent_type=factory_config.agent_type,
-            agent_context=agent_context,
-            model=factory_config.model,
-            endpoint=factory_config.endpoint,
-            api_key=factory_config.api_key,
-            runner_type=factory_config.runner_type,
-            device_config=factory_config.device_config,
-            backup_providers=[
+        factory_kwargs: dict[str, Any] = {
+            "agent_type": factory_config.agent_type,
+            "agent_context": agent_context,
+            "model": factory_config.model,
+            "endpoint": factory_config.endpoint,
+            "api_key": factory_config.api_key,
+            "runner_type": factory_config.runner_type,
+            "device_config": factory_config.device_config,
+            "generation_config": factory_config.generation_config,
+        }
+        if factory_config.agent_type == "online":
+            factory_kwargs["backup_providers"] = [
                 provider.model_dump() for provider in factory_config.backup_providers
-            ],
-            generation_config=factory_config.generation_config,
+            ]
+
+        agent = AgentFactory.create_agent(
+            **factory_kwargs,
         )
 
         return agent
 
     @staticmethod
-    def create_agent_from_default_user(
-        agent_context: AgentContext,
-        overrides: AgentConfigRequest | None = None
+    def create_agent_from_default_workspace(
+        agent_context: AgentContext, overrides: AgentConfigRequest | None = None
     ) -> BaseAgent:
         """
-        Create an agent instance for the default user.
+        Create an agent instance for the default workspace.
 
         Args:
             agent_context: Agent context object
@@ -249,9 +302,7 @@ class UserSettingsService:
         Returns:
             Agent instance
         """
-        default_user = get_default_user()
-        return UserSettingsService.create_agent_from_user_settings(
-            default_user.user_id,
-            agent_context,
-            overrides
+        workspace = get_default_workspace()
+        return UserSettingsService.create_agent_from_workspace_settings(
+            workspace.workspace_id, agent_context, overrides
         )

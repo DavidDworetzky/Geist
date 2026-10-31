@@ -52,3 +52,12 @@ def test_swapped_routes_are_rejected() -> None:
     )
 
     assert score == 0.0
+
+
+def test_creative_writing_fixture_forbids_image_and_web_tools() -> None:
+    haiku_case = next(
+        case for case in ROUTING_CASES if case["id"] == "creative_writing_haiku_no_tool"
+    )
+
+    assert haiku_case["expected_tools"] == []
+    assert "image.generate" in haiku_case["forbidden_tools"]
