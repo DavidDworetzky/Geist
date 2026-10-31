@@ -105,6 +105,17 @@ class TestVoiceSessionService:
         assert responses[start]["sample_rate"] == 48000
         assert responses[start + 1]["type"] == "audio_chunk"
 
+    @pytest.mark.asyncio
+    async def test_announces_audio_format_once_per_turn(self, voice_service, mock_agent, mock_tts):
+        mock_agent.stream_complete_text.return_value = iter(
+            ["First sentence. ", "Second sentence. ", "Tail"]
+        )
+        mock_tts.synthesize_streaming.side_effect = lambda text: iter([b"pcm"])
+        responses = [event async for event in voice_service.process_with_agent("hi")]
+        assert mock_tts.synthesize_streaming.call_count == 3
+        assert [r["type"] for r in responses].count("audio_start") == 1
+        assert [r["type"] for r in responses].count("audio_chunk") == 3
+
     def test_detect_speech(self, voice_service):
         """Test VAD (voice activity detection)."""
         # Silent audio

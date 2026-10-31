@@ -255,6 +255,7 @@ class VoiceSessionService:
 
                     full_text = ""
                     pending_tts_text = ""
+                    audio_started = False
                     for chunk in self.agent.stream_complete_text(
                         prompt=transcript, chat_id=chat_id, system_prompt=system_prompt
                     ):
@@ -264,13 +265,17 @@ class VoiceSessionService:
 
                         segments, pending_tts_text = _ready_tts_segments(pending_tts_text)
                         for segment in segments:
-                            yield from self._synthesize_events(segment)
+                            audio_started = yield from self._synthesize_events(
+                                segment, audio_started
+                            )
 
                     yield {"type": "text_complete", "text": full_text}
 
                     tail_segments, _ = _ready_tts_segments(pending_tts_text, final=True)
                     for segment in tail_segments:
-                        yield from self._synthesize_events(segment)
+                        audio_started = yield from self._synthesize_events(
+                            segment, audio_started
+                        )
 
                     yield {"type": "audio_complete"}
 
@@ -308,9 +313,11 @@ class VoiceSessionService:
             self.logger.error(f"Agent processing failed: {e}")
             yield {"type": "error", "message": str(e)}
 
-    def _synthesize_events(self, text: str) -> Generator[dict[str, Any], None, None]:
+    def _synthesize_events(
+        self, text: str, started: bool = False
+    ) -> Generator[dict[str, Any], None, bool]:
+        """Yield PCM events for one segment; announce the format once per turn."""
         stream = self.tts.synthesize_streaming(text)
-        started = False
         try:
             for chunk in stream:
                 if not started:
@@ -327,6 +334,7 @@ class VoiceSessionService:
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
+        return started
 
     def reset(self):
         """Reset the session state."""
