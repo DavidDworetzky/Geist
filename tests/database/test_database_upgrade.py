@@ -248,7 +248,7 @@ def test_upgrade_adopts_pre_mcp_schema(tmp_path, missing_permissions, missing_mc
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -279,7 +279,7 @@ def test_versioned_compute_parent_upgrade_adds_permissions(tmp_path):
         upgrade_database()
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
             connection.execute(text("SELECT agent_permissions FROM user_settings"))
     finally:
@@ -323,7 +323,7 @@ def test_upgrade_adopts_combined_unversioned_legacy_schema(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
             row = connection.execute(
@@ -371,7 +371,7 @@ def test_one_off_migration_preserves_existing_disabled_routine(tmp_path):
                 )
             ).one() == ("Existing", "Keep this prompt", 0, "2026-01-01 00:00:00", 0)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
     finally:
         Session.remove()
@@ -450,7 +450,7 @@ def test_bare_alembic_upgrade_seeds_default_workspace(tmp_path):
             ).one()
             assert row == ("default", None, "Local Workspace", None, None)
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
             assert connection.execute(text("SELECT COUNT(*) FROM mcp_server")).scalar_one() == 0
     finally:
@@ -482,7 +482,7 @@ def test_upgrade_adopts_workspace_schema_missing_only_local_artifact(tmp_path):
 
         with engine.connect() as connection:
             assert set(MigrationContext.configure(connection).get_current_heads()) == {
-                "b9d2e4f6a8c0"
+                "e2f4a6b8c0d2"
             }
             columns = {
                 row[1] for row in connection.execute(text("PRAGMA table_info(user_settings)"))
@@ -576,7 +576,7 @@ def test_legacy_adoption_preserves_data_and_backup(
 
     _validate_legacy_schema(Base.metadata, engine)
     with engine.connect() as connection:
-        assert MigrationContext.configure(connection).get_current_heads() == ("b9d2e4f6a8c0",)
+        assert MigrationContext.configure(connection).get_current_heads() == ("e2f4a6b8c0d2",)
         assert connection.execute(text("SELECT user_id, workspace_key FROM geist_user")).one() == (
             52,
             "default",
@@ -747,7 +747,7 @@ def test_upgrade_preserves_existing_oauth_connection(legacy_database, versioned)
 
     _validate_legacy_schema(Base.metadata, engine)
     with engine.connect() as connection:
-        assert MigrationContext.configure(connection).get_current_heads() == ("b9d2e4f6a8c0",)
+        assert MigrationContext.configure(connection).get_current_heads() == ("e2f4a6b8c0d2",)
         assert connection.execute(
             text("SELECT provider, client_id, credential_id FROM mcp_oauth_connection")
         ).one() == ("google", "test-client", "a" * 32)

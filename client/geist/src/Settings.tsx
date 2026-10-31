@@ -6,6 +6,7 @@ import AgentConfigSection from './Components/AgentConfigSection';
 import { LLAMA_COMPUTE_VALIDATION_MESSAGE_ID } from './Components/LlamaComputeSection';
 import GenerationParamsSection from './Components/GenerationParamsSection';
 import RAGSettingsSection from './Components/RAGSettingsSection';
+import SecuritySettingsSection from './Components/SecuritySettingsSection';
 import AgentPermissionsSection from './Components/AgentPermissionsSection';
 import RoutinesSection from './Components/RoutinesSection';
 import UIPreferencesSection from './Components/UIPreferencesSection';
@@ -18,7 +19,7 @@ import {
   useHostDevelopmentEnabled,
 } from './plugins/runtime';
 
-type Tab = 'general' | 'models' | 'generation' | 'rag' | 'permissions' | 'routines' | 'ui' | 'developer' | 'about';
+type Tab = 'general' | 'models' | 'generation' | 'rag' | 'security' | 'permissions' | 'routines' | 'ui' | 'developer' | 'about';
 
 const agentTypeOptions = [
   { value: 'local', label: 'Local' },
@@ -298,6 +299,7 @@ const Settings: React.FC = () => {
     { id: 'models' as Tab, label: 'Models and Providers' },
     { id: 'generation' as Tab, label: 'Generation' },
     { id: 'rag' as Tab, label: 'Files and RAG' },
+    { id: 'security' as Tab, label: 'Security' },
     { id: 'permissions' as Tab, label: 'Permissions' },
     { id: 'routines' as Tab, label: 'Routines' },
     { id: 'ui' as Tab, label: 'Appearance' },
@@ -464,6 +466,8 @@ const Settings: React.FC = () => {
           )}
 
           {activeTab === 'routines' && <RoutinesSection />}
+
+          {activeTab === 'security' && <SecuritySettingsSection />}
 
           {activeTab === 'ui' && (
             <UIPreferencesSection

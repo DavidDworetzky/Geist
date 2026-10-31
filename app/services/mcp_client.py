@@ -24,7 +24,8 @@ import subprocess
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -112,6 +113,10 @@ class McpServerConfig:
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0
+    connector_kind: str = "custom"
+    trusted: bool = False
+    recipient_allowlist: tuple[str, ...] = ()
+    max_writes_per_hour: int = 20
     cwd: str | None = None
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
@@ -595,6 +600,8 @@ class McpClientManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._connections: dict[int, McpConnection] = {}
+        self._idempotency_lock = threading.Lock()
+        self._idempotency_results: OrderedDict[str, str] = OrderedDict()
         self._generations: dict[int, int] = {}
         self._connecting: dict[tuple[int, int, str], threading.Event] = {}
         self._closed = False
@@ -704,20 +711,41 @@ class McpClientManager:
         *,
         cancellation: threading.Event | None = None,
         idempotency_key: str | None = None,
+        before_dispatch: Callable[[], Callable[[], None] | None] | None = None,
     ) -> str:
         deadline = time.monotonic() + config.timeout_seconds
+        if idempotency_key:
+            with self._idempotency_lock:
+                cached = self._idempotency_results.get(idempotency_key)
+                if cached is not None:
+                    self._idempotency_results.move_to_end(idempotency_key)
+                    return cached
+        rollback: Callable[[], None] | None = None
         try:
-            return self._connection(config, deadline=deadline).call_tool(
+            connection = self._connection(config, deadline=deadline)
+            if before_dispatch is not None:
+                rollback = before_dispatch()
+            content = connection.call_tool(
                 name,
                 arguments,
                 deadline=deadline,
                 cancellation=cancellation,
                 idempotency_key=idempotency_key,
             )
+            if idempotency_key:
+                with self._idempotency_lock:
+                    self._idempotency_results[idempotency_key] = content
+                    while len(self._idempotency_results) > 1000:
+                        self._idempotency_results.popitem(last=False)
+            return content
         except McpError:
+            if rollback is not None:
+                rollback()
             self.invalidate(config.server_id)
             raise
         except Exception as error:
+            if rollback is not None:
+                rollback()
             self.invalidate(config.server_id)
             raise McpError(f"MCP server '{config.name}' failed: {error}") from error
 
@@ -737,5 +765,7 @@ class McpClientManager:
             server_ids.update(key[0] for key in self._connecting)
             for server_id in server_ids:
                 self._generations[server_id] = self._generations.get(server_id, 0) + 1
+        with self._idempotency_lock:
+            self._idempotency_results.clear()
         for connection in connections:
             connection.close()

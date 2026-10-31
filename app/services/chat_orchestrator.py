@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import threading
@@ -29,6 +30,7 @@ from agents.models.tool_calling import (
     tool_requires_approval,
 )
 from app.models.database.chat_session import get_chat_history, update_chat_history
+from app.models.database.mcp_security_policy import McpSecurityPolicyModel
 from app.services.agent_permissions import AgentPermissions, load_agent_permissions
 from app.services.goal_runtime import (
     CheckpointRecoveryError,
@@ -37,6 +39,7 @@ from app.services.goal_runtime import (
     GoalStore,
     NullGoalStore,
 )
+from app.services.mcp_security import McpSecurityInspector, security_inspector
 from app.services.tool_approvals import (
     DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     SessionGrantRegistry,
@@ -69,6 +72,22 @@ TIMEOUT_MESSAGE = (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _default_security_policy(user_id: int) -> McpSecurityPolicyModel:
+    now = datetime.datetime.utcnow()
+    return McpSecurityPolicyModel(
+        mcp_security_policy_id=0,
+        user_id=user_id,
+        enabled=True,
+        inspect_tool_metadata=True,
+        inspect_outbound_arguments=True,
+        inspect_inbound_results=True,
+        deterministic_scanner=True,
+        model_mode="mirror",
+        create_date=now,
+        update_date=now,
+    )
 
 
 @dataclass(frozen=True)
@@ -247,7 +266,11 @@ class ChatOrchestrator:
         goal_max_turns: int = 48,
         approval_timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         intent_router: ToolIntentRouter | None = None,
+        security: McpSecurityInspector = security_inspector,
+        security_policy_loader: Callable[[int], McpSecurityPolicyModel] = _default_security_policy,
     ) -> None:
+        self.security = security
+        self.security_policy_loader = security_policy_loader
         self.registry = registry
         self.permissions_loader = permissions_loader
         self.approvals = approvals
@@ -337,7 +360,9 @@ class ChatOrchestrator:
             # This retention budget is soft; the provider enforces its token limit.
             if size > remaining_chars and not pending_reasoning:
                 block = [
-                    replace(item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                    replace(
+                        item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                    )
                     for item in block
                 ]
                 size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
@@ -441,7 +466,9 @@ class ChatOrchestrator:
             # Prior chat turns are complete. Resume active tool reasoning from
             # trusted goal checkpoints, not from ordinary conversation history.
             block = [
-                replace(message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                replace(
+                    message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                )
                 for message in self._entry_messages(entry)
             ]
             if not block:
@@ -502,6 +529,7 @@ class ChatOrchestrator:
         result_summary: str | None = None,
         artifact_ids: list[str] | None = None,
         error: str | None = None,
+        blocked_content_id: str | None = None,
         requires_approval: bool = False,
         requires_per_call_approval: bool = False,
         can_grant: bool = False,
@@ -514,6 +542,7 @@ class ChatOrchestrator:
             result_summary=result_summary,
             artifact_ids=artifact_ids,
             error=error,
+            blocked_content_id=blocked_content_id,
             requires_approval=requires_approval,
             requires_per_call_approval=requires_per_call_approval,
             can_grant=can_grant,
@@ -821,6 +850,34 @@ class ChatOrchestrator:
                         ", ".join(tool.name for tool in tools) or "no tools",
                     )
 
+            security_policy = self.security_policy_loader(workspace_id)
+            untrusted_tools = [tool for tool in tools if tool.untrusted_external]
+            if (
+                security_policy.enabled
+                and security_policy.inspect_tool_metadata
+                and untrusted_tools
+            ):
+                metadata_inspection = self.security.inspect(
+                    backend=backend,
+                    model_config=config,
+                    policy=security_policy,
+                    surface="tool_metadata",
+                    payload=[
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "arguments_schema": tool.parameters_schema(),
+                        }
+                        for tool in untrusted_tools
+                    ],
+                    user_id=user_id,
+                    run_id=run.run_id,
+                    source="mcp-catalog",
+                )
+                if not metadata_inspection.allowed:
+                    tools = [tool for tool in tools if not tool.untrusted_external]
+            offered_tool_names = {tool.name for tool in tools}
+
             yield ChatStreamEvent(
                 "run_started", {"run_id": run.run_id, "chat_id": conversation.chat_id}
             )
@@ -990,7 +1047,56 @@ class ChatOrchestrator:
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
 
-                    denial_message: str | None = None
+                    security_block: ToolResult | None = None
+                    if call.name not in offered_tool_names:
+                        security_block = ToolResult(
+                            call=call,
+                            status="failed",
+                            content=f"BLOCKED: tool was not offered to this model turn: {call.name}",
+                            error="tool_not_offered",
+                        )
+                    if (
+                        security_block is None
+                        and definition
+                        and definition.untrusted_external
+                        and security_policy.enabled
+                    ):
+                        if security_policy.inspect_outbound_arguments:
+                            outbound_inspection = self.security.inspect(
+                                backend=backend,
+                                model_config=config,
+                                policy=security_policy,
+                                surface="outbound_arguments",
+                                payload={"tool": call.name, "arguments": call.arguments},
+                                user_id=user_id,
+                                run_id=run.run_id,
+                                source=definition.source_adapter or call.name,
+                            )
+                            if not outbound_inspection.allowed:
+                                security_block = ToolResult(
+                                    call=call,
+                                    status="failed",
+                                    content=(
+                                        "BLOCKED: MCP security inspection rejected this tool call "
+                                        f"({outbound_inspection.verdict})."
+                                    ),
+                                    error=outbound_inspection.verdict,
+                                )
+                        if security_block is None:
+                            policy_error = self.security.write_policy.validate_recipients(
+                                user_id,
+                                definition,
+                                call.arguments,
+                            )
+                            if policy_error:
+                                security_block = ToolResult(
+                                    call=call,
+                                    status="failed",
+                                    content=f"BLOCKED: {policy_error}",
+                                    error=policy_error.split(":", 1)[0],
+                                )
+
+                    denial_message: str | None = security_block.content if security_block else None
                     if pending_input.is_set():
                         denial_message = "New user instructions superseded this unstarted call."
                     elif runtime and runtime.state.goal_status != "active":
@@ -1097,7 +1203,9 @@ class ChatOrchestrator:
                         return
                     if pending_input.is_set():
                         denial_message = "New user instructions superseded this unstarted call."
-                    if denial_message is not None:
+                    if security_block is not None:
+                        result = security_block
+                    elif denial_message is not None:
                         if denial_message in {
                             DENIED_MESSAGE,
                             TIMEOUT_MESSAGE,
@@ -1128,6 +1236,36 @@ class ChatOrchestrator:
                     if cancellation.is_set():
                         yield ChatStreamEvent("cancelled", cancelled_payload())
                         return
+                    if (
+                        result.succeeded
+                        and definition
+                        and definition.untrusted_external
+                        and security_policy.enabled
+                        and security_policy.inspect_inbound_results
+                    ):
+                        inbound_inspection = self.security.inspect(
+                            backend=backend,
+                            model_config=config,
+                            policy=security_policy,
+                            surface="inbound_result",
+                            payload=result.content,
+                            user_id=user_id,
+                            run_id=run.run_id,
+                            source=definition.source_adapter or call.name,
+                        )
+                        if inbound_inspection.allowed:
+                            result.content = inbound_inspection.safe_text or "(empty safe result)"
+                        else:
+                            result = ToolResult(
+                                call=call,
+                                status="failed",
+                                content=(
+                                    "BLOCKED: MCP security inspection rejected the tool result "
+                                    f"({inbound_inspection.verdict})."
+                                ),
+                                error=inbound_inspection.verdict,
+                                blocked_content_id=inbound_inspection.blocked_id,
+                            )
                     if approval_warning:
                         result.summary = f"{result.summary or ''} {approval_warning}".strip()
                     preserve_result = result.error in {
@@ -1145,6 +1283,7 @@ class ChatOrchestrator:
                         result_summary=result.summary,
                         artifact_ids=[artifact.id for artifact in result.artifacts],
                         error=result.error,
+                        blocked_content_id=result.blocked_content_id,
                         requires_approval=requires_approval,
                         requires_per_call_approval=requires_per_call_approval,
                     )

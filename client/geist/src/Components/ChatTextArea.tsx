@@ -60,6 +60,21 @@ const ChatTurn = memo(({ element, onToolApproval }: {
       setApprovalErrors((prev) => ({ ...prev, [key]: 'Approval could not be submitted. Please retry.' }));
     }
   };
+  const [revealedContent, setRevealedContent] = useState<Record<string, string>>({});
+
+  const revealBlockedContent = async (callId: string, blockedId: string) => {
+    try {
+      const response = await fetch(`/api/v1/security/blocked/${encodeURIComponent(blockedId)}`);
+      if (!response.ok) throw new Error(`Reveal failed: ${response.status}`);
+      const body = await response.json();
+      setRevealedContent((current) => ({ ...current, [callId]: body.content }));
+    } catch (reason) {
+      setRevealedContent((current) => ({
+        ...current,
+        [callId]: reason instanceof Error ? reason.message : 'Reveal failed',
+      }));
+    }
+  };
 
   return (
         <div className="chat-turn">
@@ -198,6 +213,27 @@ const ChatTurn = memo(({ element, onToolApproval }: {
                 {toolCall.result_summary && <div style={{ marginTop: 8 }}>{toolCall.result_summary}</div>}
                 {toolCall.error && (
                   <div className="ErrorMessage" style={{ marginTop: 8 }}>{toolCall.error}</div>
+                )}
+                {toolCall.blocked_content_id && !revealedContent[toolCall.id] && (
+                  <button
+                    className="button button-small"
+                    type="button"
+                    style={{ marginTop: 8 }}
+                    onClick={() => void revealBlockedContent(
+                      toolCall.id,
+                      toolCall.blocked_content_id as string,
+                    )}
+                  >
+                    Reveal blocked original
+                  </button>
+                )}
+                {revealedContent[toolCall.id] && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary>Blocked original (not sent to the model)</summary>
+                    <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                      {revealedContent[toolCall.id]}
+                    </pre>
+                  </details>
                 )}
               </div>
             );

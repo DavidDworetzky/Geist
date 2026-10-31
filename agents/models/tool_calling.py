@@ -228,6 +228,11 @@ class ToolDefinition:
     timeout_seconds: float = 30.0
     max_result_chars: int = 20_000
     source_adapter: str | None = None
+    untrusted_external: bool = False
+    always_untrusted_content: bool = False
+    security_source_id: int | None = None
+    recipient_allowlist: tuple[str, ...] = ()
+    max_writes_per_hour: int = 20
     source_revision: str | None = None
     availability: ToolAvailability | None = None
     semantic_tags: frozenset[ToolSemanticTag] = field(default_factory=lambda: frozenset({"action"}))
@@ -321,6 +326,7 @@ class ToolResult:
     summary: str | None = None
     artifacts: list[WorkArtifact] = field(default_factory=list)
     error: str | None = None
+    blocked_content_id: str | None = None
 
     @property
     def succeeded(self) -> bool:
