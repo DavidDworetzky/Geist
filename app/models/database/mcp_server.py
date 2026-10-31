@@ -4,7 +4,7 @@ mounted into the chat tool registry when enabled.
 """
 
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import (
@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import relationship
 
@@ -41,10 +42,20 @@ class McpServer(Base):
     command = Column(String, nullable=True)
     args = Column(JSON, default=list)
     env = Column(JSON, default=dict)
+    working_directory = Column(String, nullable=True)
 
     # http (streamable HTTP) transport
     url = Column(String, nullable=True)
     headers = Column(JSON, default=dict)
+
+    # Connector policy metadata. Every external server starts untrusted, and
+    # email connectors stay unavailable until the security stack is installed.
+    connector_kind = Column(String, nullable=False, default="custom", server_default="custom")
+    account_label = Column(String, nullable=True)
+    trusted = Column(Boolean, nullable=False, default=False, server_default=false())
+    security_required = Column(Boolean, nullable=False, default=False, server_default=false())
+    recipient_allowlist = Column(JSON, default=list)
+    max_writes_per_hour = Column(Integer, nullable=False, default=20, server_default="20")
 
     # Servers are disabled until an operator explicitly enables them; only
     # enabled servers contribute tools to chat.
@@ -82,6 +93,13 @@ class McpServerModel:
     timeout_seconds: float
     create_date: datetime.datetime
     update_date: datetime.datetime
+    working_directory: str | None = None
+    connector_kind: str = "custom"
+    account_label: str | None = None
+    trusted: bool = False
+    security_required: bool = False
+    recipient_allowlist: list[str] = field(default_factory=list)
+    max_writes_per_hour: int = 20
     cwd: str | None = None
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
@@ -94,8 +112,15 @@ _MUTABLE_FIELDS = (
     "command",
     "args",
     "env",
+    "working_directory",
     "url",
     "headers",
+    "connector_kind",
+    "account_label",
+    "trusted",
+    "security_required",
+    "recipient_allowlist",
+    "max_writes_per_hour",
     "enabled",
     "timeout_seconds",
 )
@@ -110,8 +135,15 @@ def _to_model(server: McpServer) -> McpServerModel:
         command=server.command,
         args=list(server.args or []),
         env=dict(server.env or {}),
+        working_directory=server.working_directory,
         url=server.url,
         headers=dict(server.headers or {}),
+        connector_kind=server.connector_kind or "custom",
+        account_label=server.account_label,
+        trusted=bool(server.trusted),
+        security_required=bool(server.security_required),
+        recipient_allowlist=list(server.recipient_allowlist or []),
+        max_writes_per_hour=int(server.max_writes_per_hour or 20),
         enabled=bool(server.enabled),
         timeout_seconds=float(server.timeout_seconds or 30.0),
         create_date=server.create_date,

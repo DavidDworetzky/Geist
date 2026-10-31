@@ -187,6 +187,18 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
                 f"table {table.name} missing columns {', '.join(sorted(missing_columns))}"
             )
 
+    missing_column_gaps.difference_update(
+        ("mcp_server", name)
+        for name in (
+            "working_directory",
+            "connector_kind",
+            "account_label",
+            "trusted",
+            "security_required",
+            "recipient_allowlist",
+            "max_writes_per_hour",
+        )
+    )
     oauth_missing = OAUTH_TABLE in missing_tables
     missing_tables.discard(OAUTH_TABLE)
     routine_gap = ("agent_routine", "run_once_requested")
