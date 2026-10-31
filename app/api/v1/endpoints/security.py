@@ -1,11 +1,13 @@
 """Security policy and blocked-content reveal endpoints."""
 
+import os
+import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-from app.models.database.geist_user import get_default_user
+from app.models.database.geist_user import UserModel, get_default_user
 from app.models.database.mcp_security_policy import (
     get_or_create_mcp_security_policy,
     update_mcp_security_policy,
@@ -62,10 +64,37 @@ async def update_policy(request: SecurityPolicyUpdate):
     return SecurityPolicyResponse(**policy.__dict__)
 
 
+def authenticated_reveal_user(request: Request) -> UserModel:
+    # This older stack predates operator middleware. Require its token scheme
+    # explicitly rather than treating the default database row as authentication.
+    token = os.environ.get("GEIST_OPERATOR_TOKEN", "")
+    headers = request.headers.getlist("authorization")
+    expected = f"GeistOperator {token}"
+    if (
+        len(token) < 32
+        or len(headers) != 1
+        or not secrets.compare_digest(headers[0].encode(), expected.encode())
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Operator authentication is required to reveal blocked content",
+            headers={"WWW-Authenticate": "GeistOperator", "Cache-Control": "no-store"},
+        )
+    return get_default_user()
+
+
 @router.get("/blocked/{blocked_id}", response_model=BlockedOriginalResponse)
-async def reveal_blocked_original(blocked_id: str):
-    user = get_default_user()
+async def reveal_blocked_original(
+    blocked_id: str,
+    response: Response,
+    user: UserModel = Depends(authenticated_reveal_user),
+):
+    response.headers["Cache-Control"] = "no-store"
     content = blocked_originals.get(user.user_id, blocked_id)
     if content is None:
-        raise HTTPException(status_code=404, detail="Blocked content not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Blocked content not found",
+            headers={"Cache-Control": "no-store"},
+        )
     return BlockedOriginalResponse(blocked_id=blocked_id, content=content)

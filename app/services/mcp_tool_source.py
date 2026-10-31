@@ -14,11 +14,13 @@ import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Callable
 
 from agents.models.tool_calling import ToolContext, ToolDefinition, ToolExecutionOutput
 from app.models.database.mcp_server import McpServerModel, list_enabled_mcp_servers
 from app.services.mcp_client import McpClientManager, McpError, McpServerConfig
+from app.services.mcp_security import security_inspector
 
 
 logger = logging.getLogger(__name__)
@@ -82,14 +84,17 @@ class McpToolSource:
         self._cache_ttl_seconds = cache_ttl_seconds
         self._lock = threading.Lock()
         self._cached: dict[int | None, tuple[list[ToolDefinition], float]] = {}
+        self._generation = 0
 
     def invalidate(self) -> None:
         with self._lock:
             self._cached.clear()
+            self._generation += 1
 
     def definitions(self, context: ToolContext | None = None) -> list[ToolDefinition]:
         user_id = context.user_id if context is not None else None
         with self._lock:
+            generation = self._generation
             cached = self._cached.get(user_id)
             if cached is not None and time.monotonic() < cached[1]:
                 return list(cached[0])
@@ -113,6 +118,8 @@ class McpToolSource:
                     definitions.append(definition)
 
         with self._lock:
+            if generation != self._generation:
+                return []
             self._cached[user_id] = (
                 list(definitions),
                 time.monotonic() + self._cache_ttl_seconds,
@@ -137,18 +144,30 @@ class McpToolSource:
             _config: McpServerConfig = config,
             _tool: str = tool_name,
         ) -> ToolExecutionOutput:
+            def before_dispatch() -> Callable[[], None]:
+                reservation_id = uuid.uuid4().hex
+                error = security_inspector.write_policy.check_and_record(
+                    context.user_id, definition, arguments, reservation_id
+                )
+                if error:
+                    raise McpError(error)
+                return lambda: security_inspector.write_policy.release(
+                    context.user_id, _config.server_id, reservation_id
+                )
+
             content = self._manager.call_tool(
                 _config,
                 _tool,
                 arguments,
                 idempotency_key=_idempotency_key(context, _config, _tool, arguments),
+                before_dispatch=before_dispatch,
             )
             return ToolExecutionOutput(
                 content=content or "(empty tool result)",
                 summary=f"Called {_tool} on MCP server {_config.name}",
             )
 
-        return ToolDefinition(
+        definition = ToolDefinition(
             name=f"mcp.{config.name}.{tool_name}",
             description=f"[MCP: {config.name}] {description}",
             arguments_schema=schema,
@@ -168,6 +187,7 @@ class McpToolSource:
             recipient_allowlist=config.recipient_allowlist,
             max_writes_per_hour=config.max_writes_per_hour,
         )
+        return definition
 
 
 _manager: McpClientManager | None = None

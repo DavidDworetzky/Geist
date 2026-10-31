@@ -43,11 +43,21 @@ _INSTRUCTION_PATTERNS = tuple(
         r"delete\s+(all|every)\s+.{0,40}(message|email|file|record)s?",
     )
 )
-_WRITE_TOOL_PATTERN = re.compile(
-    r"(^|[._-])(send|create|delete|remove|update|move|forward|reply|upload|write)([._-]|$)",
-    re.IGNORECASE,
-)
-_RECIPIENT_KEYS = {"to", "cc", "bcc", "recipient", "recipients", "email", "emails"}
+_RECIPIENT_KEYS = {
+    "to",
+    "cc",
+    "bcc",
+    "recipient",
+    "recipients",
+    "email",
+    "emails",
+    "toemail",
+    "ccemail",
+    "bccemail",
+    "torecipients",
+    "ccrecipients",
+    "bccrecipients",
+}
 
 
 class _SafeTextParser(HTMLParser):
@@ -167,50 +177,77 @@ class McpWritePolicy:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._writes: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+        self._writes: dict[tuple[int, int], deque[tuple[float, str]]] = defaultdict(deque)
 
     @staticmethod
-    def _recipients(arguments: Any, key: str | None = None) -> set[str]:
+    def _recipients(arguments: Any, recipient_field: bool = False) -> set[str]:
         recipients: set[str] = set()
         if isinstance(arguments, dict):
-            for child_key, value in arguments.items():
-                recipients.update(McpWritePolicy._recipients(value, str(child_key).lower()))
+            if recipient_field and not any(
+                re.sub(r"[^a-z]", "", str(key).lower())
+                in _RECIPIENT_KEYS | {"emailaddress", "address"}
+                for key in arguments
+            ):
+                return {"<unknown recipient>"}
+            for key, value in arguments.items():
+                normalized = re.sub(r"[^a-z]", "", str(key).lower())
+                nested = normalized in _RECIPIENT_KEYS or (
+                    recipient_field and normalized in {"emailaddress", "address"}
+                )
+                recipients.update(McpWritePolicy._recipients(value, nested))
         elif isinstance(arguments, list):
             for value in arguments:
-                recipients.update(McpWritePolicy._recipients(value, key))
-        elif key in _RECIPIENT_KEYS and isinstance(arguments, str):
-            recipients.update(
-                address.strip().lower()
-                for address in re.split(r"[,;\s]+", arguments)
-                if "@" in address
-            )
+                recipients.update(McpWritePolicy._recipients(value, recipient_field))
+        elif recipient_field and isinstance(arguments, str):
+            for address in re.split(r"[,;\s]+", arguments):
+                if address:
+                    recipients.add(address.strip().lower())
+            if not recipients:
+                recipients.add("<unknown recipient>")
+        elif recipient_field:
+            recipients.add("<unknown recipient>")
         return recipients
+
+    def validate_recipients(
+        self, user_id: int, definition: ToolDefinition, arguments: dict[str, Any]
+    ) -> str | None:
+        if definition.side_effect != "external_write":
+            return None
+        allowlist = {address.lower() for address in definition.recipient_allowlist}
+        recipients = self._recipients(arguments)
+        if allowlist and (not recipients or not recipients.issubset(allowlist)):
+            return "recipient_anomaly: recipients are unknown or outside the allowlist"
+        return None
 
     def check_and_record(
         self,
         user_id: int,
         definition: ToolDefinition,
         arguments: dict[str, Any],
+        reservation_id: str = "",
     ) -> str | None:
-        if not _WRITE_TOOL_PATTERN.search(definition.name):
+        if definition.side_effect != "external_write":
             return None
-        allowlist = {address.lower() for address in definition.recipient_allowlist}
-        recipients = self._recipients(arguments)
-        if allowlist and not recipients.issubset(allowlist):
-            unexpected = sorted(recipients - allowlist)
-            return f"recipient_anomaly: recipients outside allowlist: {', '.join(unexpected)}"
-
-        source_id = definition.security_source_id or 0
-        key = (user_id, source_id)
+        error = self.validate_recipients(user_id, definition, arguments)
+        if error:
+            return error
+        key = (user_id, definition.security_source_id or 0)
         now = time.time()
         with self._lock:
             writes = self._writes[key]
-            while writes and writes[0] <= now - 3600:
+            while writes and writes[0][0] <= now - 3600:
                 writes.popleft()
             if len(writes) >= definition.max_writes_per_hour:
                 return "write_rate_limit: maximum writes per hour reached"
-            writes.append(now)
+            writes.append((now, reservation_id))
         return None
+
+    def release(self, user_id: int, source_id: int, reservation_id: str) -> None:
+        with self._lock:
+            key = (user_id, source_id)
+            self._writes[key] = deque(
+                item for item in self._writes[key] if item[1] != reservation_id
+            )
 
 
 class McpSecurityInspector:
@@ -332,7 +369,9 @@ class McpSecurityInspector:
 
         if surface == "inbound_result":
             if inspection.allowed:
-                normalized = safe_text(inspection.safe_text or serialized)
+                normalized = safe_text(
+                    serialized if inspection.safe_text is None else inspection.safe_text
+                )
                 inspection = SecurityInspection(
                     verdict="allow",
                     reason=inspection.reason,

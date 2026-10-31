@@ -250,3 +250,35 @@ def test_sse_response_without_answer_raises():
     lines = ['data: {"jsonrpc": "2.0", "method": "noise"}', ""]
     with pytest.raises(McpError, match="ended without a response"):
         _HttpTransport._read_sse_response(_FakeSseResponse(lines), "req-1", "tools/list")
+
+
+def test_write_accounting_only_runs_on_dispatch(monkeypatch):
+    from types import SimpleNamespace
+
+    manager = McpClientManager()
+    config = McpServerConfig(server_id=990, name="mail", transport="stdio", command="unused")
+    calls, reservations = [], []
+    connection = SimpleNamespace(call_tool=lambda *args, **kwargs: calls.append(args) or "sent")
+    monkeypatch.setattr(manager, "_connection", lambda config: connection)
+    for _ in range(2):
+        assert (
+            manager.call_tool(
+                config,
+                "deliver",
+                {},
+                idempotency_key="unique",
+                before_dispatch=lambda: reservations.append(1),
+            )
+            == "sent"
+        )
+    assert len(calls) == len(reservations) == 1
+
+    def unavailable(config):
+        raise McpError("no connection")
+
+    monkeypatch.setattr(manager, "_connection", unavailable)
+    import pytest
+
+    with pytest.raises(McpError):
+        manager.call_tool(config, "deliver", {}, before_dispatch=lambda: reservations.append(1))
+    assert len(reservations) == 1

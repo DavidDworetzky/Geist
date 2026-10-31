@@ -535,7 +535,7 @@ class ChatOrchestrator:
                                     error=outbound_inspection.verdict,
                                 )
                         if security_block is None:
-                            policy_error = self.security.write_policy.check_and_record(
+                            policy_error = self.security.write_policy.validate_recipients(
                                 user_id,
                                 definition,
                                 call.arguments,
@@ -622,8 +622,7 @@ class ChatOrchestrator:
                                 status="failed",
                                 content=(
                                     "BLOCKED: MCP security inspection rejected the tool result "
-                                    f"({inbound_inspection.verdict}; "
-                                    f"blocked_id={inbound_inspection.blocked_id})."
+                                    f"({inbound_inspection.verdict})."
                                 ),
                                 error=inbound_inspection.verdict,
                                 blocked_content_id=inbound_inspection.blocked_id,

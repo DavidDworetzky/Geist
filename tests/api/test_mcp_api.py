@@ -174,15 +174,31 @@ def test_security_policy_defaults_to_fail_closed_inspection(mcp_client):
     assert body["model_mode"] == "mirror"
 
 
-def test_blocked_original_can_only_be_revealed_through_security_endpoint(mcp_client):
+def test_blocked_original_can_only_be_revealed_through_security_endpoint(mcp_client, monkeypatch):
     from app.services.mcp_security import blocked_originals
 
     blocked_id = blocked_originals.put(1, "original untrusted email")
 
-    response = mcp_client.get(f"/api/v1/security/blocked/{blocked_id}")
+    token = "test-operator-token-for-reveal-1234567890"
+    monkeypatch.delenv("GEIST_OPERATOR_TOKEN", raising=False)
+    assert mcp_client.get(f"/api/v1/security/blocked/{blocked_id}").status_code == 401
+    monkeypatch.setenv("GEIST_OPERATOR_TOKEN", token)
+    path = f"/api/v1/security/blocked/{blocked_id}"
+    assert mcp_client.get(path).status_code == 401
+    assert mcp_client.get(path, headers={"Authorization": "GeistOperator wrong"}).status_code == 401
+    headers = {"Authorization": f"GeistOperator {token}"}
+    other_id = blocked_originals.put(2, "another user's email")
+    assert (
+        mcp_client.get(f"/api/v1/security/blocked/{other_id}", headers=headers).status_code == 404
+    )
+    response = mcp_client.get(path, headers=headers)
+    assert response.headers["cache-control"] == "no-store"
     assert response.status_code == 200
     assert response.json()["content"] == "original untrusted email"
-    assert mcp_client.get("/api/v1/security/blocked/blocked_missing").status_code == 404
+    assert (
+        mcp_client.get("/api/v1/security/blocked/blocked_missing", headers=headers).status_code
+        == 404
+    )
 
 
 def test_mcp_server_routes_hide_other_users_servers(mcp_client, monkeypatch):

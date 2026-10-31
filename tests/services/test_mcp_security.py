@@ -100,6 +100,7 @@ def test_recipient_allowlist_and_rate_limit_fail_closed(tmp_path):
         arguments_schema={"type": "object", "properties": {}},
         handler=lambda context, arguments: None,
         untrusted_external=True,
+        side_effect="external_write",
         security_source_id=7,
         recipient_allowlist=("allowed@example.com",),
         max_writes_per_hour=1,
@@ -115,3 +116,64 @@ def test_recipient_allowlist_and_rate_limit_fail_closed(tmp_path):
     assert "write_rate_limit" in (
         inspector.write_policy.check_and_record(1, definition, {"to": "allowed@example.com"}) or ""
     )
+
+
+def test_empty_sanitized_text_does_not_restore_original(tmp_path):
+    inspection = _inspector(tmp_path).inspect(
+        backend=VerdictBackend(
+            '{"verdict":"allow","reason":"removed","categories":[],"safe_text":""}'
+        ),
+        model_config=ModelRequestConfig(),
+        policy=_policy(),
+        surface="inbound_result",
+        payload="untrusted original",
+        user_id=1,
+        run_id="test",
+        source="mcp:mail",
+    )
+    assert inspection.allowed
+    assert inspection.safe_text == ""
+
+
+def test_unknown_write_names_and_recipient_shapes_fail_closed(tmp_path):
+    from dataclasses import replace
+
+    definition = ToolDefinition(
+        name="mcp.mail.sendEmail",
+        description="mail",
+        arguments_schema={},
+        handler=lambda context, arguments: None,
+        side_effect="external_write",
+        recipient_allowlist=("allowed@example.com",),
+        max_writes_per_hour=1,
+    )
+    policy = _inspector(tmp_path).write_policy
+    for name in ("sendEmail", "createDraft", "deliver", "unknown"):
+        tool = replace(definition, name=f"mcp.mail.{name}")
+        for args in (
+            {"to_email": "outside@example.com"},
+            {"toRecipients": [{"emailAddress": {"address": "outside@example.com"}}]},
+            {"unsupportedRecipient": "outside@example.com"},
+            {"to": ["allowed@example.com", {"unsupportedAddress": "outside@example.com"}]},
+            {"to": ["allowed@example.com", None]},
+            {},
+        ):
+            assert policy.validate_recipients(1, tool, args)
+    assert (
+        policy.validate_recipients(
+            1,
+            definition,
+            {
+                "toRecipients": [
+                    {"emailAddress": {"address": "allowed@example.com", "name": "Allowed"}}
+                ]
+            },
+        )
+        is None
+    )
+    for _ in range(3):
+        assert (
+            policy.validate_recipients(1, definition, {"to_email": "allowed@example.com"}) is None
+        )
+    assert policy.check_and_record(1, definition, {"to_email": "allowed@example.com"}) is None
+    assert policy.check_and_record(1, definition, {"to_email": "allowed@example.com"})

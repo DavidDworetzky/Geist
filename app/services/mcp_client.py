@@ -22,6 +22,7 @@ import subprocess
 import threading
 import uuid
 from collections import OrderedDict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -441,6 +442,7 @@ class McpClientManager:
         arguments: dict[str, Any],
         *,
         idempotency_key: str | None = None,
+        before_dispatch: Callable[[], Callable[[], None] | None] | None = None,
     ) -> str:
         if idempotency_key:
             with self._idempotency_lock:
@@ -448,8 +450,12 @@ class McpClientManager:
                 if cached is not None:
                     self._idempotency_results.move_to_end(idempotency_key)
                     return cached
+        rollback: Callable[[], None] | None = None
         try:
-            content = self._connection(config).call_tool(
+            connection = self._connection(config)
+            if before_dispatch is not None:
+                rollback = before_dispatch()
+            content = connection.call_tool(
                 name,
                 arguments,
                 idempotency_key=idempotency_key,
@@ -461,9 +467,13 @@ class McpClientManager:
                         self._idempotency_results.popitem(last=False)
             return content
         except McpError:
+            if rollback is not None:
+                rollback()
             self.invalidate(config.server_id)
             raise
         except Exception as error:
+            if rollback is not None:
+                rollback()
             self.invalidate(config.server_id)
             raise McpError(f"MCP server '{config.name}' failed: {error}") from error
 
