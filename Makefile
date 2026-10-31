@@ -1,7 +1,13 @@
 # Variables
 UV=uv
+UV_RUN=$(UV) run
 IS_WSL=$(shell grep -qi microsoft /proc/version 2>/dev/null && echo 1 || echo 0)
 COMPOSE_FILE=docker-compose.yml
+OPERATOR_TOKEN_FILE?=$(CURDIR)/data/operator-token
+
+ifeq ($(MLX_BACKEND),1)
+UV_RUN=$(UV) run --extra local-mlx
+endif
 
 ifeq ($(IS_WSL),1)
 DOCKER=docker.exe
@@ -37,19 +43,23 @@ sync:
 	$(UV) sync
 
 # Run the backend natively. Uses SQLite unless GEIST_DATABASE_PROVIDER says otherwise.
+.PHONY: operator-token
+operator-token:
+	$(UV_RUN) python scripts/ensure_operator_token.py "$(OPERATOR_TOKEN_FILE)"
+
 .PHONY: run
-run:
+run: operator-token
 ifeq ($(IS_WSL),1)
 ifeq ($(MLX_BACKEND),1)
 	@echo "WSL detected; MLX_BACKEND=1 uses the Docker stack via Windows Docker Desktop."
 	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) up
 else
-	$(UV) run python initdb.py
-	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" $(UV_RUN) python initdb.py
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" PYTHONUNBUFFERED=1 $(UV_RUN) python bootstrap.py
 endif
 else
-	$(UV) run python initdb.py
-	PYTHONUNBUFFERED=1 $(UV) run python bootstrap.py
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" $(UV_RUN) python initdb.py
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" PYTHONUNBUFFERED=1 $(UV_RUN) python bootstrap.py
 endif
 
 # Alias for run
@@ -59,14 +69,14 @@ server: run
 
 # Run the backend natively with debugger (pdb)
 .PHONY: debug
-debug:
-	$(UV) run python initdb.py
-	PYTHONUNBUFFERED=1 $(UV) run python -m pdb bootstrap.py
+debug: operator-token
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" $(UV_RUN) python initdb.py
+	GEIST_OPERATOR_TOKEN_FILE="$(OPERATOR_TOKEN_FILE)" PYTHONUNBUFFERED=1 $(UV_RUN) python -m pdb bootstrap.py
 
 # Initialize database (SQLite by default; set GEIST_DATABASE_PROVIDER=postgresql for Postgres)
 .PHONY: init-db
 init-db:
-	$(UV) run python initdb.py
+	$(UV_RUN) python initdb.py
 
 # Run the full Docker stack (backend + frontend, SQLite by default)
 .PHONY: run-docker
@@ -78,8 +88,8 @@ endif
 
 # Run the Docker frontend alongside the native SQLite backend
 .PHONY: services
-services:
-	$(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d
+services: operator-token
+	GEIST_OPERATOR_TOKEN_FILE_HOST="$(OPERATOR_TOKEN_FILE)" $(DOCKER_COMPOSE) -f docker-compose.misc.yml up -d
 
 # Run the full Docker stack detached
 .PHONY: docker

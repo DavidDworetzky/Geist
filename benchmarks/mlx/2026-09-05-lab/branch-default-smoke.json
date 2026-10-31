@@ -1,0 +1,45 @@
+{
+  "purpose": "Application-default activation smoke, not a repeated throughput or quality benchmark",
+  "hardware": "Apple M2 Max 96 GB",
+  "mlx_version": "0.32.2",
+  "mlx_lm_version": "0.31.3",
+  "model_id": "Qwen/Qwen3.8-27B",
+  "target_revision": "3e6447f082e89cc7f0bc6e5441afd38dfce760ff",
+  "drafter_revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4",
+  "backend": "MLXLMBackend",
+  "dflash_environment_overrides": false,
+  "offline": true,
+  "copy_window": 0,
+  "compiled_verifier": false,
+  "expanded_mlp": false,
+  "qualified_wrappers": 395,
+  "total_wrappers": 395,
+  "cases": [
+    {
+      "name": "greedy_essay",
+      "temperature": 0,
+      "generation_tokens": 128,
+      "implementation": "mlx_dflash",
+      "adaptive": true,
+      "adaptation_policy": "cumulative-eight-v2",
+      "verify_rounds": 8,
+      "direct_tokens": 111,
+      "fallback_at_token": 21,
+      "generation_tps": 16.93671211548445,
+      "elapsed_seconds": 8.208317500073463
+    },
+    {
+      "name": "sampled_code",
+      "temperature": 0.7,
+      "generation_tokens": 128,
+      "implementation": "mlx_dflash",
+      "adaptive": true,
+      "adaptation_policy": "cumulative-eight-v2",
+      "verify_rounds": 18,
+      "direct_tokens": 4,
+      "fallback_at_token": null,
+      "generation_tps": 35.0649114429656,
+      "elapsed_seconds": 4.1620825827121735
+    }
+  ]
+}

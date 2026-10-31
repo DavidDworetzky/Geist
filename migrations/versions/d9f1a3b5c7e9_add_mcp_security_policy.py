@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade():
+    if "mcp_security_policy" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "mcp_security_policy",
         sa.Column("mcp_security_policy_id", sa.Integer(), autoincrement=True, nullable=False),

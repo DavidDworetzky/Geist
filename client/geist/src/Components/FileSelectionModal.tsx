@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { acknowledgeModalBackdrop } from '../Utils/modalFeedback';
+import { createPortal } from 'react-dom';
 
 interface FileItem {
   file_id: number;
@@ -145,8 +147,8 @@ const FileSelectionModal: React.FC<FileSelectionModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="modal-backdrop">
+  return createPortal(
+    <div className="modal-backdrop" onPointerDown={acknowledgeModalBackdrop}>
       <div className="file-selection-modal" role="dialog" aria-modal="true" aria-labelledby="file-selection-title">
         <header className="file-selection-header">
           <h2 id="file-selection-title">{title}</h2>
@@ -229,7 +231,8 @@ const FileSelectionModal: React.FC<FileSelectionModalProps> = ({
           </div>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

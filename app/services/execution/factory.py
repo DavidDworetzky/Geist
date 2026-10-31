@@ -1,0 +1,119 @@
+"""Config-driven selection of the tool execution backend.
+
+Environment variables (all optional; unset backend disables execution):
+
+- ``GEIST_EXEC_BACKEND``: ``docker`` | ``podman`` | ``local``. Anything else
+  (or unset) means no execution backend, and the terminal tool is not
+  registered. ``podman`` is the docker backend pinned to the podman CLI —
+  same sandbox hardening, daemonless runtime.
+- ``GEIST_EXEC_RUNTIME``: pin the container runtime CLI (a PATH name like
+  ``podman`` or an absolute binary path), mirroring Hermes-agent's
+  ``HERMES_DOCKER_BINARY``. When the pinned runtime is missing, sandbox
+  execution is unavailable rather than silently using another runtime.
+- ``GEIST_EXEC_DOCKER_IMAGE``: sandbox image (default ``python:3.11-slim``).
+- ``GEIST_EXEC_DOCKER_NETWORK``: ``1``/``true`` to give the sandbox network
+  access (default: no network). Networked commands require per-call approval.
+- ``GEIST_EXEC_WORKSPACE``: host directory. For the docker backend this is
+  bind-mounted at /workspace and makes the environment host-reaching (the
+  tool then requires per-call approval); for the local backend it is the working
+  directory.
+- ``GEIST_EXEC_PERSISTENT``: ``1``/``true`` to keep one long-lived sandbox
+  container per chat session (docker backend only), so filesystem state
+  survives between calls for legacy execution clients. Chat coding tools always
+  share a session so file operations and terminal commands see the same files.
+- ``GEIST_EXEC_SESSION_TTL_SECONDS``: idle lifetime for persistent session
+  containers (default 1800).
+- ``GEIST_EXEC_MAX_SESSIONS``: maximum tracked persistent sessions (default 8,
+  maximum 64). Temporary containers self-expire after 24 hours even after a crash.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from app.services.execution.base import ExecutionEnvironment
+from app.services.execution.docker import DEFAULT_IMAGE, DockerExecutionEnvironment
+from app.services.execution.local import LocalExecutionEnvironment
+
+
+if TYPE_CHECKING:
+    from app.services.execution.session import DockerSessionManager
+
+
+logger = logging.getLogger(__name__)
+
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in _TRUE_VALUES
+
+
+def configured_workspace_root() -> str | None:
+    roots = [
+        str(Path(value).expanduser().resolve())
+        for name in ("GEIST_WORKSPACE_ROOT", "GEIST_EXEC_WORKSPACE")
+        if (value := os.getenv(name, "").strip())
+    ]
+    if len(set(roots)) > 1:
+        raise ValueError(
+            "GEIST_WORKSPACE_ROOT and GEIST_EXEC_WORKSPACE must identify the same workspace"
+        )
+    if roots and not Path(roots[0]).is_dir():
+        raise ValueError("The configured workspace root must be an existing directory")
+    return roots[0] if roots else None
+
+
+def create_execution_environment() -> ExecutionEnvironment | None:
+    """Build the configured execution backend, or None when disabled."""
+    backend = os.getenv("GEIST_EXEC_BACKEND", "").strip().lower()
+    workspace = configured_workspace_root()
+
+    if backend in ("docker", "podman"):
+        runtime_preference = os.getenv("GEIST_EXEC_RUNTIME", "").strip() or None
+        if backend == "podman" and runtime_preference is None:
+            runtime_preference = "podman"
+        return DockerExecutionEnvironment(
+            image=os.getenv("GEIST_EXEC_DOCKER_IMAGE", "").strip() or DEFAULT_IMAGE,
+            network=_env_flag("GEIST_EXEC_DOCKER_NETWORK"),
+            workspace=workspace,
+            runtime_preference=runtime_preference,
+        )
+    if backend == "local":
+        return LocalExecutionEnvironment(workdir=workspace)
+    if backend:
+        logger.warning(
+            "Unknown GEIST_EXEC_BACKEND %r; tool execution disabled "
+            "(valid: docker, podman, local)",
+            backend,
+        )
+    return None
+
+
+def create_session_manager(
+    environment: ExecutionEnvironment | None, *, required: bool = False
+) -> DockerSessionManager | None:
+    """Build the persistent-session manager when configured (docker only)."""
+    if not required and not _env_flag("GEIST_EXEC_PERSISTENT"):
+        return None
+    if not isinstance(environment, DockerExecutionEnvironment):
+        if environment is not None:
+            logger.warning(
+                "GEIST_EXEC_PERSISTENT requires the docker backend; " "persistent sessions disabled"
+            )
+        return None
+    from app.services.execution.session import (
+        DEFAULT_SESSION_TTL_SECONDS,
+        DockerSessionManager,
+    )
+
+    try:
+        ttl = float(os.getenv("GEIST_EXEC_SESSION_TTL_SECONDS") or DEFAULT_SESSION_TTL_SECONDS)
+        limit = int(os.getenv("GEIST_EXEC_MAX_SESSIONS") or "8")
+        return DockerSessionManager(environment, ttl_seconds=ttl, max_sessions=limit)
+    except ValueError:
+        logger.warning("Invalid persistent session limits; using one-shot execution")
+        return None

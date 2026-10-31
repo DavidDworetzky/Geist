@@ -4,10 +4,21 @@ mounted into the chat tool registry when enabled.
 """
 
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.orm import relationship
 
 from app.models.database.database import Base, SessionLocal
@@ -17,9 +28,12 @@ class McpServer(Base):
     """Connection settings for one MCP server (stdio or streamable HTTP)."""
 
     __tablename__ = "mcp_server"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_mcp_server_workspace_name"),
+    )
 
     mcp_server_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=False)
 
     name = Column(String, nullable=False)
     transport = Column(String, nullable=False, default="stdio")  # 'stdio' or 'http'
@@ -36,12 +50,12 @@ class McpServer(Base):
 
     # Connector policy metadata. Every external server starts untrusted, and
     # email connectors stay unavailable until the security stack is installed.
-    connector_kind = Column(String, nullable=False, default="custom")
+    connector_kind = Column(String, nullable=False, default="custom", server_default="custom")
     account_label = Column(String, nullable=True)
-    trusted = Column(Boolean, nullable=False, default=False)
-    security_required = Column(Boolean, nullable=False, default=False)
+    trusted = Column(Boolean, nullable=False, default=False, server_default=false())
+    security_required = Column(Boolean, nullable=False, default=False, server_default=false())
     recipient_allowlist = Column(JSON, default=list)
-    max_writes_per_hour = Column(Integer, nullable=False, default=20)
+    max_writes_per_hour = Column(Integer, nullable=False, default=20, server_default="20")
 
     # Servers are disabled until an operator explicitly enables them; only
     # enabled servers contribute tools to chat.
@@ -53,7 +67,13 @@ class McpServer(Base):
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
     )
 
-    user = relationship("GeistUser", backref="mcp_servers")
+    workspace = relationship("GeistUser", backref="mcp_servers")
+    oauth_connection = relationship(
+        "McpOAuthConnection",
+        back_populates="server",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 @dataclass
@@ -61,25 +81,29 @@ class McpServerModel:
     """Data model for a configured MCP server."""
 
     mcp_server_id: int
-    user_id: int
+    workspace_id: int
     name: str
     transport: str
     command: str | None
     args: list[str]
     env: dict[str, str]
-    working_directory: str | None
     url: str | None
     headers: dict[str, str]
-    connector_kind: str
-    account_label: str | None
-    trusted: bool
-    security_required: bool
-    recipient_allowlist: list[str]
-    max_writes_per_hour: int
     enabled: bool
     timeout_seconds: float
     create_date: datetime.datetime
     update_date: datetime.datetime
+    working_directory: str | None = None
+    connector_kind: str = "custom"
+    account_label: str | None = None
+    trusted: bool = False
+    security_required: bool = False
+    recipient_allowlist: list[str] = field(default_factory=list)
+    max_writes_per_hour: int = 20
+    cwd: str | None = None
+    plugin_root: str | None = None
+    plugin_data_dir: str | None = None
+    oauth_configured: bool = False
 
 
 _MUTABLE_FIELDS = (
@@ -105,7 +129,7 @@ _MUTABLE_FIELDS = (
 def _to_model(server: McpServer) -> McpServerModel:
     return McpServerModel(
         mcp_server_id=server.mcp_server_id,
-        user_id=server.user_id,
+        workspace_id=server.workspace_id,
         name=server.name,
         transport=server.transport,
         command=server.command,
@@ -124,31 +148,32 @@ def _to_model(server: McpServer) -> McpServerModel:
         timeout_seconds=float(server.timeout_seconds or 30.0),
         create_date=server.create_date,
         update_date=server.update_date,
+        oauth_configured=server.oauth_connection is not None,
     )
 
 
-def list_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
-    """List configured MCP servers, optionally scoped to one user."""
+def list_mcp_servers(workspace_id: int | None = None) -> list[McpServerModel]:
+    """List configured MCP servers, optionally scoped to one workspace."""
     with SessionLocal() as session:
         query = session.query(McpServer)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         return [_to_model(server) for server in query.order_by(McpServer.mcp_server_id).all()]
 
 
-def list_enabled_mcp_servers(user_id: int | None = None) -> list[McpServerModel]:
-    """List enabled MCP servers, optionally scoped to one user."""
+def list_enabled_mcp_servers(workspace_id: int | None = None) -> list[McpServerModel]:
+    """List enabled MCP servers, optionally scoped to one workspace."""
     with SessionLocal() as session:
         query = session.query(McpServer).filter_by(enabled=True)
-        if user_id is not None:
-            query = query.filter_by(user_id=user_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
         servers = query.order_by(McpServer.mcp_server_id).all()
-        if user_id is not None:
+        if workspace_id is not None:
             from app.models.database.mcp_security_policy import (
                 get_or_create_mcp_security_policy,
             )
 
-            security_enabled = get_or_create_mcp_security_policy(user_id).enabled
+            security_enabled = get_or_create_mcp_security_policy(workspace_id).enabled
             servers = [
                 server for server in servers if not server.security_required or security_enabled
             ]
@@ -161,10 +186,10 @@ def get_mcp_server(mcp_server_id: int) -> McpServerModel | None:
         return _to_model(server) if server else None
 
 
-def create_mcp_server(user_id: int, values: dict[str, Any]) -> McpServerModel:
+def create_mcp_server(workspace_id: int, values: dict[str, Any]) -> McpServerModel:
     with SessionLocal() as session:
         server = McpServer(
-            user_id=user_id,
+            workspace_id=workspace_id,
             **{key: values[key] for key in _MUTABLE_FIELDS if key in values},
         )
         session.add(server)
@@ -173,9 +198,17 @@ def create_mcp_server(user_id: int, values: dict[str, Any]) -> McpServerModel:
         return _to_model(server)
 
 
-def update_mcp_server(mcp_server_id: int, updates: dict[str, Any]) -> McpServerModel | None:
+def update_mcp_server(
+    mcp_server_id: int,
+    updates: dict[str, Any],
+    *,
+    workspace_id: int | None = None,
+) -> McpServerModel | None:
     with SessionLocal() as session:
-        server = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id).first()
+        query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
+        server = query.first()
         if not server:
             return None
         for key in _MUTABLE_FIELDS:
@@ -187,9 +220,12 @@ def update_mcp_server(mcp_server_id: int, updates: dict[str, Any]) -> McpServerM
         return _to_model(server)
 
 
-def delete_mcp_server(mcp_server_id: int) -> bool:
+def delete_mcp_server(mcp_server_id: int, *, workspace_id: int | None = None) -> bool:
     with SessionLocal() as session:
-        server = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id).first()
+        query = session.query(McpServer).filter_by(mcp_server_id=mcp_server_id)
+        if workspace_id is not None:
+            query = query.filter_by(workspace_id=workspace_id)
+        server = query.first()
         if not server:
             return False
         session.delete(server)

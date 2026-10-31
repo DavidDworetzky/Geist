@@ -371,6 +371,9 @@ class LlamaMLX:
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
+        self.frequency_penalty = 0.0
+        self.presence_penalty = 0.0
+        self.stop: str | list[str] | None = None
 
         # Local directory to store model & tokenizer
         self.weights_dir = weights_dir or "app/model_weights/llama_3_1"

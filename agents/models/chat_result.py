@@ -70,6 +70,8 @@ class ToolCallResult:
     error: str | None = None
     blocked_content_id: str | None = None
     requires_approval: bool = False
+    requires_per_call_approval: bool = False
+    can_grant: bool = False
 
     @classmethod
     def create(
@@ -84,6 +86,8 @@ class ToolCallResult:
         error: str | None = None,
         blocked_content_id: str | None = None,
         requires_approval: bool = False,
+        requires_per_call_approval: bool = False,
+        can_grant: bool = False,
     ) -> "ToolCallResult":
         return cls(
             id=id or f"toolcall_{uuid.uuid4().hex}",
@@ -95,6 +99,8 @@ class ToolCallResult:
             error=error,
             blocked_content_id=blocked_content_id,
             requires_approval=requires_approval,
+            requires_per_call_approval=requires_per_call_approval,
+            can_grant=can_grant,
         )
 
     def to_dict(self) -> dict[str, Any]:

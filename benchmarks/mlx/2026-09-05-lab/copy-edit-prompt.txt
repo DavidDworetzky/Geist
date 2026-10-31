@@ -1,0 +1,144 @@
+Edit the following Python file. Change only DEFAULT_TIMEOUT from 30 to 45. Return the entire file inside one Python code fence, with no explanation. Preserve every other line exactly, including whitespace and ordering. Do not shorten or omit any part.
+
+```python
+DEFAULT_RETRIES = 3
+DEFAULT_TIMEOUT = 30
+
+class ServiceConfig:
+    def __init__(self):
+        self.worker_01_limit = 8
+        self.worker_02_limit = 16
+        self.worker_03_limit = 24
+        self.worker_04_limit = 32
+        self.worker_05_limit = 40
+        self.worker_06_limit = 48
+        self.worker_07_limit = 56
+        self.worker_08_limit = 64
+        self.worker_09_limit = 72
+        self.worker_10_limit = 80
+        self.worker_11_limit = 88
+        self.worker_12_limit = 96
+        self.worker_13_limit = 104
+        self.worker_14_limit = 112
+        self.worker_15_limit = 120
+        self.worker_16_limit = 128
+        self.worker_17_limit = 136
+        self.worker_18_limit = 144
+        self.worker_19_limit = 152
+        self.worker_20_limit = 160
+        self.worker_21_limit = 168
+        self.worker_22_limit = 176
+        self.worker_23_limit = 184
+        self.worker_24_limit = 192
+        self.worker_25_limit = 200
+        self.worker_26_limit = 208
+        self.worker_27_limit = 216
+        self.worker_28_limit = 224
+        self.worker_29_limit = 232
+        self.worker_30_limit = 240
+        self.worker_31_limit = 248
+        self.worker_32_limit = 256
+
+    def limits(self):
+        return {
+            "worker_01": self.worker_01_limit,
+            "worker_02": self.worker_02_limit,
+            "worker_03": self.worker_03_limit,
+            "worker_04": self.worker_04_limit,
+            "worker_05": self.worker_05_limit,
+            "worker_06": self.worker_06_limit,
+            "worker_07": self.worker_07_limit,
+            "worker_08": self.worker_08_limit,
+            "worker_09": self.worker_09_limit,
+            "worker_10": self.worker_10_limit,
+            "worker_11": self.worker_11_limit,
+            "worker_12": self.worker_12_limit,
+            "worker_13": self.worker_13_limit,
+            "worker_14": self.worker_14_limit,
+            "worker_15": self.worker_15_limit,
+            "worker_16": self.worker_16_limit,
+            "worker_17": self.worker_17_limit,
+            "worker_18": self.worker_18_limit,
+            "worker_19": self.worker_19_limit,
+            "worker_20": self.worker_20_limit,
+            "worker_21": self.worker_21_limit,
+            "worker_22": self.worker_22_limit,
+            "worker_23": self.worker_23_limit,
+            "worker_24": self.worker_24_limit,
+            "worker_25": self.worker_25_limit,
+            "worker_26": self.worker_26_limit,
+            "worker_27": self.worker_27_limit,
+            "worker_28": self.worker_28_limit,
+            "worker_29": self.worker_29_limit,
+            "worker_30": self.worker_30_limit,
+            "worker_31": self.worker_31_limit,
+            "worker_32": self.worker_32_limit,
+        }
+
+    def validate(self):
+        if self.worker_01_limit <= 0:
+            raise ValueError("worker_01_limit must be positive")
+        if self.worker_02_limit <= 0:
+            raise ValueError("worker_02_limit must be positive")
+        if self.worker_03_limit <= 0:
+            raise ValueError("worker_03_limit must be positive")
+        if self.worker_04_limit <= 0:
+            raise ValueError("worker_04_limit must be positive")
+        if self.worker_05_limit <= 0:
+            raise ValueError("worker_05_limit must be positive")
+        if self.worker_06_limit <= 0:
+            raise ValueError("worker_06_limit must be positive")
+        if self.worker_07_limit <= 0:
+            raise ValueError("worker_07_limit must be positive")
+        if self.worker_08_limit <= 0:
+            raise ValueError("worker_08_limit must be positive")
+        if self.worker_09_limit <= 0:
+            raise ValueError("worker_09_limit must be positive")
+        if self.worker_10_limit <= 0:
+            raise ValueError("worker_10_limit must be positive")
+        if self.worker_11_limit <= 0:
+            raise ValueError("worker_11_limit must be positive")
+        if self.worker_12_limit <= 0:
+            raise ValueError("worker_12_limit must be positive")
+        if self.worker_13_limit <= 0:
+            raise ValueError("worker_13_limit must be positive")
+        if self.worker_14_limit <= 0:
+            raise ValueError("worker_14_limit must be positive")
+        if self.worker_15_limit <= 0:
+            raise ValueError("worker_15_limit must be positive")
+        if self.worker_16_limit <= 0:
+            raise ValueError("worker_16_limit must be positive")
+        if self.worker_17_limit <= 0:
+            raise ValueError("worker_17_limit must be positive")
+        if self.worker_18_limit <= 0:
+            raise ValueError("worker_18_limit must be positive")
+        if self.worker_19_limit <= 0:
+            raise ValueError("worker_19_limit must be positive")
+        if self.worker_20_limit <= 0:
+            raise ValueError("worker_20_limit must be positive")
+        if self.worker_21_limit <= 0:
+            raise ValueError("worker_21_limit must be positive")
+        if self.worker_22_limit <= 0:
+            raise ValueError("worker_22_limit must be positive")
+        if self.worker_23_limit <= 0:
+            raise ValueError("worker_23_limit must be positive")
+        if self.worker_24_limit <= 0:
+            raise ValueError("worker_24_limit must be positive")
+        if self.worker_25_limit <= 0:
+            raise ValueError("worker_25_limit must be positive")
+        if self.worker_26_limit <= 0:
+            raise ValueError("worker_26_limit must be positive")
+        if self.worker_27_limit <= 0:
+            raise ValueError("worker_27_limit must be positive")
+        if self.worker_28_limit <= 0:
+            raise ValueError("worker_28_limit must be positive")
+        if self.worker_29_limit <= 0:
+            raise ValueError("worker_29_limit must be positive")
+        if self.worker_30_limit <= 0:
+            raise ValueError("worker_30_limit must be positive")
+        if self.worker_31_limit <= 0:
+            raise ValueError("worker_31_limit must be positive")
+        if self.worker_32_limit <= 0:
+            raise ValueError("worker_32_limit must be positive")
+        return True
+```

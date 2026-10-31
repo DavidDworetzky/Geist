@@ -5,6 +5,9 @@ Script to manage local model weights.
 This script provides functionality to:
 1. Delete weights from a model-specific directory.
 2. Copy weights from a desktop or configured location to that directory.
+
+Moshi MLX uses model ID kyutai/moshiko-mlx-q4; its model and two tokenizer files
+can be copied to app/model_weights/kyutai_moshiko-mlx-q4 with --model.
 """
 
 import logging
@@ -18,7 +21,9 @@ from dotenv import load_dotenv
 
 # Set up logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +41,7 @@ def model_dir_name(model_id: str) -> str:
 
 def destination_for_model(model_id: str) -> Path:
     return Path(__file__).parent.parent / "app" / "model_weights" / model_dir_name(model_id)
+
 
 def delete_weights(weights_dir: str | Path = None) -> tuple[bool, str]:
     """
@@ -83,8 +89,8 @@ def delete_weights(weights_dir: str | Path = None) -> tuple[bool, str]:
         logger.error(f"Error deleting files: {str(e)}")
         return False, f"Error deleting files: {str(e)}"
 
-def copy_weights(source_dir: str | Path,
-                 dest_dir: str | Path | None = None) -> tuple[bool, str]:
+
+def copy_weights(source_dir: str | Path, dest_dir: str | Path | None = None) -> tuple[bool, str]:
     """
     Copy model weights from source directory to destination directory.
 
@@ -130,12 +136,18 @@ def copy_weights(source_dir: str | Path,
                 dest_subdir = dest_dir / file_path.name
                 shutil.copytree(file_path, dest_subdir, dirs_exist_ok=True)
 
-        logger.info(f"Successfully copied {file_count} files/directories from {source_dir} to {dest_dir}.")
-        return True, f"Successfully copied {file_count} files/directories from {source_dir} to {dest_dir}."
+        logger.info(
+            f"Successfully copied {file_count} files/directories from {source_dir} to {dest_dir}."
+        )
+        return (
+            True,
+            f"Successfully copied {file_count} files/directories from {source_dir} to {dest_dir}.",
+        )
 
     except Exception as e:
         logger.error(f"Error copying files: {str(e)}")
         return False, f"Error copying files: {str(e)}"
+
 
 def copy_from_desktop(model_id: str = DEFAULT_MODEL) -> tuple[bool, str]:
     """
@@ -175,11 +187,14 @@ def copy_from_desktop(model_id: str = DEFAULT_MODEL) -> tuple[bool, str]:
     logger.info(f"Using weights from desktop: {desktop_dir}")
     return copy_weights(desktop_dir, destination_for_model(model_id))
 
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Manage local model weights")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model ID or local model directory name")
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL, help="Model ID or local model directory name"
+    )
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # Delete command
@@ -187,7 +202,9 @@ if __name__ == "__main__":
 
     # Copy command
     copy_parser = subparsers.add_parser("copy", help="Copy weights from source to destination")
-    copy_parser.add_argument("--source", type=str, help="Source directory (defaults to desktop/llama_3_1)")
+    copy_parser.add_argument(
+        "--source", type=str, help="Source directory (defaults to desktop/llama_3_1)"
+    )
 
     args = parser.parse_args()
 

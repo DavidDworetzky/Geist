@@ -1,6 +1,7 @@
 """
 Agent factory for instantiating LocalAgent and OnlineAgent instances.
 """
+
 import logging
 import os
 import platform
@@ -9,9 +10,11 @@ from typing import Any
 
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
+from agents.model_ids import canonicalize_local_model_id
 
 
 logger = logging.getLogger(__name__)
+
 
 class AgentFactory:
     """Factory class for creating agent instances."""
@@ -25,7 +28,7 @@ class AgentFactory:
         api_key: str | None = None,
         runner_type: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """
         Create an agent instance based on the specified type and configuration.
@@ -51,7 +54,7 @@ class AgentFactory:
                 model=model,
                 runner_type=runner_type,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         elif agent_type == "online":
             return AgentFactory._create_online_agent(
@@ -60,10 +63,11 @@ class AgentFactory:
                 endpoint=endpoint,
                 api_key=api_key,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}. Must be 'local' or 'online'")
+
     @staticmethod
     def _infer_runner_type(model: str) -> str:
         """Infer a backend from catalog capabilities, not provider branding."""
@@ -95,12 +99,52 @@ class AgentFactory:
         return "transformers"
 
     @staticmethod
+    def _resolve_local_runner_type(
+        model: str,
+        runner_type: str | None,
+        device_config: dict[str, Any] | None,
+    ) -> tuple[str, bool]:
+        """Resolve the effective runner without contradicting a selected artifact."""
+        requested_runner = (runner_type or "").strip()
+        configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
+        explicit_runner = requested_runner or configured_runner
+
+        artifact_backend: str | None = None
+        artifact_id = (device_config or {}).get("artifact_id")
+        if artifact_id is not None:
+            if not isinstance(artifact_id, str) or not artifact_id.strip():
+                raise ValueError("artifact_id must be a non-empty string")
+
+            from app.services.local_models import get_local_model_manager
+
+            try:
+                artifact = get_local_model_manager().get_artifact(artifact_id)
+            except KeyError as error:
+                raise ValueError(str(error)) from error
+
+            selected_model = canonicalize_local_model_id(artifact.model_id)
+            if selected_model != model:
+                raise ValueError(f"Artifact {artifact.id} belongs to {selected_model}, not {model}")
+            artifact_backend = artifact.backend
+            if explicit_runner and explicit_runner != artifact_backend:
+                raise ValueError(
+                    f"Runner '{explicit_runner}' is incompatible with selected artifact "
+                    f"{artifact.id}, which requires '{artifact_backend}'"
+                )
+
+        if explicit_runner:
+            return explicit_runner, True
+        if artifact_backend:
+            return artifact_backend, False
+        return AgentFactory._infer_runner_type(model), False
+
+    @staticmethod
     def _create_local_agent(
         agent_context: AgentContext,
         model: str | None = None,
         runner_type: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """
         Create a LocalAgent instance.
@@ -113,22 +157,31 @@ class AgentFactory:
 
             # Default model
             if not model:
-                model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+                from agents.model_catalog import default_local_model_id
 
-            configured_runner = (os.getenv("GEIST_LOCAL_RUNNER") or "").strip()
-            runner_was_explicit = runner_type is not None or bool(configured_runner)
-            # Auto-detect runner type from model ID when not explicitly set
-            if not runner_type:
-                runner_type = configured_runner or AgentFactory._infer_runner_type(model)
+                model = default_local_model_id()
+
+            model = canonicalize_local_model_id(model)
+
+            device_config_supplied = "device_config" in kwargs
+            device_config = dict(kwargs.pop("device_config", None) or {})
+            runner_type, runner_was_explicit = AgentFactory._resolve_local_runner_type(
+                model,
+                runner_type,
+                device_config,
+            )
+
+            if runner_type != "llama_server":
+                device_config.pop("llama_backend", None)
+                device_config.pop("llama_gpu_device_ids", None)
+                device_config.pop("llama_allow_system_ram", None)
 
             if not runner_was_explicit and runner_type == "mlx_llama":
                 from agents.model_catalog import infer_model_spec
 
                 spec = infer_model_spec(model)
                 if spec is not None and spec.family != "llama":
-                    device_config = kwargs.pop("device_config", None) or {}
                     device_config.setdefault("implementation", "mlx_lm")
-                    kwargs["device_config"] = device_config
 
             # Automatic selection protects users from accidental 32B+ loads.
             # A deliberate Transformers override is the opt-in for capable
@@ -138,15 +191,14 @@ class AgentFactory:
 
                 spec = infer_model_spec(model)
                 if spec and not spec.local:
-                    device_config = kwargs.pop("device_config", None) or {}
                     device_config.setdefault("allow_server_backed", True)
-                    kwargs["device_config"] = device_config
 
             # Propagate weights_dir into device_config so the runner can
             # load safetensors / pretrained weights from a custom path.
             if "weights_dir" in kwargs:
-                device_config = kwargs.pop("device_config", None) or {}
                 device_config["weights_dir"] = kwargs.pop("weights_dir")
+
+            if device_config or device_config_supplied:
                 kwargs["device_config"] = device_config
 
             logger.info(f"Creating LocalAgent with runner: {runner_type}, model: {model}")
@@ -155,7 +207,7 @@ class AgentFactory:
                 model_id=model,
                 runner_type=runner_type,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         except ImportError as e:
             logger.error(f"Failed to import LocalAgent: {e}")
@@ -168,7 +220,7 @@ class AgentFactory:
         endpoint: str | None = None,
         api_key: str | None = None,
         as_subprocess: bool = False,
-        **kwargs
+        **kwargs,
     ) -> BaseAgent:
         """Create an OnlineAgent instance."""
         try:
@@ -197,7 +249,7 @@ class AgentFactory:
                 model=model,
                 api_key=api_key,
                 as_subprocess=as_subprocess,
-                **kwargs
+                **kwargs,
             )
         except ImportError as e:
             logger.error(f"Failed to import OnlineAgent: {e}")
@@ -228,7 +280,17 @@ class AgentFactory:
             api_key=config.get("api_key"),
             runner_type=config.get("runner_type"),
             as_subprocess=config.get("as_subprocess", False),
-            **{k: v for k, v in config.items() if k not in [
-                "agent_type", "model", "endpoint", "api_key", "runner_type", "as_subprocess"
-            ]}
+            **{
+                k: v
+                for k, v in config.items()
+                if k
+                not in [
+                    "agent_type",
+                    "model",
+                    "endpoint",
+                    "api_key",
+                    "runner_type",
+                    "as_subprocess",
+                ]
+            },
         )

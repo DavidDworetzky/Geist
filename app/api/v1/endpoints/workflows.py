@@ -3,8 +3,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.utils import get_current_user
+from app.api.utils import get_current_workspace
 from app.models.database.database import SessionLocal
+from app.models.database.geist_user import WorkspaceModel
 from app.models.database.workflow import (
     Workflow,
     WorkflowStep,
@@ -35,10 +36,10 @@ def get_db():
 async def create_new_workflow(
     workflow: WorkflowCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Create a new workflow."""
-    db_workflow = Workflow(name=workflow.name, user_id=current_user["user_id"])
+    db_workflow = Workflow(name=workflow.name, user_id=current_workspace.workspace_id)
 
     if workflow.steps:
         db_workflow.steps = []
@@ -66,15 +67,18 @@ async def create_new_workflow(
 
 @router.get("/", response_model=list[WorkflowResponse])
 async def list_workflows(
-    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> list[Workflow]:
-    """List all workflows for the authenticated user."""
-    return get_workflows_for_user(user_id=current_user["user_id"], db=db)
+    """List all workflows in the authenticated workspace."""
+    return get_workflows_for_user(user_id=current_workspace.workspace_id, db=db)
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
-    workflow_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+    workflow_id: int,
+    db: Session = Depends(get_db),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Get a specific workflow by ID."""
     workflow = (
@@ -82,7 +86,7 @@ async def get_workflow(
         .options(selectinload(Workflow.steps))
         .filter(
             Workflow.workflow_id == workflow_id,
-            Workflow.user_id == current_user["user_id"],  # Ensure user owns the workflow
+            Workflow.user_id == current_workspace.workspace_id,
         )
         .first()
     )
@@ -97,13 +101,16 @@ async def update_existing_workflow(
     workflow_id: int,
     workflow_update: WorkflowUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> Workflow:
     """Update an existing workflow."""
     # First check if the user owns this workflow
     workflow = (
         db.query(Workflow)
-        .filter(Workflow.workflow_id == workflow_id, Workflow.user_id == current_user["user_id"])
+        .filter(
+            Workflow.workflow_id == workflow_id,
+            Workflow.user_id == current_workspace.workspace_id,
+        )
         .first()
     )
 
@@ -138,13 +145,18 @@ async def update_existing_workflow(
 
 @router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workflow(
-    workflow_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+    workflow_id: int,
+    db: Session = Depends(get_db),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> None:
     """Delete a workflow."""
     # First check if the user owns this workflow
     workflow = (
         db.query(Workflow)
-        .filter(Workflow.workflow_id == workflow_id, Workflow.user_id == current_user["user_id"])
+        .filter(
+            Workflow.workflow_id == workflow_id,
+            Workflow.user_id == current_workspace.workspace_id,
+        )
         .first()
     )
 
@@ -166,14 +178,17 @@ async def run_workflow(
     input_data: dict[str, Any] | None = None,
     background: bool = False,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_workspace: WorkspaceModel = Depends(get_current_workspace),
 ) -> dict[str, Any]:
     """Execute a workflow synchronously, or queue it with background=true."""
     # First check if the user owns this workflow
     workflow = (
         db.query(Workflow)
         .options(selectinload(Workflow.steps))
-        .filter(Workflow.workflow_id == workflow_id, Workflow.user_id == current_user["user_id"])
+        .filter(
+            Workflow.workflow_id == workflow_id,
+            Workflow.user_id == current_workspace.workspace_id,
+        )
         .first()
     )
 
@@ -192,10 +207,10 @@ async def run_workflow(
             "workflow.run",
             payload={
                 "workflow_id": workflow_id,
-                "user_id": current_user["user_id"],
+                "user_id": current_workspace.workspace_id,
                 "input_data": input_data or {},
             },
-            user_id=int(current_user["user_id"]),
+            user_id=current_workspace.workspace_id,
         )
         return {
             "job_id": job.job_id,
@@ -209,7 +224,9 @@ async def run_workflow(
 
         # Execute the workflow synchronously
         run = executor.execute_workflow(
-            workflow=workflow, user_id=current_user["user_id"], input_data=input_data or {}
+            workflow=workflow,
+            user_id=current_workspace.workspace_id,
+            input_data=input_data or {},
         )
 
         return {

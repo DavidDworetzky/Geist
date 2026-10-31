@@ -1,9 +1,12 @@
+import json
 import threading
 from unittest.mock import Mock
 
 import pytest
 
+from agents.architectures.chat_template_tools import build_tool_payload, parse_tool_response
 from agents.models.tool_calling import (
+    InvocationApproval,
     ToolCall,
     ToolContext,
     ToolDefinition,
@@ -16,12 +19,12 @@ from app.services.tool_registry import (
 )
 
 
-def _context(*approved_call_ids: str) -> ToolContext:
+def _context(approved_call: ToolCall | None = None) -> ToolContext:
     return ToolContext(
-        user_id=42,
+        workspace_id=42,
         chat_id=7,
         run_id="run-test",
-        approved_call_ids=frozenset(approved_call_ids),
+        invocation_approval=InvocationApproval(approved_call) if approved_call else None,
     )
 
 
@@ -45,6 +48,7 @@ def _definition(
 
 
 def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.delenv("GEIST_ENABLED_CHAT_TOOLS", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
@@ -58,30 +62,97 @@ def test_default_catalog_and_context_definitions(monkeypatch, tmp_path):
         "image.generate",
         "workspace.list_markdown",
         "workspace.read_markdown",
-        "workspace.write_markdown",
-        "communication.email.send",
-        "communication.sms.send",
+        "workspace.list_files",
+        "workspace.read_file",
+        "workspace.search",
+        "workspace.write_file",
+        "workspace.edit_file",
         "adapter.JobStatusAdapter.check_async_tool",
     }
     assert catalog["web.search"].enabled_by_default is True
     assert catalog["adapter.JobStatusAdapter.check_async_tool"].enabled_by_default is False
+    assert catalog["adapter.JobStatusAdapter.check_async_tool"].allows_standing_grant is False
     assert catalog["documents.search"].enabled_by_default is True
     assert catalog["image.generate"].enabled_by_default is True
-    assert catalog["workspace.read_markdown"].enabled_by_default is False
-    assert catalog["workspace.write_markdown"].requires_approval is True
-    assert catalog["communication.email.send"].requires_approval is True
-    assert catalog["communication.sms.send"].requires_approval is True
+    assert catalog["workspace.read_markdown"].enabled_by_default is True
+    assert catalog["workspace.read_file"].enabled_by_default is True
+    assert catalog["workspace.search"].requires_approval is False
+    assert catalog["workspace.write_file"].requires_approval is True
+    assert catalog["workspace.edit_file"].requires_approval is True
+    assert catalog["workspace.edit_file"].requires_per_call_approval is True
 
     available_names = {
         definition.name for definition in registry.definitions_for_context(_context())
     }
-    assert available_names == {"web.search", "documents.search"}
+    assert available_names == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+        "workspace.list_files",
+        "workspace.read_file",
+        "workspace.search",
+        "workspace.write_file",
+        "workspace.edit_file",
+    }
+
+
+def test_markdown_tools_default_to_the_private_data_workspace(monkeypatch, tmp_path):
+    data_dir = tmp_path / "geist-data"
+    monkeypatch.delenv("GEIST_MARKDOWN_ROOT", raising=False)
+    monkeypatch.setenv("GEIST_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    workspace = data_dir / "workspace"
+    assert workspace.is_dir()
+    (workspace / "note.md").write_text("# Private workspace note", encoding="utf-8")
+
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {}),
+        _context(),
+    )
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": "note.md"}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert '"note.md"' in listed.content
+    assert read.status == "succeeded"
+    assert read.content == "# Private workspace note"
+
+
+def test_markdown_list_paths_can_be_passed_directly_to_read(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    notes = workspace / "notes"
+    notes.mkdir(parents=True)
+    (notes / "a.md").write_text("# Nested note", encoding="utf-8")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(workspace))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    registry = build_default_tool_registry()
+    listed = registry.execute(
+        ToolCall.create("workspace.list_markdown", {"path": "notes"}),
+        _context(),
+    )
+    listed_path = json.loads(listed.content)["files"][0]
+    read = registry.execute(
+        ToolCall.create("workspace.read_markdown", {"path": listed_path}),
+        _context(),
+    )
+
+    assert listed.status == "succeeded"
+    assert listed_path == "notes/a.md"
+    assert read.status == "succeeded"
+    assert read.content == "# Nested note"
 
 
 def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
-        "workspace.list_markdown, workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
@@ -96,11 +167,56 @@ def test_environment_can_explicitly_enable_catalog_tools(monkeypatch, tmp_path):
         "documents.search",
         "workspace.list_markdown",
         "workspace.read_markdown",
+        "adapter.JobStatusAdapter.check_async_tool",
+        "workspace.list_files",
+        "workspace.read_file",
+        "workspace.search",
+        "workspace.write_file",
+        "workspace.edit_file",
     }
-    assert registry.is_enabled(registry.get("workspace.write_markdown")) is False
 
 
-def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monkeypatch, tmp_path):
+def test_intent_filtering_uses_retrieval_scope_and_keeps_answer_as_superset(monkeypatch, tmp_path):
+    monkeypatch.delenv("GEIST_ENABLED_CHAT_TOOLS", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-catalog-only")
+    monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
+    registry = build_default_tool_registry()
+
+    answer = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "answer")
+    }
+    sensitive = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "sensitive_answer")
+    }
+    action = {
+        definition.name for definition in registry.definitions_for_intent(_context(), "action")
+    }
+    image = {
+        definition.name
+        for definition in registry.definitions_for_intent(_context(), "image_generation")
+    }
+
+    assert answer == {
+        "web.search",
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive == {
+        "documents.search",
+        "workspace.list_markdown",
+        "workspace.read_markdown",
+    }
+    assert sensitive < answer
+    assert image == {"image.generate"}
+    assert "image.generate" not in action
+    assert {"web.search", "documents.search"} <= action
+
+    assert registry.definitions_for_intent(_context(), "answer", include_retrieval=False) == []
+
+
+def test_unfinished_side_effect_mappings_are_not_registered(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "GEIST_ENABLED_CHAT_TOOLS",
         "workspace.write_markdown,communication.email.send,communication.sms.send",
@@ -108,13 +224,35 @@ def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monk
     monkeypatch.setenv("GEIST_MARKDOWN_ROOT", str(tmp_path))
 
     registry = build_default_tool_registry()
-    available_names = {
-        definition.name for definition in registry.definitions_for_context(_context())
-    }
+    catalog_names = {definition.name for definition in registry.catalog()}
 
-    assert "workspace.write_markdown" not in available_names
-    assert "communication.email.send" not in available_names
-    assert "communication.sms.send" not in available_names
+    assert "workspace.write_markdown" not in catalog_names
+    assert "communication.email.send" not in catalog_names
+    assert "communication.sms.send" not in catalog_names
+
+
+def test_workspace_write_and_edit_tools_use_existing_approval_flow(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEIST_WORKSPACE_ROOT", str(tmp_path))
+    registry = build_default_tool_registry()
+
+    write_call = ToolCall.create(
+        "workspace.write_file",
+        {"path": "src/app.py", "content": "value = 1\n"},
+    )
+    assert registry.execute(write_call, _context()).status == "awaiting_approval"
+    assert registry.execute(write_call, _context(write_call)).status == "succeeded"
+
+    edit_call = ToolCall.create(
+        "workspace.edit_file",
+        {
+            "path": "src/app.py",
+            "old_text": "value = 1",
+            "new_text": "value = 2",
+        },
+    )
+    assert registry.execute(edit_call, _context()).status == "awaiting_approval"
+    assert registry.execute(edit_call, _context(edit_call)).status == "succeeded"
+    assert (tmp_path / "src" / "app.py").read_text(encoding="utf-8") == "value = 2\n"
 
 
 @pytest.mark.parametrize(
@@ -123,14 +261,33 @@ def test_side_effect_mappings_stay_unavailable_until_approval_resume_exists(monk
         {"query": "valid query", "unexpected": True},
         {"query": ""},
         {"query": "valid query", "max_results": 11},
+        {"max_results": 3},
     ],
 )
-def test_execute_rejects_invalid_or_extra_arguments(arguments):
+@pytest.mark.parametrize("protocol", ["json", "xml"])
+def test_execute_rejects_invalid_or_extra_model_arguments(arguments, protocol):
     handler = Mock(return_value=ToolExecutionOutput(content="should not run"))
     registry = ToolRegistry()
-    registry.register(_definition("strict.search", handler))
+    definition = _definition("strict.search", handler)
+    registry.register(definition)
+    payload = build_tool_payload([], [definition])
+    name = next(iter(payload.provider_to_internal))
+    if protocol == "json":
+        body = json.dumps({"name": name, "arguments": arguments})
+    else:
+        parameters = "".join(
+            f"<parameter={key}>\n{value if isinstance(value, str) else json.dumps(value)}\n"
+            "</parameter>\n"
+            for key, value in arguments.items()
+        )
+        body = f"<function={name}>\n{parameters}</function>"
+    turn = parse_tool_response(
+        f"<tool_call>{body}</tool_call>",
+        provider_to_internal=payload.provider_to_internal,
+        tools=payload.tools,
+    )
 
-    result = registry.execute(ToolCall.create("strict.search", arguments), _context())
+    result = registry.execute(turn.tool_calls[0], _context())
 
     assert result.status == "failed"
     assert result.error == "invalid_arguments"
@@ -162,7 +319,7 @@ def test_execute_requires_matching_call_approval_before_running_handler():
     call = ToolCall.create("approved.search", {"query": "approved query"})
 
     awaiting = registry.execute(call, _context())
-    succeeded = registry.execute(call, _context(call.id))
+    succeeded = registry.execute(call, _context(call))
 
     assert awaiting.status == "awaiting_approval"
     assert awaiting.error == "approval_required"

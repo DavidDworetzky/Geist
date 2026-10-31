@@ -1,6 +1,8 @@
 """Tests for the minimal synchronous MCP client (stdio transport + parsing)."""
 
 import sys
+import threading
+from io import StringIO
 
 import pytest
 
@@ -9,7 +11,9 @@ from app.services.mcp_client import (
     McpConnection,
     McpError,
     McpServerConfig,
+    _filtered_child_environment,
     _HttpTransport,
+    _StdioTransport,
     _unwrap_response,
 )
 
@@ -142,6 +146,69 @@ def test_stdio_request_timeout():
         connection.close()
 
 
+def test_stdio_request_honors_cancellation():
+    connection = McpConnection(_stdio_config(timeout_seconds=5.0))
+    cancellation = threading.Event()
+    cancellation.set()
+    try:
+        with pytest.raises(McpError, match="cancelled"):
+            connection.call_tool("slow", {}, cancellation=cancellation)
+    finally:
+        connection.close()
+
+
+def test_stdio_child_environment_does_not_inherit_application_secrets(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
+    monkeypatch.setenv("PATH", "/safe/bin")
+
+    environment = _filtered_child_environment({"EXPLICIT_TOKEN": "configured"})
+
+    assert environment["PATH"] == "/safe/bin"
+    assert environment["EXPLICIT_TOKEN"] == "configured"
+    assert "OPENAI_API_KEY" not in environment
+
+
+def test_plugin_stdio_launch_sets_reserved_environment_cwd_and_data_dir(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        stdin = StringIO()
+        stdout = StringIO()
+        stderr = StringIO()
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "app.services.mcp_client.shutil.which", lambda *_args, **_kwargs: "/bin/tool"
+    )
+    monkeypatch.setattr("app.services.mcp_client.subprocess.Popen", fake_popen)
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    plugin_data = tmp_path / "data"
+    config = McpServerConfig(
+        server_id=-1,
+        name="plugin.tool",
+        transport="stdio",
+        command="tool",
+        env={"PLUGIN_ROOT": "untrusted", "EXPLICIT": "yes"},
+        cwd=str(plugin_root),
+        plugin_root=str(plugin_root),
+        plugin_data_dir=str(plugin_data),
+    )
+
+    _StdioTransport(config)
+
+    assert captured["command"] == ["/bin/tool"]
+    assert captured["cwd"] == str(plugin_root)
+    assert captured["env"]["PLUGIN_ROOT"] == str(plugin_root)
+    assert captured["env"]["PLUGIN_DATA"] == str(plugin_data)
+    assert captured["env"]["EXPLICIT"] == "yes"
+    assert plugin_data.is_dir()
+
+
 def test_missing_command_fails_fast():
     config = McpServerConfig(server_id=2, name="broken", transport="stdio", command=None)
     with pytest.raises(McpError, match="no command"):
@@ -194,11 +261,11 @@ def test_manager_replays_completed_idempotent_tool_call(monkeypatch):
     calls = []
 
     class Connection:
-        def call_tool(self, name, arguments, *, idempotency_key=None):
+        def call_tool(self, name, arguments, *, idempotency_key=None, **kwargs):
             calls.append((name, arguments, idempotency_key))
             return "sent once"
 
-    monkeypatch.setattr(manager, "_connection", lambda config: Connection())
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: Connection())
     config = _stdio_config()
 
     assert (
@@ -210,6 +277,45 @@ def test_manager_replays_completed_idempotent_tool_call(monkeypatch):
         == "sent once"
     )
     assert len(calls) == 1
+
+
+def test_manager_invalidation_discards_connection_created_by_stale_flight(monkeypatch):
+    import app.services.mcp_client as mcp_client
+
+    first_started = threading.Event()
+    release_first = threading.Event()
+    created = []
+
+    class FakeConnection:
+        def __init__(self, config, *, deadline=None):
+            self.config = config
+            self.closed = False
+            created.append(self)
+            if len(created) == 1:
+                first_started.set()
+                assert release_first.wait(2)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(mcp_client, "McpConnection", FakeConnection)
+    manager = McpClientManager()
+    result = []
+    worker = threading.Thread(
+        target=lambda: result.append(manager._connection(_stdio_config())),
+        daemon=True,
+    )
+    worker.start()
+    assert first_started.wait(1)
+
+    manager.invalidate(1)
+    release_first.set()
+    worker.join(timeout=2)
+
+    assert len(created) == 2
+    assert created[0].closed is True
+    assert result == [created[1]]
+    manager.shutdown()
 
 
 def test_unwrap_response_surfaces_server_errors():
@@ -259,7 +365,7 @@ def test_write_accounting_only_runs_on_dispatch(monkeypatch):
     config = McpServerConfig(server_id=990, name="mail", transport="stdio", command="unused")
     calls, reservations = [], []
     connection = SimpleNamespace(call_tool=lambda *args, **kwargs: calls.append(args) or "sent")
-    monkeypatch.setattr(manager, "_connection", lambda config: connection)
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: connection)
     for _ in range(2):
         assert (
             manager.call_tool(
@@ -273,7 +379,7 @@ def test_write_accounting_only_runs_on_dispatch(monkeypatch):
         )
     assert len(calls) == len(reservations) == 1
 
-    def unavailable(config):
+    def unavailable(config, **kwargs):
         raise McpError("no connection")
 
     monkeypatch.setattr(manager, "_connection", unavailable)
@@ -282,3 +388,48 @@ def test_write_accounting_only_runs_on_dispatch(monkeypatch):
     with pytest.raises(McpError):
         manager.call_tool(config, "deliver", {}, before_dispatch=lambda: reservations.append(1))
     assert len(reservations) == 1
+
+
+def test_http_transport_client_headers_take_precedence():
+    transport = _HttpTransport(
+        McpServerConfig(
+            server_id=1,
+            name="remote",
+            transport="http",
+            url="https://example.test/mcp",
+            headers={
+                "Accept": "text/plain",
+                "content-type": "text/plain",
+                "Mcp-Session-Id": "plugin-value",
+                "MCP-Protocol-Version": "plugin-value",
+                "X-Tenant": "public",
+            },
+        )
+    )
+
+    assert transport._session.headers["Accept"] == "application/json, text/event-stream"
+    assert transport._session.headers["Content-Type"] == "application/json"
+    assert "Mcp-Session-Id" not in transport._session.headers
+    assert "MCP-Protocol-Version" not in transport._session.headers
+    assert transport._session.headers["X-Tenant"] == "public"
+    transport.close()
+
+
+def test_http_transport_rejects_redirects():
+    class RedirectResponse:
+        status_code = 302
+
+        def close(self):
+            pass
+
+    class RedirectSession:
+        def post(self, *args, **kwargs):
+            assert kwargs["allow_redirects"] is False
+            return RedirectResponse()
+
+    transport = object.__new__(_HttpTransport)
+    transport._url = "https://example.test/mcp"
+    transport._session = RedirectSession()
+
+    with pytest.raises(McpError, match="redirects are not allowed"):
+        transport._post({"jsonrpc": "2.0"}, timeout=1, stream=True)

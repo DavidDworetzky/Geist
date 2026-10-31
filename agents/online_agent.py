@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
+from copy import deepcopy
 from typing import Any, cast
 
 import httpx
@@ -17,7 +18,7 @@ import httpx
 from agents.agent_context import AgentContext
 from agents.base_agent import BaseAgent
 from agents.exceptions import CompletionRequestError
-from agents.model_catalog import PROVIDERS
+from agents.model_catalog import PROVIDERS, resolve_request_spec
 from agents.models.generic_completion import GenericCompletion
 from agents.models.tool_calling import (
     ChatMessage,
@@ -115,9 +116,18 @@ class OnlineAgent(BaseAgent):
 
     def _known_native_tool_provider(self) -> bool:
         normalized_url = self.base_url.lower()
+        if "generativelanguage.googleapis.com" in normalized_url:
+            return "/v1beta/openai" in normalized_url
         return any(
             provider_host in normalized_url
-            for provider_host in ("openai.com", "anthropic.com", "groq.com", "api.x.ai")
+            for provider_host in (
+                "openai.com",
+                "anthropic.com",
+                "groq.com",
+                "api.x.ai",
+                "openrouter.ai",
+                "api.meta.ai",
+            )
         )
 
     def _get_api_key_from_env(self) -> str | None:
@@ -134,6 +144,30 @@ class OnlineAgent(BaseAgent):
         elif "x.ai" in self.base_url:  # Grok
             return os.getenv("GROK_API_KEY")
         return None
+
+    @staticmethod
+    def _apply_model_request_requirements(payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply cataloged request constraints before provider dispatch."""
+        model_id = str(payload.get("model") or "")
+        spec = resolve_request_spec(model_id)
+        if spec is None:
+            return payload
+
+        constrained = payload.copy()
+        removed_parameters = [
+            parameter for parameter in spec.unsupported_parameters if parameter in constrained
+        ]
+        for parameter in spec.unsupported_parameters:
+            constrained.pop(parameter, None)
+        if removed_parameters:
+            logger.debug(
+                "Removed unsupported request parameters for %s: %s",
+                spec.id,
+                ", ".join(removed_parameters),
+            )
+        if spec.mandatory_reasoning_effort and "reasoning" not in constrained:
+            constrained["reasoning"] = {"effort": spec.mandatory_reasoning_effort}
+        return constrained
 
     def _make_request(
         self, payload: dict[str, Any], use_backup: bool = False, backup_index: int = 0
@@ -165,6 +199,8 @@ class OnlineAgent(BaseAgent):
             payload = payload.copy()
             payload["model"] = current_model
 
+        request_payload = self._apply_model_request_requirements(payload)
+
         # Ensure endpoint includes chat/completions
         if not current_url.endswith("/chat/completions"):
             current_url = f"{current_url}/chat/completions"
@@ -173,7 +209,9 @@ class OnlineAgent(BaseAgent):
             try:
                 self.logger.debug(f"Making request to {current_url} (attempt {attempt + 1})")
 
-                response = self.client.post(current_url, json=payload, headers=current_headers)
+                response = self.client.post(
+                    current_url, json=request_payload, headers=current_headers
+                )
 
                 if response.status_code == 200:
                     return cast(dict[str, Any], response.json())
@@ -319,6 +357,7 @@ class OnlineAgent(BaseAgent):
             chat_id,
         )
         payload["stream"] = True
+        payload = self._apply_model_request_requirements(payload)
         # Ensure endpoint includes chat/completions
         current_url = self.base_url
         if not current_url.endswith("/chat/completions"):
@@ -591,7 +630,14 @@ class OnlineAgent(BaseAgent):
         internal_to_provider, provider_to_internal = self._provider_tool_name_maps(tools, messages)
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [message.to_openai(internal_to_provider) for message in messages],
+            "messages": [
+                message.to_openai(
+                    internal_to_provider,
+                    reasoning_model=self.model,
+                    reasoning_endpoint=self._openai_chat_url(),
+                )
+                for message in messages
+            ],
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "top_p": config.top_p,
@@ -604,9 +650,11 @@ class OnlineAgent(BaseAgent):
         if tools:
             payload["tools"] = [tool.to_openai(internal_to_provider[tool.name]) for tool in tools]
             payload["tool_choice"] = "auto"
+        payload = self._apply_model_request_requirements(payload)
 
         text_parts: list[str] = []
         call_parts: dict[int, dict[str, str]] = {}
+        reasoning_details: list[dict[str, Any]] = []
         finish_reason: str | None = None
         saw_done = False
         with self.client.stream(
@@ -641,6 +689,9 @@ class OnlineAgent(BaseAgent):
                 choice = choices[0]
                 finish_reason = choice.get("finish_reason") or finish_reason
                 delta = choice.get("delta") or {}
+                # OpenRouter requires the original reasoning sequence on tool continuations.
+                # Keep opaque chunks (including signatures) in order, separate from UI text.
+                reasoning_details.extend(deepcopy(delta.get("reasoning_details") or []))
                 content = delta.get("content")
                 if content:
                     text_parts.append(content)
@@ -652,7 +703,18 @@ class OnlineAgent(BaseAgent):
                         int(index),
                         {"id": "", "name": "", "arguments": ""},
                     )
-                    current["id"] += tool_delta.get("id") or ""
+                    tool_call_id = tool_delta.get("id") or ""
+                    # OpenAI sends the ID once; compatible providers may repeat it.
+                    if tool_call_id and not current["id"]:
+                        current["id"] = tool_call_id
+                    elif tool_call_id and tool_call_id != current["id"]:
+                        self.logger.warning(
+                            "Ignoring conflicting tool-call ID for stream index %s: "
+                            "kept %s, received %s",
+                            index,
+                            current["id"],
+                            tool_call_id,
+                        )
                     function = tool_delta.get("function") or {}
                     current["name"] += function.get("name") or ""
                     current["arguments"] += function.get("arguments") or ""
@@ -678,6 +740,9 @@ class OnlineAgent(BaseAgent):
                 text="".join(text_parts),
                 tool_calls=calls,
                 finish_reason=finish_reason,
+                reasoning_details=reasoning_details,
+                reasoning_model=self.model if reasoning_details else None,
+                reasoning_endpoint=self._openai_chat_url() if reasoning_details else None,
             )
         )
 
