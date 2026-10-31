@@ -9,9 +9,14 @@ describe('AgentConfigSection', () => {
     localModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
     onlineProvider: 'openai',
     onlineModel: 'gpt-4',
+    llamaBackend: null,
+    llamaGpuDeviceIds: [],
     onAgentTypeChange: jest.fn(),
     onOnlineProviderChange: jest.fn(),
     onOnlineModelChange: jest.fn(),
+    onLlamaBackendChange: jest.fn(),
+    onLlamaGpuDeviceIdsChange: jest.fn(),
+    onLlamaComputeValidityChange: jest.fn(),
   };
 
   beforeEach(() => {
@@ -214,18 +219,32 @@ describe('AgentConfigSection', () => {
         ok: true,
         json: async () => ({
           providers: {
-            openrouter: [{
-              id: 'x-ai/grok-4.6',
-              name: 'Grok 4.6',
-              provider: 'openrouter',
-              context_window: 500000,
-              max_output_tokens: null,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_streaming: true,
-              recommended: true,
-              family: 'grok',
-            }],
+            openrouter: [
+              {
+                id: 'x-ai/grok-4.6',
+                name: 'Grok 4.6',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+              {
+                id: 'x-ai/grok-4.7',
+                name: 'Grok 4.7',
+                provider: 'openrouter',
+                context_window: 500000,
+                max_output_tokens: 450000,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'grok',
+              },
+            ],
           },
           last_updated: null,
         }),
@@ -241,6 +260,7 @@ describe('AgentConfigSection', () => {
 
       expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Grok 4.6' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Grok 4.7' })).toBeInTheDocument();
     });
 
     it('shows Gemini 3.8 Flash under the Google Gemini provider', async () => {
@@ -278,24 +298,39 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Gemini 3.8 Flash' })).toBeInTheDocument();
     });
 
-    it('shows Muse Spark Contributor from live OpenRouter catalog data', async () => {
+    it('shows Muse models from live OpenRouter catalog data', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
           providers: {
-            openrouter: [{
-              id: 'meta/muse-spark-1.2-contributor',
-              name: 'Muse Spark 1.2 Contributor',
-              provider: 'openrouter',
-              context_window: 1048576,
-              max_output_tokens: null,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_reasoning: true,
-              supports_streaming: true,
-              recommended: false,
-              family: 'muse',
-            }],
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-wonder',
+                name: 'Muse Wonder',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+            ],
           },
           last_updated: null,
         }),
@@ -305,7 +340,7 @@ describe('AgentConfigSection', () => {
         <AgentConfigSection
           {...defaultProps}
           onlineProvider="openrouter"
-          onlineModel="meta/muse-spark-1.2-contributor"
+          onlineModel="meta/muse-wonder"
         />
       );
 
@@ -313,6 +348,60 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', {
         name: 'Muse Spark 1.2 Contributor',
       })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Wonder' })).toBeInTheDocument();
+    });
+
+    it('shows Muse Spark models from live OpenRouter catalog data', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [
+              {
+                id: 'meta/muse-spark-1.2-contributor',
+                name: 'Muse Spark 1.2 Contributor',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: null,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: false,
+                family: 'muse',
+              },
+              {
+                id: 'meta/muse-spark-open',
+                name: 'Muse Spark Open',
+                provider: 'openrouter',
+                context_window: 1048576,
+                max_output_tokens: 943718,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'muse',
+              },
+            ],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="meta/muse-spark-open"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'OpenRouter' })).toBeInTheDocument();
+      expect(screen.getByRole('option', {
+        name: 'Muse Spark 1.2 Contributor',
+      })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Muse Spark Open' })).toBeInTheDocument();
     });
 
     it('shows direct Muse Spark options from Meta Model API catalog data', async () => {
@@ -414,6 +503,156 @@ describe('AgentConfigSection', () => {
       );
 
       expect(await screen.findByRole('option', { name: 'Qwen 3.8 Flash' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows DeepSeek V4.1 Flash 1017 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'October 2026 snapshot; enforce OpenRouter ZDR for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'deepseek/deepseek-v4.1-flash-1017',
+              name: 'DeepSeek V4.1 Flash 1017',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 393216,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'deepseek',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="deepseek/deepseek-v4.1-flash-1017"
+        />
+      );
+
+      expect(await screen.findByRole('option', {
+        name: 'DeepSeek V4.1 Flash 1017',
+      })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Fireworks Ember-1 from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fireworks-hosted model with a zero-retention route.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'fireworks/ember-1',
+              name: 'Fireworks Ember-1',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'ember',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="fireworks/ember-1"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Fireworks Ember-1' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows GPT-6.1 Terra guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fast million-token route; do not use for confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'openai/gpt-6.1-terra',
+              name: 'GPT-6.1 Terra',
+              provider: 'openrouter',
+              context_window: 1050000,
+              max_output_tokens: 128000,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'gpt',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="openai/gpt-6.1-terra"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'GPT-6.1 Terra' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
+    it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'anthropic/claude-haiku-5.5',
+              name: 'Claude Haiku 5.5',
+              provider: 'openrouter',
+              context_window: 1000000,
+              max_output_tokens: 128000,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'claude',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="anthropic/claude-haiku-5.5"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Claude Haiku 5.5' })).toBeInTheDocument();
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 

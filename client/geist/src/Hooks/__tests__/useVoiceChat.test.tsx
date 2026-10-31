@@ -51,6 +51,8 @@ class FakeAudioContext {
   }
 }
 
+const live = { sessionId: 7, mode: 'live' as const, ttsProvider: 'kokoro' };
+
 describe('useVoiceChat audio playback contract', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
@@ -72,7 +74,7 @@ describe('useVoiceChat audio playback contract', () => {
 
   it.each(['local', 'online'])('routes voice requests to the selected %s runtime', async (agentType) => {
     const { result, unmount } = renderHook(() => useVoiceChat({
-      sessionId: 7, agentType, sttProvider: 'mms', ttsProvider: 'kokoro',
+      ...live, agentType, sttProvider: 'mms', ttsProvider: 'kokoro',
     }));
     await act(async () => { await result.current.startRecording(); });
     const params = new URL(FakeWebSocket.instances[0].url).searchParams;
@@ -84,7 +86,7 @@ describe('useVoiceChat audio playback contract', () => {
 
   it('uses audio_start sample-rate metadata for streamed PCM playback', async () => {
     const { result, unmount } = renderHook(() => useVoiceChat({
-      sessionId: 7,
+      ...live,
       ttsProvider: 'magpie',
       ttsModel: 'nvidia/magpie_tts_multilingual_357m',
       ttsVoice: 'John',
@@ -121,7 +123,7 @@ describe('useVoiceChat audio playback contract', () => {
   });
 
   it('schedules successive turns without overlap and stops every scheduled source', async () => {
-    const { result, unmount } = renderHook(() => useVoiceChat({ sessionId: 7 }));
+    const { result, unmount } = renderHook(() => useVoiceChat({ ...live }));
     await act(async () => { await result.current.startRecording(); });
     const socket = FakeWebSocket.instances[0];
     const playback = FakeAudioContext.instances[0];
@@ -143,7 +145,7 @@ describe('useVoiceChat audio playback contract', () => {
   });
 
   it('drops a Blob that resolves after stop instead of restarting playback', async () => {
-    const { result, unmount } = renderHook(() => useVoiceChat({ sessionId: 7 }));
+    const { result, unmount } = renderHook(() => useVoiceChat({ ...live }));
     await act(async () => { await result.current.startRecording(); });
     const socket = FakeWebSocket.instances[0];
     let resolve!: (data: ArrayBuffer) => void;
@@ -159,7 +161,7 @@ describe('useVoiceChat audio playback contract', () => {
   });
 
   it('cleans up recording when the socket closes unexpectedly', async () => {
-    const { result, unmount } = renderHook(() => useVoiceChat({ sessionId: 7 }));
+    const { result, unmount } = renderHook(() => useVoiceChat({ ...live }));
     await act(async () => { await result.current.startRecording(); });
     act(() => FakeWebSocket.instances[0].onclose?.({ code: 1006 } as CloseEvent));
     expect(result.current.isRecording).toBe(false);
@@ -169,7 +171,7 @@ describe('useVoiceChat audio playback contract', () => {
 
   it('reports a recoverable server error without closing the microphone session', async () => {
     const onError = jest.fn();
-    const { result, unmount } = renderHook(() => useVoiceChat({ sessionId: 7, onError }));
+    const { result, unmount } = renderHook(() => useVoiceChat({ ...live, onError }));
     await act(async () => { await result.current.startRecording(); });
     const socket = FakeWebSocket.instances[0];
     await act(async () => {

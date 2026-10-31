@@ -56,6 +56,9 @@ def test_voice_models_download_into_hugging_face_cache(monkeypatch):
     fetched_repos = {call["repo_id"] for call in snapshot_calls + file_calls}
     assert "sesame/csm-1b" in fetched_repos
     assert "facebook/mms-1b-all" in fetched_repos
+    moshi = next(call for call in snapshot_calls if call["repo_id"] == "kyutai/moshiko-mlx-q4")
+    assert moshi["revision"] == "18e4df760a34d5977a34517d7d1580e07acbb2f1"
+    assert "model.q4.safetensors" in moshi["allow_patterns"]
     # Sesame needs the Mimi codec weights alongside the CSM checkpoint
     assert any(call["repo_id"] == "kyutai/moshiko-pytorch-bf16" for call in file_calls)
 

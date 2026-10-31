@@ -1,7 +1,7 @@
 import argparse
 import os
 import re
-import subprocess  # nosec B404 - CLI helper uses an argument list, never a shell
+import subprocess  # nosec B404 - optional CLI uses an argument list, never a shell.
 
 from huggingface_hub import hf_hub_download, snapshot_download
 
@@ -13,6 +13,20 @@ DEFAULT_MODEL_ID = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 # into the cache instead of a local_dir. Each entry lists the repos to fetch;
 # "allow_patterns" limits a fetch to the files the runtime actually loads.
 VOICE_MODELS: dict[str, dict] = {
+    "moshi-mlx-q4": {
+        "description": "Moshiko 7B 4-bit MLX voice-to-voice (+ Mimi codec), about 5.2 GB",
+        "downloads": [
+            {
+                "repo_id": "kyutai/moshiko-mlx-q4",
+                "revision": "18e4df760a34d5977a34517d7d1580e07acbb2f1",
+                "allow_patterns": [
+                    "model.q4.safetensors",
+                    "tokenizer-e351c8d8-checkpoint125.safetensors",
+                    "tokenizer_spm_32k_3.model",
+                ],
+            }
+        ],
+    },
     "sesame-csm-1b": {
         "description": "Sesame CSM 1B TTS (+ Mimi audio codec and Llama tokenizer)",
         "downloads": [
@@ -82,7 +96,7 @@ def download_model_weights(model_id, weights_dir=None, use_cli=False, revision=N
         command = ["huggingface-cli", "download", model_id, "--local-dir", weights_dir]
         if revision:
             command.extend(["--revision", revision])
-        subprocess.run(command, check=True)  # nosec B603 - model IDs are separate argv values
+        subprocess.run(command, check=True)  # nosec B603 - fixed executable; model/path are separate arguments.
     else:
         print(f"Downloading model files to {weights_dir}")
         snapshot_download(
@@ -114,7 +128,10 @@ def download_voice_model_weights(voice_model):
             hf_hub_download(repo_id=repo_id, filename=allow_patterns[0], token=token)
         else:
             print(f"Fetching {repo_id} into the Hugging Face cache")
-            snapshot_download(repo_id=repo_id, token=token, allow_patterns=allow_patterns)
+            options = {"revision": download["revision"]} if download.get("revision") else {}
+            snapshot_download(
+                repo_id=repo_id, token=token, allow_patterns=allow_patterns, **options
+            )
 
     print("Download complete!")
 

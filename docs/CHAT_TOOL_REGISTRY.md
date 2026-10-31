@@ -24,6 +24,43 @@ The default registry is intentionally explicit:
 | `web.search` | `SearchAdapter.search` | yes | Bounded public search results; arbitrary URL fetch is not exposed. |
 | `documents.search` | `DocumentSearchService.search` | yes | Read-only and scoped to the current workspace's uploaded files. |
 | `image.generate` | `ImageGenerationAdapter.generate_image` | when an OpenAI image key is configured | Cost-bearing network write; intended only for explicit image requests. |
+| `workspace.list_files` | `WorkspaceFileAdapter.list_files` | yes | Lists bounded source paths under `GEIST_WORKSPACE_ROOT`; common generated/vendor directories and credential files are excluded. |
+| `workspace.read_file` | `WorkspaceFileAdapter.read_file` | yes | Reads bounded UTF-8 line ranges under the workspace root. |
+| `workspace.search` | `WorkspaceFileAdapter.search_text` | yes | Bounded literal search across workspace text files; the coding equivalent of `rg -F`/`grep -F`. |
+| `workspace.write_file` | `WorkspaceFileAdapter.write_file` | yes, approval required | Atomically creates or replaces a workspace text file. |
+| `workspace.edit_file` | `WorkspaceFileAdapter.edit_file` | yes, approval required | Exact-match edit that fails closed unless the expected replacement count matches. |
+| `terminal.run` | configured execution backend | when configured | Runs coding commands with bounded output/runtime. Isolated, offline sandboxes run directly; host-reaching or networked backends require fresh approval for every command. |
+| `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
+| `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | no | Paths are contained under `GEIST_MARKDOWN_ROOT`. |
+| `workspace.write_markdown` | `MarkdownFileAdapter.write_file` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
+| `communication.email.send` | `SendGridAdapter.send_email` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
+| `communication.sms.send` | `SMSAdapter.send_text` | unavailable | Catalogued mapping; blocked until approval/resume and idempotency exist. |
+
+Host coding tools require an explicit existing `GEIST_WORKSPACE_ROOT` or
+`GEIST_EXEC_WORKSPACE`; there is no process-directory fallback. When both are
+set they must resolve to the same directory. Misconfiguration logs an actionable
+error and disables coding tools, not chat. Docker/Podman without a host mount uses
+an isolated shared workspace. The table's default file tools are advertised only
+when one of these workspace configurations is available.
+
+File paths are relative and contained beneath the root; symlink escapes and
+common credentials (including AWS/SSH directories, npm/netrc/Postgres credentials,
+service-account JSON and secrets directories) are rejected. These exclusions are
+defense in depth, not a guarantee that an authorized root contains no secrets.
+Host writes and edits require a fresh per-call approval, even in auto-approve mode.
+Container file tools require a Python-capable image with bash and timeout; missing
+runtime commands return an actionable tool error.
+
+Terminal session/permanent grants and global auto-approve never bypass the
+per-command gate when execution can reach a host workspace or the network.
+Host-reaching commands and all shared sessions also pass through the hardline
+rejection floor, protecting accumulated work in isolated sessions as well.
+The floor is defense-in-depth; container isolation remains the security
+boundary for approval-free shell execution.
+
+The optional legacy Markdown list/read tools can still be selected by the
+operator with a comma-separated `GEIST_ENABLED_CHAT_TOOLS` value. They accept
+only `.md`/`.markdown` paths contained under `GEIST_MARKDOWN_ROOT`.
 | `workspace.list_markdown` | `MarkdownFileAdapter.get_files` | yes | Read-only paths contained under Geist's private workspace directory. |
 | `workspace.read_markdown` | `MarkdownFileAdapter.read_file` | yes | Read-only paths contained under Geist's private workspace directory. |
 
@@ -78,6 +115,44 @@ stdio requests observe the run cancellation event, while HTTP operations are
 bounded by the same end-to-end server deadline and have their connection closed
 when invalidated. Side-effect mappings additionally require an interactive,
 call-specific approval before dispatch.
+
+## Terminal execution
+
+Set `GEIST_EXEC_BACKEND` to `docker`, `podman`, or `local`, and explicitly include
+`terminal.run` in `GEIST_ENABLED_CHAT_TOOLS`. `GEIST_EXEC_RUNTIME` pins a CLI and
+fails closed when missing. `GEIST_EXEC_DOCKER_IMAGE` must provide bash and GNU
+timeout (default `python:3.11-slim`). `GEIST_EXEC_DOCKER_NETWORK` defaults off;
+enabling it exposes egress, potentially including LAN/metadata endpoints, and
+requires fresh approval. `GEIST_EXEC_WORKSPACE` must identify an existing host
+directory; relative paths are resolved at startup and Docker uses a fail-closed
+bind mount. Commas in Docker paths are rejected. The path must exist on both the
+backend and daemon hosts; a missing daemon-side directory is not auto-created.
+
+Local execution is not sandboxed. Environment scrubbing cannot hide secrets in
+host files or inside a mounted workspace, and regex command checks are only a
+best-effort defense. Host/network approval cannot be waived by auto-approve or an
+always-allow grant. Interactive approval resume uses the authenticated, invocation-
+bound path inherited from main; unattended callers deny approval-requiring tools.
+
+Timeouts kill the local POSIX process group or attempt bounded removal of this
+invocation's uniquely named container. Cleanup cannot be guaranteed if the daemon
+is unavailable or a host descendant deliberately escapes its process group.
+Docker exit codes124/137 are treated as timeouts; a command deliberately exiting
+with those codes is indistinguishable. Policy refusals have `policy_blocked` tool
+errors, distinct from ordinary shell exit codes in the result body.
+
+Subprocess output is captured incrementally with at most 64 KiB retained per stream
+before model-facing truncation. Excess bytes are drained and discarded, not held
+in host memory; verbose commands retain their real exit status and report
+`truncated: true`. The deadline, not output volume, stops a workload and triggers
+container cleanup. The tool catalog marks fresh-approval tools explicitly;
+the UI cannot create ineffective standing grants for
+them, but existing grants can still be removed.
+
+The container root filesystem is read-only. Only the size-limited temporary
+mounts (and an explicitly approved host workspace, if configured) are writable.
+Background processes that retain output pipes can keep capture open until the
+command deadline; launch long-running services through a managed job instead.
 
 ## Security and identity model
 
@@ -195,3 +270,18 @@ unified registry is follow-up work.
 (identical name and arguments) three times consecutively. The repeated call is
 not executed; the run fails with a `Doom loop detected` error so a stuck model
 cannot burn its round and tool budgets on identical requests.
+
+The approved coding write/edit tools are operational. Legacy Markdown writes,
+email and SMS remain unavailable until their approval/idempotency requirements
+are implemented.
+
+An omitted `agentic_mode` request inherits the stored (default-on) preference;
+explicit true/false overrides it. Scheduled routines explicitly retain direct mode.
+`goal_action: "new"` starts a fresh goal in the same chat without destroying the
+previous checkpoint; the default `"resume"` continues an unfinished goal.
+Invalid checkpoints return a recovery error and remain intact until the user
+chooses a new goal. Steering is streamed as `user_instruction` and persisted in
+an independent `instructions` history field, including non-agentic runs.
+
+Tool-output trimming is not semantic context compaction. Transcript and goal-state
+compaction/retention remain separate follow-up work.

@@ -2,13 +2,41 @@
 DTO models for user settings API.
 """
 
+import sys
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from agents.model_catalog import default_local_model_id
 from agents.model_ids import canonicalize_local_model_id
+from agents.models.tool_calling import (
+    MAX_ALWAYS_ALLOWED_TOOLS,
+    MAX_PERMISSION_TOOL_NAME_LENGTH,
+    PERMISSION_MODE_DEFAULT,
+    PermissionMode,
+)
+
+
+class AgentPermissionsSettings(BaseModel):
+    """User-configurable approval posture for agentic tool execution."""
+
+    mode: PermissionMode = Field(
+        default=PERMISSION_MODE_DEFAULT,
+        description=(
+            "Approval posture: 'default' (per-tool flags), 'auto_approve' "
+            "(never ask), or 'require_approval' (always ask)"
+        ),
+    )
+    always_allow: list[
+        Annotated[
+            str, Field(min_length=1, max_length=MAX_PERMISSION_TOOL_NAME_LENGTH, pattern=r"\S")
+        ]
+    ] = Field(
+        default=[],
+        max_length=MAX_ALWAYS_ALLOWED_TOOLS,
+        description="Eligible static built-in tool names that skip approval; runtime-discovered tools and mandatory fresh-approval tools cannot redeem these grants",
+    )
 
 
 def _installed_local_artifact_id(model_id: str) -> str | None:
@@ -40,12 +68,26 @@ class UserSettingsBase(BaseModel):
         default=None,
         description="Concrete managed artifact selected for the default local model",
     )
+    llama_backend: Literal["cpu", "gpu"] | None = Field(
+        default=None,
+        description="Managed llama.cpp compute backend; null triggers first-use detection",
+    )
+    llama_gpu_device_ids: list[str] = Field(
+        default=[], description="Selected managed llama.cpp GPU device IDs"
+    )
+    llama_allow_system_ram: bool = Field(
+        default=False, description="Allow GPU model loading to use system RAM when needed"
+    )
     default_online_model: str = Field(default="gpt-4", description="Default online model")
     default_online_provider: str = Field(default="openai", description="Default online provider")
     default_file_archives: list[int] = Field(
         default=[], description="Default file archives for RAG"
     )
     enable_rag_by_default: bool = Field(default=True, description="Enable RAG by default")
+    agentic_mode_enabled: bool = Field(
+        default=True,
+        description="Always decompose requests and continue until explicit goal completion",
+    )
     default_max_tokens: int = Field(default=4096, description="Default max tokens")
     default_temperature: float = Field(default=1.0, description="Default temperature")
     default_top_p: float = Field(default=1.0, description="Default top_p")
@@ -55,6 +97,10 @@ class UserSettingsBase(BaseModel):
         default=[], description="Backup provider configurations"
     )
     ui_preferences: dict[str, Any] = Field(default={}, description="UI preferences")
+    agent_permissions: AgentPermissionsSettings = Field(
+        default_factory=AgentPermissionsSettings,
+        description="Agent tool approval settings",
+    )
 
 
 class UserSettingsCreate(UserSettingsBase):
@@ -69,10 +115,14 @@ class UserSettingsUpdate(BaseModel):
     default_agent_type: str | None = None
     default_local_model: str | None = None
     default_local_artifact_id: str | None = None
+    llama_backend: Literal["cpu", "gpu"] | None = None
+    llama_gpu_device_ids: list[str] | None = None
+    llama_allow_system_ram: bool = False
     default_online_model: str | None = None
     default_online_provider: str | None = None
     default_file_archives: list[int] | None = None
     enable_rag_by_default: bool | None = None
+    agentic_mode_enabled: bool | None = None
     default_max_tokens: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
@@ -80,6 +130,7 @@ class UserSettingsUpdate(BaseModel):
     default_presence_penalty: float | None = None
     backup_providers: list[dict[str, Any]] | None = None
     ui_preferences: dict[str, Any] | None = None
+    agent_permissions: AgentPermissionsSettings | None = None
 
 
 class UserSettingsResponse(UserSettingsBase):
@@ -145,9 +196,7 @@ class AgentFactoryConfig(BaseModel):
         agent_type = overrides.agent_type or settings.default_agent_type
 
         if agent_type == "local":
-            model = canonicalize_local_model_id(
-                overrides.model or settings.default_local_model
-            )
+            model = canonicalize_local_model_id(overrides.model or settings.default_local_model)
             # Leave unset so AgentFactory can select a backend from catalog
             # capabilities. Explicit user overrides still take precedence.
             runner_type = overrides.runner_type
@@ -156,7 +205,11 @@ class AgentFactoryConfig(BaseModel):
                 or settings.default_local_artifact_id
                 or _installed_local_artifact_id(model)
             )
-            device_config = {"artifact_id": artifact_id} if artifact_id else {}
+            device_config: dict[str, Any] = {"artifact_id": artifact_id} if artifact_id else {}
+            if sys.platform in {"win32", "linux"}:
+                device_config["llama_backend"] = settings.llama_backend or "auto"
+                device_config["llama_gpu_device_ids"] = settings.llama_gpu_device_ids
+                device_config["llama_allow_system_ram"] = settings.llama_allow_system_ram
             endpoint = None
             api_key = None
         else:  # online
@@ -169,7 +222,12 @@ class AgentFactoryConfig(BaseModel):
                 endpoint = overrides.endpoint or "https://api.anthropic.com/v1/messages"
             else:
                 from agents.model_catalog import get_provider_endpoint
-                provider = "xai" if settings.default_online_provider == "grok" else settings.default_online_provider
+
+                provider = (
+                    "xai"
+                    if settings.default_online_provider == "grok"
+                    else settings.default_online_provider
+                )
                 endpoint = overrides.endpoint or get_provider_endpoint(provider)
             api_key = None  # Will be retrieved from environment
 
@@ -180,8 +238,12 @@ class AgentFactoryConfig(BaseModel):
 
         # Generation config
         generation_config = {
-            "max_tokens": overrides.max_tokens if overrides.max_tokens is not None else settings.default_max_tokens,
-            "temperature": overrides.temperature if overrides.temperature is not None else settings.default_temperature,
+            "max_tokens": overrides.max_tokens
+            if overrides.max_tokens is not None
+            else settings.default_max_tokens,
+            "temperature": overrides.temperature
+            if overrides.temperature is not None
+            else settings.default_temperature,
             "top_p": overrides.top_p if overrides.top_p is not None else settings.default_top_p,
             "frequency_penalty": (
                 overrides.frequency_penalty

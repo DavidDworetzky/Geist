@@ -32,10 +32,6 @@ def eligible_pull_request() -> dict:
     }
 
 
-def passing_checks() -> list[dict]:
-    return [{"name": "tests", "status": "completed", "conclusion": "success"}]
-
-
 def pr_330_files() -> list[dict]:
     return [
         {"filename": "agents/model_catalog.py"},
@@ -92,7 +88,7 @@ def test_gate_accepts_small_localized_fix_with_test() -> None:
     ]
 
     result = pitchblend.deterministic_gate(
-        eligible_pull_request(), files, passing_checks(), []
+        eligible_pull_request(), files
     )
 
     assert result.eligible
@@ -109,7 +105,7 @@ def test_gate_blocks_migration_contract_security_and_dependency_paths() -> None:
     ]
 
     result = pitchblend.deterministic_gate(
-        eligible_pull_request(), files, passing_checks(), []
+        eligible_pull_request(), files
     )
 
     assert not result.eligible
@@ -119,7 +115,7 @@ def test_gate_blocks_migration_contract_security_and_dependency_paths() -> None:
     assert any("dependency" in reason for reason in result.reasons)
 
 
-def test_gate_blocks_size_limits_and_pending_checks() -> None:
+def test_gate_blocks_size_limits() -> None:
     files = [
         {
             "filename": f"src/fix_{index}.py",
@@ -131,56 +127,12 @@ def test_gate_blocks_size_limits_and_pending_checks() -> None:
         for index in range(21)
     ]
     files[0]["filename"] = "tests/test_fix.py"
-    checks = [{"name": "tests", "status": "in_progress", "conclusion": None}]
 
-    result = pitchblend.deterministic_gate(eligible_pull_request(), files, checks, [])
+    result = pitchblend.deterministic_gate(eligible_pull_request(), files)
 
     assert not result.eligible
     assert any("20-file limit" in reason for reason in result.reasons)
     assert any("1000-line limit" in reason for reason in result.reasons)
-    assert any("pending or unsuccessful" in reason for reason in result.reasons)
-
-
-def test_gate_ignores_its_own_pending_status_but_not_other_statuses() -> None:
-    files = [
-        {
-            "filename": "agents/model_catalog.py",
-            "status": "modified",
-            "additions": 4,
-            "deletions": 2,
-            "patch": "@@ -1 +1 @@",
-        },
-        {
-            "filename": "tests/agents/test_model_catalog.py",
-            "status": "modified",
-            "additions": 8,
-            "deletions": 1,
-            "patch": "@@ -1 +1 @@",
-        },
-    ]
-    own_status = {
-        "context": pitchblend.APPROVAL_GATE_CONTEXT,
-        "state": "pending",
-    }
-
-    result = pitchblend.deterministic_gate(
-        eligible_pull_request(), files, passing_checks(), [own_status]
-    )
-
-    assert result.eligible
-
-    unrelated_status = {"context": "external policy", "state": "pending"}
-    result = pitchblend.deterministic_gate(
-        eligible_pull_request(),
-        files,
-        passing_checks(),
-        [own_status, unrelated_status],
-    )
-
-    assert not result.eligible
-    assert result.reasons == (
-        "commit statuses are pending or unsuccessful: external policy",
-    )
 
 
 def test_model_catalog_scope_matches_pr_330_and_pr_341() -> None:
@@ -196,7 +148,7 @@ def test_model_catalog_scope_matches_pr_330_and_pr_341() -> None:
 
 def test_gate_allows_scoped_registry_catalog_change_but_blocks_near_miss() -> None:
     result = pitchblend.deterministic_gate(
-        eligible_pull_request(), pr_341_files(), passing_checks(), []
+        eligible_pull_request(), pr_341_files()
     )
     assert result.eligible
 
@@ -210,7 +162,7 @@ def test_gate_allows_scoped_registry_catalog_change_but_blocks_near_miss() -> No
         }
     ]
     result = pitchblend.deterministic_gate(
-        eligible_pull_request(), unscoped_files, passing_checks(), []
+        eligible_pull_request(), unscoped_files
     )
     assert not result.eligible
     assert any("contract" in reason for reason in result.reasons)
@@ -520,3 +472,50 @@ def test_classifier_requires_every_non_frontend_low_risk_signal() -> None:
 
     classification["contract_change"] = True
     assert not pitchblend.classification_is_eligible(classification)
+
+
+def test_copy_only_matrix_waives_tests_but_preserves_risk_boundaries() -> None:
+    classification = base_classification(change_type="copy", regression_test_present=False)
+    assert pitchblend.classification_pass_rule(classification) == "copy-only-low"
+    for field, value in (("complexity", "medium"), ("data_migration", True),
+                         ("contract_change", True), ("security_change", True)):
+        assert pitchblend.classification_pass_rule({**classification, field: value}) is None
+    body = pitchblend.format_approved_comment(363, "head", 1, 1, classification, "copy-only-low")
+    assert "Regression tests are not required" in body
+    assert "check, and regression-test gates passed" not in body
+
+
+def test_review_copy_without_ci_queries_and_behavioral_fix_requires_tests() -> None:
+    files = [{"filename": "client/geist/src/AppShell.tsx", "status": "modified",
+              "additions": 0, "deletions": 1,
+              "patch": '@@ -309 +309,0 @@\n-<p className="topbar-eyebrow">Runtime</p>'}]
+    event = {"repository": {"full_name": "org/repo"},
+             "issue": {"number": 363, "pull_request": {}},
+             "comment": {"id": 123, "body": "@pitchblend-ai review", "author_association": "OWNER"}}
+    event["issue"]["pull_request"] = {"url": "https://github.test/pr/363"}
+    pull_request = {**eligible_pull_request(), **gate_pull_request()}
+    for change_type in ("copy", "bugfix"):
+        github = mock.Mock()
+        github.paginate.side_effect = [[], files]
+        def request(method, path, payload=None):
+            if method == "GET":
+                assert path == "/repos/org/repo/pulls/363", path
+                return pull_request
+            return None
+        github.request.side_effect = request
+        environment = {"GITHUB_EVENT_PATH": "/event.json", "GITHUB_EVENT_NAME": "issue_comment",
+                       "PITCHBLEND_GITHUB_TOKEN": "token", "OPENAI_API_KEY": "key"}
+        with (mock.patch.dict(os.environ, environment, clear=True),
+              mock.patch("builtins.open", mock.mock_open(read_data=json.dumps(event))),
+              mock.patch.object(pitchblend, "JsonHttpClient", return_value=github),
+              mock.patch.object(pitchblend, "refresh_approval_gate"),
+              mock.patch.object(pitchblend, "classify_pull_request", return_value=base_classification(
+                  change_type=change_type, is_frontend=True, regression_test_present=False))):
+            assert pitchblend.main() == 0
+        approvals = [call for call in github.request.call_args_list
+                     if call.args[0] == "POST" and call.args[1].endswith("/reviews")]
+        assert bool(approvals) == (change_type == "copy")
+        if approvals:
+            assert approvals[0].args[2]["commit_id"] == "current-head"
+        else:
+            assert any("no regression-test file" in str(call) for call in github.request.call_args_list)

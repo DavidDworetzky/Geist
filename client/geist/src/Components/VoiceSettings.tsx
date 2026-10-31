@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import useVoiceModels, { TTSModelInfo, TTSProviderInfo, UseVoiceModelsReturn } from '../Hooks/useVoiceModels';
+import { CONVERSATION_PROVIDERS } from '../Utils/pipelineVoiceSession';
+import BrandMark from './BrandMark';
 
 export interface VoiceSelection {
+  mode: 'dictation' | 'live';
   sttProvider: string;
   ttsProvider: string;
   ttsModel?: string;
@@ -9,10 +12,9 @@ export interface VoiceSelection {
   ttsLanguage?: string;
 }
 
-// Fallback while the installed-model catalog is loading; recording waits for it.
 export const DEFAULT_VOICE_SELECTION: VoiceSelection = {
-  sttProvider: 'mms',
-  ttsProvider: 'sesame'
+  mode: 'dictation', sttProvider: 'mms', ttsProvider: 'openai_live',
+  ttsModel: 'gpt-live-1', ttsVoice: 'marin'
 };
 
 const STT_PROVIDERS = [
@@ -29,8 +31,13 @@ export const modelIsReady = (model: TTSModelInfo): boolean => (
   )
 );
 
-const providerIsReady = (provider: TTSProviderInfo): boolean => (
-  provider.models.some(modelIsReady)
+/** Live chat offers speech-to-speech providers and downloadable local voices. */
+export const isLiveProvider = (provider: TTSProviderInfo): boolean => (
+  provider.mode === 'conversation' || provider.models.some(model => Boolean(model.artifact))
+);
+
+export const usesVoicePipeline = (selection: VoiceSelection): boolean => (
+  selection.mode === 'live' && !CONVERSATION_PROVIDERS.has(selection.ttsProvider)
 );
 
 interface VoiceSettingsProps {
@@ -40,184 +47,94 @@ interface VoiceSettingsProps {
   catalog?: UseVoiceModelsReturn;
 }
 
-const VoiceSettings: React.FC<VoiceSettingsProps> = ({
-  selection,
-  onChange,
-  disabled = false,
-  catalog
-}) => {
+const VoiceSettings: React.FC<VoiceSettingsProps> = ({ selection, onChange, disabled = false, catalog }) => {
   const [expanded, setExpanded] = useState(false);
-  const localCatalog = useVoiceModels(expanded && !catalog);
+  const localCatalog = useVoiceModels(expanded && selection.mode === 'live' && !catalog);
   const { data, loading, error } = catalog || localCatalog;
-
-  const providerInfo: TTSProviderInfo | undefined = data?.providers.find(
-    p => p.provider === selection.ttsProvider
+  const providers = data?.providers.filter(isLiveProvider) || [];
+  const provider = providers.find(item => item.provider === selection.ttsProvider);
+  const model = provider?.models.find(item => item.id === (selection.ttsModel || provider.default_model));
+  const sttSelect = (
+    <label className="voice-settings-field">Speech to text
+      <select disabled={disabled} value={selection.sttProvider}
+        onChange={event => onChange({ ...selection, sttProvider: event.target.value })}>
+        {STT_PROVIDERS.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+      </select>
+    </label>
   );
-  const activeModelId = selection.ttsModel || providerInfo?.default_model;
-  const modelInfo: TTSModelInfo | undefined = providerInfo?.models.find(
-    m => m.id === activeModelId
-  );
 
-  const selectionForModel = (
-    provider: TTSProviderInfo,
-    model: TTSModelInfo | undefined
-  ): VoiceSelection => ({
-    ...selection,
-    ttsProvider: provider.provider,
-    ttsModel: model?.id,
-    ttsVoice: model?.voices[0]?.id,
-    ttsLanguage: model?.languages[0]?.code
-  });
-
-  const handleProviderChange = (providerId: string) => {
-    const provider = data?.providers.find(p => p.provider === providerId);
-    if (!provider || !providerIsReady(provider)) {
-      return;
-    }
-    const model = provider.models.find(
-      m => m.id === provider.default_model && modelIsReady(m)
-    ) || provider.models.find(modelIsReady);
-    onChange(selectionForModel(provider, model));
-  };
-
-  const handleModelChange = (modelId: string) => {
-    if (!providerInfo) {
-      return;
-    }
-    const model = providerInfo.models.find(m => m.id === modelId);
-    if (!model || !modelIsReady(model)) {
-      return;
-    }
-    onChange(selectionForModel(providerInfo, model));
+  const selectModel = (value: string) => {
+    const selectedProvider = providers.find(item => item.models.some(m => `${item.provider}/${m.id}` === value));
+    const selectedModel = selectedProvider?.models.find(item => `${selectedProvider?.provider}/${item.id}` === value);
+    if (!selectedProvider || !selectedModel || !modelIsReady(selectedModel)) return;
+    onChange({ ...selection, ttsProvider: selectedProvider.provider, ttsModel: selectedModel.id,
+      ttsVoice: selectedModel.voices[0]?.id, ttsLanguage: selectedModel.languages?.[0]?.code });
   };
 
   return (
-    <div className="voice-settings">
-      <button
-        type="button"
-        className={`voice-settings-toggle${expanded ? ' expanded' : ''}`}
-        onClick={() => setExpanded(prev => !prev)}
-        disabled={disabled}
-        aria-expanded={expanded}
-        aria-label="Voice settings"
-        title={disabled ? 'Stop recording to change voice settings' : 'Voice settings'}
-      >
-        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          {expanded ? (
-            <path d="M10 6l6 8H4l6-8z" />
-          ) : (
-            <path d="M10 14l-6-8h12l-6 8z" />
-          )}
-        </svg>
-      </button>
-
-      {expanded && (
-        <div className="voice-settings-panel">
-          <div className="voice-settings-title">Voice settings</div>
-
-          <label className="voice-settings-field">
-            Speech to text
-            <select
-              value={selection.sttProvider}
-              disabled={disabled}
-              onChange={e => onChange({ ...selection, sttProvider: e.target.value })}
-            >
-              {STT_PROVIDERS.map(provider => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {loading && <div className="voice-settings-status">Loading voice models...</div>}
-          {error && <div className="voice-settings-status voice-settings-error">{error}</div>}
-
-          {data && (
-            <>
-              <label className="voice-settings-field">
-                Voice provider
-                <select
-                  value={selection.ttsProvider}
-                  disabled={disabled}
-                  onChange={e => handleProviderChange(e.target.value)}
-                >
-                  {data.providers.map(provider => {
-                    const ready = providerIsReady(provider);
-                    return (
-                      <option key={provider.provider} value={provider.provider} disabled={!ready}>
-                        {provider.display_name}{ready ? '' : ' (download or runtime required)'}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-
-              {providerInfo && providerInfo.models.length > 1 && (
-                <label className="voice-settings-field">
-                  Model
-                  <select
-                    value={activeModelId || ''}
-                    disabled={disabled}
-                    onChange={e => handleModelChange(e.target.value)}
-                  >
-                    {providerInfo.models.map(model => {
-                      const ready = modelIsReady(model);
+    <div className="voice-controls">
+      <div className="voice-settings">
+        <button type="button" className="voice-settings-toggle" disabled={disabled}
+          aria-expanded={expanded} aria-label="Voice settings" onClick={() => setExpanded(value => !value)}>⚙</button>
+        {expanded && (
+          <div className="voice-settings-panel">
+            <div className="voice-settings-title">{selection.mode === 'live' ? 'Live chat' : 'Dictation'}</div>
+            {selection.mode === 'dictation' ? (
+              <>
+                <div className="voice-settings-status">Transcribe into your message. Review it, then press Send.</div>
+                {sttSelect}
+              </>
+            ) : (
+              <>
+                <div className="voice-settings-status">A continuous conversation with AI-generated speech.</div>
+                {provider?.description && <div className="voice-settings-status">{provider.description}</div>}
+                {loading && <div className="voice-settings-status">Loading voice models...</div>}
+                {error && <div className="voice-settings-error">{error}</div>}
+                {data && <label className="voice-settings-field">Live voice model
+                  <select disabled={disabled} value={`${selection.ttsProvider}/${selection.ttsModel || provider?.default_model || ''}`}
+                    onChange={event => selectModel(event.target.value)}>
+                    {providers.flatMap(item => item.models.map(option => {
+                      const ready = modelIsReady(option);
                       return (
-                        <option key={model.id} value={model.id} disabled={!ready}>
-                          {model.display_name}{ready ? '' : ' (not ready)'}
+                        <option key={`${item.provider}/${option.id}`} value={`${item.provider}/${option.id}`} disabled={!ready}>
+                          {item.display_name} · {option.display_name}{ready ? '' : ' (download or runtime required)'}
                         </option>
                       );
-                    })}
+                    }))}
                   </select>
-                </label>
-              )}
-
-              {modelInfo?.artifact && !modelIsReady(modelInfo) && (
-                <div className="voice-settings-status">
-                  {modelInfo.artifact.status !== 'installed'
-                    ? 'Download this voice model from the Models tab first.'
-                    : modelInfo.artifact.runtime_detail || 'The local voice runtime is not ready.'}
-                </div>
-              )}
-
-              {modelInfo && modelInfo.voices.length > 1 && (
-                <label className="voice-settings-field">
-                  Voice
-                  <select
-                    value={selection.ttsVoice || modelInfo.voices[0].id}
-                    disabled={disabled}
-                    onChange={e => onChange({ ...selection, ttsVoice: e.target.value })}
-                  >
-                    {modelInfo.voices.map(voice => (
-                      <option key={voice.id} value={voice.id}>
-                        {voice.display_name}
-                      </option>
+                </label>}
+                {model?.artifact && !modelIsReady(model) && (
+                  <div className="voice-settings-status">
+                    {model.artifact.status !== 'installed'
+                      ? 'Download this voice model from the Models tab first.'
+                      : model.artifact.runtime_detail || 'The local voice runtime is not ready.'}
+                  </div>
+                )}
+                {usesVoicePipeline(selection) && sttSelect}
+                {model && model.voices.length > 0 && <label className="voice-settings-field">Voice
+                  <select disabled={disabled} value={selection.ttsVoice || model.voices[0]?.id}
+                    onChange={event => onChange({ ...selection, ttsVoice: event.target.value })}>
+                    {model.voices.map(voice => <option key={voice.id} value={voice.id}>{voice.display_name}</option>)}
+                  </select>
+                </label>}
+                {model && (model.languages?.length ?? 0) > 1 && <label className="voice-settings-field">Language
+                  <select disabled={disabled} value={selection.ttsLanguage || model.languages[0].code}
+                    onChange={event => onChange({ ...selection, ttsLanguage: event.target.value })}>
+                    {model.languages.map(language => (
+                      <option key={language.code} value={language.code}>{language.display_name}</option>
                     ))}
                   </select>
-                </label>
-              )}
-
-              {modelInfo && modelInfo.languages.length > 1 && (
-                <label className="voice-settings-field">
-                  Language
-                  <select
-                    value={selection.ttsLanguage || modelInfo.languages[0].code}
-                    disabled={disabled}
-                    onChange={e => onChange({ ...selection, ttsLanguage: e.target.value })}
-                  >
-                    {modelInfo.languages.map(language => (
-                      <option key={language.code} value={language.code}>
-                        {language.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </>
-          )}
-        </div>
-      )}
+                </label>}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <button type="button" className="live-chat-toggle" disabled={disabled}
+        aria-label="Live chat" title="Live chat" aria-pressed={selection.mode === 'live'}
+        onClick={() => onChange({ ...selection, mode: selection.mode === 'live' ? 'dictation' : 'live' })}>
+        <BrandMark />
+      </button>
     </div>
   );
 };

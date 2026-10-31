@@ -31,7 +31,6 @@ jobs:
           private-key: ${{ secrets.PITCHBLEND_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-checks: read
           permission-statuses: write
           permission-contents: read
           permission-issues: write

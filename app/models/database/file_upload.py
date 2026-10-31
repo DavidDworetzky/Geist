@@ -18,7 +18,7 @@ class FileUpload(Base):
     mime_type = Column(String, nullable=False)
     file_hash = Column(String, nullable=False)  # SHA-256 hash for deduplication
     upload_date = Column(DateTime, default=datetime.datetime.utcnow)
-    user_id = Column(Integer, ForeignKey('geist_user.user_id'), nullable=False)
+    user_id = Column(Integer, ForeignKey("geist_user.user_id"), nullable=False)
 
     # Extracted content for searchability
     extracted_text = Column(Text)  # For PDFs and text files
@@ -27,6 +27,7 @@ class FileUpload(Base):
 
     # Relationships
     user = relationship("GeistUser", backref="uploaded_files")
+
 
 @dataclass
 class FileUploadModel:
@@ -43,6 +44,7 @@ class FileUploadModel:
     is_processed: bool = False
     processing_error: str | None = None
 
+
 @dataclass
 class FileUploadResponse:
     file_id: int
@@ -54,6 +56,7 @@ class FileUploadResponse:
     user_id: int
     is_processed: bool
     processing_error: str | None = None
+
 
 def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
     """Create a new file upload record"""
@@ -68,7 +71,7 @@ def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
             user_id=file_upload.user_id,
             extracted_text=file_upload.extracted_text,
             is_processed=file_upload.is_processed,
-            processing_error=file_upload.processing_error
+            processing_error=file_upload.processing_error,
         )
         session.add(db_file)
         session.commit()
@@ -86,8 +89,9 @@ def create_file_upload(file_upload: FileUploadModel) -> FileUploadModel:
             user_id=db_file.user_id,
             extracted_text=db_file.extracted_text,
             is_processed=db_file.is_processed,
-            processing_error=db_file.processing_error
+            processing_error=db_file.processing_error,
         )
+
 
 def get_file_upload_by_id(file_id: int) -> FileUploadModel | None:
     """Get file upload by ID"""
@@ -108,30 +112,35 @@ def get_file_upload_by_id(file_id: int) -> FileUploadModel | None:
             user_id=db_file.user_id,
             extracted_text=db_file.extracted_text,
             is_processed=db_file.is_processed,
-            processing_error=db_file.processing_error
+            processing_error=db_file.processing_error,
         )
+
 
 def get_files_by_user(user_id: int, skip: int = 0, limit: int = 100) -> list[FileUploadResponse]:
     """Get files uploaded by a specific user"""
     with SessionLocal() as session:
         files = session.query(FileUpload).filter_by(user_id=user_id).offset(skip).limit(limit).all()
 
-        return [FileUploadResponse(
-            file_id=f.file_id,
-            filename=f.filename,
-            original_filename=f.original_filename,
-            file_size=f.file_size,
-            mime_type=f.mime_type,
-            upload_date=f.upload_date,
-            user_id=f.user_id,
-            is_processed=f.is_processed,
-            processing_error=f.processing_error
-        ) for f in files]
+        return [
+            FileUploadResponse(
+                file_id=f.file_id,
+                filename=f.filename,
+                original_filename=f.original_filename,
+                file_size=f.file_size,
+                mime_type=f.mime_type,
+                upload_date=f.upload_date,
+                user_id=f.user_id,
+                is_processed=f.is_processed,
+                processing_error=f.processing_error,
+            )
+            for f in files
+        ]
 
-def get_file_by_hash(file_hash: str) -> FileUploadModel | None:
+
+def get_file_by_hash(file_hash: str, user_id: int) -> FileUploadModel | None:
     """Check if file with given hash already exists"""
     with SessionLocal() as session:
-        db_file = session.query(FileUpload).filter_by(file_hash=file_hash).first()
+        db_file = session.query(FileUpload).filter_by(file_hash=file_hash, user_id=user_id).first()
         if not db_file:
             return None
 
@@ -147,8 +156,9 @@ def get_file_by_hash(file_hash: str) -> FileUploadModel | None:
             user_id=db_file.user_id,
             extracted_text=db_file.extracted_text,
             is_processed=db_file.is_processed,
-            processing_error=db_file.processing_error
+            processing_error=db_file.processing_error,
         )
+
 
 def delete_file_upload(file_id: int, user_id: int) -> bool:
     """Delete file upload (only if owned by user)"""
@@ -161,7 +171,10 @@ def delete_file_upload(file_id: int, user_id: int) -> bool:
         session.commit()
         return True
 
-def update_file_processing_status(file_id: int, extracted_text: str | None = None, processing_error: str | None = None):
+
+def update_file_processing_status(
+    file_id: int, extracted_text: str | None = None, processing_error: str | None = None
+):
     """Update file processing status and extracted text"""
     with SessionLocal() as session:
         db_file = session.query(FileUpload).filter_by(file_id=file_id).first()

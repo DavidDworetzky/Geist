@@ -39,6 +39,7 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
         cwd=server.cwd,
         plugin_root=server.plugin_root,
         plugin_data_dir=server.plugin_data_dir,
+        oauth_workspace_id=server.workspace_id if server.oauth_configured else None,
     )
 
 

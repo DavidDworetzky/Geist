@@ -105,6 +105,7 @@ export default function useLocalRuntimeReadiness(
     settings?.default_agent_type,
     settings?.default_local_artifact_id,
     settings?.default_local_model,
+    settings?.llama_allow_system_ram,
   ]);
 
   return { status, retry };

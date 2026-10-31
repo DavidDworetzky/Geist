@@ -3,7 +3,7 @@
 import datetime
 import threading
 
-from agents.models.tool_calling import ToolCall, ToolContext
+from agents.models.tool_calling import InvocationApproval, ToolCall, ToolContext
 from app.models.database.mcp_server import McpServerModel
 from app.services.mcp_client import McpError
 from app.services.mcp_tool_source import McpToolSource, config_from_model
@@ -65,7 +65,7 @@ def _approved_context(call: ToolCall) -> ToolContext:
         workspace_id=1,
         chat_id=None,
         run_id="run-test",
-        approved_call_ids=frozenset({call.id}),
+        invocation_approval=InvocationApproval(call),
     )
 
 

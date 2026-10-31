@@ -108,6 +108,8 @@ def update_chat_history(
     user_id: int | None = None,
     run_id: str | None = None,
     status: str | None = None,
+    orchestration: dict[str, Any] | None = None,
+    instructions: list[dict[str, str]] | None = None,
     memory_enabled: bool | None = None,
     memory_mode: str | None = None,
     folder_id: int | None = None,
@@ -142,6 +144,8 @@ def update_chat_history(
         # Add new message pair. Extra fields are optional so older chat history
         # records and clients that only read user/ai remain compatible.
         history_entry = {"user": new_user_message, "ai": new_ai_message}
+        if instructions:
+            history_entry["instructions"] = _serialize_chat_extension(instructions)
         if tool_calls:
             history_entry["tool_calls"] = _serialize_chat_extension(tool_calls)
         if artifacts:
@@ -152,6 +156,8 @@ def update_chat_history(
             history_entry["run_id"] = run_id
         if status:
             history_entry["status"] = status
+        if orchestration:
+            history_entry["orchestration"] = _serialize_chat_extension(orchestration)
         current_history.append(history_entry)
 
         chat_session.chat_history = json.dumps(current_history)

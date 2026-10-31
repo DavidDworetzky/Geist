@@ -5,13 +5,15 @@ interface VoiceButtonProps {
   isProcessing: boolean;
   onClick: () => void;
   disabled?: boolean;
+  mode?: 'dictation' | 'live';
 }
 
 const VoiceButton: React.FC<VoiceButtonProps> = ({
   isRecording,
   isProcessing,
   onClick,
-  disabled = false
+  disabled = false,
+  mode = 'dictation'
 }) => {
   const className = [
     'icon-button',
@@ -20,10 +22,10 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
   ].filter(Boolean).join(' ');
 
   const getTooltip = () => {
-    if (isRecording) return 'Click to stop recording';
+    if (isRecording) return mode === 'live' ? 'End voice call' : 'Finish dictation';
     if (disabled) return 'Voice chat disabled';
-    if (isProcessing) return 'Processing...';
-    return 'Click to start voice chat';
+    if (isProcessing) return 'Transcribing...';
+    return mode === 'live' ? 'Start voice call' : 'Start dictation';
   };
 
   return (
@@ -32,6 +34,7 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
       onClick={onClick}
       disabled={!isRecording && (disabled || isProcessing)}
       title={getTooltip()}
+      aria-label={getTooltip()}
       className={className}
     >
       {isRecording ? (

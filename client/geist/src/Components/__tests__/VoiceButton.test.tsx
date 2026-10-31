@@ -5,8 +5,15 @@ import VoiceButton from '../VoiceButton';
 it('keeps Stop usable during processing even if the chat input becomes disabled', () => {
   const onClick = jest.fn();
   render(<VoiceButton isRecording isProcessing disabled onClick={onClick} />);
-  const stop = screen.getByRole('button', { name: 'Click to stop recording' });
+  const stop = screen.getByRole('button', { name: 'Finish dictation' });
   expect(stop).toBeEnabled();
   fireEvent.click(stop);
+  expect(onClick).toHaveBeenCalledTimes(1);
+});
+
+it('keeps End voice call usable when the composer disables voice mid-call', () => {
+  const onClick = jest.fn();
+  render(<VoiceButton isRecording isProcessing={false} disabled mode="live" onClick={onClick} />);
+  fireEvent.click(screen.getByRole('button', { name: 'End voice call' }));
   expect(onClick).toHaveBeenCalledTimes(1);
 });

@@ -1,14 +1,26 @@
 import React, { useMemo } from 'react';
 import SettingsSelect from './SettingsSelect';
 import { useAvailableModels } from '../Hooks/useAvailableModels';
+import LlamaComputeSection from './LlamaComputeSection';
 
 interface AgentConfigSectionProps {
   agentType: string;
   localModel: string;
   onlineProvider: string;
   onlineModel: string;
+  llamaBackend: 'cpu' | 'gpu' | null;
+  llamaGpuDeviceIds: string[];
+  llamaAllowSystemRam?: boolean;
   onOnlineProviderChange: (value: string) => void;
   onOnlineModelChange: (value: string) => void;
+  onLlamaBackendChange: (value: 'cpu' | 'gpu' | null) => void;
+  onLlamaGpuDeviceIdsChange: (value: string[]) => void;
+  onLlamaAllowSystemRamChange?: (value: boolean) => void;
+  onLlamaComputeValidityChange: (
+    valid: boolean,
+    settled: boolean,
+    validationError: string | null,
+  ) => void;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -34,8 +46,15 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
   localModel,
   onlineProvider,
   onlineModel,
+  llamaBackend,
+  llamaGpuDeviceIds,
+  llamaAllowSystemRam = false,
   onOnlineProviderChange,
-  onOnlineModelChange
+  onOnlineModelChange,
+  onLlamaBackendChange,
+  onLlamaGpuDeviceIdsChange,
+  onLlamaAllowSystemRamChange,
+  onLlamaComputeValidityChange,
 }) => {
   const {
     getModelById,
@@ -82,6 +101,7 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
       </header>
 
       {agentType === 'local' ? (
+        <>
         <div className="settings-field">
           <span className="settings-label">Local model</span>
           <p className="settings-description">
@@ -97,6 +117,16 @@ const AgentConfigSection: React.FC<AgentConfigSectionProps> = ({
             </a>
           </div>
         </div>
+          <LlamaComputeSection
+            backend={llamaBackend}
+            deviceIds={llamaGpuDeviceIds}
+            allowSystemRam={llamaAllowSystemRam}
+            onAllowSystemRamChange={onLlamaAllowSystemRamChange}
+            onBackendChange={onLlamaBackendChange}
+            onDeviceIdsChange={onLlamaGpuDeviceIdsChange}
+            onValidityChange={onLlamaComputeValidityChange}
+          />
+        </>
       ) : (
         <>
           <SettingsSelect

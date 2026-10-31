@@ -480,6 +480,20 @@ textarea:focus-visible {
   background: var(--geist-color-danger);
 }
 
+.chat-stop-button {
+  width: 40px;
+  height: 40px;
+  align-self: center;
+  padding: 0;
+  color: var(--geist-color-accent-strong);
+  background: color-mix(in srgb, var(--geist-color-accent) 12%, var(--geist-color-surface));
+  border-color: var(--geist-color-accent);
+}
+
+.chat-stop-button:hover {
+  background: color-mix(in srgb, var(--geist-color-accent) 24%, var(--geist-color-surface));
+}
+
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -1976,6 +1990,49 @@ textarea:focus-visible {
   border-color: color-mix(in srgb, var(--geist-color-accent) 45%, var(--geist-color-border));
 }
 
+.agentic-progress {
+  max-width: min(820px, 92%);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--geist-color-accent) 7%, var(--geist-color-surface-strong));
+  border: 1px solid color-mix(in srgb, var(--geist-color-accent) 35%, var(--geist-color-border));
+  border-radius: var(--geist-radius-lg);
+}
+
+.agentic-progress-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.agentic-task-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agentic-task {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px;
+  color: var(--geist-color-text-muted);
+}
+
+.agentic-task small {
+  display: block;
+  margin-top: 2px;
+}
+
+.agentic-task-completed {
+  color: var(--geist-color-success);
+}
+
+.agentic-task-blocked {
+  color: var(--geist-color-danger);
+}
+
 .chat-speaker {
   display: block;
   margin-bottom: 4px;
@@ -2211,19 +2268,19 @@ ul.relative {
 
 .input-row {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
 }
 
 .input-actions {
   display: flex;
-  flex: 0 0 72px;
-  flex-direction: column;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  flex-direction: row;
   gap: 8px;
-  align-items: stretch;
-  align-self: flex-end;
-  width: 72px;
-  margin-right: 10px;
+  align-items: center;
+  width: 100%;
 }
 
 .chat-textarea,
@@ -2287,13 +2344,14 @@ ul.relative {
 
 .send-button {
   flex: 0 0 auto;
-  width: 100%;
+  width: auto;
+  min-width: 68px;
   padding: 0 12px;
   font-weight: 720;
+  white-space: nowrap;
 }
 
 .voice-settings {
-  position: relative;
   display: flex;
   align-items: flex-end;
 }
@@ -2325,11 +2383,12 @@ ul.relative {
 .voice-settings-panel {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 8px);
+  bottom: 52px;
   z-index: 20;
   display: grid;
   gap: 8px;
-  width: 260px;
+  width: min(360px, 100%);
+  box-sizing: border-box;
   padding: 12px;
   background: var(--geist-color-surface);
   border: 1px solid var(--geist-color-border);
@@ -2569,9 +2628,7 @@ select.form-control {
   }
 
   .input-actions {
-    flex-basis: 68px;
-    width: 68px;
-    margin-right: 8px;
+    gap: 6px;
   }
 
   .ChatSidebar.stage-panel-minimized::before {
@@ -2754,6 +2811,57 @@ select.form-control {
   margin: 10px 0 18px;
 }
 
+.model-load-dialog {
+  width: min(520px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  padding: 24px;
+  color: var(--geist-color-text);
+  overflow: auto;
+}
+
+.model-load-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.model-load-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-load-dialog-heading h2 { margin: 0; font-size: 20px; }
+.model-load-dialog .model-load-dialog-model { color: var(--geist-color-text-muted); font-size: 13px; }
+.model-load-dialog .modal-actions { flex-wrap: wrap; }
+.chat-input-field { position: relative; display: flex; flex: 1; min-width: 0; }
+.chat-input-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--geist-color-text-muted);
+}
+.chat-input-status .runtime-model-spinner {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+.model-error-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--geist-color-border);
+  border-radius: 999px;
+  background: var(--geist-color-surface);
+  color: var(--geist-color-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.model-error-badge:hover { border-color: var(--geist-color-text-muted); }
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2912,3 +3020,21 @@ select.form-control {
     flex-direction: column;
   }
 }
+
+.voice-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.live-chat-toggle { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; padding: 7px; border: 1px solid var(--geist-color-border-strong); border-radius: 50%; background: radial-gradient(circle at 50% 35%, rgba(156, 169, 255, 0.22), rgba(124, 140, 255, 0.04)); cursor: pointer; transition: box-shadow 160ms ease, border-color 160ms ease; }
+.live-chat-toggle .brand-mark-image { width: 24px; height: 24px; object-fit: contain; filter: drop-shadow(0 0 5px rgba(156, 169, 255, 0.5)); }
+.live-chat-toggle:hover:not(:disabled), .live-chat-toggle[aria-pressed="true"] { border-color: var(--geist-color-accent); box-shadow: 0 0 14px rgba(124, 140, 255, 0.28); }
+.live-chat-toggle:focus-visible { outline: 2px solid var(--geist-color-accent); outline-offset: 3px; }
+.live-chat-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+.live-call-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 25px 12px 16px; width: 100%; }
+.live-call-mark { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: rgba(109, 156, 255, 0.06); transition: transform 90ms linear, box-shadow 90ms linear; }
+.live-call-mark .brand-mark-svg, .live-call-mark .brand-mark-image { width: 62px; height: 62px; }
+.live-call-mark.active { transform: scale(calc(1 + var(--voice-level, 0) * 0.24)); box-shadow: 0 0 calc(8px + var(--voice-level, 0) * 40px) rgba(108, 164, 255, 0.4); }
+.live-call-status { font-size: 14px; font-weight: 600; }
+.live-call-hint { font-size: 12px; opacity: 0.7; text-align: center; }
+.live-call-captions { width: 100%; max-height: 150px; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 13px; overflow-wrap: anywhere; }
+.live-call-captions strong { font-size: 11px; opacity: 0.65; }
+.live-call-captions p { margin: 5px 0; white-space: pre-wrap; }
+@media (prefers-reduced-motion: reduce) { .live-call-mark.active { transform: none; transition: none; } }
+@media (max-width: 600px) { .voice-controls { flex-wrap: wrap; } .live-call-captions { grid-template-columns: 1fr; } }
