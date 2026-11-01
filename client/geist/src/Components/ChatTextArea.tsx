@@ -249,12 +249,12 @@ const ChatTurn = memo(({ element, onToolApproval }: {
 ChatTurn.displayName = 'ChatTurn';
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
-  const { chatName, productName } = useBranding();
+  const { productName } = useBranding();
   const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
       {isEmpty && (
-        <div className="chat-empty-state">Chat with {chatName ?? productName}</div>
+        <div className="chat-empty-state">Chat with {productName}</div>
       )}
       {props.chatHistory.map((element, index) => (
         <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />

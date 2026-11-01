@@ -49,7 +49,6 @@ describe('BrandingProvider', () => {
 
     const runtimeBranding: GeistBranding = {
       productName: 'Hosted Geist',
-      chatName: 'Pitchblend',
       theme: {
         '--geist-color-bg': '#1a0b2e',
         '--geist-color-accent': '#a78bfa',
@@ -62,7 +61,7 @@ describe('BrandingProvider', () => {
     });
 
     expect(screen.getByTestId('product-name')).toHaveTextContent('Hosted Geist');
-    expect(screen.getByText('Chat with Pitchblend')).toBeInTheDocument();
+    expect(screen.getByText('Chat with Hosted Geist')).toBeInTheDocument();
 
     await act(async () => {
       resolveFetch({ ok: false } as Response);

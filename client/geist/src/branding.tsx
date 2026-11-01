@@ -22,7 +22,6 @@ export type GeistThemeToken =
 
 export interface GeistBranding {
   productName?: string;
-  chatName?: string;
   productVersion?: string;
   logoUrl?: string;
   faviconUrl?: string;
