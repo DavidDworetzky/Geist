@@ -4,6 +4,26 @@ from typing import Any
 
 
 DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+DEFAULT_COSYVOICE2_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
+# The pip `kokoro` runtime (CPU/CUDA). The plain "kokoro" provider id is
+# reserved for the managed MLX artifact on Apple Silicon.
+KOKORO_PYTORCH_PROVIDER = "kokoro_pytorch"
+DEFAULT_KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
+KOKORO_DEFAULT_VOICE = "af_heart"
+
+# Kokoro selects its G2P pipeline by single-letter language code. Japanese
+# and Chinese need misaki[ja]/misaki[zh] on top of kokoro, so they are not
+# offered.
+KOKORO_LANG_CODES = {
+    "en": "a",
+    "en-us": "a",
+    "en-gb": "b",
+    "es": "e",
+    "fr": "f",
+    "hi": "h",
+    "it": "i",
+    "pt": "p",
+}
 
 SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
     {
@@ -131,7 +151,80 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
             },
         ],
     },
+    {
+        "provider": KOKORO_PYTORCH_PROVIDER,
+        "display_name": "Kokoro (PyTorch, CPU/CUDA)",
+        "type": "local",
+        "default_model": DEFAULT_KOKORO_TTS_MODEL,
+        "models": [
+            {
+                "id": DEFAULT_KOKORO_TTS_MODEL,
+                "display_name": "Kokoro 82M",
+                "sample_rate": 24000,
+                "supports_streaming": True,
+                "streaming_mode": "segment_streaming",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": False,
+                "voices": [
+                    {"id": KOKORO_DEFAULT_VOICE, "display_name": "Heart (US female)"},
+                    {"id": "af_bella", "display_name": "Bella (US female)"},
+                    {"id": "af_nicole", "display_name": "Nicole (US female)"},
+                    {"id": "af_sky", "display_name": "Sky (US female)"},
+                    {"id": "am_adam", "display_name": "Adam (US male)"},
+                    {"id": "am_michael", "display_name": "Michael (US male)"},
+                    {"id": "bf_emma", "display_name": "Emma (UK female)"},
+                    {"id": "bf_isabella", "display_name": "Isabella (UK female)"},
+                    {"id": "bm_george", "display_name": "George (UK male)"},
+                    {"id": "bm_lewis", "display_name": "Lewis (UK male)"},
+                ],
+                "languages": [
+                    {"code": "en", "display_name": "English (US)"},
+                    {"code": "en-gb", "display_name": "English (UK)"},
+                    {"code": "es", "display_name": "Spanish"},
+                    {"code": "fr", "display_name": "French"},
+                    {"code": "hi", "display_name": "Hindi"},
+                    {"code": "it", "display_name": "Italian"},
+                    {"code": "pt", "display_name": "Portuguese"},
+                ],
+            }
+        ],
+    },
+    {
+        "provider": "cosyvoice2",
+        "display_name": "CosyVoice2 (experimental)",
+        "type": "local",
+        "default_model": DEFAULT_COSYVOICE2_MODEL,
+        "models": [
+            {
+                "id": DEFAULT_COSYVOICE2_MODEL,
+                "display_name": "CosyVoice2 0.5B",
+                "sample_rate": 24000,
+                "supports_streaming": True,
+                "streaming_mode": "native",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": True,
+                "voices": [{"id": "default", "display_name": "Default"}],
+                "languages": [
+                    {"code": "en", "display_name": "English"},
+                    {"code": "zh", "display_name": "Chinese"},
+                    {"code": "ja", "display_name": "Japanese"},
+                    {"code": "ko", "display_name": "Korean"},
+                ],
+            }
+        ],
+    },
 ]
+
+
+def allowed_voices_for_tts_model(provider_type: str, model: str) -> list[str]:
+    """Published voice ids for one provider model."""
+    for entry in SUPPORTED_TTS_PROVIDERS:
+        if entry["provider"] != provider_type:
+            continue
+        for published in entry.get("models", []):
+            if published["id"] == model:
+                return [voice["id"] for voice in published.get("voices", [])]
+    return []
 
 
 def get_supported_tts_providers() -> list[dict[str, Any]]:
