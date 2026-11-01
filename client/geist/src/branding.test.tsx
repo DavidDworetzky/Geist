@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { BrandingProvider, GeistBranding, useBranding } from './branding';
+import ChatTextArea from './Components/ChatTextArea';
 
 function BrandingProbe(): JSX.Element {
   const branding = useBranding();
@@ -39,6 +40,7 @@ describe('BrandingProvider', () => {
     render(
       <BrandingProvider>
         <BrandingProbe />
+        <ChatTextArea chatHistory={[]} />
       </BrandingProvider>
     );
 
@@ -47,6 +49,7 @@ describe('BrandingProvider', () => {
 
     const runtimeBranding: GeistBranding = {
       productName: 'Hosted Geist',
+      chatName: 'Pitchblend',
       theme: {
         '--geist-color-bg': '#1a0b2e',
         '--geist-color-accent': '#a78bfa',
@@ -59,6 +62,7 @@ describe('BrandingProvider', () => {
     });
 
     expect(screen.getByTestId('product-name')).toHaveTextContent('Hosted Geist');
+    expect(screen.getByText('Chat with Pitchblend')).toBeInTheDocument();
 
     await act(async () => {
       resolveFetch({ ok: false } as Response);
