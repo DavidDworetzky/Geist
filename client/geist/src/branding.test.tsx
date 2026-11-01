@@ -72,6 +72,12 @@ describe('BrandingProvider', () => {
     expect(document.documentElement.style.getPropertyValue('--geist-color-bg')).toBe('#1a0b2e');
   });
 
+  it.each([undefined, '', '   '])('falls back to Geist for an unusable product name (%p)', (productName) => {
+    window.__GEIST_BRANDING__ = { productName };
+    render(<BrandingProvider><ChatTextArea chatHistory={[]} /></BrandingProvider>);
+    expect(screen.getByText('Chat with Geist')).toBeInTheDocument();
+  });
+
   it('uses runtime branding on the first render when Electron injected it before mount', () => {
     window.__GEIST_BRANDING__ = {
       productName: 'Hosted Geist',

@@ -254,7 +254,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
       {isEmpty && (
-        <div className="chat-empty-state">Chat with {productName}</div>
+        <div className="chat-empty-state">Chat with {productName?.trim() || 'Geist'}</div>
       )}
       {props.chatHistory.map((element, index) => (
         <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />
