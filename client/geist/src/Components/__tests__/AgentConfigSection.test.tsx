@@ -619,6 +619,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Particle-1 guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Low-cost analytics route; enforce OpenRouter ZDR.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'particle-ai/particle-1',
+              name: 'Particle-1',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 131072,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'particle',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="particle-ai/particle-1"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Particle-1' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({

@@ -352,6 +352,30 @@ def test_openrouter_gpt61_terra_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(terra.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_particle1_metadata_is_explicit_and_server_backed():
+    particle = get_model_spec("particle-ai/particle-1")
+
+    assert particle.provider == "openrouter"
+    assert particle.backend == "openai_compatible"
+    assert particle.local is False
+    assert particle.family == "particle"
+    assert particle.context_window == 1048576
+    assert particle.max_output_tokens == 131072
+    assert particle.parameter_count is None
+    assert particle.activated_parameters is None
+    assert particle.supports_vision is True
+    assert particle.supports_function_calling is True
+    assert particle.supports_reasoning is True
+    assert particle.supports_streaming is True
+    assert particle.recommended is False
+    assert particle.mandatory_reasoning_effort is None
+    assert particle.unsupported_parameters == ("n",)
+    assert particle.performance_note is not None
+    assert "single Particle route is ZDR-listed" in particle.performance_note
+    assert "enforce OpenRouter ZDR" in particle.performance_note
+    assert get_provider_endpoint(particle.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("deepseek/deepseek-v4.1-flash-1017")
 
@@ -732,6 +756,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "anthropic/claude-haiku-5.5",
         "openai/gpt-6.1-terra",
         "openai/gpt-6.1-terra-20261026",
+        "particle-ai/particle-1",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -809,6 +834,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-opus-5.5",
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
+        "particle-ai/particle-1",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -978,6 +1004,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(
         model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
+    assert any(model.id == "particle-ai/particle-1" for model in response.providers["openrouter"])
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
