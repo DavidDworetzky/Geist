@@ -437,6 +437,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "zero-retention route; enforce OpenRouter ZDR before confidential workloads."
         ),
     ),
+    ModelSpec(
+        "particle-ai/particle-1",
+        "Particle-1",
+        "particle",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Low-cost coding and data-analysis specialization with optional reasoning, "
+            "native tools, and best-effort schema-guided output. The current single "
+            "Particle route is ZDR-listed; enforce OpenRouter ZDR and re-check endpoint "
+            "policy before confidential workloads."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",

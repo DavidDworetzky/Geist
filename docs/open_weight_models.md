@@ -107,6 +107,41 @@ inventory and Azure is listed as zero retention/no training. Default routing
 can still select a retaining OpenAI endpoint, so confidential or regulated
 workloads must explicitly enforce OpenRouter ZDR and re-check endpoint policy.
 
+## OpenRouter-hosted Particle-1
+
+Set `OPENROUTER_API_KEY` and select `particle-ai/particle-1`. The stable route
+has a 1,048,576-token context window, a 131,072-token output limit, text and
+image input, streaming, optional reasoning, and native tools. Reasoning is high
+by default but may be reduced or disabled. Geist removes only the unsupported
+generic `n` field and preserves sampling controls, tool choice, and
+caller-supplied reasoning.
+
+OpenRouter listed $0.05 per million input tokens, $0.50 per million output
+tokens, and $0.003 per million cached input tokens on November 1, 2026. The
+sole Particle route reported 100% one-day uptime at review time, but it remains
+a young single-provider route without an SLA.
+
+Particle validates JSON-object output. JSON Schema is accepted and guides
+decoding, but Particle explicitly documents schema conformance as best-effort;
+applications must validate the returned object. The exact endpoint appears in
+OpenRouter's ZDR inventory, and Particle documents no persistent prompt/output
+storage or training without affirmative opt-in. Enforce OpenRouter ZDR and
+re-check the endpoint inventory before confidential or regulated use.
+
+Independent evidence is mixed but useful. Plotly's October 31
+DataAnalyticsBench run scored Particle-1 at 40/43, four questions above
+DeepSeek V4.1 Flash and tied with GPT-6.1 Terra, for $0.35. Enclave's October
+29 security-agent run tied DeepSeek at 4/11 verified vulnerable runs but solved
+one fewer task and cost substantially more overall. Particle's claims of
+shorter coding traces remain provider-run evidence.
+
+See the [OpenRouter model page](https://openrouter.ai/particle-ai/particle-1),
+[Particle API documentation](https://docs.particle.ai/),
+[structured-output contract](https://docs.particle.ai/structured-outputs),
+[data-retention policy](https://docs.particle.ai/data-retention),
+[Plotly evaluation](https://plotly.com/blog/particle-1-plotly-data-analytics-bench/),
+and [Enclave evaluation](https://enclave.ai/blog/particle-1-verifies-4-of-11-runs-exploits-cost-1-dollar).
+
 ## OpenRouter-hosted Grok 4.6
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
