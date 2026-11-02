@@ -1,4 +1,4 @@
-# Use Node.js 20.13.1 as the base image
+# Use Node.js 24.22.1 as the base image
 FROM node:24.22.1-alpine
 
 # Set the working directory in the container
