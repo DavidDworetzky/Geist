@@ -615,14 +615,18 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
 
-    def test_particle1_omits_n_and_preserves_optional_reasoning_and_native_tools(self):
+    @pytest.mark.parametrize(
+        "model_id",
+        ["particle-ai/particle-1", "particle-ai/particle-1-20261027"],
+    )
+    def test_particle1_omits_n_and_preserves_optional_reasoning_and_native_tools(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="particle-ai/particle-1",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -632,7 +636,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "particle-ai/particle-1",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 0.7,

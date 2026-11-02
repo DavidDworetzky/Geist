@@ -450,6 +450,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_reasoning=True,
         supports_streaming=True,
         unsupported_parameters=("n",),
+        aliases=("particle-ai/particle-1-20261027",),
         local=False,
         performance_note=(
             "Low-cost coding and data-analysis specialization with optional reasoning, "

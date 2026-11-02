@@ -370,6 +370,8 @@ def test_openrouter_particle1_metadata_is_explicit_and_server_backed():
     assert particle.recommended is False
     assert particle.mandatory_reasoning_effort is None
     assert particle.unsupported_parameters == ("n",)
+    assert particle.aliases == ("particle-ai/particle-1-20261027",)
+    assert resolve_request_spec(particle.aliases[0]) is particle
     assert particle.performance_note is not None
     assert "single Particle route is ZDR-listed" in particle.performance_note
     assert "enforce OpenRouter ZDR" in particle.performance_note
@@ -757,6 +759,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "openai/gpt-6.1-terra",
         "openai/gpt-6.1-terra-20261026",
         "particle-ai/particle-1",
+        "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
@@ -835,6 +838,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
         "particle-ai/particle-1",
+        "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
