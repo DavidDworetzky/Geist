@@ -726,6 +726,29 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "z-ai/glm-5.3-flashx-legal",
+        "GLM 5.3 FlashX Legal",
+        "glm",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="max",
+        local=False,
+        performance_note=(
+            "Legal-domain GLM specialization hosted through OpenRouter with mandatory "
+            "max reasoning, native tools, and structured output. The current single "
+            "Z.AI route is zero retention/no training but is unavailable through EU "
+            "in-region routing; enforce ZDR and require professional review for "
+            "confidential or high-stakes legal work."
+        ),
+    ),
+    ModelSpec(
         "stealth/union-alpha",
         "Union Alpha (Preview)",
         "stealth",
