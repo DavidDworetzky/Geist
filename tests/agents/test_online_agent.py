@@ -463,6 +463,7 @@ class TestOnlineAgentAPIRequests:
                         "frequency_penalty": 0.2,
                         "presence_penalty": 0.1,
                         "stop": "END",
+                        "reasoning": {"effort": "low"},
                         "tools": [{"type": "function", "function": {"name": "lookup"}}],
                         "tool_choice": "auto",
                         "response_format": {
