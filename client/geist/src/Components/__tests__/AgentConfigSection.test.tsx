@@ -619,6 +619,45 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows GLM 5.3 FlashX Legal guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Legal specialization; enforce ZDR and require professional review.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'z-ai/glm-5.3-flashx-legal',
+              name: 'GLM 5.3 FlashX Legal',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 131072,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: false,
+              family: 'glm',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="z-ai/glm-5.3-flashx-legal"
+        />
+      );
+
+      expect(
+        await screen.findByRole('option', { name: 'GLM 5.3 FlashX Legal' })
+      ).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Claude Haiku 5.5 guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Low-cost Claude route; enforce ZDR routing.';
       global.fetch = jest.fn().mockResolvedValue({

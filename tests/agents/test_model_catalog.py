@@ -401,6 +401,36 @@ def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_glm53_flashx_legal_metadata_is_explicit_and_server_backed():
+    legal = get_model_spec("z-ai/glm-5.3-flashx-legal")
+
+    assert legal.provider == "openrouter"
+    assert legal.backend == "openai_compatible"
+    assert legal.local is False
+    assert legal.family == "glm"
+    assert legal.context_window == 1048576
+    assert legal.max_output_tokens == 131072
+    assert legal.parameter_count is None
+    assert legal.activated_parameters is None
+    assert legal.supports_vision is True
+    assert legal.supports_function_calling is True
+    assert legal.supports_reasoning is True
+    assert legal.supports_streaming is True
+    assert legal.recommended is False
+    assert legal.mandatory_reasoning_effort == "max"
+    assert legal.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    )
+    assert legal.performance_note is not None
+    assert "zero retention/no training" in legal.performance_note
+    assert "unavailable through EU in-region routing" in legal.performance_note
+    assert "professional review" in legal.performance_note
+    assert get_provider_endpoint(legal.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
     grok = get_model_spec("x-ai/grok-4.6")
 
@@ -740,6 +770,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
+        "z-ai/glm-5.3-flashx-legal",
         "meta/muse-spark-1.2-contributor",
         "meta/muse-wonder",
         "meta/muse-spark-open",
@@ -817,6 +848,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "deepseek/deepseek-v4.1-flash",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
+        "z-ai/glm-5.3-flashx-legal",
         "meta/muse-spark-1.2-contributor",
         "meta/muse-wonder",
         "meta/muse-spark-open",
@@ -987,6 +1019,9 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "z-ai/glm-5.3-flashx-legal" for model in response.providers["openrouter"]
+    )
     assert any(
         model.id == "meta/muse-spark-1.2-contributor" for model in response.providers["openrouter"]
     )
