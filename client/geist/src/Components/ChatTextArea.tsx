@@ -1,4 +1,5 @@
 import React, { forwardRef, memo, useState } from 'react';
+import { useBranding } from '../branding';
 import { ChatHistory, ChatPair, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
@@ -248,11 +249,12 @@ const ChatTurn = memo(({ element, onToolApproval }: {
 ChatTurn.displayName = 'ChatTurn';
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
+  const { productName } = useBranding();
   const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
       {isEmpty && (
-        <div className="chat-empty-state">Start a conversation with Geist.</div>
+        <div className="chat-empty-state">Chat with {productName?.trim() || 'Geist'}</div>
       )}
       {props.chatHistory.map((element, index) => (
         <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />

@@ -21,11 +21,12 @@ describe('ChatTextArea loading state', () => {
     render(<ChatTextArea chatHistory={[]} isLoading />);
 
     expect(screen.getByRole('status', { name: 'Geist is responding' })).toBeInTheDocument();
-    expect(screen.queryByText('Start a conversation with Geist.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Chat with Geist')).not.toBeInTheDocument();
   });
 
   it('hides the Geist loading indicator when chat is idle', () => {
     render(<ChatTextArea chatHistory={[]} isLoading={false} />);
+    expect(screen.getByText('Chat with Geist')).toBeInTheDocument();
 
     expect(screen.queryByRole('status', { name: 'Geist is responding' })).not.toBeInTheDocument();
   });
