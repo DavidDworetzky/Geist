@@ -71,11 +71,16 @@ def test_voice_registry_covers_local_tts_provider_models():
     registry_repos = {
         download["repo_id"] for spec in VOICE_MODELS.values() for download in spec["downloads"]
     }
+    local_models = pytest.importorskip("app.services.local_models")
+    managed_artifact_ids = {artifact.id for artifact in local_models.CURATED_LOCAL_ARTIFACTS}
 
     for provider in tts.SUPPORTED_TTS_PROVIDERS:
         if provider["type"] != "local":
             continue
         for model in provider["models"]:
+            if model.get("artifact_id"):
+                assert model["artifact_id"] in managed_artifact_ids
+                continue
             assert model["id"] in registry_repos, (
                 f"Local TTS model {model['id']} is not downloadable via "
                 "scripts/download_models.py VOICE_MODELS"

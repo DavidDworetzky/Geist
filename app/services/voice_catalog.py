@@ -1,9 +1,16 @@
 """Voice model metadata without loading inference runtimes."""
 
+import copy
 from typing import Any
 
 
-DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+DEFAULT_KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
+KOKORO_MLX_ARTIFACT_ID = "kokoro-82m-bf16-mlx"
+KOKORO_DEFAULT_VOICE = "af_heart"
+DEFAULT_QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+QWEN3_MLX_ARTIFACT_ID = "qwen3-tts-0.6b-customvoice-mlx-6bit"
+MAGPIE_TTS_MODEL = "nvidia/magpie_tts_multilingual_357m"
+MAGPIE_ARTIFACT_ID = "magpie-tts-multilingual-357m-nemo-speech"
 
 SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
     {
@@ -70,65 +77,63 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
         ],
     },
     {
+        "provider": "kokoro",
+        "display_name": "Vera (Kokoro local MLX)",
+        "type": "local",
+        "default_model": DEFAULT_KOKORO_TTS_MODEL,
+        "models": [
+            {
+                "id": DEFAULT_KOKORO_TTS_MODEL,
+                "display_name": "Vera · Kokoro 82M BF16",
+                "artifact_id": KOKORO_MLX_ARTIFACT_ID,
+                "sample_rate": 24000,
+                "supports_streaming": True,
+                "streaming_mode": "sentence_buffered_pcm",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": False,
+                "voices": [{"id": KOKORO_DEFAULT_VOICE, "display_name": "Vera"}],
+                "languages": [{"code": "a", "display_name": "English (US)"}],
+            },
+        ],
+    },
+    {
         "provider": "qwen3",
-        "display_name": "Qwen3 TTS",
+        "display_name": "Qwen3 TTS (local MLX)",
         "type": "local",
         "default_model": DEFAULT_QWEN3_TTS_MODEL,
         "models": [
             {
-                "id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
-                "display_name": "Qwen3 TTS 0.6B Custom Voice",
-                "sample_rate": 24000,
-                "supports_streaming": True,
-                "streaming_mode": "native_or_chunked",
-                "supports_instruction_control": True,
-                "supports_voice_cloning": False,
-                "voices": [
-                    {"id": "Cherry", "display_name": "Cherry"},
-                    {"id": "Chelsie", "display_name": "Chelsie"},
-                    {"id": "Ethan", "display_name": "Ethan"},
-                    {"id": "Serena", "display_name": "Serena"},
-                ],
-                "languages": [
-                    {"code": "en", "display_name": "English"},
-                    {"code": "zh", "display_name": "Chinese"},
-                    {"code": "ja", "display_name": "Japanese"},
-                    {"code": "ko", "display_name": "Korean"},
-                    {"code": "de", "display_name": "German"},
-                    {"code": "fr", "display_name": "French"},
-                    {"code": "ru", "display_name": "Russian"},
-                    {"code": "pt", "display_name": "Portuguese"},
-                    {"code": "es", "display_name": "Spanish"},
-                    {"code": "it", "display_name": "Italian"},
-                ],
-            },
-            {
                 "id": DEFAULT_QWEN3_TTS_MODEL,
-                "display_name": "Qwen3 TTS 1.7B Custom Voice",
+                "display_name": "Qwen3 TTS 0.6B Custom Voice",
+                "artifact_id": QWEN3_MLX_ARTIFACT_ID,
                 "sample_rate": 24000,
                 "supports_streaming": True,
-                "streaming_mode": "native_or_chunked",
-                "supports_instruction_control": True,
+                "streaming_mode": "native_pcm",
+                "supports_instruction_control": False,
                 "supports_voice_cloning": False,
-                "voices": [
-                    {"id": "Cherry", "display_name": "Cherry"},
-                    {"id": "Chelsie", "display_name": "Chelsie"},
-                    {"id": "Ethan", "display_name": "Ethan"},
-                    {"id": "Serena", "display_name": "Serena"},
-                ],
-                "languages": [
-                    {"code": "en", "display_name": "English"},
-                    {"code": "zh", "display_name": "Chinese"},
-                    {"code": "ja", "display_name": "Japanese"},
-                    {"code": "ko", "display_name": "Korean"},
-                    {"code": "de", "display_name": "German"},
-                    {"code": "fr", "display_name": "French"},
-                    {"code": "ru", "display_name": "Russian"},
-                    {"code": "pt", "display_name": "Portuguese"},
-                    {"code": "es", "display_name": "Spanish"},
-                    {"code": "it", "display_name": "Italian"},
-                ],
+                "voices": [{"id": "Aiden", "display_name": "Aiden"}],
+                "languages": [{"code": "English", "display_name": "English"}],
             },
+        ],
+    },
+    {
+        "provider": "magpie",
+        "display_name": "NVIDIA Magpie TTS (local CUDA)",
+        "type": "local",
+        "default_model": MAGPIE_TTS_MODEL,
+        "models": [
+            {
+                "id": MAGPIE_TTS_MODEL,
+                "display_name": "Magpie TTS Multilingual 357M",
+                "artifact_id": MAGPIE_ARTIFACT_ID,
+                "sample_rate": 22050,
+                "supports_streaming": True,
+                "streaming_mode": "native_pcm",
+                "supports_instruction_control": False,
+                "supports_voice_cloning": False,
+                "voices": [{"id": "John", "display_name": "John"}],
+                "languages": [{"code": "en-US", "display_name": "English"}],
+            }
         ],
     },
 ]
@@ -136,4 +141,35 @@ SUPPORTED_TTS_PROVIDERS: list[dict[str, Any]] = [
 
 def get_supported_tts_providers() -> list[dict[str, Any]]:
     """Return frontend-consumable metadata for supported TTS providers."""
-    return SUPPORTED_TTS_PROVIDERS
+    from app.services.local_models import get_local_model_manager
+
+    manager = get_local_model_manager()
+    providers = copy.deepcopy(SUPPORTED_TTS_PROVIDERS)
+    available: list[dict[str, Any]] = []
+    for provider in providers:
+        models = []
+        for model in provider.get("models", []):
+            artifact_id = model.get("artifact_id")
+            if not artifact_id:
+                models.append(model)
+                continue
+            status = manager.status(artifact_id)
+            if status.get("supported") is False:
+                continue
+            model["artifact"] = {
+                key: status.get(key)
+                for key in (
+                    "id",
+                    "status",
+                    "supported",
+                    "runtime_ready",
+                    "runtime_detail",
+                    "license",
+                    "license_url",
+                )
+            }
+            models.append(model)
+        provider["models"] = models
+        if models:
+            available.append(provider)
+    return available

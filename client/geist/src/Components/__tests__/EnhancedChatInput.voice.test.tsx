@@ -9,6 +9,7 @@ jest.mock('../BrandMark', () => () => <span>Brand</span>);
 const voice = useVoiceChat as jest.Mock;
 
 beforeEach(() => {
+  localStorage.clear();
   voice.mockReturnValue({ isRecording: false, isProcessing: false, partialTranscript: '', assistantText: '', status: '', audioLevel: 0, toggleRecording: jest.fn() });
 });
 

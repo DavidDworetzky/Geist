@@ -156,17 +156,19 @@ jest.mock('./Components/ChatTextArea', () => {
 
 jest.mock('./Components/EnhancedChatInput', () => ({
   __esModule: true,
-  default: ({ value, onChange, disabled, placeholder, modelLoading, onShowModelError }: {
+  default: ({ value, onChange, disabled, placeholder, agentType, modelLoading, onShowModelError }: {
     value: string;
     onChange: (value: string) => void;
     disabled?: boolean;
     placeholder?: string;
+    agentType?: string;
     modelLoading?: boolean;
     onShowModelError?: () => void;
   }) => (
     <>
     <textarea
       aria-label="Message"
+      data-agent-type={agentType}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       disabled={disabled}
@@ -193,6 +195,12 @@ describe('Chat history panel', () => {
     mockLocalRuntimeStatus = null;
     mockLocalArtifact = null;
     mockLocalArtifactsError = null;
+  });
+
+  it.each(['local', 'online'])('passes the saved %s runtime to the voice input', (agentType) => {
+    mockUserSettings = { default_agent_type: agentType };
+    render(<MemoryRouter initialEntries={['/chat']}><Chat /></MemoryRouter>);
+    expect(screen.getByLabelText('Message')).toHaveAttribute('data-agent-type', agentType);
   });
 
   it('offers a retry when the local model catalogue cannot be loaded', () => {

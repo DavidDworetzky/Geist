@@ -54,7 +54,19 @@ VOICE_MODELS: dict[str, dict] = {
     },
     "mms-1b-all": {
         "description": "Meta MMS 1B speech-to-text (adapters/mms_adapter.py)",
-        "downloads": [{"repo_id": "facebook/mms-1b-all"}],
+        "downloads": [
+            {
+                "repo_id": "facebook/mms-1b-all",
+                "allow_patterns": [
+                    "config.json",
+                    "model.safetensors",
+                    "preprocessor_config.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json",
+                    "vocab.json",
+                ],
+            }
+        ],
     },
 }
 
