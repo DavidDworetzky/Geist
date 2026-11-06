@@ -682,6 +682,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         aliases=("deepseek/deepseek-v4.1-flash",),
     ),
     ModelSpec(
+        "tencent/hy4",
+        "Tencent Hy4",
+        "hy",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=65536,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        local=False,
+        performance_note=(
+            "Stable single-provider Tencent route on OpenRouter with vision, optional "
+            "reasoning, native tools, and structured outputs. Enforce OpenRouter ZDR "
+            "routing before confidential workloads; EU in-region routing is unavailable."
+        ),
+    ),
+    ModelSpec(
         "tencent/hy4-preview",
         "Tencent Hy4 Preview",
         "hy",

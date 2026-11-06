@@ -376,18 +376,18 @@ def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_back
     assert resolve_request_spec("deepseek/deepseek-v4.1-flash") is flash
 
 
-def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
-    hy4 = get_model_spec("tencent/hy4-preview")
+def test_openrouter_hy4_metadata_is_explicit_and_server_backed():
+    hy4 = get_model_spec("tencent/hy4")
 
     assert hy4.provider == "openrouter"
     assert hy4.backend == "openai_compatible"
     assert hy4.local is False
     assert hy4.family == "hy"
     assert hy4.context_window == 1048576
-    assert hy4.max_output_tokens == 64000
-    assert hy4.parameter_count == "770B"
-    assert hy4.activated_parameters == "49B"
-    assert hy4.supports_vision is False
+    assert hy4.max_output_tokens == 65536
+    assert hy4.parameter_count is None
+    assert hy4.activated_parameters is None
+    assert hy4.supports_vision is True
     assert hy4.supports_function_calling is True
     assert hy4.supports_reasoning is True
     assert hy4.supports_streaming is True
@@ -398,7 +398,30 @@ def test_openrouter_hy4_preview_metadata_is_explicit_and_server_backed():
         "frequency_penalty",
         "presence_penalty",
     )
+    assert hy4.performance_note is not None
+    assert "Stable single-provider Tencent route" in hy4.performance_note
+    assert "Enforce OpenRouter ZDR" in hy4.performance_note
+    assert "EU in-region routing is unavailable" in hy4.performance_note
     assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_hy4_preview_remains_available_for_existing_settings():
+    preview = get_model_spec("tencent/hy4-preview")
+
+    assert preview.provider == "openrouter"
+    assert preview.local is False
+    assert preview.context_window == 1048576
+    assert preview.max_output_tokens == 64000
+    assert preview.parameter_count == "770B"
+    assert preview.activated_parameters == "49B"
+    assert preview.supports_vision is False
+    assert preview.supports_function_calling is True
+    assert preview.unsupported_parameters == (
+        "n",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    )
 
 
 def test_openrouter_grok_46_metadata_is_explicit_and_server_backed():
@@ -738,6 +761,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "qwen/qwen3.8-flash",
         "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
+        "tencent/hy4",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -815,6 +839,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "qwen/qwen3.8-flash",
         "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
+        "tencent/hy4",
         "tencent/hy4-preview",
         "z-ai/glm-5.3-flash",
         "meta/muse-spark-1.2-contributor",
@@ -985,6 +1010,7 @@ def test_model_routes_serialize_string_backed_providers():
         for model in response.providers["openrouter"]
     )
     assert any(model.id == "stealth/union-alpha" for model in response.providers["openrouter"])
+    assert any(model.id == "tencent/hy4" for model in response.providers["openrouter"])
     assert any(model.id == "tencent/hy4-preview" for model in response.providers["openrouter"])
     assert any(model.id == "z-ai/glm-5.3-flash" for model in response.providers["openrouter"])
     assert any(
