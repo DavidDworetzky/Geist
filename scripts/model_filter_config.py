@@ -17,6 +17,7 @@ ALWAYS_INCLUDE: list[str] = [
     "o1",
     "o1-mini",
     "o3-mini",
+    "gpt-6-astra",
     # Anthropic
     "claude-fable-5-1",
     "claude-mythos-5-1",
@@ -52,6 +53,7 @@ CHAT_MODEL_PREFIXES: list[str] = [
     "gpt-3.5",
     "o1",
     "o3",
+    "gpt-6",
     "claude",
     "grok",
     "llama",
@@ -143,6 +145,15 @@ MODEL_METADATA: dict[str, dict] = {
         "supports_vision": False,
         "supports_function_calling": True,
         "family": "o3",
+    },
+    "gpt-6-astra": {
+        "name": "GPT-6 Astra",
+        "recommended": False,
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "family": "gpt-6",
     },
     # Anthropic models
     "claude-fable-5-1": {

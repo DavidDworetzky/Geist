@@ -406,6 +406,45 @@ class TestOnlineAgentAPIRequests:
             assert "Removed unsupported request parameters" in caplog.text
             assert "frequency_penalty, presence_penalty, stop, n" in caplog.text
 
+    def test_gpt6_astra_removes_unsupported_sampling_parameters(self):
+        context = create_mock_agent_context()
+        agent = OnlineAgent(
+            agent_context=context,
+            base_url="https://api.openai.com/v1",
+            model="gpt-6-astra",
+            api_key="test-openai-key",
+        )
+
+        with patch.object(agent.client, "post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+            mock_post.return_value = mock_response
+
+            agent._make_request(
+                {
+                    "model": "gpt-6-astra",
+                    "messages": [{"role": "user", "content": "Test prompt"}],
+                    "temperature": 0.5,
+                    "top_p": 0.9,
+                    "top_logprobs": 3,
+                    "logprobs": True,
+                    "frequency_penalty": 0.2,
+                    "presence_penalty": 0.3,
+                    "n": 1,
+                }
+            )
+
+            payload = mock_post.call_args.kwargs["json"]
+            assert "temperature" not in payload
+            assert "top_p" not in payload
+            assert "top_logprobs" not in payload
+            assert "logprobs" not in payload
+            assert payload["frequency_penalty"] == 0.2
+            assert payload["presence_penalty"] == 0.3
+            assert payload["n"] == 1
+            assert "reasoning" not in payload
+
     def test_glm53_flash_applies_reasoning_without_dropping_supported_parameters(self):
         context = create_mock_agent_context()
 
