@@ -695,6 +695,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         supports_streaming=True,
         recommended=True,
         unsupported_parameters=("n", "top_p", "frequency_penalty", "presence_penalty"),
+        aliases=("tencent/hy4-20261104",),
         local=False,
         performance_note=(
             "Stable single-provider Tencent route on OpenRouter with vision, optional "

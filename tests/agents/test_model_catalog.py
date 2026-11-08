@@ -403,6 +403,7 @@ def test_openrouter_hy4_metadata_is_explicit_and_server_backed():
     assert "Enforce OpenRouter ZDR" in hy4.performance_note
     assert "EU in-region routing is unavailable" in hy4.performance_note
     assert get_provider_endpoint(hy4.provider) == "https://openrouter.ai/api/v1"
+    assert resolve_request_spec("tencent/hy4-20261104") is hy4
 
 
 def test_openrouter_hy4_preview_remains_available_for_existing_settings():
