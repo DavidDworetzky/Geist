@@ -86,10 +86,8 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Cancel'));
     fireEvent.click(screen.getByRole('button', { name: 'Configure Proton Mail' }));
     expect(screen.getByLabelText('Name')).toHaveValue('proton-mail');
-    expect(screen.getByLabelText('Command')).toHaveValue('');
-    expect(screen.getByTestId('mcp-profile-summary')).toHaveTextContent(
-      'Proton Mail Bridge'
-    );
+    expect(screen.queryByLabelText('Command')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Bridge password')).toHaveValue('');
   });
 
   it('creates a server through the form', async () => {
@@ -178,7 +176,7 @@ describe('McpServersSection', () => {
     });
   });
 
-  it.each(['custom', 'proton'])('edits an existing %s server without changing its connector kind', async (kind) => {
+  it.each(['custom'])('edits an existing %s server without changing its connector kind', async (kind) => {
     let server = { ...stdioServer, connector_kind: kind };
     const fetchMock = jest.fn((url: string, options?: RequestInit) => {
       if (url.endsWith('/email-connectors/profiles')) return jsonResponse([]);
@@ -333,6 +331,6 @@ it('explains Bridge credentials and local networking during Proton setup', async
   fireEvent.click(screen.getByRole('button', { name: 'Configure Proton Mail' }));
   expect(screen.getByRole('link', { name: 'Install Proton Mail Bridge' })).toHaveAttribute('href', 'https://proton.me/mail/bridge');
   expect(screen.getByText(/Use the Bridge password, which is separate/)).toBeInTheDocument();
-  expect(screen.getByText(/localhost refers to the container/)).toBeInTheDocument();
+  expect(screen.getByText(/localhost cannot reach Bridge/)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /connect with Google/ })).not.toBeInTheDocument();
 });

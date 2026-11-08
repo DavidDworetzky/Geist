@@ -191,6 +191,7 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
         ("mcp_server", name)
         for name in (
             "working_directory",
+            "managed_email",
             "connector_kind",
             "account_label",
             "trusted",

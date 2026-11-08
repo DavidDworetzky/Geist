@@ -115,7 +115,7 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     id: 'proton-mail',
     name: 'Proton Mail',
     publisher: 'Proton',
-    description: 'Connect a paid Proton account through Proton Mail Bridge and a vetted local MCP server.',
+    description: 'Connect directly to local Proton Mail Bridge with Geist’s bundled email connector.',
     category: 'Email',
     sourceUrl: 'https://proton.me/support/imap-smtp-and-pop3-setup',
     transport: 'stdio',
@@ -123,9 +123,9 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     authentication: 'Bridge-issued local IMAP/SMTP credentials',
     requirements: [
       'Proton Mail Bridge installed, running, and signed in.',
-      'A separately installed, operator-vetted IMAP/SMTP MCP server.',
-      'Bridge credentials configured in the local server environment.',
+      'Geist running natively on the same computer as Bridge.',
+      'Bridge-generated password and exported public TLS certificate.',
     ],
-    configurationNote: 'Geist does not install an IMAP/SMTP MCP server. Enter the command for the server you have vetted; the configuration is saved disabled.',
+    configurationNote: 'Paste Bridge connection details into Geist. The bundled connector is saved disabled after authentication succeeds.',
   },
 ];

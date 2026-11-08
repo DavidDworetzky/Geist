@@ -43,6 +43,7 @@ class McpServer(Base):
     args = Column(JSON, default=list)
     env = Column(JSON, default=dict)
     working_directory = Column(String, nullable=True)
+    managed_email = Column(JSON, nullable=True)
 
     # http (streamable HTTP) transport
     url = Column(String, nullable=True)
@@ -104,6 +105,7 @@ class McpServerModel:
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
     oauth_configured: bool = False
+    managed_email: dict | None = None
 
 
 _MUTABLE_FIELDS = (
@@ -113,6 +115,7 @@ _MUTABLE_FIELDS = (
     "args",
     "env",
     "working_directory",
+    "managed_email",
     "url",
     "headers",
     "connector_kind",
@@ -136,6 +139,7 @@ def _to_model(server: McpServer) -> McpServerModel:
         args=list(server.args or []),
         env=dict(server.env or {}),
         working_directory=server.working_directory,
+        managed_email=server.managed_email,
         url=server.url,
         headers=dict(server.headers or {}),
         connector_kind=server.connector_kind or "custom",

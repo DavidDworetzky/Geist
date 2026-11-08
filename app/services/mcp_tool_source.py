@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 import threading
 import time
 import uuid
@@ -30,14 +31,25 @@ _DEFAULT_CACHE_TTL_SECONDS = 60.0
 
 
 def config_from_model(server: McpServerModel) -> McpServerConfig:
+    from app.runtime_config import PROJECT_ROOT, default_data_dir
+
+    managed = server.managed_email
+    if managed:
+        managed = dict(managed)
+        managed["send_ledger"] = str(
+            default_data_dir() / "email-sends" / f"{managed['credential_id']}.sqlite3"
+        )
     return McpServerConfig(
         server_id=server.mcp_server_id,
         name=server.name,
         transport=server.transport,
-        command=server.command,
-        args=tuple(server.args or []),
-        env=dict(server.env or {}),
-        working_directory=server.working_directory,
+        command=sys.executable if managed else server.command,
+        args=(str(PROJECT_ROOT / "app/services/email_mcp.py"),)
+        if managed
+        else tuple(server.args or []),
+        env={} if managed else dict(server.env or {}),
+        managed_email=managed,
+        working_directory=str(PROJECT_ROOT) if managed else server.working_directory,
         url=server.url,
         headers=dict(server.headers or {}),
         timeout_seconds=server.timeout_seconds,
@@ -212,7 +224,10 @@ class McpToolSource:
             description=f"[MCP: {config.name}] {description}",
             arguments_schema=schema,
             handler=handler,
-            side_effect="external_write",
+            side_effect="read"
+            if config.managed_email
+            and tool_name in {"list_folders", "search_messages", "read_message"}
+            else "external_write",
             # MCP does not expose a trustworthy read/write classification for
             # arbitrary server tools. Fail closed and require a user decision
             # before dispatching anything discovered at runtime.

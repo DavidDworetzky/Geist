@@ -22,6 +22,8 @@ export interface McpServer {
   create_date: string;
   update_date: string;
   oauth_configured?: boolean;
+  managed_email?: { host: string; username: string; sender: string; certificate: string;
+    imap_port: number; smtp_port: number; imap_security: string; smtp_security: string; } | null;
 }
 
 export interface McpServerInput {

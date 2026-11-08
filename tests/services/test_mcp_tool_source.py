@@ -384,3 +384,25 @@ def test_failed_dispatch_releases_its_own_quota_reservation(monkeypatch):
     assert not registry.execute(call, _approved_context(call)).succeeded
     assert registry.execute(call, _approved_context(call)).succeeded
     assert len(calls) == 2
+
+
+def test_bundled_email_has_fixed_command_and_conservative_tool_classification():
+    from app.services.email_mcp import READ_TOOLS, TOOLS
+
+    server = _server_model()
+    server.connector_kind = "proton"
+    server.managed_email = {"credential_id": "a" * 32}
+    server.command = "untrusted-command"
+    server.args = ["untrusted-argument"]
+    server.env = {"UNTRUSTED": "value"}
+    config = config_from_model(server)
+    assert config.command != server.command
+    assert config.args[0].endswith("app/services/email_mcp.py")
+    assert config.env == {}
+    manager = FakeManager(tools_by_server={"fake": TOOLS + [ECHO_TOOL]})
+    source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [server])
+    for definition in source.definitions():
+        name = definition.name.rsplit(".", 1)[-1]
+        assert definition.side_effect == ("read" if name in READ_TOOLS else "external_write")
+        assert definition.requires_approval
+        assert definition.always_untrusted_content

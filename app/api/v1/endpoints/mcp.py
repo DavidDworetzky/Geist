@@ -24,17 +24,21 @@ from app.models.database.mcp_server import (
     list_mcp_servers,
     update_mcp_server,
 )
+from app.models.proton_bridge import ProtonBridgeRequest
 from app.security.operator import (
     OperatorCapability,
     OperatorPrincipal,
     require_operator_capability,
 )
+from app.services.email_credentials import EmailCredentialError
+from app.services.email_mcp import EmailError
 from app.services.mcp_client import McpError
 from app.services.mcp_tool_source import (
     config_from_model,
     get_mcp_manager,
     get_mcp_tool_source,
 )
+from app.services.proton_bridge import connection_settings, save_connection, test_connection
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +87,7 @@ _EMAIL_CONNECTOR_PROFILES = (
         "authentication": "Bridge-issued local IMAP/SMTP credentials",
         "requirements": [
             "Proton Mail Bridge installed, running, and signed in",
-            "A separately installed, operator-vetted IMAP/SMTP MCP server",
+            "Geist running natively alongside Bridge; bundled email MCP included",
         ],
     },
 )
@@ -198,6 +202,7 @@ class McpServerResponse(BaseModel):
     create_date: Any
     update_date: Any
     oauth_configured: bool = False
+    managed_email: dict | None = None
 
 
 class McpToolInfo(BaseModel):
@@ -237,6 +242,10 @@ def _validate_email_policy(values: dict[str, Any], user_id: int) -> None:
 
 def _response(server: McpServerModel) -> McpServerResponse:
     values = dict(server.__dict__)
+    if values.get("managed_email"):
+        values["managed_email"] = {
+            key: value for key, value in values["managed_email"].items() if key != "credential_id"
+        }
     values["env"] = {key: _REDACTED for key in server.env}
     values["headers"] = {key: _REDACTED for key in server.headers}
     return McpServerResponse(**values)
@@ -338,6 +347,14 @@ async def update_server(
     try:
         existing = _owned_server_or_404(mcp_server_id, operator.workspace_id)
         updates = request.model_dump(exclude_unset=True)
+        if existing.managed_email and set(updates) - {
+            "name",
+            "enabled",
+            "account_label",
+            "recipient_allowlist",
+            "max_writes_per_hour",
+        }:
+            raise HTTPException(409, "Use Proton Bridge setup to change this managed connection")
         if existing.oauth_configured and (
             any(
                 key in updates and updates[key] != getattr(existing, key)
@@ -430,6 +447,10 @@ async def delete_server(
             from app.services.mcp_oauth import disconnect
 
             await run_in_threadpool(disconnect, server)
+        if server.managed_email:
+            from app.services.email_credentials import credentials
+
+            await run_in_threadpool(credentials, server.managed_email["credential_id"], delete=True)
         if not delete_mcp_server(mcp_server_id, workspace_id=operator.workspace_id):
             raise HTTPException(status_code=404, detail="MCP server not found")
         _invalidate(mcp_server_id)
@@ -448,11 +469,15 @@ async def test_server(
     """Connect to the server and list its tools without enabling it."""
     server = _owned_server_or_404(mcp_server_id, operator.workspace_id)
     try:
+        if server.managed_email:
+            from app.services.proton_bridge import test_saved_connection
+
+            await run_in_threadpool(test_saved_connection, server)
         tools = await run_in_threadpool(
             get_mcp_manager().list_tools,
             config_from_model(server),
         )
-    except McpError as error:
+    except (McpError, EmailError, EmailCredentialError) as error:
         return McpServerTestResponse(ok=False, error=str(error))
     except Exception as e:
         logger.error(f"Unexpected error testing MCP server {mcp_server_id}: {e}")
@@ -491,3 +516,56 @@ async def list_mounted_tools(
     except Exception as e:
         logger.error(f"Error listing mounted MCP tools: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
+def _require_local_bridge(operator: OperatorPrincipal) -> None:
+    if not operator.is_local_operator:
+        raise HTTPException(403, "Proton Bridge setup requires a local operator")
+
+
+@router.post("/proton-bridge/test")
+async def test_proton_bridge(
+    request: ProtonBridgeRequest, operator: OperatorPrincipal = Depends(_require_tools_operator)
+):
+    _require_local_bridge(operator)
+    try:
+        settings = await run_in_threadpool(connection_settings, request)
+        await run_in_threadpool(test_connection, settings)
+    except (EmailError, EmailCredentialError) as error:
+        raise HTTPException(400, str(error)) from error
+    return {"ok": True}
+
+
+@router.post("/proton-bridge", response_model=McpServerResponse, status_code=201)
+async def create_proton_bridge(
+    request: ProtonBridgeRequest, operator: OperatorPrincipal = Depends(_require_tools_operator)
+):
+    _require_local_bridge(operator)
+    try:
+        server = await run_in_threadpool(save_connection, request, operator.workspace_id)
+    except (EmailError, EmailCredentialError) as error:
+        raise HTTPException(400, str(error)) from error
+    except IntegrityError as error:
+        raise HTTPException(409, "An MCP server with this name already exists") from error
+    _invalidate()
+    return _response(server)
+
+
+@router.put("/proton-bridge/{mcp_server_id}", response_model=McpServerResponse)
+async def update_proton_bridge(
+    mcp_server_id: int,
+    request: ProtonBridgeRequest,
+    operator: OperatorPrincipal = Depends(_require_tools_operator),
+):
+    _require_local_bridge(operator)
+    existing = _owned_server_or_404(mcp_server_id, operator.workspace_id)
+    if existing.connector_kind != "proton":
+        raise HTTPException(409, "Only Proton connections can use Bridge setup")
+    try:
+        server = await run_in_threadpool(save_connection, request, operator.workspace_id, existing)
+    except (EmailError, EmailCredentialError) as error:
+        raise HTTPException(400, str(error)) from error
+    except IntegrityError as error:
+        raise HTTPException(409, "An MCP server with this name already exists") from error
+    _invalidate(mcp_server_id)
+    return _response(server)
