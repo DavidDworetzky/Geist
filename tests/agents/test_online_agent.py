@@ -640,6 +640,7 @@ class TestOnlineAgentAPIRequests:
                         "frequency_penalty": 0.2,
                         "presence_penalty": 0.1,
                         "stop": "END",
+                        "reasoning": {"effort": "low"},
                         "tools": [{"type": "function", "function": {"name": "lookup"}}],
                         "tool_choice": "auto",
                         "response_format": {
@@ -651,7 +652,7 @@ class TestOnlineAgentAPIRequests:
 
                 payload = mock_post.call_args.kwargs["json"]
                 assert "n" not in payload
-                assert "reasoning" not in payload
+                assert payload["reasoning"] == {"effort": "low"}
                 assert payload["temperature"] == 0.7
                 assert payload["top_p"] == 0.9
                 assert payload["frequency_penalty"] == 0.2
