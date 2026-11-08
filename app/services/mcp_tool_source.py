@@ -37,7 +37,9 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
     if managed:
         managed = dict(managed)
         managed["send_ledger"] = str(
-            default_data_dir() / "email-sends" / f"{managed['credential_id']}.sqlite3"
+            default_data_dir()
+            / "email-sends"
+            / f"{managed.get('ledger_id', managed['credential_id'])}.sqlite3"
         )
     return McpServerConfig(
         server_id=server.mcp_server_id,

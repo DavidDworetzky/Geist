@@ -105,3 +105,32 @@ def test_real_stdio_mcp_uses_private_initialization_and_bounded_tools(tmp_path, 
             assert state["messages"] == []
         finally:
             connection.close()
+
+
+def test_unicode_message_survives_stdio_result_limit(tmp_path, monkeypatch):
+    with bridge_fixture(tmp_path) as (settings, state):
+        state["raw_message"] = (
+            b"Content-Type: text/plain; charset=utf-8\r\n\r\n" + ("字" * 20000).encode()
+        )
+        monkeypatch.setattr(
+            "app.services.email_credentials.credentials", lambda reference: settings["password"]
+        )
+        managed = {k: v for k, v in settings.items() if k != "password"}
+        managed["credential_id"] = "a" * 32
+        connection = McpConnection(
+            McpServerConfig(
+                server_id=1,
+                name="unicode",
+                transport="stdio",
+                command=sys.executable,
+                args=(str(Path("app/services/email_mcp.py").resolve()),),
+                managed_email=managed,
+            )
+        )
+        try:
+            result = json.loads(
+                connection.call_tool("read_message", {"uid": 42, "uid_validity": 123})
+            )
+            assert result["body"] == "字" * 20000
+        finally:
+            connection.close()

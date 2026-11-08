@@ -59,6 +59,9 @@ def save_connection(
     password = settings.pop("password")
     credentials(reference, password)
     settings["credential_id"] = reference
+    # Keep delivery history across credential rotations and connection edits.
+    previous = existing.managed_email if existing and existing.managed_email else {}
+    settings["ledger_id"] = previous.get("ledger_id", previous.get("credential_id", reference))
     values = {
         "name": request.name,
         "transport": "stdio",

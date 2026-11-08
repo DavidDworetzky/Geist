@@ -244,7 +244,9 @@ def _response(server: McpServerModel) -> McpServerResponse:
     values = dict(server.__dict__)
     if values.get("managed_email"):
         values["managed_email"] = {
-            key: value for key, value in values["managed_email"].items() if key != "credential_id"
+            key: value
+            for key, value in values["managed_email"].items()
+            if key not in {"credential_id", "ledger_id"}
         }
     values["env"] = {key: _REDACTED for key in server.env}
     values["headers"] = {key: _REDACTED for key in server.headers}

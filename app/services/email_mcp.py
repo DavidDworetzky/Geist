@@ -390,7 +390,9 @@ def main() -> None:
                         params.get("arguments", {}),
                         (params.get("_meta") or {}).get("geist/idempotencyKey"),
                     )
-                    result = {"content": [{"type": "text", "text": json.dumps(value)}]}
+                    result = {
+                        "content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}]
+                    }
                 except EmailError as error:
                     result = {"isError": True, "content": [{"type": "text", "text": str(error)}]}
                 except Exception:

@@ -477,3 +477,52 @@ def test_bundled_bridge_setup_requires_local_operator(mcp_client, bridge_store):
     for route in ("/api/v1/mcp/proton-bridge", "/api/v1/mcp/proton-bridge/test"):
         assert mcp_client.post(route, json=payload).status_code == 403
     assert bridge_store == {}
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_bridge_edit_preserves_send_history(
+    mcp_client, bridge_store, tmp_path, monkeypatch, legacy
+):
+    import json
+
+    from app.models.database.mcp_server import update_mcp_server
+    from app.services.mcp_client import McpConnection
+    from app.services.mcp_tool_source import config_from_model
+    from tests.fixtures.mail_bridge import bridge_fixture
+
+    monkeypatch.setattr("app.runtime_config.default_data_dir", lambda: tmp_path)
+    with bridge_fixture(tmp_path) as (settings, state):
+        payload = {k: v for k, v in settings.items() if k != "send_ledger"}
+        payload["name"] = "rotation"
+        created = mcp_client.post("/api/v1/mcp/proton-bridge", json=payload)
+        assert created.status_code == 201, created.text
+        server_id = created.json()["mcp_server_id"]
+        assert "ledger_id" not in created.json()["managed_email"]
+        server = get_mcp_server(server_id)
+        if legacy:
+            managed = dict(server.managed_email)
+            managed.pop("ledger_id")
+            server = update_mcp_server(server_id, {"managed_email": managed})
+        first = config_from_model(server)
+        args = {"to": ["recipient@example.test"], "subject": "Test", "body": "Synthetic mail"}
+        connection = McpConnection(first)
+        try:
+            connection.call_tool("send_message", args, idempotency_key="d" * 64)
+        finally:
+            connection.close()
+        edited = mcp_client.put(
+            f"/api/v1/mcp/proton-bridge/{server_id}", json={**payload, "password": None}
+        )
+        assert edited.status_code == 200, edited.text
+        second = config_from_model(get_mcp_server(server_id))
+        assert first.managed_email["credential_id"] != second.managed_email["credential_id"]
+        assert first.managed_email["send_ledger"] == second.managed_email["send_ledger"]
+        connection = McpConnection(second)
+        try:
+            result = json.loads(
+                connection.call_tool("send_message", args, idempotency_key="d" * 64)
+            )
+            assert result["replayed"]
+            assert len(state["messages"]) == 1
+        finally:
+            connection.close()

@@ -101,6 +101,7 @@ def bridge_fixture(tmp_path, *, starttls=False):
                             self.reply(b"* SEARCH 42")
                         elif parts[2].upper() == b"FETCH":
                             data = b"From: alice@example.test\r\nTo: test@example.test\r\nSubject: Fixture message\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello from local fixture."
+                            data = state.get("raw_message", data)
                             self.reply(
                                 b"* 1 FETCH (UID 42 BODY[] {" + str(len(data)).encode() + b"}"
                             )
