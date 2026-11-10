@@ -214,6 +214,7 @@ class TestOnlineAgentInitialization:
             "anthropic/claude-opus-5.5",
             "anthropic/claude-sonnet-5.5",
             "anthropic/claude-haiku-5.5",
+            "anthropic/claude-fable-5.2",
             "openai/gpt-6.1-terra",
             "openai/gpt-6.1-terra-20261026",
             "fireworks/ember-1",
@@ -439,9 +440,15 @@ class TestOnlineAgentAPIRequests:
 
     @pytest.mark.parametrize(
         "model_id",
-        ["anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"],
+        [
+            "anthropic/claude-opus-5.5",
+            "anthropic/claude-sonnet-5.5",
+            "anthropic/claude-fable-5.2",
+        ],
     )
-    def test_claude_55_filters_sampling_defaults_and_keeps_native_tools(self, model_id: str):
+    def test_mandatory_claude_reasoning_filters_defaults_and_keeps_native_tools(
+        self, model_id: str
+    ):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
