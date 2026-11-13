@@ -1441,6 +1441,14 @@ textarea:focus-visible {
   --chat-scrollbar-gap: 6px;
 }
 
+.chat-jump-latest {
+  position: absolute;
+  bottom: calc(var(--chat-composer-clearance) + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
 .chat-stage,
 .chat-transcript-layer {
   width: 100%;

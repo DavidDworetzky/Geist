@@ -245,19 +245,45 @@ const Chat = () => {
     ref: chatDrawerScrollRef,
     hasOverflow: hasChatDrawerScrollbar,
   } = useOverflowObserver<HTMLDivElement>(chatDrawerState === 'expanded');
-  const prevScrollHeightRef = useRef<number>(0);
-  const shouldRestoreScrollRef = useRef(false);
+  const historyScrollSnapshot = useRef<{ index: number; offset: number } | null>(null);
+  const historyGeneration = useRef(0);
+  const historyRequestPending = useRef(false);
+  const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
+  const followLatestRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const jumpToLatest = () => {
+    followLatestRef.current = true;
+    setShowJumpToLatest(false);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  };
+
+  useLayoutEffect(() => {
+    historyGeneration.current += 1;
+    historyRequestPending.current = false;
+    setIsLoadingHistory(false);
+    setHistoryLoadFailed(false);
+    setChatHistory(undefined);
+    followLatestRef.current = true;
+    historyScrollSnapshot.current = null;
+    setShowJumpToLatest(false);
+    return () => { historyGeneration.current += 1; };
+  }, [chatId]);
 
   const fetchHistory = useCallback(async (pageNum: number, currentChatId: string) => {
-    if (!currentChatId) return;
+    if (!currentChatId || historyRequestPending.current) return;
+    const generation = historyGeneration.current;
+    historyRequestPending.current = true;
     setIsLoadingHistory(true);
-    if (pageNum > 1) shouldRestoreScrollRef.current = true;
 
     try {
       const res = await fetch(`/agent/chat_history/${currentChatId}/paginated?page=${pageNum}&page_size=${PAGE_SIZE}`);
       if (!res.ok) throw new Error('Failed to fetch history');
 
       const data = await res.json();
+      if (generation !== historyGeneration.current) return;
       const newMessages = data.chat_history.map((h: any) => ({
         run_id: h.run_id,
         user: h.user,
@@ -269,6 +295,18 @@ const Chat = () => {
         instructions: h.instructions,
       }));
 
+      if (pageNum > 1 && !followLatestRef.current && chatContainerRef.current) {
+        const container = chatContainerRef.current;
+        const turns = Array.from(container.querySelectorAll<HTMLElement>('.chat-turn'));
+        const viewportTop = container.getBoundingClientRect().top;
+        const index = turns.findIndex(turn => turn.getBoundingClientRect().bottom > viewportTop);
+        if (index >= 0) {
+          historyScrollSnapshot.current = {
+            index: index + newMessages.length,
+            offset: turns[index].getBoundingClientRect().top - viewportTop,
+          };
+        }
+      }
       setChatHistory(prev => {
         if (pageNum === 1) {
           return { chatHistory: newMessages };
@@ -279,13 +317,20 @@ const Chat = () => {
       });
 
       const total = data.total_messages || 0;
+      setPage(pageNum);
+      setHistoryLoadFailed(false);
       setHasMore(!(newMessages.length < PAGE_SIZE || (pageNum * PAGE_SIZE >= total)));
     } catch (err) {
+      if (generation !== historyGeneration.current) return;
+      setHistoryLoadFailed(true);
       console.error('Error fetching chat history:', err);
     } finally {
-      setIsLoadingHistory(false);
+      if (generation === historyGeneration.current) {
+        historyRequestPending.current = false;
+        setIsLoadingHistory(false);
+      }
     }
-  }, []);
+  }, [chatContainerRef]);
 
   useEffect(() => {
     if (chatId) {
@@ -297,29 +342,17 @@ const Chat = () => {
     }
   }, [chatId, fetchHistory]);
 
-  useLayoutEffect(() => {
-    if (shouldRestoreScrollRef.current && chatContainerRef.current && prevScrollHeightRef.current) {
-      const newScrollHeight = chatContainerRef.current.scrollHeight;
-      const diff = newScrollHeight - prevScrollHeightRef.current;
-      chatContainerRef.current.scrollTop = diff;
-      shouldRestoreScrollRef.current = false;
-    } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [chatContainerRef, chatHistory, page, isLoading]);
-
   useEffect(() => {
     const container = chatContainerRef.current;
-    if (container && chatId && hasMore && !isLoadingHistory && (chatHistory?.chatHistory?.length ?? 0) > 0) {
+    if (container && chatId && hasMore && !isLoadingHistory && !historyLoadFailed && (chatHistory?.chatHistory?.length ?? 0) > 0) {
       if (container.scrollHeight <= container.clientHeight) {
         const nextPage = page + 1;
-        setPage(nextPage);
         if (chatId) {
           fetchHistory(nextPage, chatId);
         }
       }
     }
-  }, [chatContainerRef, chatHistory, hasMore, isLoadingHistory, page, chatId, fetchHistory]);
+  }, [chatContainerRef, chatHistory, hasMore, isLoadingHistory, historyLoadFailed, page, chatId, fetchHistory]);
 
   const observer = useRef<IntersectionObserver>();
   const lastItemRef = useCallback(
@@ -338,12 +371,16 @@ const Chat = () => {
 
   const loadedHistoryLength = chatHistory?.chatHistory?.length ?? 0;
   const handleScroll = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (container) {
+      const nearBottom = container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
+      followLatestRef.current = nearBottom;
+      setShowJumpToLatest(!nearBottom);
+    }
     if (chatContainerRef.current && chatId && loadedHistoryLength > 0) {
-      const { scrollTop, scrollHeight } = chatContainerRef.current;
+      const { scrollTop } = chatContainerRef.current;
       if (scrollTop <= 10 && hasMore && !isLoadingHistory) {
-        prevScrollHeightRef.current = scrollHeight;
         const nextPage = page + 1;
-        setPage(nextPage);
         if (chatId) {
           fetchHistory(nextPage, chatId);
         }
@@ -444,6 +481,7 @@ const Chat = () => {
 
   const handleSubmit = async (message: string) => {
     if (message.trim() && !submitDisabled) {
+      jumpToLatest();
       if (isLoading) {
         if (await steerRun(message)) {
           setUserInput(current => current === message ? '' : current);
@@ -476,6 +514,7 @@ const Chat = () => {
   };
 
   const handleNewChat = () => {
+    jumpToLatest();
     const newChatScope: MemoryScope = folderFilter === 'all'
       ? { kind: 'public' }
       : { kind: 'folder', folderId: folderFilter };
@@ -676,6 +715,22 @@ const Chat = () => {
     ],
   );
 
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const snapshot = historyScrollSnapshot.current;
+    if (snapshot) {
+      const anchor = container.querySelectorAll<HTMLElement>('.chat-turn')[snapshot.index];
+      if (anchor) {
+        container.scrollTop += anchor.getBoundingClientRect().top
+          - container.getBoundingClientRect().top - snapshot.offset;
+      }
+      historyScrollSnapshot.current = null;
+    } else if (followLatestRef.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [chatContainerRef, displayedHistory, isLoading]);
+
   const handleToolApproval = useCallback(async (
     runId: string,
     callId: string,
@@ -714,13 +769,18 @@ const Chat = () => {
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
-            <div className="chat-history-scroll" ref={chatContainerRef}>
+            <div className="chat-history-scroll" ref={chatContainerRef} role="region" aria-label="Conversation history">
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
                 onToolApproval={handleToolApproval}
               />
             </div>
+            {showJumpToLatest && chatDrawerState !== 'expanded' && (
+              <button type="button" className="button chat-jump-latest" onClick={jumpToLatest}>
+                Jump to latest
+              </button>
+            )}
           </div>
 
           <aside

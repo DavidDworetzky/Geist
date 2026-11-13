@@ -126,6 +126,9 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   };
 
   const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Some browsers report the IME confirmation key with keyCode 229.
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+
     if ((isRecording || isProcessing) && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       return;
