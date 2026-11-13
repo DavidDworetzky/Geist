@@ -245,13 +245,27 @@ const Chat = () => {
     ref: chatDrawerScrollRef,
     hasOverflow: hasChatDrawerScrollbar,
   } = useOverflowObserver<HTMLDivElement>(chatDrawerState === 'expanded');
-  const prevScrollHeightRef = useRef<number>(0);
-  const shouldRestoreScrollRef = useRef(false);
+  const historyScrollSnapshot = useRef<{ height: number; top: number } | null>(null);
+  const followLatestRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const jumpToLatest = () => {
+    followLatestRef.current = true;
+    setShowJumpToLatest(false);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  };
+
+  useLayoutEffect(() => {
+    followLatestRef.current = true;
+    historyScrollSnapshot.current = null;
+    setShowJumpToLatest(false);
+  }, [chatId]);
 
   const fetchHistory = useCallback(async (pageNum: number, currentChatId: string) => {
     if (!currentChatId) return;
     setIsLoadingHistory(true);
-    if (pageNum > 1) shouldRestoreScrollRef.current = true;
 
     try {
       const res = await fetch(`/agent/chat_history/${currentChatId}/paginated?page=${pageNum}&page_size=${PAGE_SIZE}`);
@@ -269,6 +283,12 @@ const Chat = () => {
         instructions: h.instructions,
       }));
 
+      if (pageNum > 1 && chatContainerRef.current) {
+        historyScrollSnapshot.current = {
+          height: chatContainerRef.current.scrollHeight,
+          top: chatContainerRef.current.scrollTop,
+        };
+      }
       setChatHistory(prev => {
         if (pageNum === 1) {
           return { chatHistory: newMessages };
@@ -285,7 +305,7 @@ const Chat = () => {
     } finally {
       setIsLoadingHistory(false);
     }
-  }, []);
+  }, [chatContainerRef]);
 
   useEffect(() => {
     if (chatId) {
@@ -296,17 +316,6 @@ const Chat = () => {
       setChatHistory(undefined);
     }
   }, [chatId, fetchHistory]);
-
-  useLayoutEffect(() => {
-    if (shouldRestoreScrollRef.current && chatContainerRef.current && prevScrollHeightRef.current) {
-      const newScrollHeight = chatContainerRef.current.scrollHeight;
-      const diff = newScrollHeight - prevScrollHeightRef.current;
-      chatContainerRef.current.scrollTop = diff;
-      shouldRestoreScrollRef.current = false;
-    } else if (page === 1 && chatContainerRef.current && !shouldRestoreScrollRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [chatContainerRef, chatHistory, page, isLoading]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -338,10 +347,15 @@ const Chat = () => {
 
   const loadedHistoryLength = chatHistory?.chatHistory?.length ?? 0;
   const handleScroll = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (container) {
+      const nearBottom = container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
+      followLatestRef.current = nearBottom;
+      setShowJumpToLatest(!nearBottom);
+    }
     if (chatContainerRef.current && chatId && loadedHistoryLength > 0) {
-      const { scrollTop, scrollHeight } = chatContainerRef.current;
+      const { scrollTop } = chatContainerRef.current;
       if (scrollTop <= 10 && hasMore && !isLoadingHistory) {
-        prevScrollHeightRef.current = scrollHeight;
         const nextPage = page + 1;
         setPage(nextPage);
         if (chatId) {
@@ -676,6 +690,18 @@ const Chat = () => {
     ],
   );
 
+  useLayoutEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const snapshot = historyScrollSnapshot.current;
+    if (snapshot) {
+      container.scrollTop = snapshot.top + container.scrollHeight - snapshot.height;
+      historyScrollSnapshot.current = null;
+    } else if (followLatestRef.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [chatContainerRef, displayedHistory, isLoading]);
+
   const handleToolApproval = useCallback(async (
     runId: string,
     callId: string,
@@ -714,13 +740,18 @@ const Chat = () => {
       <section className="ChatContent">
         <div className="chat-stage">
           <div className="chat-transcript-layer" aria-hidden={chatDrawerState === 'expanded'}>
-            <div className="chat-history-scroll" ref={chatContainerRef}>
+            <div className="chat-history-scroll" ref={chatContainerRef} role="region" aria-label="Conversation history">
               <ChatTextArea
                 chatHistory={displayedHistory}
                 isLoading={isLoading}
                 onToolApproval={handleToolApproval}
               />
             </div>
+            {showJumpToLatest && (
+              <button type="button" className="button chat-jump-latest" onClick={jumpToLatest}>
+                Jump to latest
+              </button>
+            )}
           </div>
 
           <aside

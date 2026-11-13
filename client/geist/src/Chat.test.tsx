@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Chat from './Chat';
 import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
@@ -150,7 +150,9 @@ jest.mock('./Components/ChatTextArea', () => {
   const React = require('react');
   return {
     __esModule: true,
-    default: React.forwardRef((_props: unknown, ref: React.Ref<HTMLDivElement>) => <div ref={ref}>Chat transcript</div>)
+    default: React.forwardRef(({ chatHistory }: { chatHistory: unknown[] }, ref: React.Ref<HTMLDivElement>) => (
+      <div ref={ref} data-message-count={chatHistory.length}>Chat transcript</div>
+    ))
   };
 });
 
@@ -193,6 +195,86 @@ describe('Chat history panel', () => {
     mockLocalRuntimeStatus = null;
     mockLocalArtifact = null;
     mockLocalArtifactsError = null;
+  });
+
+  it('preserves the reading position during streaming and resumes following on request', () => {
+    mockActiveTurn = { run_id: 'stream', prompt: 'Hello', message: 'First', origin_chat_id: null, chat_id: null };
+    const tree = () => <MemoryRouter><Chat /></MemoryRouter>;
+    const view = render(tree());
+    const scroll = screen.getByRole('region', { name: 'Conversation history' });
+    let height = 1000;
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => height },
+      clientHeight: { value: 300 },
+    });
+    scroll.scrollTop = 200;
+    fireEvent.scroll(scroll);
+    height = 1200;
+    mockActiveTurn = { ...mockActiveTurn, message: 'More streamed text' };
+    view.rerender(tree());
+    expect(scroll.scrollTop).toBe(200);
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to latest' }));
+    expect(scroll.scrollTop).toBe(1200);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
+    height = 1400;
+    mockActiveTurn = { ...mockActiveTurn, message: 'Still streaming' };
+    view.rerender(tree());
+    expect(scroll.scrollTop).toBe(1400);
+  });
+
+  it('follows streamed text when the reader is near the bottom', () => {
+    mockActiveTurn = { run_id: 'stream', prompt: 'Hello', message: 'First', origin_chat_id: null, chat_id: null };
+    const tree = () => <MemoryRouter><Chat /></MemoryRouter>;
+    const view = render(tree());
+    const scroll = screen.getByRole('region', { name: 'Conversation history' });
+    let height = 1000;
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => height },
+      clientHeight: { value: 300 },
+    });
+    scroll.scrollTop = 675;
+    fireEvent.scroll(scroll);
+    height = 1200;
+    mockActiveTurn = { ...mockActiveTurn, message: 'More streamed text' };
+    view.rerender(tree());
+    expect(scroll.scrollTop).toBe(1200);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
+  });
+
+  it('preserves the current offset when older history arrives after the reader moves', async () => {
+    const originalFetch = global.fetch;
+    let resolveOlder!: (response: unknown) => void;
+    const messages = Array.from({ length: 20 }, (_, index) => ({ user: `Message ${index}`, ai: 'Reply' }));
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ chat_history: messages, total_messages: 40 }) })
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOlder = resolve; }));
+    try {
+      render(
+        <MemoryRouter initialEntries={['/chat/42']}>
+          <Routes><Route path="/chat/:chatId" element={<Chat />} /></Routes>
+        </MemoryRouter>,
+      );
+      const scroll = screen.getByRole('region', { name: 'Conversation history' });
+      Object.defineProperties(scroll, {
+        scrollHeight: { get: () => screen.getByText('Chat transcript').getAttribute('data-message-count') === '40' ? 1500 : 1000 },
+        clientHeight: { value: 300 },
+      });
+      await waitFor(() => expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '20'));
+      expect(scroll.scrollTop).toBe(1000);
+      scroll.scrollTop = 5;
+      fireEvent.scroll(scroll);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(scroll.scrollTop).toBe(5);
+      scroll.scrollTop = 80;
+      fireEvent.scroll(scroll);
+      await act(async () => {
+        resolveOlder({ ok: true, json: async () => ({ chat_history: messages, total_messages: 40 }) });
+      });
+      expect(scroll.scrollTop).toBe(580);
+      expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument();
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('offers a retry when the local model catalogue cannot be loaded', () => {
