@@ -131,7 +131,7 @@ jobs:
           os: windows-latest
           extras: ""
         - target: darwin-arm64
-          os: macos-14
+          os: macos-15
           extras: "--extra local-mlx"
 
     steps:
