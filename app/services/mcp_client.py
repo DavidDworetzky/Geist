@@ -108,6 +108,7 @@ class McpServerConfig:
     command: str | None = None
     args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
+    working_directory: str | None = None
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     timeout_seconds: float = 30.0
@@ -124,6 +125,7 @@ class McpServerConfig:
                 "command": self.command,
                 "args": list(self.args),
                 "env": self.env,
+                "working_directory": self.working_directory,
                 "url": self.url,
                 "headers": self.headers,
                 "cwd": self.cwd,
@@ -163,7 +165,7 @@ class _StdioTransport:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=environment,
-                cwd=config.cwd,
+                cwd=config.working_directory or config.cwd,
                 text=True,
                 bufsize=1,
             )
@@ -547,12 +549,21 @@ class McpConnection:
         *,
         deadline: float | None = None,
         cancellation: threading.Event | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         deadline = deadline or (time.monotonic() + self.config.timeout_seconds)
         with self._operation_lock:
             result = self._transport.request(
                 "tools/call",
-                {"name": name, "arguments": arguments},
+                {
+                    "name": name,
+                    "arguments": arguments,
+                    **(
+                        {"_meta": {"geist/idempotencyKey": idempotency_key}}
+                        if idempotency_key
+                        else {}
+                    ),
+                },
                 timeout=_remaining_seconds(deadline, "tools/call"),
                 cancellation=cancellation,
             )
@@ -692,6 +703,7 @@ class McpClientManager:
         arguments: dict[str, Any],
         *,
         cancellation: threading.Event | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         deadline = time.monotonic() + config.timeout_seconds
         try:
@@ -700,6 +712,7 @@ class McpClientManager:
                 arguments,
                 deadline=deadline,
                 cancellation=cancellation,
+                idempotency_key=idempotency_key,
             )
         except McpError:
             self.invalidate(config.server_id)
