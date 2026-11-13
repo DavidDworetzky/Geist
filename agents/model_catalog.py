@@ -410,6 +410,34 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "anthropic/claude-fable-5.2",
+        "Claude Fable 5.2",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Frontier hosted reasoning through OpenRouter with native tools. "
+            "No ZDR-eligible endpoint was available at review time; never send "
+            "confidential workloads through this route."
+        ),
+    ),
+    ModelSpec(
         "openai/gpt-6.1-terra",
         "GPT-6.1 Terra",
         "gpt",
