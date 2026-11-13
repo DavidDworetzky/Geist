@@ -437,6 +437,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "zero-retention route; enforce OpenRouter ZDR before confidential workloads."
         ),
     ),
+    ModelSpec(
+        "openrouter/auto-code",
+        "OpenRouter Auto Code",
+        "router",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=2000000,
+        max_output_tokens=65536,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Coding-focused router with variable downstream model, provider, price, "
+            "and data policy. Configure OpenRouter guardrails and require ZDR before "
+            "confidential workloads; EU in-region routing is unavailable."
+        ),
+    ),
     # Heavyweight models are deliberately server-backed.
     ModelSpec(
         "zai-org/GLM-4.7-Flash",
