@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import Chat from './Chat';
 import { installResizeObserverMock } from './testUtils/mockResizeObserver';
 
@@ -151,26 +151,31 @@ jest.mock('./Components/ChatTextArea', () => {
   return {
     __esModule: true,
     default: React.forwardRef(({ chatHistory }: { chatHistory: unknown[] }, ref: React.Ref<HTMLDivElement>) => (
-      <div ref={ref} data-message-count={chatHistory.length}>Chat transcript</div>
+      <div ref={ref}>
+        <span data-message-count={chatHistory.length}>Chat transcript</span>
+        {chatHistory.map((_, index) => <div key={index} className="chat-turn" data-index={index} />)}
+      </div>
     ))
   };
 });
 
 jest.mock('./Components/EnhancedChatInput', () => ({
   __esModule: true,
-  default: ({ value, onChange, disabled, placeholder, modelLoading, onShowModelError }: {
+  default: ({ value, onChange, disabled, placeholder, modelLoading, onShowModelError, handleKeyDown }: {
     value: string;
     onChange: (value: string) => void;
     disabled?: boolean;
     placeholder?: string;
     modelLoading?: boolean;
     onShowModelError?: () => void;
+    handleKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
   }) => (
     <>
     <textarea
       aria-label="Message"
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      onKeyDown={handleKeyDown}
       disabled={disabled}
       placeholder={modelLoading ? '' : placeholder}
     />
@@ -248,15 +253,22 @@ describe('Chat history panel', () => {
     global.fetch = jest.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ chat_history: messages, total_messages: 40 }) })
       .mockImplementationOnce(() => new Promise(resolve => { resolveOlder = resolve; }));
+    let scroll: HTMLElement;
+    const rect = jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const index = this.getAttribute('data-index');
+      const top = index === null ? 0 : Number(index) * 25 - scroll.scrollTop;
+      return { top, bottom: top + 25 } as DOMRect;
+    });
     try {
       render(
         <MemoryRouter initialEntries={['/chat/42']}>
           <Routes><Route path="/chat/:chatId" element={<Chat />} /></Routes>
         </MemoryRouter>,
       );
-      const scroll = screen.getByRole('region', { name: 'Conversation history' });
+      scroll = screen.getByRole('region', { name: 'Conversation history' });
       Object.defineProperties(scroll, {
-        scrollHeight: { get: () => screen.getByText('Chat transcript').getAttribute('data-message-count') === '40' ? 1500 : 1000 },
+        // An extra 200px below the anchor must not count as prepended history.
+        scrollHeight: { get: () => screen.getByText('Chat transcript').getAttribute('data-message-count') === '40' ? 1700 : 1000 },
         clientHeight: { value: 300 },
       });
       await waitFor(() => expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '20'));
@@ -273,7 +285,88 @@ describe('Chat history panel', () => {
       expect(scroll.scrollTop).toBe(580);
       expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument();
     } finally {
+      rect.mockRestore();
       global.fetch = originalFetch;
+    }
+  });
+
+  it.each(['send', 'new chat'])('resumes following on %s while scrolled up', async (action) => {
+    render(<MemoryRouter><Chat /></MemoryRouter>);
+    const scroll = screen.getByRole('region', { name: 'Conversation history' });
+    Object.defineProperties(scroll, { scrollHeight: { value: 1000 }, clientHeight: { value: 300 } });
+    scroll.scrollTop = 200;
+    fireEvent.scroll(scroll);
+    await act(async () => {
+      if (action === 'send') {
+        fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Hello' } });
+        fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+      }
+    });
+    expect(scroll.scrollTop).toBe(1000);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
+  });
+
+  it('removes the jump button from keyboard navigation when history is expanded', () => {
+    render(<MemoryRouter><Chat /></MemoryRouter>);
+    const scroll = screen.getByRole('region', { name: 'Conversation history' });
+    Object.defineProperties(scroll, { scrollHeight: { value: 1000 }, clientHeight: { value: 300 } });
+    scroll.scrollTop = 200;
+    fireEvent.scroll(scroll);
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chat history' }));
+    expect(screen.queryByRole('button', { name: 'Jump to latest', hidden: true })).not.toBeInTheDocument();
+  });
+
+  it('ignores a pending history response after switching chats', async () => {
+    const originalFetch = global.fetch;
+    let resolveOld!: (response: unknown) => void;
+    global.fetch = jest.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ chat_history: [{ user: 'New chat', ai: 'Reply' }], total_messages: 1 }) });
+    try {
+      render(<MemoryRouter initialEntries={['/chat/42']}>
+        <Link to="/chat/43">Switch chat</Link>
+        <Routes><Route path="/chat/:chatId" element={<Chat />} /></Routes>
+      </MemoryRouter>);
+      fireEvent.click(screen.getByRole('link', { name: 'Switch chat' }));
+      await waitFor(() => expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '1'));
+      await act(async () => {
+        resolveOld({ ok: true, json: async () => ({ chat_history: [{ user: 'Old' }, { user: 'Old again' }], total_messages: 2 }) });
+      });
+      expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '1');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('retries the failed history page instead of skipping it', async () => {
+    const originalFetch = global.fetch;
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const messages = Array.from({ length: 20 }, () => ({ user: 'Hello', ai: 'Reply' }));
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ chat_history: messages, total_messages: 60 }) })
+      .mockRejectedValueOnce(new Error('Network failure'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ chat_history: messages, total_messages: 60 }) });
+    try {
+      render(<MemoryRouter initialEntries={['/chat/42']}>
+        <Routes><Route path="/chat/:chatId" element={<Chat />} /></Routes>
+      </MemoryRouter>);
+      const scroll = screen.getByRole('region', { name: 'Conversation history' });
+      Object.defineProperties(scroll, { scrollHeight: { value: 1000 }, clientHeight: { value: 300 } });
+      await waitFor(() => expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '20'));
+      scroll.scrollTop = 5;
+      fireEvent.scroll(scroll);
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      fireEvent.scroll(scroll);
+      await waitFor(() => expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '40'));
+      expect(global.fetch).toHaveBeenNthCalledWith(3, '/agent/chat_history/42/paginated?page=2&page_size=20');
+      expect(screen.getByText('Chat transcript')).toHaveAttribute('data-message-count', '40');
+    } finally {
+      global.fetch = originalFetch;
+      error.mockRestore();
     }
   });
 

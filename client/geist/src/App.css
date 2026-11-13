@@ -1443,7 +1443,7 @@ textarea:focus-visible {
 
 .chat-jump-latest {
   position: absolute;
-  bottom: 1rem;
+  bottom: calc(var(--chat-composer-clearance) + 0.5rem);
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
