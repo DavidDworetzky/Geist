@@ -220,6 +220,7 @@ class TestOnlineAgentInitialization:
             "qwen/qwen3.8-flash",
             "deepseek/deepseek-v4.1-flash-1017",
             "deepseek/deepseek-v4.1-flash",
+            "tencent/hy4",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
             "stealth/union-alpha",
@@ -834,14 +835,15 @@ class TestOnlineAgentAPIRequests:
                 assert payload["presence_penalty"] == 0.0
                 assert payload["stop"] == "END"
 
-    def test_hy4_preview_omits_unsupported_defaults_and_keeps_native_tools(self):
+    @pytest.mark.parametrize("model_id", ["tencent/hy4", "tencent/hy4-preview"])
+    def test_hy4_models_omit_unsupported_defaults_and_keep_native_tools(self, model_id):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="tencent/hy4-preview",
+                model=model_id,
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -851,7 +853,7 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "tencent/hy4-preview",
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "top_p": 1.0,
