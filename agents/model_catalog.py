@@ -547,6 +547,29 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "google/gemini-4-hydrogen",
+        "Gemini 4 Hydrogen",
+        "gemini",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty"),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Fast agentic Gemini route with mandatory reasoning, native tools, and "
+            "ZDR-eligible Google Vertex endpoints. Default routing can use Google "
+            "AI Studio's 55-day retention; enforce ZDR and review safety-retention "
+            "policy before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "kimi-k2.5",
         "Kimi K2.5",
         "kimi",
