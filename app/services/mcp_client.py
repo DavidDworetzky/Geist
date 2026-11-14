@@ -121,6 +121,7 @@ class McpServerConfig:
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
     oauth_workspace_id: int | None = None
+    managed_email: dict | None = field(default=None, repr=False)
 
     @property
     def fingerprint(self) -> str:
@@ -137,6 +138,7 @@ class McpServerConfig:
                 "plugin_root": self.plugin_root,
                 "plugin_data_dir": self.plugin_data_dir,
                 "oauth_workspace_id": self.oauth_workspace_id,
+                "managed_email": self.managed_email,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -510,6 +512,7 @@ class McpConnection:
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": CLIENT_INFO,
+                    **self._email_initialization(),
                 },
                 timeout=_remaining_seconds(deadline, "initialize"),
             )
@@ -525,6 +528,16 @@ class McpConnection:
         except Exception:
             self._transport.close()
             raise
+
+    def _email_initialization(self) -> dict:
+        if self.config.managed_email is None:
+            return {}
+        from app.services.email_credentials import credentials
+
+        settings = dict(self.config.managed_email)
+        reference = settings.pop("credential_id")
+        settings["password"] = credentials(reference)
+        return {"geistEmail": settings}
 
     def list_tools(self, *, deadline: float | None = None) -> list[dict[str, Any]]:
         deadline = deadline or (time.monotonic() + self.config.timeout_seconds)

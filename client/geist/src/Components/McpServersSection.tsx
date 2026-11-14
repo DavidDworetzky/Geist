@@ -341,8 +341,8 @@ const McpServersSection: React.FC = () => {
         <div className="settings-field">
           <span className="settings-label">Email connector profiles</span>
           <p className="settings-description">
-            Geist stores the account policy and launch settings. Install and vet the MCP server
-            separately; email connectors remain disabled until security inspection is configured.
+            Proton Mail connects directly to your local Bridge using Geist’s bundled email connector.
+            Other profiles require an operator-configured MCP server.
           </p>
           <div className="mcp-server-actions">
             {connectorProfiles.map((profile) => (
@@ -382,7 +382,7 @@ const McpServersSection: React.FC = () => {
                       {server.connector_kind && server.connector_kind !== 'custom'
                         ? `${server.connector_kind.replace('_', ' ')} · ${server.account_label || 'account not labeled'} · `
                         : ''}
-                      {server.transport === 'stdio'
+                      {server.managed_email ? 'Bundled Proton Bridge connector' : server.transport === 'stdio'
                         ? `${server.command ?? ''} ${(server.args || []).join(' ')}`.trim()
                         : server.url}
                     </p>
@@ -453,7 +453,10 @@ const McpServersSection: React.FC = () => {
         </ul>
       )}
 
-      {formOpen ? (
+      {formOpen && form.connector_kind === 'proton' ? (
+        <ProtonBridgeSetup key={editingId ?? 'new'} server={servers.find(server => server.mcp_server_id === editingId)}
+          onCancel={closeForm} onSaved={async () => { closeForm(); await refetch(); }} />
+      ) : formOpen ? (
         <div className="mcp-server-form" data-testid="mcp-server-form" ref={formRef}>
           <header className="settings-section-header">
             <h3>{editingId !== null ? 'Edit MCP Server' : 'Add MCP Server'}</h3>
@@ -483,7 +486,6 @@ const McpServersSection: React.FC = () => {
           )}
 
           {formError && <div className="notice notice-error">{formError}</div>}
-          {selectedCatalogueEntry?.id === 'proton-mail' && <ProtonBridgeSetup />}
 
           <div className="settings-field">
             <label className="settings-label" htmlFor="mcp-name">Name</label>
