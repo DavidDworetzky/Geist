@@ -144,6 +144,32 @@ describe('ChatTextArea tool activity', () => {
       'https://example.com/notes.txt',
     );
   });
+
+  it('reveals blocked content through the user-only security endpoint', async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ content: 'Original email body' }),
+    } as Response)) as typeof fetch;
+    render(<ChatTextArea chatHistory={[{
+      run_id: 'run_blocked',
+      user: 'Read it',
+      ai: '',
+      tool_calls: [{
+        id: 'call_blocked',
+        name: 'mcp.mail.read',
+        arguments: {},
+        status: 'failed',
+        error: 'block',
+        blocked_content_id: 'blocked_123',
+      }],
+    }]} />);
+
+    fireEvent.click(screen.getByText('Reveal blocked original'));
+
+    expect(await screen.findByText('Original email body')).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/security/blocked/blocked_123');
+  });
 });
 
 describe('ChatTextArea agentic progress', () => {

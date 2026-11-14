@@ -59,6 +59,8 @@ class FakeManager:
         return self.tools_by_server.get(config.name, [])
 
     def call_tool(self, config, name, arguments, **kwargs):
+        if kwargs.get("before_dispatch"):
+            kwargs["before_dispatch"]()
         self.calls.append((config.name, name, arguments, kwargs.get("idempotency_key")))
         return f"{name} says: {arguments.get('text', '')}"
 
@@ -298,3 +300,87 @@ def test_config_from_model_maps_fields():
     assert config.transport == "stdio"
     assert config.command == "fake-command"
     assert config.timeout_seconds == 10.0
+
+
+def test_invalidation_discards_in_flight_discovery():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    started, release = Event(), Event()
+    servers = [_server_model()]
+
+    def load(user_id):
+        snapshot = list(servers)
+        started.set()
+        assert release.wait(5)
+        return snapshot
+
+    source = McpToolSource(FakeManager(tools_by_server={"fake": [ECHO_TOOL]}), servers_loader=load)
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(source.definitions, _context())
+        assert started.wait(5)
+        servers.clear()
+        source.invalidate()
+        release.set()
+        assert pending.result(timeout=5) == []
+    assert source.definitions(_context()) == []
+
+
+def test_quota_is_reserved_only_for_approved_valid_unique_dispatches(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.mcp_client import McpClientManager
+    from app.services.mcp_security import McpWritePolicy, security_inspector
+
+    policy = McpWritePolicy()
+    monkeypatch.setattr(security_inspector, "write_policy", policy)
+    manager = McpClientManager()
+    calls = []
+    connection = SimpleNamespace(
+        call_tool=lambda *args, **kwargs: calls.append(args) or "ok",
+        list_tools=lambda **kwargs: [ECHO_TOOL],
+    )
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: connection)
+    server = _server_model()
+    server.max_writes_per_hour = 1
+    source = McpToolSource(manager, servers_loader=lambda user_id: [server])
+    registry = ToolRegistry()
+    registry.add_source(source)
+    invalid = ToolCall.create("mcp.fake.echo", {})
+    assert registry.execute(invalid, _approved_context(invalid)).error == "invalid_arguments"
+    call = ToolCall.create("mcp.fake.echo", {"text": "hello"})
+    assert registry.execute(call, _context()).error == "approval_required"
+    assert registry.execute(call, _approved_context(call)).succeeded
+    assert registry.execute(call, _approved_context(call)).succeeded
+    assert len(calls) == 1
+    another = ToolCall.create("mcp.fake.echo", {"text": "different"})
+    assert not registry.execute(another, _approved_context(another)).succeeded
+    assert len(calls) == 1
+
+
+def test_failed_dispatch_releases_its_own_quota_reservation(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.mcp_client import McpClientManager
+    from app.services.mcp_security import McpWritePolicy, security_inspector
+
+    monkeypatch.setattr(security_inspector, "write_policy", McpWritePolicy())
+    manager = McpClientManager()
+    calls = []
+
+    def dispatch(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise McpError("failed")
+        return "ok"
+
+    connection = SimpleNamespace(call_tool=dispatch, list_tools=lambda **kwargs: [ECHO_TOOL])
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: connection)
+    server = _server_model()
+    server.max_writes_per_hour = 1
+    registry = ToolRegistry()
+    registry.add_source(McpToolSource(manager, servers_loader=lambda user_id: [server]))
+    call = ToolCall.create("mcp.fake.echo", {"text": "hello"})
+    assert not registry.execute(call, _approved_context(call)).succeeded
+    assert registry.execute(call, _approved_context(call)).succeeded
+    assert len(calls) == 2

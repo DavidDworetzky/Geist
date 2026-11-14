@@ -199,6 +199,7 @@ def _inspect_legacy_schema(metadata, engine) -> tuple[str, list[str]]:
             "max_writes_per_hour",
         )
     )
+    missing_tables.discard("mcp_security_policy")
     oauth_missing = OAUTH_TABLE in missing_tables
     missing_tables.discard(OAUTH_TABLE)
     routine_gap = ("agent_routine", "run_once_requested")

@@ -14,12 +14,14 @@ import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from agents.models.tool_calling import ToolContext, ToolDefinition, ToolExecutionOutput
 from app.models.database.mcp_server import McpServerModel, list_enabled_mcp_servers
 from app.services.mcp_client import McpClientManager, McpError, McpServerConfig
+from app.services.mcp_security import security_inspector
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,10 @@ def config_from_model(server: McpServerModel) -> McpServerConfig:
         url=server.url,
         headers=dict(server.headers or {}),
         timeout_seconds=server.timeout_seconds,
+        connector_kind=server.connector_kind,
+        trusted=server.trusted,
+        recipient_allowlist=tuple(server.recipient_allowlist or []),
+        max_writes_per_hour=server.max_writes_per_hour,
         cwd=server.cwd,
         plugin_root=server.plugin_root,
         plugin_data_dir=server.plugin_data_dir,
@@ -123,6 +129,8 @@ class McpToolSource:
                     time.monotonic() + self._cache_ttl_seconds,
                     generation,
                 )
+            else:
+                definitions = []
             flight.set()
         return definitions
 
@@ -175,19 +183,31 @@ class McpToolSource:
             _config: McpServerConfig = config,
             _tool: str = tool_name,
         ) -> ToolExecutionOutput:
+            def before_dispatch() -> Callable[[], None]:
+                reservation_id = uuid.uuid4().hex
+                error = security_inspector.write_policy.check_and_record(
+                    context.workspace_id, definition, arguments, reservation_id
+                )
+                if error:
+                    raise McpError(error)
+                return lambda: security_inspector.write_policy.release(
+                    context.workspace_id, _config.server_id, reservation_id
+                )
+
             content = self._manager.call_tool(
                 _config,
                 _tool,
                 arguments,
                 cancellation=context.cancellation,
                 idempotency_key=_idempotency_key(context, _config, _tool, arguments),
+                before_dispatch=before_dispatch,
             )
             return ToolExecutionOutput(
                 content=content or "(empty tool result)",
                 summary=f"Called {_tool} on MCP server {_config.name}",
             )
 
-        return ToolDefinition(
+        definition = ToolDefinition(
             name=f"mcp.{config.name}.{tool_name}",
             description=f"[MCP: {config.name}] {description}",
             arguments_schema=schema,
@@ -199,8 +219,16 @@ class McpToolSource:
             requires_approval=True,
             timeout_seconds=config.timeout_seconds + 5.0,
             source_adapter=f"mcp:{config.name}",
+            # Email remains untrusted even after an operator promotes its
+            # server. Trust promotion only affects non-email MCP servers.
+            untrusted_external=(not config.trusted or config.connector_kind != "custom"),
+            always_untrusted_content=config.connector_kind != "custom",
+            security_source_id=config.server_id,
+            recipient_allowlist=config.recipient_allowlist,
+            max_writes_per_hour=config.max_writes_per_hour,
             source_revision=config.fingerprint,
         )
+        return definition
 
 
 _manager: McpClientManager | None = None

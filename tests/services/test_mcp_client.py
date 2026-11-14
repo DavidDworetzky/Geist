@@ -256,6 +256,29 @@ def test_manager_reconnects_when_fingerprint_changes():
         manager.shutdown()
 
 
+def test_manager_replays_completed_idempotent_tool_call(monkeypatch):
+    manager = McpClientManager()
+    calls = []
+
+    class Connection:
+        def call_tool(self, name, arguments, *, idempotency_key=None, **kwargs):
+            calls.append((name, arguments, idempotency_key))
+            return "sent once"
+
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: Connection())
+    config = _stdio_config()
+
+    assert (
+        manager.call_tool(config, "send", {"to": "a@example.com"}, idempotency_key="same")
+        == "sent once"
+    )
+    assert (
+        manager.call_tool(config, "send", {"to": "a@example.com"}, idempotency_key="same")
+        == "sent once"
+    )
+    assert len(calls) == 1
+
+
 def test_manager_invalidation_discards_connection_created_by_stale_flight(monkeypatch):
     import app.services.mcp_client as mcp_client
 
@@ -333,6 +356,38 @@ def test_sse_response_without_answer_raises():
     lines = ['data: {"jsonrpc": "2.0", "method": "noise"}', ""]
     with pytest.raises(McpError, match="ended without a response"):
         _HttpTransport._read_sse_response(_FakeSseResponse(lines), "req-1", "tools/list")
+
+
+def test_write_accounting_only_runs_on_dispatch(monkeypatch):
+    from types import SimpleNamespace
+
+    manager = McpClientManager()
+    config = McpServerConfig(server_id=990, name="mail", transport="stdio", command="unused")
+    calls, reservations = [], []
+    connection = SimpleNamespace(call_tool=lambda *args, **kwargs: calls.append(args) or "sent")
+    monkeypatch.setattr(manager, "_connection", lambda config, **kwargs: connection)
+    for _ in range(2):
+        assert (
+            manager.call_tool(
+                config,
+                "deliver",
+                {},
+                idempotency_key="unique",
+                before_dispatch=lambda: reservations.append(1),
+            )
+            == "sent"
+        )
+    assert len(calls) == len(reservations) == 1
+
+    def unavailable(config, **kwargs):
+        raise McpError("no connection")
+
+    monkeypatch.setattr(manager, "_connection", unavailable)
+    import pytest
+
+    with pytest.raises(McpError):
+        manager.call_tool(config, "deliver", {}, before_dispatch=lambda: reservations.append(1))
+    assert len(reservations) == 1
 
 
 def test_http_transport_client_headers_take_precedence():

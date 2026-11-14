@@ -17,6 +17,7 @@ export interface ToolCallResult {
   result_summary?: string;
   artifact_ids?: string[];
   error?: string;
+  blocked_content_id?: string;
 }
 
 export interface WorkArtifact {
