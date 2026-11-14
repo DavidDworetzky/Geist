@@ -244,6 +244,34 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     )
 
 
+def test_openrouter_gemini4_hydrogen_metadata_is_explicit_and_server_backed():
+    hydrogen = get_model_spec("google/gemini-4-hydrogen")
+
+    assert hydrogen.provider == "openrouter"
+    assert hydrogen.backend == "openai_compatible"
+    assert hydrogen.local is False
+    assert hydrogen.family == "gemini"
+    assert hydrogen.context_window == 1048576
+    assert hydrogen.max_output_tokens == 943718
+    assert hydrogen.parameter_count is None
+    assert hydrogen.activated_parameters is None
+    assert hydrogen.supports_vision is True
+    assert hydrogen.supports_function_calling is True
+    assert hydrogen.supports_reasoning is True
+    assert hydrogen.supports_streaming is True
+    assert hydrogen.recommended is True
+    assert hydrogen.mandatory_reasoning_effort == "medium"
+    assert hydrogen.unsupported_parameters == (
+        "n",
+        "frequency_penalty",
+        "presence_penalty",
+    )
+    assert hydrogen.performance_note is not None
+    assert "55-day retention" in hydrogen.performance_note
+    assert "enforce ZDR" in hydrogen.performance_note
+    assert get_provider_endpoint(hydrogen.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -748,6 +776,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "muse-spark-1.2",
         "muse-spark-1.3",
         "gemini-3.8-flash",
+        "google/gemini-4-hydrogen",
     ],
 )
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
@@ -821,6 +850,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "meta/muse-wonder",
         "meta/muse-spark-open",
         "stealth/union-alpha",
+        "google/gemini-4-hydrogen",
     ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
@@ -967,6 +997,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert "huggingface" not in response.providers
     assert "self-hosted" not in response.providers
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
+    assert any(model.id == "google/gemini-4-hydrogen" for model in response.providers["openrouter"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(model.id == "x-ai/grok-4.7" for model in response.providers["openrouter"])
     assert any(
