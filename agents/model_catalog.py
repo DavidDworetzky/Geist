@@ -638,6 +638,30 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted-only flagship MoE; OpenRouter proxies Alibaba's endpoint until open weights ship.",
     ),
     ModelSpec(
+        "qwen/qwen4-max",
+        "Qwen4 Max",
+        "qwen",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="2.4T",
+        activated_parameters="71B",
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Stable Alibaba flagship route with optional default-on reasoning, native "
+            "tools, and structured output. Alibaba retains prompts and responses for "
+            "up to 30 days, and this route is not ZDR-eligible; do not use it for "
+            "confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-flash",
         "Qwen 3.8 Flash",
         "qwen",
