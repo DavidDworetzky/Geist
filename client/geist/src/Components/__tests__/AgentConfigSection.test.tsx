@@ -469,26 +469,42 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Muse Spark 1.3' })).toBeInTheDocument();
     });
 
-    it('shows Qwen3.8 Flash privacy guidance from live catalog data', async () => {
-      const performanceNote = 'The current endpoint is not OpenRouter ZDR; do not use it for confidential workloads.';
+    it('shows Qwen hosted models and the selected privacy guidance from live catalog data', async () => {
+      const performanceNote = 'Alibaba retains prompts for up to 30 days; do not use it for confidential workloads.';
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
           providers: {
-            openrouter: [{
-              id: 'qwen/qwen3.8-flash',
-              name: 'Qwen 3.8 Flash',
-              provider: 'openrouter',
-              context_window: 1000000,
-              max_output_tokens: 131072,
-              supports_vision: true,
-              supports_function_calling: true,
-              supports_reasoning: true,
-              supports_streaming: true,
-              recommended: true,
-              family: 'qwen',
-              performance_note: performanceNote,
-            }],
+            openrouter: [
+              {
+                id: 'qwen/qwen3.8-flash',
+                name: 'Qwen 3.8 Flash',
+                provider: 'openrouter',
+                context_window: 1000000,
+                max_output_tokens: 131072,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'qwen',
+                performance_note: 'Existing Qwen route.',
+              },
+              {
+                id: 'qwen/qwen4-max',
+                name: 'Qwen4 Max',
+                provider: 'openrouter',
+                context_window: 1000000,
+                max_output_tokens: 131072,
+                supports_vision: true,
+                supports_function_calling: true,
+                supports_reasoning: true,
+                supports_streaming: true,
+                recommended: true,
+                family: 'qwen',
+                performance_note: performanceNote,
+              },
+            ],
           },
           last_updated: null,
         }),
@@ -498,11 +514,12 @@ describe('AgentConfigSection', () => {
         <AgentConfigSection
           {...defaultProps}
           onlineProvider="openrouter"
-          onlineModel="qwen/qwen3.8-flash"
+          onlineModel="qwen/qwen4-max"
         />
       );
 
       expect(await screen.findByRole('option', { name: 'Qwen 3.8 Flash' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Qwen4 Max' })).toBeInTheDocument();
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 

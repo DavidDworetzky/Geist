@@ -222,6 +222,32 @@ def test_qwen_max_id_variants_route_to_openrouter_not_local_qwen():
         assert spec.local is False
 
 
+def test_openrouter_qwen4_max_metadata_is_explicit_and_server_backed():
+    qwen = get_model_spec("qwen/qwen4-max")
+
+    assert qwen is not None
+    assert qwen.name == "Qwen4 Max"
+    assert qwen.family == "qwen"
+    assert qwen.provider == "openrouter"
+    assert qwen.backend == "openai_compatible"
+    assert qwen.local is False
+    assert qwen.context_window == 1000000
+    assert qwen.max_output_tokens == 131072
+    assert qwen.parameter_count == "2.4T"
+    assert qwen.activated_parameters == "71B"
+    assert qwen.supports_vision is True
+    assert qwen.supports_function_calling is True
+    assert qwen.supports_reasoning is True
+    assert qwen.supports_streaming is True
+    assert qwen.recommended is True
+    assert qwen.mandatory_reasoning_effort is None
+    assert qwen.unsupported_parameters == ("n",)
+    assert qwen.performance_note is not None
+    assert "not ZDR-eligible" in qwen.performance_note
+    assert "do not use it for confidential workloads" in qwen.performance_note
+    assert get_provider_endpoint(qwen.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("gemini-3.8-flash")
 
@@ -735,6 +761,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
+        "qwen/qwen4-max",
         "qwen/qwen3.8-flash",
         "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
@@ -812,6 +839,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "fireworks/ember-1",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
+        "qwen/qwen4-max",
         "qwen/qwen3.8-flash",
         "deepseek/deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash",
@@ -979,6 +1007,7 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
+    assert any(model.id == "qwen/qwen4-max" for model in response.providers["openrouter"])
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash-1017"
