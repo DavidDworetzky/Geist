@@ -25,6 +25,49 @@ _FUNCTION_PATTERN = re.compile(r"<function=([A-Za-z0-9_-]+)>(.*?)</function>", r
 _PARAMETER_PATTERN = re.compile(r"<parameter=([^<>\s]+)>(.*?)</parameter>", re.DOTALL)
 _UNWRAPPED_XML_MARKERS = ("<function=", "<parameter=", "</function>", "</parameter>")
 
+_INKLING_THINKING_PATTERN = re.compile(
+    r"(?:<\|message_model\|>[^<]*)?<\|content_thinking\|>.*?(?:<\|end_message\|>|$)",
+    re.DOTALL,
+)
+_INKLING_TEXT_PATTERN = re.compile(
+    r"(?:<\|message_model\|>[^<]*)?<\|content_(?:text|tool_error|invoke_tool_text)\|>(.*?)(?:<\|end_message\|>|$)",
+    re.DOTALL,
+)
+_INKLING_TOOL_PATTERN = re.compile(
+    r"(?:<\|message_model\|>[^<]*)?<\|content_invoke_tool_json\|>\s*(.*?)\s*(?:<\|end_message\|>|$)",
+    re.DOTALL,
+)
+_INKLING_SPECIAL_TAG_PATTERN = re.compile(
+    r"<\|(?:message_model|content_model_end_sampling|end_message)\|>[^<]*"
+)
+
+
+def _has_inkling_markup(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "<|message_model|>",
+            "<|content_text|>",
+            "<|content_thinking|>",
+            "<|content_invoke_tool_json|>",
+            "<|end_message|>",
+            "<|content_model_end_sampling|>",
+        )
+    )
+
+
+def strip_inkling_response_markup(text: str) -> str:
+    """Extract plain assistant text from Inkling 2 control-token markup."""
+    if not _has_inkling_markup(text):
+        return text
+    text_blocks = [match.group(1) for match in _INKLING_TEXT_PATTERN.finditer(text)]
+    if text_blocks:
+        return "".join(text_blocks).strip()
+    cleaned = _INKLING_THINKING_PATTERN.sub("", text)
+    cleaned = _INKLING_TOOL_PATTERN.sub("", cleaned)
+    cleaned = _INKLING_SPECIAL_TAG_PATTERN.sub("", cleaned)
+    return cleaned.strip()
+
 
 @dataclass(frozen=True)
 class ChatTemplateToolPayload:
@@ -147,34 +190,40 @@ def parse_tool_response(
     """Parse Qwen-style tool markup into a fail-closed structured model turn."""
 
     raw_response = response.strip()
-    matches = list(_TOOL_CALL_PATTERN.finditer(raw_response))
-    has_marker = _TOOL_CALL_OPEN in raw_response or _TOOL_CALL_CLOSE in raw_response
-    if has_marker and not matches:
-        raise MalformedToolCallError("Model returned incomplete tool-call markup")
-
-    payloads: list[str]
-    if matches:
-        without_calls = _TOOL_CALL_PATTERN.sub("", raw_response).strip()
-        if _TOOL_CALL_OPEN in without_calls or _TOOL_CALL_CLOSE in without_calls:
-            raise MalformedToolCallError("Model returned malformed tool-call markup")
-        payloads = [match.group(1) for match in matches]
-        text = without_calls
+    inkling_tool_matches = list(_INKLING_TOOL_PATTERN.finditer(raw_response))
+    if inkling_tool_matches or _has_inkling_markup(raw_response):
+        payloads = [match.group(1) for match in inkling_tool_matches]
+        text = strip_inkling_response_markup(raw_response)
     else:
-        payloads = []
-        text = raw_response
-        if provider_to_internal and raw_response.startswith("{"):
-            try:
-                candidate = json.loads(raw_response)
-            except json.JSONDecodeError:
-                candidate = None
-            if (
-                isinstance(candidate, dict)
-                and isinstance(candidate.get("name"), str)
-                and candidate["name"] in provider_to_internal
-                and ("arguments" in candidate or "parameters" in candidate)
-            ):
-                payloads = [raw_response]
-                text = ""
+        matches = list(_TOOL_CALL_PATTERN.finditer(raw_response))
+        has_marker = _TOOL_CALL_OPEN in raw_response or _TOOL_CALL_CLOSE in raw_response
+        if has_marker and not matches:
+            raise MalformedToolCallError("Model returned incomplete tool-call markup")
+
+        if matches:
+            without_calls = _TOOL_CALL_PATTERN.sub("", raw_response).strip()
+            if _TOOL_CALL_OPEN in without_calls or _TOOL_CALL_CLOSE in without_calls:
+                raise MalformedToolCallError("Model returned malformed tool-call markup")
+            payloads = [match.group(1) for match in matches]
+            text = without_calls
+        else:
+            payloads = []
+            text = raw_response
+            if provider_to_internal and raw_response.startswith("{"):
+                try:
+                    candidate = json.loads(raw_response)
+                except json.JSONDecodeError:
+                    candidate = None
+                if (
+                    isinstance(candidate, dict)
+                    and isinstance(candidate.get("name"), str)
+                    and candidate["name"] in provider_to_internal
+                    and (
+                        "arguments" in candidate or "parameters" in candidate or "args" in candidate
+                    )
+                ):
+                    payloads = [raw_response]
+                    text = ""
 
     if any(marker in text for marker in _UNWRAPPED_XML_MARKERS):
         raise MalformedToolCallError("Model returned unwrapped function-call markup")
@@ -194,9 +243,9 @@ def parse_tool_response(
         if not isinstance(provider_name, str) or provider_name not in provider_to_internal:
             raise MalformedToolCallError("Model requested unknown tool")
         # This tokenizer path follows the OpenAI-shaped contract, so arguments
-        # intentionally wins if a model emits both keys. Parameters remains a
-        # compatibility alias for Qwen responses that mirror the tool schema.
-        arguments = value.get("arguments", value.get("parameters", {}))
+        # intentionally wins if a model emits both keys. Parameters and args remain
+        # compatibility aliases for Qwen and Inkling 2 responses.
+        arguments = value.get("arguments", value.get("parameters", value.get("args", {})))
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
