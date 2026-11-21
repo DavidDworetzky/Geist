@@ -296,6 +296,32 @@ def test_openrouter_qwen38_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(flash.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_inkling_2_mini_metadata_is_explicit_and_server_backed():
+    inkling = get_model_spec("thinkingmachines/inkling-2-mini")
+
+    assert inkling is not None
+    assert inkling.name == "Inkling 2 Mini"
+    assert inkling.family == "inkling"
+    assert inkling.provider == "openrouter"
+    assert inkling.backend == "openai_compatible"
+    assert inkling.local is False
+    assert inkling.context_window == 1048576
+    assert inkling.max_output_tokens == 65536
+    assert inkling.parameter_count == "26.4B"
+    assert inkling.activated_parameters == "5.4B"
+    assert inkling.supports_vision is True
+    assert inkling.supports_function_calling is True
+    assert inkling.supports_reasoning is True
+    assert inkling.supports_streaming is True
+    assert inkling.recommended is True
+    assert inkling.mandatory_reasoning_effort is None
+    assert inkling.unsupported_parameters == ("n",)
+    assert inkling.performance_note is not None
+    assert "ZDR-eligible" in inkling.performance_note
+    assert "one route caps context at 262K" in inkling.performance_note
+    assert get_provider_endpoint(inkling.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_ember1_metadata_is_explicit_and_server_backed():
     ember = get_model_spec("fireworks/ember-1")
 
@@ -733,6 +759,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "openai/gpt-6.1-terra",
         "openai/gpt-6.1-terra-20261026",
         "fireworks/ember-1",
+        "thinkingmachines/inkling-2-mini",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -810,6 +837,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "anthropic/claude-sonnet-5.5",
         "anthropic/claude-haiku-5.5",
         "fireworks/ember-1",
+        "thinkingmachines/inkling-2-mini",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -979,6 +1007,9 @@ def test_model_routes_serialize_string_backed_providers():
         model.id == "anthropic/claude-haiku-5.5" for model in response.providers["openrouter"]
     )
     assert any(model.id == "fireworks/ember-1" for model in response.providers["openrouter"])
+    assert any(
+        model.id == "thinkingmachines/inkling-2-mini" for model in response.providers["openrouter"]
+    )
     assert any(model.id == "qwen/qwen3.8-flash" for model in response.providers["openrouter"])
     assert any(
         model.id == "deepseek/deepseek-v4.1-flash-1017"
