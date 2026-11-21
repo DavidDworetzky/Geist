@@ -94,7 +94,8 @@ class QuantizedSwitchLinear(nn.Module):
         if global_scale is not None:
             # MLX's native nvfp4 global_scale multiplies the accumulated dot
             # product by (global_scale / (448 * 6)). Applying that exact factor
-            # after gather_qmm works on mlx==0.31.2 without upgrading MLX.
+            # after gather_qmm works on pinned mlx==0.32.2 without requiring
+            # mlx>=0.32.3's native global_scale kwarg.
             scale = global_scale[indices] * (1.0 / (448.0 * 6.0))
             while scale.ndim < out.ndim:
                 scale = mx.expand_dims(scale, -1)
@@ -153,6 +154,8 @@ class SwitchLinear(nn.Module):
         bits: int = 4,
         mode: str = "affine",
         global_scale: bool = False,
+        *,
+        quantize_weights: bool = True,
     ) -> QuantizedSwitchLinear:
         num_experts, output_dims, input_dims = self.weight.shape
         ql = QuantizedSwitchLinear(
@@ -165,6 +168,16 @@ class SwitchLinear(nn.Module):
             mode=mode,
             global_scale=global_scale,
         )
+        if quantize_weights:
+            quantized = mx.quantize(
+                self.weight,
+                group_size=group_size,
+                bits=bits,
+                mode=mode,
+            )
+            ql.weight, ql.scales = quantized[0], quantized[1]
+            if len(quantized) > 2:
+                ql.biases = quantized[2]
         if "bias" in self:
             ql.bias = self.bias
         return ql

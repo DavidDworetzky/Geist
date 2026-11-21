@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import json
+import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from agents.architectures.chat_template_tools import (
     parse_tool_response,
+    provider_tool_name,
     strip_inkling_response_markup,
 )
 from agents.architectures.llama.mlx_lm_backend import (
     MLXLMBackend,
     _InklingStreamFilter,
     _is_inkling2_model,
+    _load_model_and_tokenizer,
+    _read_local_model_type,
 )
 from agents.model_catalog import get_model_spec, infer_model_spec
+from agents.models.tool_calling import ChatMessage, ModelRequestConfig, ToolDefinition
 from app.services.local_models import CURATED_LOCAL_ARTIFACTS
 
 
-def _tiny_inkling2_config() -> dict:
-    """Build a minimal 4-layer (2 looped x 2 = 6 logical visits) Inkling 2 config."""
+def _tiny_inkling2_config(*, core_start: int = 1) -> dict:
+    """Build a minimal 4-layer (looped x 2) Inkling 2 config."""
     return {
         "model_type": "inkling2_loop",
         "text_config": {
@@ -53,7 +60,7 @@ def _tiny_inkling2_config() -> dict:
             "route_scale": 1.0,
             "final_logit_softcapping": 30.0,
             "loop_config": {
-                "core_start": 1,
+                "core_start": core_start,
                 "core_end": 3,
                 "num_passes": 2,
                 "gate_rank": 16,
@@ -63,6 +70,43 @@ def _tiny_inkling2_config() -> dict:
             "hidden_size": 64,
         },
     }
+
+
+def _install_stub_mlx_lm(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Install minimal stub mlx_lm modules so backend unit tests run without MLX."""
+    state = SimpleNamespace(
+        load_calls=[],
+        load_model_calls=[],
+        load_tokenizer_calls=[],
+    )
+    mlx_lm_mod = ModuleType("mlx_lm")
+    mlx_lm_utils = ModuleType("mlx_lm.utils")
+    mlx_lm_sample = ModuleType("mlx_lm.sample_utils")
+
+    def fake_load(path_or_id):
+        state.load_calls.append(path_or_id)
+        return SimpleNamespace(model_type="llama"), SimpleNamespace()
+
+    def fake_load_model(model_path, *, lazy=False, get_model_classes=None):
+        config = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8"))
+        classes = get_model_classes(config) if get_model_classes else None
+        state.load_model_calls.append((model_path, lazy, classes))
+        return SimpleNamespace(model_type=config["model_type"]), config
+
+    def fake_load_tokenizer(model_path, *, eos_token_ids=None):
+        state.load_tokenizer_calls.append((model_path, eos_token_ids))
+        return SimpleNamespace(eos_token_ids=eos_token_ids)
+
+    mlx_lm_mod.load = fake_load
+    mlx_lm_utils.load_model = fake_load_model
+    mlx_lm_utils.load_tokenizer = fake_load_tokenizer
+    mlx_lm_sample.make_sampler = lambda **kwargs: kwargs
+    mlx_lm_sample.make_logits_processors = lambda: []
+
+    monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm_mod)
+    monkeypatch.setitem(sys.modules, "mlx_lm.utils", mlx_lm_utils)
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", mlx_lm_sample)
+    return state
 
 
 def test_catalog_and_curated_artifacts_include_inkling2_mini() -> None:
@@ -84,6 +128,7 @@ def test_catalog_and_curated_artifacts_include_inkling2_mini() -> None:
     assert official is not None
     assert official.repo_id == "thinkingmachines/Inkling-2-Mini"
     assert official.backend == "mlx_llama"
+    assert "model*.safetensors" in official.allow_patterns
     assert quantized is not None
     assert quantized.repo_id == "mlx-community/Inkling-2-Mini-4bit"
 
@@ -110,6 +155,22 @@ def test_inkling2_response_markup_and_tool_parsing() -> None:
     assert turn.tool_calls[0].name == "weather.get"
     assert turn.tool_calls[0].arguments == {"city": "Austin"}
 
+    # Mixed text + tool call in the same Inkling response
+    mixed_raw = (
+        "<|message_model|><|content_thinking|>Need weather.<|end_message|>"
+        "<|message_model|><|content_text|>Checking Austin now.<|end_message|>"
+        '<|message_model|><|content_invoke_tool_json|>{"name": "get_weather", '
+        '"args": {"city": "Austin"}}<|end_message|><|content_model_end_sampling|>'
+    )
+    mixed_turn = parse_tool_response(
+        mixed_raw,
+        provider_to_internal={"get_weather": "weather.get"},
+    )
+    assert mixed_turn.text == "Checking Austin now."
+    assert len(mixed_turn.tool_calls) == 1
+    assert mixed_turn.tool_calls[0].name == "weather.get"
+    assert mixed_turn.tool_calls[0].arguments == {"city": "Austin"}
+
     # Streaming filter handles split control markers cleanly
     stream_filter = _InklingStreamFilter()
     chunks = [
@@ -124,20 +185,71 @@ def test_inkling2_response_markup_and_tool_parsing() -> None:
     emitted = "".join(stream_filter.feed(chunk) for chunk in chunks) + stream_filter.flush()
     assert emitted == "Hello world!"
 
+    # Streaming filter preserves plain text before any marker and suppresses tool JSON blocks
+    mixed_filter = _InklingStreamFilter()
+    mixed_chunks = [
+        "Prefix ",
+        "<|message_model|><|content_invoke_tool_json|>",
+        '{"name":"get_weather","args":{"city":"Austin"}}',
+        "<|end_message|><|message_model|><|content_text|>Done.<|end_message|>",
+    ]
+    mixed_emitted = (
+        "".join(mixed_filter.feed(chunk) for chunk in mixed_chunks) + mixed_filter.flush()
+    )
+    assert mixed_emitted == "Prefix Done."
 
-def test_mlx_lm_backend_inkling2_defaults_and_markup_stripping(
+
+def test_read_local_model_type_and_loader_routing(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    state = _install_stub_mlx_lm(monkeypatch)
+    fake_inkling_pkg = ModuleType("agents.architectures.inkling2")
+    fake_inkling_pkg.Model = type("FakeInklingModel", (), {})
+    fake_inkling_pkg.ModelArgs = type("FakeInklingArgs", (), {})
+    monkeypatch.setitem(sys.modules, "agents.architectures.inkling2", fake_inkling_pkg)
+
+    # Corrupt UTF-8 config falls back to None without raising
+    bad_dir = tmp_path / "bad_utf8"
+    bad_dir.mkdir()
+    (bad_dir / "config.json").write_bytes(b"\xff\xfe\xfd")
+    assert _read_local_model_type(str(bad_dir)) is None
+
+    # Local inkling2_loop snapshot routes through load_model + load_tokenizer
+    inkling_dir = tmp_path / "inkling_snap"
+    inkling_dir.mkdir()
+    (inkling_dir / "config.json").write_text(
+        json.dumps({"model_type": "inkling2_loop", "eos_token_id": 200006}),
+        encoding="utf-8",
+    )
+    assert _read_local_model_type(str(inkling_dir)) == "inkling2_loop"
+    model, tokenizer = _load_model_and_tokenizer(str(inkling_dir))
+    assert model.model_type == "inkling2_loop"
+    assert tokenizer.eos_token_ids == 200006
+    assert len(state.load_model_calls) == 1
+    assert state.load_model_calls[0][2] == (fake_inkling_pkg.Model, fake_inkling_pkg.ModelArgs)
+    assert state.load_calls == []
+
+    # Non-Inkling model falls back to stock mlx_lm.load
+    other_dir = tmp_path / "llama_snap"
+    other_dir.mkdir()
+    (other_dir / "config.json").write_text(json.dumps({"model_type": "llama"}), encoding="utf-8")
+    _load_model_and_tokenizer(str(other_dir))
+    assert state.load_calls == [str(other_dir)]
+
+
+def test_mlx_lm_backend_inkling2_defaults_streaming_and_tool_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stub_mlx_lm(monkeypatch)
     assert _is_inkling2_model("thinkingmachines/Inkling-2-Mini") is True
     assert _is_inkling2_model("mlx-community/Inkling-2-Mini-4bit") is True
     assert _is_inkling2_model("Qwen/Qwen3-4B") is False
 
-    seen_template_kwargs: list[dict] = []
-
     class DummyTokenizer:
         def apply_chat_template(self, messages, **kwargs):
-            seen_template_kwargs.append(dict(kwargs))
-            return "prompt"
+            tools = kwargs.get("tools")
+            return "with_tools" if tools else "prompt"
 
     dummy_model = SimpleNamespace(model_type="inkling2_loop")
 
@@ -156,6 +268,80 @@ def test_mlx_lm_backend_inkling2_defaults_and_markup_stripping(
     )
     assert backend._template_options()["reasoning_effort"] == "none"
 
+    # stream_messages applies _InklingStreamFilter when tools is empty,
+    # and preserves raw markup when tools are provided.
+    raw_chunks = [
+        "<|message_model|><|content_thinking|>hidden<|end_message|>",
+        "<|message_model|><|content_text|>Hello ",
+        "world!<|end_message|>",
+        '<|message_model|><|content_invoke_tool_json|>{"name":"weather_get","args":{"city":"Austin"}}<|end_message|>',
+    ]
+    monkeypatch.setattr(
+        backend,
+        "_stream_prompt",
+        lambda prompt, sampler, logits_processors=None: iter(raw_chunks),
+    )
+
+    plain_stream = "".join(backend.stream_messages([{"role": "user", "content": "Hi"}]))
+    assert plain_stream == "Hello world!"
+
+    tool_stream = "".join(
+        backend.stream_messages(
+            [{"role": "user", "content": "Hi"}],
+            tools=[{"type": "function", "function": {"name": "weather_get"}}],
+        )
+    )
+    assert "<|content_invoke_tool_json|>" in tool_stream
+
+    # stream_model_turn streams text_delta incrementally and closes the underlying generator
+    closed = {"flag": False}
+
+    provider_name = provider_tool_name("weather.get")
+
+    def closing_stream(messages, tools=None):
+        try:
+            yield "<|message_model|><|content_thinking|>plan<|end_message|>"
+            yield "<|message_model|><|content_text|>Checking "
+            yield "Austin.<|end_message|>"
+            yield (
+                f'<|message_model|><|content_invoke_tool_json|>{{"name":"{provider_name}",'
+                '"args":{"city":"Austin"}}<|end_message|>'
+            )
+        finally:
+            closed["flag"] = True
+
+    monkeypatch.setattr(backend, "stream_messages", closing_stream)
+    backend.supports_native_tool_calling = True
+    tool = ToolDefinition(
+        name="weather.get",
+        description="Get weather",
+        handler=lambda **kw: kw,
+        arguments_schema={
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    )
+    events = list(
+        backend.stream_model_turn(
+            [ChatMessage(role="user", content="Weather in Austin?")],
+            [tool],
+            ModelRequestConfig(max_tokens=64),
+        )
+    )
+    assert closed["flag"] is True
+    text_deltas = [ev.text for ev in events if ev.kind == "text_delta"]
+    assert len(text_deltas) >= 2  # streamed incrementally, not buffered into one chunk
+    assert "".join(text_deltas) == "Checking Austin."
+    final = events[-1]
+    assert final.kind == "turn_complete"
+    assert final.turn is not None
+    assert final.turn.text == "Checking Austin."
+    assert len(final.turn.tool_calls) == 1
+    assert final.turn.tool_calls[0].name == "weather.get"
+    assert final.turn.tool_calls[0].arguments == {"city": "Austin"}
+
+    # complete_messages strips Inkling markup cleanly
     monkeypatch.setattr(
         backend,
         "stream_messages",
@@ -175,6 +361,7 @@ def test_mlx_lm_backend_inkling2_defaults_and_markup_stripping(
 
 def test_inkling2_tiny_model_forward_decode_and_taps() -> None:
     mx = pytest.importorskip("mlx.core")
+    pytest.importorskip("mlx_lm")
     from agents.architectures.inkling2 import Model, ModelArgs
 
     args = ModelArgs.from_dict(_tiny_inkling2_config())
@@ -193,7 +380,7 @@ def test_inkling2_tiny_model_forward_decode_and_taps() -> None:
     step_hidden, taps = model.model.language_model(
         next_token,
         cache=cache,
-        return_taps=(1, 4, 6),
+        return_taps={1, 4, 6},
     )
     mx.eval(step_hidden, *taps.values())
     assert step_hidden.shape == (1, 1, 64)
@@ -201,11 +388,17 @@ def test_inkling2_tiny_model_forward_decode_and_taps() -> None:
     for tensor in taps.values():
         assert tensor.shape == (1, 1, 64)
 
+    # Loop with core_start == 0 and num_passes > 1 fails with a clear ValueError
+    no_prelude_model = Model(ModelArgs.from_dict(_tiny_inkling2_config(core_start=0)))
+    with pytest.raises(ValueError, match="prelude layers"):
+        no_prelude_model(prompt, cache=no_prelude_model.make_cache())
 
-def test_inkling2_nvfp4_global_scale_and_sanitize() -> None:
+
+def test_inkling2_nvfp4_global_scale_to_quantized_and_sanitize() -> None:
     mx = pytest.importorskip("mlx.core")
+    pytest.importorskip("mlx_lm")
     from agents.architectures.inkling2 import Model, ModelArgs
-    from agents.architectures.inkling2.moe import QuantizedSwitchLinear
+    from agents.architectures.inkling2.moe import QuantizedSwitchLinear, SwitchLinear
 
     mx.random.seed(7)
     w = mx.random.normal((4, 32, 64)).astype(mx.bfloat16)
@@ -244,6 +437,16 @@ def test_inkling2_nvfp4_global_scale_and_sanitize() -> None:
     max_diff = float(mx.max(mx.abs(out.astype(mx.float32) - ref)).item())
     assert max_diff < 5e-2
 
+    # SwitchLinear.to_quantized() quantizes the source weights (not random weights)
+    sl = SwitchLinear(input_dims=64, output_dims=32, num_experts=4, bias=False)
+    sl.weight = w
+    ql_from_sl = sl.to_quantized(group_size=32, bits=8, mode="mxfp8")
+    out_sl = sl(x, indices)
+    out_ql = ql_from_sl(x, indices)
+    mx.eval(out_sl, out_ql)
+    mean_diff = float(mx.mean(mx.abs(out_sl.astype(mx.float32) - out_ql.astype(mx.float32))).item())
+    assert mean_diff < 0.25
+
     # Test sanitize drops vision weights and remaps prefixes/conv1d/scales
     args = ModelArgs.from_dict(_tiny_inkling2_config())
     model = Model(args)
@@ -273,3 +476,7 @@ def test_inkling2_nvfp4_global_scale_and_sanitize() -> None:
         model.model.language_model.layers[0].mlp.experts.gate_up_proj,
         QuantizedSwitchLinear,
     )
+
+    # Incomplete cross-pass query pair raises ValueError naming the missing tensor
+    with pytest.raises(ValueError, match="cross_pass_kv_queries"):
+        model.sanitize({"model.llm.cross_pass_queries": mx.zeros((2, 64))})

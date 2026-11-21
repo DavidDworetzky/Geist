@@ -94,11 +94,20 @@ class TextModel(nn.Module):
         prelude = run(self.layers[: core.start], hidden_states, None)
         hidden_states, block_states = prelude
         assert self.args.loop_config is not None
-        for loop_pass in range(int(self.args.loop_config["num_passes"])):
+        num_passes = int(self.args.loop_config["num_passes"])
+        if num_passes > 1 and prelude[1] is None:
+            raise ValueError(
+                "Looped Inkling 2 execution with num_passes > 1 requires prelude layers "
+                "to produce at least one attention-residual block state."
+            )
+        for loop_pass in range(num_passes):
             bank = None
             if loop_pass > 0:
+                assert prelude[1] is not None and block_states is not None
+                # block_states is stacked along axis 0: (num_blocks, batch, seq, hidden).
+                prelude_blocks = prelude[1].shape[0]
                 bank = (
-                    block_states[prelude[1].shape[0] + 1 :],
+                    block_states[prelude_blocks + 1 :],
                     unweighted_rms_norm(hidden_states.astype(mx.float32)),
                 )
                 hidden_states, block_states = prelude

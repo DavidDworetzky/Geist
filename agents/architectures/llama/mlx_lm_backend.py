@@ -50,14 +50,18 @@ def _read_local_model_type(path_or_id: str) -> str | None:
         return None
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     model_type = data.get("model_type")
     return model_type if isinstance(model_type, str) else None
 
 
 def _load_model_and_tokenizer(path_or_id: str) -> tuple[Any, Any]:
-    """Load an MLX model and tokenizer, routing Inkling 2 to Geist's in-repo architecture."""
+    """Load an MLX model and tokenizer, routing local Inkling 2 snapshots to Geist's architecture.
+
+    Inkling 2 detection inspects ``config.json`` inside a local snapshot directory
+    (which ``MLXLlamaRunner`` supplies via ``weights_dir`` from the managed store).
+    """
     model_type = _read_local_model_type(path_or_id)
     if model_type in INKLING2_MODEL_TYPES:
         from mlx_lm.utils import load_model, load_tokenizer
@@ -127,6 +131,7 @@ class _InklingStreamFilter:
         + (
             "<|message_model|>",
             "<|content_thinking|>",
+            "<|content_invoke_tool_json|>",
         )
     )
 
@@ -148,11 +153,20 @@ class _InklingStreamFilter:
                         text_pos = idx
                         text_marker = marker
                 if text_pos != -1:
+                    if text_pos and not self._saw_markup:
+                        output.append(self._buffer[:text_pos])
                     self._saw_markup = True
                     self._in_text = True
                     self._buffer = self._buffer[text_pos + len(text_marker) :]
                     continue
-                if any(m in self._buffer for m in self._ALL_MARKERS):
+                marker_pos = -1
+                for marker in self._ALL_MARKERS:
+                    idx = self._buffer.find(marker)
+                    if idx != -1 and (marker_pos == -1 or idx < marker_pos):
+                        marker_pos = idx
+                if marker_pos != -1:
+                    if marker_pos and not self._saw_markup:
+                        output.append(self._buffer[:marker_pos])
                     self._saw_markup = True
                     retained = _stop_prefix_length(self._buffer, self._TEXT_MARKERS)
                     self._buffer = self._buffer[len(self._buffer) - retained :] if retained else ""
@@ -161,13 +175,16 @@ class _InklingStreamFilter:
                     retained = _stop_prefix_length(self._buffer, self._TEXT_MARKERS)
                     self._buffer = self._buffer[len(self._buffer) - retained :] if retained else ""
                     break
-                # Wait briefly if the very start of the stream might be a control tag.
-                if len(self._buffer) < 24 and _stop_prefix_length(
+                # Wait briefly if the buffer may be a partial leading control tag.
+                if len(self._buffer) < 32 and _stop_prefix_length(
                     self._buffer, self._ALL_MARKERS
                 ) == len(self._buffer):
                     break
-                output.append(self._buffer)
-                self._buffer = ""
+                retained = _stop_prefix_length(self._buffer, self._ALL_MARKERS)
+                emit_len = len(self._buffer) - retained
+                if emit_len:
+                    output.append(self._buffer[:emit_len])
+                    self._buffer = self._buffer[emit_len:]
                 break
 
             end_pos = -1
@@ -596,19 +613,28 @@ class MLXLMBackend:
         payload = build_tool_payload(messages, tools)
         responses = self.stream_messages(payload.messages, payload.tools)
         if self._is_inkling2():
+            stream_filter = _InklingStreamFilter() if payload.tools else None
+            raw_parts: list[str] = []
             try:
-                raw_response = "".join(responses).strip()
+                for segment in responses:
+                    raw_parts.append(segment)
+                    text = stream_filter.feed(segment) if stream_filter is not None else segment
+                    if text:
+                        yield ModelEvent.text_delta(text)
+                if stream_filter is not None:
+                    tail = stream_filter.flush()
+                    if tail:
+                        yield ModelEvent.text_delta(tail)
             finally:
                 close = getattr(responses, "close", None)
                 if callable(close):
                     close()
+            raw_response = "".join(raw_parts).strip()
             turn = parse_tool_response(
                 raw_response,
                 provider_to_internal=payload.provider_to_internal,
                 tools=payload.tools,
             )
-            if turn.text:
-                yield ModelEvent.text_delta(turn.text)
             yield ModelEvent.turn_complete(turn)
             return
         parser = ToolResponseStream(payload.provider_to_internal, payload.tools)

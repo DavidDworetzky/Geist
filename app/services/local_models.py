@@ -151,7 +151,7 @@ CURATED_LOCAL_ARTIFACTS: tuple[LocalModelArtifact, ...] = (
         allow_patterns=(
             "*.json",
             "*.jinja",
-            "*.safetensors",
+            "model*.safetensors",
             "tiktoken/*",
         ),
     ),

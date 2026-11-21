@@ -112,6 +112,13 @@ def sanitize(model, weights: dict[str, mx.array]) -> dict[str, mx.array]:
         sanitized[k] = v
 
     if message_queries:
+        missing = [
+            "cross_pass_queries" if key == "q" else "cross_pass_kv_queries"
+            for key in ("q", "kv")
+            if key not in message_queries
+        ]
+        if missing:
+            raise ValueError(f"Incomplete Inkling 2 loop checkpoint: missing {', '.join(missing)}")
         dims = message_queries["q"].shape[-1]
         q = message_queries["q"].reshape(-1, 2, dims)
         kv = message_queries["kv"].reshape(-1, 2, dims)
@@ -141,6 +148,7 @@ def sanitize(model, weights: dict[str, mx.array]) -> dict[str, mx.array]:
             bits,
             mode=modes[bits, group_size],
             global_scale=f"{path}.global_scale" in sanitized,
+            quantize_weights=False,
         )
         quantized.append((path, ql))
     if quantized:

@@ -2,20 +2,20 @@
 
 ## Goal
 
-Add text-only local MLX inference for `thinkingmachines/Inkling-2-Mini` on Apple Silicon using Geist's existing pinned `mlx==0.31.2` and `mlx-lm==0.31.3` dependencies, validate live inference against the official Hugging Face checkpoint, and benchmark/implement concrete local serving speedups.
+Add text-only local MLX inference for `thinkingmachines/Inkling-2-Mini` on Apple Silicon using Geist's existing pinned `mlx==0.32.2` and `mlx-lm==0.31.3` dependencies, validate live inference against the official Hugging Face checkpoint, and benchmark/implement concrete local serving speedups.
 
 ## What Already Exists
 
 - `agents/model_catalog.py` and `agents/architectures/registry.py` expose local models and route Apple Silicon models to `mlx_llama`.
 - `app/services/local_models.py` manages immutable pinned Hugging Face snapshots (`LocalModelArtifact`) with progress tracking and atomic install.
 - `agents/architectures/mlx_llama_runner.py` and `agents/architectures/llama/mlx_lm_backend.py` load and stream non-Llama MLX models through `mlx-lm`.
-- `mlx==0.31.2` natively supports `nvfp4`, `mxfp8`, and `affine` `mx.gather_qmm`, `mx.fast.metal_kernel`, and `mx.fast.scaled_dot_product_attention(..., sinks=...)`.
+- `mlx==0.32.2` natively supports `nvfp4`, `mxfp8`, and `affine` `mx.gather_qmm`, `mx.fast.metal_kernel`, and `mx.fast.scaled_dot_product_attention(..., sinks=...)`.
 
 ## What Needs to Be Added
 
 1. **In-repo MLX Inkling 2 Mini architecture (`agents/architectures/inkling2/`)**:
    - `config.py`: `TextArgs`, `VisionArgs`, and `ModelArgs` for `inkling2_loop` / `inkling2`.
-   - `moe.py`: `SwitchLinear` and `QuantizedSwitchLinear` supporting NVFP4 per-expert `global_scale`, MXFP8, and 4-bit affine experts on `mlx==0.31.2`.
+   - `moe.py`: `SwitchLinear` and `QuantizedSwitchLinear` supporting NVFP4 per-expert `global_scale`, MXFP8, and 4-bit affine experts on `mlx==0.32.2`.
    - `kernels.py`: Fused Metal kernels for `depth_attention`, `relative_attention`, and `expert_routing`, with pure-MLX fallbacks.
    - `layers.py`: Looped decoder layers, sliding/full attention with relative position logits and learned sinks, static/dynamic short convolutions, softcapped SwiGLU MoE, block attention residuals, and cross-pass message gates.
    - `checkpoint.py`: Weight renaming and NVFP4/MXFP8 quantization wiring for both `thinkingmachines/Inkling-2-Mini` and `mlx-community/Inkling-2-Mini-4bit`, skipping unused vision weights in text-only mode.
