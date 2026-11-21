@@ -296,4 +296,15 @@ it('renders readable orchestration task markers', () => {
   } }]} />);
   expect(screen.getByText('\u2713')).toBeInTheDocument();
   expect(screen.getByText('\u25cb')).toBeInTheDocument();
+  expect(screen.getByText('Steps 1/2 completed')).toBeInTheDocument();
+});
+
+it('shows Direct response instead of 0/0 steps for completed direct answers', () => {
+  render(<ChatTextArea chatHistory={[{ user: 'write a haiku', ai: 'Leaves drift down', orchestration: {
+    agentic_mode: true,
+    goal_status: 'complete',
+    tasks: [],
+  } }]} />);
+  expect(screen.getByText('Direct response')).toBeInTheDocument();
+  expect(screen.queryByText(/Steps 0\/0/)).not.toBeInTheDocument();
 });

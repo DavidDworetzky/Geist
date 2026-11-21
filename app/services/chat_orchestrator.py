@@ -337,7 +337,9 @@ class ChatOrchestrator:
             # This retention budget is soft; the provider enforces its token limit.
             if size > remaining_chars and not pending_reasoning:
                 block = [
-                    replace(item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                    replace(
+                        item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                    )
                     for item in block
                 ]
                 size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
@@ -441,7 +443,9 @@ class ChatOrchestrator:
             # Prior chat turns are complete. Resume active tool reasoning from
             # trusted goal checkpoints, not from ordinary conversation history.
             block = [
-                replace(message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None)
+                replace(
+                    message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                )
                 for message in self._entry_messages(entry)
             ]
             if not block:
@@ -721,6 +725,8 @@ class ChatOrchestrator:
                 runtime.checkpoint(self._checkpoint_messages(run.model_messages))
             return instructions
 
+        goal_state_prompt: str | None = None
+        goal_state_insert_index: int | None = None
         try:
             if goal_loop_enabled:
                 saved = (
@@ -776,7 +782,7 @@ class ChatOrchestrator:
                     self.goal_store.attach_chat(runtime.state.goal_id, chat_id)
                 context = replace(context, coding_workspace_id=runtime.state.workspace_id)
                 self.orchestration_runs.start(run.run_id, runtime)
-                orchestration_prompt = runtime.execution_prompt()
+                orchestration_prompt = runtime.static_execution_prompt()
                 if conversation.messages and conversation.messages[0].role == "system":
                     current_prompt = conversation.messages[0].content or ""
                     conversation.messages[
@@ -786,6 +792,11 @@ class ChatOrchestrator:
                     conversation.messages.insert(
                         0, ChatMessage(role="system", content=orchestration_prompt)
                     )
+                goal_state_prompt = runtime.state_context_prompt()
+                if goal_state_prompt is not None:
+                    # Anchor dynamic resumed-goal state right before the latest user
+                    # prompt without mutating the static system message or checkpoint.
+                    goal_state_insert_index = max(1, len(run.model_messages) - 1)
                 snapshot = runtime.snapshot()
                 yield ChatStreamEvent(
                     "plan",
@@ -840,6 +851,11 @@ class ChatOrchestrator:
                 completed_turn = None
                 with run.persistence_lock:
                     model_messages = self._model_context(run.model_messages)
+                if goal_state_prompt is not None and goal_state_insert_index is not None:
+                    insert_at = min(goal_state_insert_index, len(model_messages))
+                    model_messages.insert(
+                        insert_at, ChatMessage(role="user", content=goal_state_prompt)
+                    )
                 if format_correction:
                     model_messages.append(ChatMessage(role="user", content=format_correction))
                 responses = None

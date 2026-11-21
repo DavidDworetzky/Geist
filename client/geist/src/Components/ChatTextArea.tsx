@@ -104,7 +104,11 @@ const ChatTurn = memo(({ element, onToolApproval }: {
                   </span>
                 )}
                 <span className="input-help">
-                  Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
+                  {element.orchestration.tasks.length > 0
+                    ? `Steps ${element.orchestration.tasks.filter((task) => task.status === 'completed').length}/${element.orchestration.tasks.length} completed`
+                    : element.orchestration.goal_status === 'complete'
+                      ? 'Direct response'
+                      : 'No plan steps yet'}
                 </span>
               </div>
               {element.orchestration.decomposition_warning && (
