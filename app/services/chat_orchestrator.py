@@ -726,7 +726,7 @@ class ChatOrchestrator:
             return instructions
 
         goal_state_prompt: str | None = None
-        goal_state_insert_index: int | None = None
+        goal_state_anchor: ChatMessage | None = None
         try:
             if goal_loop_enabled:
                 saved = (
@@ -794,9 +794,12 @@ class ChatOrchestrator:
                     )
                 goal_state_prompt = runtime.state_context_prompt()
                 if goal_state_prompt is not None:
-                    # Anchor dynamic resumed-goal state right before the latest user
-                    # prompt without mutating the static system message or checkpoint.
-                    goal_state_insert_index = max(1, len(run.model_messages) - 1)
+                    # Anchor dynamic resumed-goal state to the latest user message
+                    # object so _model_context trimming never places it between an
+                    # assistant tool_calls turn and its tool results.
+                    initial_messages = run.model_messages
+                    if initial_messages and initial_messages[-1].role == "user":
+                        goal_state_anchor = initial_messages[-1]
                 snapshot = runtime.snapshot()
                 yield ChatStreamEvent(
                     "plan",
@@ -851,8 +854,24 @@ class ChatOrchestrator:
                 completed_turn = None
                 with run.persistence_lock:
                     model_messages = self._model_context(run.model_messages)
-                if goal_state_prompt is not None and goal_state_insert_index is not None:
-                    insert_at = min(goal_state_insert_index, len(model_messages))
+                if goal_state_prompt is not None:
+                    insert_at = next(
+                        (
+                            index
+                            for index, message in enumerate(model_messages)
+                            if goal_state_anchor is not None and message is goal_state_anchor
+                        ),
+                        None,
+                    )
+                    if insert_at is None:
+                        insert_at = next(
+                            (
+                                index
+                                for index, message in enumerate(model_messages)
+                                if message.role != "system"
+                            ),
+                            len(model_messages),
+                        )
                     model_messages.insert(
                         insert_at, ChatMessage(role="user", content=goal_state_prompt)
                     )

@@ -2677,3 +2677,110 @@ def test_agentic_system_prompt_stays_static_across_fresh_and_resumed_runs():
         for msg in resumed_messages[1:-1]
     )
     assert resumed_messages[-1] == {"role": "user", "content": "Continue"}
+
+
+def test_resumed_goal_state_never_splits_tool_call_and_result_under_trimming():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        max_history_entries=2,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=56),
+    )
+
+    paused = GoalRuntime(objective="Finish migration", tasks=[], max_turns=8)
+    paused.update_plan([{"task_id": "step-1", "title": "Inspect schema", "status": "in_progress"}])
+    paused.state.goal_status = "paused"
+    goal_store.latest = paused.checkpoint(
+        [
+            {"role": "user", "content": "Finish migration"},
+            {"role": "assistant", "content": "Starting schema inspection."},
+            {"role": "user", "content": "Also check indexes"},
+        ]
+    )
+
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_1",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-1",
+                                    "title": "Inspect schema",
+                                    "status": "completed",
+                                    "evidence": "Schema inspected",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_2",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-2",
+                                    "title": "Check indexes",
+                                    "status": "completed",
+                                    "evidence": "Indexes checked",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="complete_1",
+                        name="agent.goal.complete",
+                        arguments={
+                            "summary": "Migration checks complete",
+                            "evidence": ["Schema inspected", "Indexes checked"],
+                        },
+                    )
+                ]
+            ),
+        ]
+    )
+
+    list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Continue",
+            workspace_id=7,
+            chat_id=56,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    assert len(backend.requests) == 3
+    for request in backend.requests:
+        messages = request["messages"]
+        assert messages[0]["role"] == "system"
+        assert "Current state:" not in messages[0]["content"]
+        assert any(
+            msg["role"] == "user" and "Current goal state:" in (msg["content"] or "")
+            for msg in messages[1:]
+        )
+        for index, msg in enumerate(messages):
+            tool_calls = msg.get("tool_calls") or []
+            if msg["role"] == "assistant" and tool_calls:
+                expected_ids = [call["id"] for call in tool_calls]
+                following = messages[index + 1 : index + 1 + len(expected_ids)]
+                assert [item["role"] for item in following] == ["tool"] * len(expected_ids)
+                assert [item["tool_call_id"] for item in following] == expected_ids
