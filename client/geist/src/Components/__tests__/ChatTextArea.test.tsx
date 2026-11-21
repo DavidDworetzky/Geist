@@ -299,12 +299,23 @@ it('renders readable orchestration task markers', () => {
   expect(screen.getByText('Steps 1/2 completed')).toBeInTheDocument();
 });
 
-it('shows Direct response instead of 0/0 steps for completed direct answers', () => {
+it('omits the agentic plan card for direct responses with no plan steps', () => {
   render(<ChatTextArea chatHistory={[{ user: 'write a haiku', ai: 'Leaves drift down', orchestration: {
     agentic_mode: true,
     goal_status: 'complete',
     tasks: [],
   } }]} />);
-  expect(screen.getByText('Direct response')).toBeInTheDocument();
-  expect(screen.queryByText(/Steps 0\/0/)).not.toBeInTheDocument();
+  expect(screen.getByText('Leaves drift down')).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Agentic progress' })).not.toBeInTheDocument();
+});
+
+it('still shows the agentic progress card when a zero-task goal needs attention', () => {
+  render(<ChatTextArea chatHistory={[{ user: 'deploy', ai: '', orchestration: {
+    agentic_mode: true,
+    goal_status: 'waiting_for_user',
+    tasks: [],
+  } }]} />);
+  const progress = screen.getByRole('region', { name: 'Agentic progress' });
+  expect(progress).toHaveTextContent('waiting for user');
+  expect(progress).not.toHaveTextContent('Steps 0/0');
 });

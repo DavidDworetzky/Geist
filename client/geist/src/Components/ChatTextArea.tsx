@@ -20,6 +20,20 @@ const approvalChoices: { decision: ToolApprovalDecision; label: string }[] = [
   { decision: 'deny', label: 'Deny' }
 ];
 
+function shouldShowAgenticPlan(orchestration: ChatPair['orchestration']): boolean {
+  if (!orchestration) {
+    return false;
+  }
+  if (orchestration.tasks.length > 0 || orchestration.decomposition_warning) {
+    return true;
+  }
+  return Boolean(
+    orchestration.goal_status
+      && orchestration.goal_status !== 'active'
+      && orchestration.goal_status !== 'complete',
+  );
+}
+
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
   onToolApproval?: (
@@ -94,7 +108,7 @@ const ChatTurn = memo(({ element, onToolApproval }: {
             </div>
           )}
 
-          {element.orchestration && (
+          {shouldShowAgenticPlan(element.orchestration) && element.orchestration && (
             <section className="agentic-progress" aria-label="Agentic progress">
               <div className="agentic-progress-header">
                 <strong>Agentic plan</strong>
@@ -103,13 +117,11 @@ const ChatTurn = memo(({ element, onToolApproval }: {
                     {statusLabel(element.orchestration.goal_status)}
                   </span>
                 )}
-                <span className="input-help">
-                  {element.orchestration.tasks.length > 0
-                    ? `Steps ${element.orchestration.tasks.filter((task) => task.status === 'completed').length}/${element.orchestration.tasks.length} completed`
-                    : element.orchestration.goal_status === 'complete'
-                      ? 'Direct response'
-                      : 'No plan steps yet'}
-                </span>
+                {element.orchestration.tasks.length > 0 && (
+                  <span className="input-help">
+                    Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
+                  </span>
+                )}
               </div>
               {element.orchestration.decomposition_warning && (
                 <div className="input-help">{element.orchestration.decomposition_warning}</div>
