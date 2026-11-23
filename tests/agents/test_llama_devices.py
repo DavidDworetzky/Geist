@@ -277,6 +277,7 @@ def test_duplicate_group_and_unique_device_survive_reordering(tmp_path: Path) ->
 
     inventory = discover()
     group, other = inventory.devices
+    assert inventory.recommended_device_ids == (other.id,)
     assert inventory.error is None
     assert group.name == f"{name} (group of 2)"
     assert group.free_memory_mib == 43000
@@ -292,9 +293,28 @@ def test_duplicate_group_and_unique_device_survive_reordering(tmp_path: Path) ->
     assert reordered.resolve_runtime_ids((group.id,)) == ("Vulkan3", "Vulkan7")
     assert reordered.resolve_runtime_ids((other.id,)) == ("Vulkan5",)
     assert reordered.devices[1].free_memory_mib is None
+    output = f"Vulkan3: {name}\nVulkan7: {name}"
+    assert discover().recommended_device_ids == (group.id,)
     output += f"\nVulkan8: {name}"
     with pytest.raises(ValueError, match="unavailable"):
         discover().resolve_device_ids((group.id,))
+
+
+def test_mixed_identity_warns_about_unselectable_twin(tmp_path: Path, caplog) -> None:
+    runtime = _runtime_tree(tmp_path)
+    output = "Vulkan0: NVIDIA RTX 4090 [PCI=0000:01:00.0]\nVulkan1: NVIDIA RTX 4090"
+    inventory = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=output, stderr=""
+        ),
+    ).inventory()
+
+    assert inventory.error is None
+    assert inventory.resolve_runtime_ids(inventory.recommended_device_ids) == ("Vulkan0",)
+    message = "One additional NVIDIA RTX 4090 cannot be selected individually"
+    assert message in inventory.reason
+    assert message in caplog.text
 
 
 def test_classification_keeps_integrated_and_software_out_of_auto_selection() -> None:
