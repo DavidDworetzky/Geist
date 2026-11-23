@@ -104,29 +104,65 @@ class StaticDeviceService:
 
 
 @pytest.mark.parametrize(
-    ("failures", "spill", "expected"),
+    ("failures", "spill", "expected", "pair_first", "layers"),
     [
-        ([], True, [("Vulkan0", "999")]),
-        (["ErrorOutOfDeviceMemory"], False, [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")]),
+        (*case, False, None)
+        for case in [
+            ([], True, [("Vulkan0", "999")]),
+            (["ErrorOutOfDeviceMemory"], False, [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")]),
+            (
+                ["ErrorOutOfDeviceMemory"] * 2,
+                True,
+                [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999"), ("Vulkan0,Vulkan1", "auto")],
+            ),
+            (["std::bad_alloc"], False, [("Vulkan0", "999")]),
+            (
+                ["ErrorOutOfDeviceMemory", "unsupported device pair"],
+                False,
+                [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")],
+            ),
+            (
+                ["ErrorOutOfDeviceMemory"] * 2,
+                False,
+                [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")],
+            ),
+        ]
+    ]
+    + [
+        (
+            ["ErrorOutOfDeviceMemory"],
+            False,
+            [("Vulkan0,Vulkan1", "999"), ("Vulkan0", "999")],
+            True,
+            None,
+        ),
         (
             ["ErrorOutOfDeviceMemory"] * 2,
             True,
-            [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999"), ("Vulkan0,Vulkan1", "auto")],
+            [("Vulkan0,Vulkan1", "999"), ("Vulkan0,Vulkan1", "auto"), ("Vulkan0", "auto")],
+            True,
+            None,
         ),
-        (["std::bad_alloc"], False, [("Vulkan0", "999")]),
-        (
-            ["ErrorOutOfDeviceMemory", "unsupported device pair"],
-            False,
-            [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")],
-        ),
-        (["ErrorOutOfDeviceMemory"] * 2, False, [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")]),
+        (["ErrorOutOfDeviceMemory"], False, [("Vulkan0", "12")], False, "12"),
     ],
 )
-def test_auto_placement_order(tmp_path, failures, spill, expected):
+def test_auto_placement_order(tmp_path, monkeypatch, failures, spill, expected, pair_first, layers):
     runtime = _runtime_tree(tmp_path)
     model = tmp_path / "model.gguf"
     model.touch()
     launches = []
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    if layers:
+        environment["GEIST_LLAMA_GPU_LAYERS"] = layers
+        monkeypatch.setattr(
+            "agents.architectures.llama_server_process._fits_gpu_memory",
+            lambda *_: pytest.fail("layer override must bypass estimation"),
+        )
+    elif pair_first:
+        monkeypatch.setattr(
+            "agents.architectures.llama_server_process._fits_gpu_memory",
+            lambda _exe, _model, devices, _env: len(devices) == 2,
+        )
 
     def factory(args, **_options):
         launches.append((args[args.index("--device") + 1], args[args.index("--n-gpu-layers") + 1]))
@@ -141,7 +177,7 @@ def test_auto_placement_order(tmp_path, failures, spill, expected):
             raise RuntimeError("startup failed")
 
     manager = LlamaServerManager(
-        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        environment=environment,
         device_service=StaticDeviceService(device_count=2),
         process_factory=factory,
         health_probe=health,
@@ -162,6 +198,13 @@ def test_auto_placement_order(tmp_path, failures, spill, expected):
 @pytest.mark.parametrize(
     ("single", "pair", "expected"),
     [
+        # Captured stdout from Pitchblend b10068 (571d0d540), Qwen3-4B-Q4_K_M,
+        # RTX 3080 Laptop, --ctx-size 8192 --n-gpu-layers 999 --fit-print on.
+        (
+            "Vulkan0 2375 1152 301 \nHost 304 0 18 \n",
+            "Vulkan0 1000 512 24\nVulkan1 1000 513 24",
+            "Vulkan0,Vulkan1",
+        ),
         ("Vulkan0 2000 1024 48", "", "Vulkan0"),
         ("Vulkan0 2000 1025 48", "Vulkan0 1000 512 24\nVulkan1 1000 513 24", "Vulkan0,Vulkan1"),
         ("Vulkan0 2000 1025 48", "Vulkan0 1000 512 24\nVulkan1 3900 513 24", "Vulkan0"),
@@ -194,6 +237,63 @@ def test_auto_fit_checks_context_compute_and_headroom_per_card(
     try:
         selection = manager.start(model, "model").device_ids
         assert selection == (("gpu-0", "gpu-1") if "," in expected else ("gpu-0",))
+    finally:
+        manager.stop()
+
+
+@pytest.mark.parametrize("refresh_delay", [0, 3])
+def test_auto_switch_discards_free_memory_sampled_with_previous_model_loaded(
+    tmp_path, monkeypatch, refresh_delay
+):
+    runtime = _runtime_tree(tmp_path)
+    (runtime / "vulkan" / llama_server_filename()).with_stem("llama-fit-params").touch()
+    model = tmp_path / "model.gguf"
+    model.touch()
+    now = [100.0]
+    processes = []
+    free_samples = []
+
+    def probe(*_args, **_kwargs):
+        loaded = processes and processes[-1].poll() is None
+        free = 2500 if loaded else 6000
+        return subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=(
+                f"Vulkan0: NVIDIA RTX 4090 (8000 MiB, {free} MiB free)\n"
+                "Vulkan1: NVIDIA RTX 4080 (8000 MiB, 2000 MiB free)"
+            ),
+            stderr="",
+        )
+
+    def estimate(_exe, _model, devices, _env):
+        free_samples.append(devices[0].free_memory_mib)
+        return devices[0].free_memory_mib >= 4000 or len(devices) == 2
+
+    def factory(args, **_kwargs):
+        processes.append(FakeProcess(args))
+        return processes[-1]
+
+    monkeypatch.setattr("agents.architectures.llama_server_process._fits_gpu_memory", estimate)
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    service = LlamaDeviceService(
+        environment=environment, command_runner=probe, clock=lambda: now[0]
+    )
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=factory,
+        device_service=service,
+        health_probe=lambda *_: None,
+    )
+    try:
+        manager.start(model, "first")
+        now[0] += 3
+        assert service.inventory(refresh=True).devices[0].free_memory_mib == 2500
+        now[0] += refresh_delay
+        manager.start(model, "second")
+        assert processes[0].terminated
+        assert processes[-1].args[processes[-1].args.index("--device") + 1] == "Vulkan0"
+        assert free_samples == ([6000, 6000] if refresh_delay else [6000])
     finally:
         manager.stop()
 

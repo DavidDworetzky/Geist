@@ -283,7 +283,12 @@ class LlamaServerManager:
         return backend, device_ids
 
     def _auto_gpu_candidates(
-        self, inventory: LlamaDeviceInventory, executable: Path, model: Path, allow_system_ram: bool
+        self,
+        inventory: LlamaDeviceInventory,
+        executable: Path,
+        model: Path,
+        allow_system_ram: bool,
+        placement_started_at: float,
     ) -> list[LlamaServerCandidate]:
         ids = inventory.recommended_device_ids
         primary = LlamaServerCandidate(
@@ -302,7 +307,10 @@ class LlamaServerManager:
         pair = LlamaServerCandidate(
             "vulkan", executable, (first.runtime_id, second.runtime_id), (first.id, second.id)
         )
-        first_fits = _fits_gpu_memory(executable, model, (first,), self.environment)
+        # A rate-limited refresh can return a probe begun before the old model stopped.
+        first_fits = None
+        if inventory.probe_started_at >= placement_started_at:
+            first_fits = _fits_gpu_memory(executable, model, (first,), self.environment)
         pair_first = (
             first_fits is False
             and _fits_gpu_memory(executable, model, (first, second), self.environment) is True
@@ -355,10 +363,18 @@ class LlamaServerManager:
                 )
             ]
         else:
-            inventory = self._device_service.inventory()
+            placement_started_at = time.perf_counter()
+            executable = root / "vulkan" / filename
+            if (
+                executable.with_stem("llama-fit-params").is_file()
+                and "GEIST_LLAMA_GPU_LAYERS" not in self.environment
+            ):
+                inventory = self._device_service.inventory(refresh=True)
+            else:
+                inventory = self._device_service.inventory()
             if inventory.recommended_backend == "gpu" and inventory.recommended_device_ids:
                 candidates = self._auto_gpu_candidates(
-                    inventory, root / "vulkan" / filename, model, allow_system_ram
+                    inventory, executable, model, allow_system_ram, placement_started_at
                 )
                 candidates.append(LlamaServerCandidate("cpu", root / "cpu" / filename))
             else:

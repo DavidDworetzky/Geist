@@ -10,7 +10,7 @@ import subprocess  # nosec B404 -- runs a fixed flag against a verified managed 
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -102,6 +102,7 @@ class LlamaDeviceInventory:
     cache_policy: Literal["positive", "negative"] = "positive"
     selection_detection_error: str | None = None
     discovery_in_progress: bool = False
+    probe_started_at: float = field(default_factory=time.perf_counter, compare=False, repr=False)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -560,6 +561,7 @@ class LlamaDeviceService:
 
     def _probe_inventory(self, generation: int) -> None:
         try:
+            probe_started_at = time.perf_counter()
             inventory = self._discover_inventory()
             completed_at = self.clock()
         except BaseException as error:
@@ -585,7 +587,7 @@ class LlamaDeviceService:
                     if inventory.cache_policy == "negative"
                     else self.cache_ttl_seconds
                 )
-                self._cached_inventory = inventory
+                self._cached_inventory = replace(inventory, probe_started_at=probe_started_at)
                 self._cached_inventory_expires_at = completed_at + ttl_seconds
                 self._next_refresh_allowed_at = completed_at + self.minimum_refresh_interval_seconds
             finally:
