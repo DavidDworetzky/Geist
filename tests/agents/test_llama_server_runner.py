@@ -286,8 +286,8 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
                 0,
                 stdout=(
                     "Available devices:\n"
-                    "  Vulkan0: NVIDIA RTX 4090\n"
-                    "  Vulkan1: NVIDIA RTX 4090\n"
+                    "  Vulkan0: NVIDIA RTX 4090 [PCI=0000:01:00.0]\n"
+                    "  Vulkan1: NVIDIA RTX 4090 [PCI=0000:01:00.0]\n"
                 ),
                 stderr="",
             )
