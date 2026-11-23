@@ -20,9 +20,12 @@ from typing import Any
 import httpx
 
 from agents.architectures.llama_devices import (
+    LlamaDevice,
+    LlamaDeviceInventory,
     LlamaDeviceService,
     get_llama_device_service,
     llama_server_filename,
+    recommend_device,
 )
 from agents.architectures.llama_server_process_platform import (
     attach_process_lifetime,
@@ -48,6 +51,7 @@ class LlamaServerConnection:
     selection_device_ids: tuple[str, ...] = ()
     detection_error: str | None = None
     allow_system_ram: bool = False
+    model_specific_placement: bool = False
 
 
 @dataclass
@@ -95,6 +99,69 @@ class LlamaServerCandidate:
     runtime_device_ids: tuple[str, ...] = ()
     public_device_ids: tuple[str, ...] = ()
     detection_error: str | None = None
+
+    full_offload: bool = False
+    requires_gpu_oom: bool = False
+
+
+def _fits_gpu_memory(
+    executable: Path, model: Path, devices: tuple[LlamaDevice, ...], environment: Mapping[str, str]
+) -> bool | None:
+    """Ask the sibling llama.cpp estimator for model, KV and compute allocations per GPU."""
+    estimator = executable.with_name("llama-fit-params" + executable.suffix)
+    if not estimator.is_file() or any(device.free_memory_mib is None for device in devices):
+        return None
+    ids = [device.runtime_id for device in devices]
+    args = [
+        str(estimator),
+        "--model",
+        str(model),
+        "--device",
+        ",".join(ids),
+        "--ctx-size",
+        environment.get("GEIST_LLAMA_CONTEXT_SIZE", "32768").strip(),
+        "--n-gpu-layers",
+        "999",
+        "--fit-print",
+        "on",
+    ]
+    try:
+        result = subprocess.run(  # nosec B603 -- fixed sibling of the managed executable
+            args,
+            cwd=executable.parent,
+            env=dict(environment),
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode:
+        return None
+    allocations = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if fields and fields[0] in ids:
+            if (
+                len(fields) != 4
+                or fields[0] in allocations
+                or not all(
+                    field.isascii() and field.isdecimal() and len(field) <= 12
+                    for field in fields[1:]
+                )
+            ):
+                return None
+            allocations[fields[0]] = sum(map(int, fields[1:]))
+    if set(allocations) != set(ids) or not all(allocations.values()):
+        return None
+    # Reserve one GiB on each adapter for the driver and concurrent desktop use.
+    return all(
+        allocations[device.runtime_id] + 1024 <= device.free_memory_mib
+        for device in devices
+        if device.free_memory_mib is not None
+    )
 
 
 def _server_filename(system: str | None = None) -> str:
@@ -215,10 +282,46 @@ class LlamaServerManager:
             return "cpu", ()
         return backend, device_ids
 
+    def _auto_gpu_candidates(
+        self, inventory: LlamaDeviceInventory, executable: Path, model: Path, allow_system_ram: bool
+    ) -> list[LlamaServerCandidate]:
+        ids = inventory.recommended_device_ids
+        primary = LlamaServerCandidate(
+            "vulkan", executable, inventory.resolve_runtime_ids(ids), ids
+        )
+        singles = [
+            device
+            for device in inventory.devices
+            if device.kind == "discrete" and not device.additional_runtime_ids
+        ]
+        first = next((device for device in singles if (device.id,) == ids), None)
+        second = recommend_device([device for device in singles if device != first])
+        if first is None or second is None or "GEIST_LLAMA_GPU_LAYERS" in self.environment:
+            return [primary]
+
+        pair = LlamaServerCandidate(
+            "vulkan", executable, (first.runtime_id, second.runtime_id), (first.id, second.id)
+        )
+        first_fits = _fits_gpu_memory(executable, model, (first,), self.environment)
+        pair_first = (
+            first_fits is False
+            and _fits_gpu_memory(executable, model, (first, second), self.environment) is True
+        )
+        candidates = [] if pair_first else [replace(primary, full_offload=True)]
+        candidates.append(replace(pair, full_offload=True, requires_gpu_oom=not pair_first))
+        if allow_system_ram:
+            candidates.append(replace(pair, requires_gpu_oom=True))
+        if pair_first or allow_system_ram:
+            # Mixed adapters can fail together even when both memory estimates fit.
+            candidates.append(replace(primary, full_offload=not allow_system_ram))
+        return candidates
+
     def _candidate_executables(
         self,
         backend: str,
         device_ids: tuple[str, ...],
+        model: Path,
+        allow_system_ram: bool,
     ) -> list[LlamaServerCandidate]:
         explicit = self.environment.get("GEIST_LLAMA_SERVER_PATH")
         if explicit:
@@ -254,16 +357,10 @@ class LlamaServerManager:
         else:
             inventory = self._device_service.inventory()
             if inventory.recommended_backend == "gpu" and inventory.recommended_device_ids:
-                recommended_ids = inventory.recommended_device_ids
-                candidates = [
-                    LlamaServerCandidate(
-                        "vulkan",
-                        root / "vulkan" / filename,
-                        inventory.resolve_runtime_ids(recommended_ids),
-                        recommended_ids,
-                    ),
-                    LlamaServerCandidate("cpu", root / "cpu" / filename),
-                ]
+                candidates = self._auto_gpu_candidates(
+                    inventory, root / "vulkan" / filename, model, allow_system_ram
+                )
+                candidates.append(LlamaServerCandidate("cpu", root / "cpu" / filename))
             else:
                 candidates = [
                     LlamaServerCandidate(
@@ -335,6 +432,8 @@ class LlamaServerManager:
                 candidates = self._candidate_executables(
                     selection_backend,
                     selection_device_ids,
+                    resolved_model,
+                    allow_system_ram,
                 )
             except Exception as error:
                 with self._lock:
@@ -350,7 +449,26 @@ class LlamaServerManager:
             errors: list[str] = []
             prior_startup_error: str | None = None
             last_error: Exception | None = None
+            gpu_memory_failure: ModelMemoryError | None = None
+            adaptive = any(candidate.full_offload for candidate in candidates)
             for candidate in candidates:
+                with self._lock:
+                    if requested_epoch != self._stop_epoch:
+                        raise RuntimeError("llama-server startup was cancelled")
+                if candidate.backend == "cpu" and gpu_memory_failure and not allow_system_ram:
+                    last_error = gpu_memory_failure
+                    break
+                gpu_oom = (
+                    isinstance(last_error, ModelMemoryError) and last_error.code == "gpu_memory"
+                )
+                if candidate.requires_gpu_oom and not gpu_oom:
+                    continue
+                if (
+                    isinstance(last_error, ModelMemoryError)
+                    and not allow_system_ram
+                    and not (gpu_oom and candidate.full_offload)
+                ):
+                    break
                 startup_candidate = (
                     replace(candidate, detection_error=prior_startup_error)
                     if prior_startup_error is not None and candidate.detection_error is None
@@ -365,6 +483,7 @@ class LlamaServerManager:
                         selection_backend,
                         selection_device_ids,
                         allow_system_ram,
+                        adaptive,
                     )
                 except Exception as error:
                     with self._lock:
@@ -373,10 +492,10 @@ class LlamaServerManager:
                         self._stop_locked()
                     prior_startup_error = str(error)
                     last_error = error
+                    if isinstance(error, ModelMemoryError) and error.code == "gpu_memory":
+                        gpu_memory_failure = error
                     errors.append(f"{candidate.backend}: {error}")
                     logger.warning("llama-server %s startup failed: %s", candidate.backend, error)
-                    if isinstance(error, ModelMemoryError) and not allow_system_ram:
-                        break
 
             detail = "; ".join(errors) or "No llama-server runtime candidate was available"
             with self._lock:
@@ -394,6 +513,7 @@ class LlamaServerManager:
         selection_backend: str,
         selection_device_ids: tuple[str, ...],
         allow_system_ram: bool,
+        adaptive: bool,
     ) -> LlamaServerConnection:
         executable = candidate.executable
         backend = candidate.backend
@@ -420,7 +540,8 @@ class LlamaServerManager:
         args.extend(["--ctx-size", context_size])
         if backend == "vulkan":
             gpu_layers = self.environment.get(
-                "GEIST_LLAMA_GPU_LAYERS", "auto" if allow_system_ram else "999"
+                "GEIST_LLAMA_GPU_LAYERS",
+                "auto" if allow_system_ram and not candidate.full_offload else "999",
             ).strip()
             if gpu_layers != "auto" and not gpu_layers.isdigit():
                 raise ValueError("GEIST_LLAMA_GPU_LAYERS must be auto or a non-negative integer")
@@ -490,6 +611,7 @@ class LlamaServerManager:
                 selection_device_ids,
                 candidate.detection_error,
                 allow_system_ram,
+                adaptive,
             )
             self._connection = connection
             self._state = LlamaServerState(

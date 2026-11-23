@@ -103,6 +103,101 @@ class StaticDeviceService:
         return tuple(by_id[device_id] for device_id in device_ids)
 
 
+@pytest.mark.parametrize(
+    ("failures", "spill", "expected"),
+    [
+        ([], True, [("Vulkan0", "999")]),
+        (["ErrorOutOfDeviceMemory"], False, [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")]),
+        (
+            ["ErrorOutOfDeviceMemory"] * 2,
+            True,
+            [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999"), ("Vulkan0,Vulkan1", "auto")],
+        ),
+        (["std::bad_alloc"], False, [("Vulkan0", "999")]),
+        (
+            ["ErrorOutOfDeviceMemory", "unsupported device pair"],
+            False,
+            [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")],
+        ),
+        (["ErrorOutOfDeviceMemory"] * 2, False, [("Vulkan0", "999"), ("Vulkan0,Vulkan1", "999")]),
+    ],
+)
+def test_auto_placement_order(tmp_path, failures, spill, expected):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    launches = []
+
+    def factory(args, **_options):
+        launches.append((args[args.index("--device") + 1], args[args.index("--n-gpu-layers") + 1]))
+        process = FakeProcess(args)
+        if len(launches) <= len(failures):
+            process.stdout = io.StringIO(failures[len(launches) - 1])
+            process.returncode = 1
+        return process
+
+    def health(_url, _key, process, _timeout):
+        if process.poll() is not None:
+            raise RuntimeError("startup failed")
+
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        device_service=StaticDeviceService(device_count=2),
+        process_factory=factory,
+        health_probe=health,
+    )
+    try:
+        if len(expected) == len(failures):
+            with pytest.raises(ModelMemoryError):
+                manager.start(model, "model", allow_system_ram=spill)
+        else:
+            connection = manager.start(model, "model", allow_system_ram=spill)
+            assert connection.model_specific_placement
+            assert manager.start(model, "model", allow_system_ram=spill) is connection
+        assert launches == expected
+    finally:
+        manager.stop()
+
+
+@pytest.mark.parametrize(
+    ("single", "pair", "expected"),
+    [
+        ("Vulkan0 2000 1024 48", "", "Vulkan0"),
+        ("Vulkan0 2000 1025 48", "Vulkan0 1000 512 24\nVulkan1 1000 513 24", "Vulkan0,Vulkan1"),
+        ("Vulkan0 2000 1025 48", "Vulkan0 1000 512 24\nVulkan1 3900 513 24", "Vulkan0"),
+        ("Vulkan0 2000 1025 48", "Vulkan0 1000 512 24", "Vulkan0"),
+        ("invalid", "", "Vulkan0"),
+    ],
+)
+def test_auto_fit_checks_context_compute_and_headroom_per_card(
+    tmp_path, monkeypatch, single, pair, expected
+):
+    runtime = _runtime_tree(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    estimator = (runtime / "vulkan" / llama_server_filename()).with_stem("llama-fit-params")
+    estimator.touch()
+
+    def estimate(args, **kwargs):
+        assert args[0] == str(estimator)
+        assert args[args.index("--ctx-size") + 1] == "8192"
+        output = pair if args[args.index("--device") + 1] == "Vulkan0,Vulkan1" else single
+        return subprocess.CompletedProcess(args, 0, stdout=output)
+
+    monkeypatch.setattr(subprocess, "run", estimate)
+    manager = LlamaServerManager(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime), "GEIST_LLAMA_CONTEXT_SIZE": "8192"},
+        device_service=StaticDeviceService(device_count=2),
+        process_factory=lambda a, **kw: FakeProcess(a),
+        health_probe=lambda *_: None,
+    )
+    try:
+        selection = manager.start(model, "model").device_ids
+        assert selection == (("gpu-0", "gpu-1") if "," in expected else ("gpu-0",))
+    finally:
+        manager.stop()
+
+
 def test_default_runtime_root_uses_geist_home_sibling(tmp_path: Path) -> None:
     assert default_llama_runtime_root({"GEIST_HOME": str(tmp_path / "geist")}) == (
         tmp_path / "geist-runtime" / "llama.cpp"

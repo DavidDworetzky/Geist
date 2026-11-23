@@ -8,6 +8,15 @@ fit model layers across GPU and system memory when GPU memory is insufficient;
 responses may be slower. Explicit `GEIST_LLAMA_GPU_LAYERS` launch overrides still
 take precedence. Saving the setting applies it on the next model load.
 
+With Auto on a machine with two individually selectable discrete Vulkan GPUs,
+Geist prefers one card. When the managed runtime includes llama-fit-params,
+Geist estimates the model, context cache, and compute buffers at the configured
+context length and reserves 1 GiB of headroom per card. It selects the pair
+when only the pair fits that budget. A confirmed GPU allocation failure can
+also trigger the pair, including on runtimes without the estimator. Auto tries
+full GPU offload before using the system RAM option. Placement is reconsidered
+for each model. Existing manual GPU selections keep their saved devices.
+
 Model load failures open a dismissible dialog with recovery actions. Confirmed
 memory failures explain the limit and link to model selection. The offload
 suggestion and memory-settings link appear only for llama.cpp GPU failures when
