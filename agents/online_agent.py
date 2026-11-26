@@ -165,7 +165,7 @@ class OnlineAgent(BaseAgent):
                 spec.id,
                 ", ".join(removed_parameters),
             )
-        if spec.mandatory_reasoning_effort and "reasoning" not in constrained:
+        if spec.mandatory_reasoning_effort:
             constrained["reasoning"] = {"effort": spec.mandatory_reasoning_effort}
         return constrained
 

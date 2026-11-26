@@ -222,6 +222,7 @@ class TestOnlineAgentInitialization:
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
+            "z-ai/glm-5.3-flashx-legal",
             "stealth/union-alpha",
             "meta/muse-wonder",
             "meta/muse-spark-open",
@@ -436,6 +437,58 @@ class TestOnlineAgentAPIRequests:
                 assert payload["presence_penalty"] == 0.5
                 assert payload["stop"] == "END"
                 assert payload["reasoning"] == {"effort": "max"}
+
+    def test_glm53_flashx_legal_filters_defaults_and_preserves_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="z-ai/glm-5.3-flashx-legal",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "z-ai/glm-5.3-flashx-legal",
+                        "messages": [{"role": "user", "content": "Review this contract"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 0.95,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "reasoning": {"effort": "low"},
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "stop",
+                    }
+                    & payload.keys()
+                )
+                assert payload["temperature"] == 1.0
+                assert payload["top_p"] == 0.95
+                assert payload["reasoning"] == {"effort": "max"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
 
     @pytest.mark.parametrize(
         "model_id",

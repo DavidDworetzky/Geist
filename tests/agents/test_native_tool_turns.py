@@ -215,7 +215,9 @@ def test_opus_reasoning_survives_tool_continuation_history_and_checkpoint():
         "https://openrouter.ai/api/v1/chat/completions",
     ],
 )
-def test_reasoning_replay_is_source_scoped_and_does_not_mutate_history(target_model, target_endpoint):
+def test_reasoning_replay_is_source_scoped_and_does_not_mutate_history(
+    target_model, target_endpoint
+):
     model = "anthropic/claude-opus-5.5"
     endpoint = "https://openrouter.ai/api/v1/chat/completions"
     saved = {
@@ -377,6 +379,25 @@ def test_union_alpha_stream_filters_defaults_and_preserves_automatic_tool_callin
     assert payload["temperature"] == 1.0
     assert payload["top_p"] == 1.0
     assert not {"n", "frequency_penalty", "presence_penalty", "stop", "reasoning"} & payload.keys()
+
+
+def test_glm53_flashx_legal_stream_preserves_automatic_tool_calling():
+    turn, agent, provider_name = _run_streamed_tool_call(
+        model="z-ai/glm-5.3-flashx-legal", endpoint="https://openrouter.ai/api/v1"
+    )
+
+    assert turn.tool_calls[0].name == "web.search"
+    assert turn.tool_calls[0].arguments == {"query": "today news"}
+    assert turn.finish_reason == "tool_calls"
+    payload = agent.client.request["json"]
+    assert payload["model"] == "z-ai/glm-5.3-flashx-legal"
+    assert payload["stream"] is True
+    assert payload["tool_choice"] == "auto"
+    assert payload["tools"][0]["function"]["name"] == provider_name
+    assert payload["temperature"] == 1.0
+    assert payload["top_p"] == 1.0
+    assert payload["reasoning"] == {"effort": "max"}
+    assert not {"n", "frequency_penalty", "presence_penalty", "stop"} & payload.keys()
 
 
 def test_openai_stream_accepts_repeated_tool_call_id():

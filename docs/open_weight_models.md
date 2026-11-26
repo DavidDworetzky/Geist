@@ -12,8 +12,9 @@ Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
 and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
-Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash/FlashX Legal, Grok 4.6/4.7,
+Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
+server-backed. For models
 with published weights, their total resident weights make an in-process laptop
 load impractical even when their mixture-of-experts active-parameter count is
 much smaller.
@@ -349,6 +350,37 @@ OpenRouter may route this model across providers with different context limits,
 supported parameters, and data policies. Enable OpenRouter Zero Data Retention
 routing for confidential workloads and retain normal retry handling for
 provider availability changes.
+
+## OpenRouter-hosted GLM 5.3 FlashX Legal
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`z-ai/glm-5.3-flashx-legal`. OpenRouter added the stable route on November 2,
+2026. It accepts text, image, and video input; supports a 1,048,576-token
+context, 131,072-token maximum output, streaming, native automatic tool calls,
+and JSON-schema structured output; and requires reasoning, for which Geist
+sends the advertised default `max` effort. Geist omits `n`,
+`frequency_penalty`, `presence_penalty`, and `stop`, which the endpoint does
+not advertise.
+
+Z.ai positions this specialization for contract review, legal research,
+cross-document checks, and drafting. Its October 12 provider report claims a
+19.2% all-pass rate on Harvey's Legal Agent Benchmark. Vals independently
+measured 19.17% (7th of 80), versus 6.67% for the base GLM 5.3 Flash model,
+plus 86.23% on LegalBench and 41.83% on Legal Research Bench. These results
+show a material legal-domain gain, not general coding superiority, and most
+complete legal tasks still failed the strict all-pass rubric. Require qualified
+professional review for high-stakes work.
+
+The current OpenRouter route costs $0.37/M input tokens, $1.25/M output tokens,
+and $0.075/M cached input. It is a single Z.AI FP8 endpoint, listed as
+zero-retention/no-training and present in OpenRouter's ZDR inventory, but it is
+not available through EU in-region routing. Enforce OpenRouter ZDR and re-check
+the endpoint policy before sending confidential legal material. Metadata and
+evidence were checked November 2, 2026 against the
+[OpenRouter model page](https://openrouter.ai/z-ai/glm-5.3-flashx-legal),
+[endpoint API](https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flashx-legal-20261102/endpoints),
+[Z.ai launch post](https://z.ai/blog/glm-legal), and
+[Vals model card](https://www.vals.ai/models/zai_glm-legal).
 
 ## OpenRouter-hosted Union Alpha (Preview)
 
