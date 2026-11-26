@@ -11,12 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
-Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
-with published weights, their total resident weights make an in-process laptop
-load impractical even when their mixture-of-experts active-parameter count is
-much smaller.
+and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Fable 5.2, Claude
+Opus 5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7,
+Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
+server-backed. For models with published weights, their total resident weights
+make an in-process laptop load impractical even when their mixture-of-experts
+active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -163,6 +163,36 @@ routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
 confidential workloads; ordinary provider policy and availability can change.
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled.
+
+## OpenRouter-hosted Claude Fable 5.2
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-fable-5.2`. OpenRouter added this stable route on November 9,
+2026. It accepts text, image, and file input, has a 1,000,000-token context
+window and 128,000-token output limit, and supports streaming, native function
+calling with automatic tool choice, and JSON-schema structured output. Geist's
+generic chat path currently uses text, images, and native tools rather than
+provider-native file inputs.
+
+Adaptive reasoning is mandatory and supports low through max effort; Geist
+sends OpenRouter's documented default `high` effort. Geist retains `stop`,
+automatic tool choice, and structured output while omitting unsupported `n`,
+temperature, `top_p`, frequency-penalty, and presence-penalty fields. Forced
+function selection is not available across the routed endpoints.
+
+OpenRouter lists $8 per million input tokens and $40 per million output tokens,
+with $0.20 per million cached input tokens and separate cache-write rates. The
+standard route can use Google Vertex, Amazon Bedrock, Azure, and Anthropic;
+OpenRouter reported 99.93% three-day availability on November 10, 2026.
+Independent evaluations were strong but expensive: Artificial Analysis ranked
+the max-effort model first with an Intelligence Index of 65 at $26.54 per task,
+and Vals ranked high effort first on its index at 71.31% and $17.94 per test.
+
+OpenRouter's exact ZDR inventory contained no Fable 5.2 endpoint at review time,
+and its model page warns that Anthropic safety monitoring requires retention.
+Do not send confidential or regulated workloads through this route. Re-check
+endpoint policy before use because routing and retention availability can
+change.
 
 ## OpenRouter-hosted Claude Haiku 5.5
 
