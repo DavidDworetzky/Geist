@@ -17,7 +17,7 @@ _CHECKPOINT_STATE = TypeAdapter(OrchestrationSnapshot)
 _CHECKPOINT_TRANSCRIPT = TypeAdapter(list[dict[str, Any]])
 
 
-EXECUTION_PROMPT = """Agentic Mode is active. Work toward the user's objective, taking
+STATIC_EXECUTION_PROMPT = """Agentic Mode is active. Work toward the user's objective, taking
 later user instructions into account. Inspect the available context and workspace first.
 For complex work, create a plan with agent.plan.update; revise or extend it as you learn.
 Keep the current goal until it is complete. New user messages may refine or redirect
@@ -36,8 +36,9 @@ Plain prose can finish a simple answer with no plan or tool work. For unfinished
 tool-based work, use the completion/wait tools; repeated prose pauses execution.
 On resumed work, inspect the workspace again: interrupted actions may already have
 happened, and files in an ephemeral container may have expired. Older tool output
-may be elided from context; retrieve it again when needed.
-Current state: {state}"""
+may be elided from context; retrieve it again when needed."""
+
+EXECUTION_PROMPT = f"{STATIC_EXECUTION_PROMPT}\nCurrent state: {{state}}"
 
 
 class CheckpointRecoveryError(ValueError):
@@ -293,7 +294,7 @@ class GoalRuntime:
                 self.state.goal_status = "failed"
                 self.checkpoint()
 
-    def execution_prompt(self) -> str:
+    def _bounded_state_json(self) -> str:
         state = self.snapshot()
         state["objective"] = state["objective"][:4000]
         state["completion_summary"] = (state.get("completion_summary") or "")[:1000]
@@ -314,7 +315,25 @@ class GoalRuntime:
         for field in ("observations", "instructions", "tasks"):
             while state[field] and len(json.dumps(state, ensure_ascii=False)) > 24_000:
                 state[field].pop(0)
-        return EXECUTION_PROMPT.format(state=json.dumps(state, ensure_ascii=False))
+        return json.dumps(state, ensure_ascii=False)
+
+    def static_execution_prompt(self) -> str:
+        """Return the invariant Agentic Mode system prompt for KV-cache reuse."""
+        return STATIC_EXECUTION_PROMPT
+
+    def state_context_prompt(self) -> str | None:
+        """Return dynamic goal state only when resuming or carrying prior progress."""
+        if (
+            not self.state.tasks
+            and not self.state.observations
+            and not self.state.instructions
+            and self.state.turns_used == 0
+        ):
+            return None
+        return f"Current goal state: {self._bounded_state_json()}"
+
+    def execution_prompt(self) -> str:
+        return EXECUTION_PROMPT.format(state=self._bounded_state_json())
 
     def continuation_prompt(self) -> str:
         return "Continue the objective, or call agent.goal.wait if user input is required. Call agent.goal.complete when done."
