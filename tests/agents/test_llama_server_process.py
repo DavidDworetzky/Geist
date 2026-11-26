@@ -224,6 +224,7 @@ def test_auto_fit_checks_context_compute_and_headroom_per_card(
     def estimate(args, **kwargs):
         assert args[0] == str(estimator)
         assert args[args.index("--ctx-size") + 1] == "8192"
+        assert kwargs["stdin"] is subprocess.DEVNULL
         output = pair if args[args.index("--device") + 1] == "Vulkan0,Vulkan1" else single
         return subprocess.CompletedProcess(args, 0, stdout=output)
 
@@ -294,6 +295,43 @@ def test_auto_switch_discards_free_memory_sampled_with_previous_model_loaded(
         assert processes[0].terminated
         assert processes[-1].args[processes[-1].args.index("--device") + 1] == "Vulkan0"
         assert free_samples == ([6000, 6000] if refresh_delay else [6000])
+    finally:
+        manager.stop()
+
+
+def test_auto_single_gpu_switch_skips_forced_inventory_refresh(tmp_path):
+    runtime = _runtime_tree(tmp_path)
+    (runtime / "vulkan" / llama_server_filename()).with_stem("llama-fit-params").touch()
+    model = tmp_path / "model.gguf"
+    model.touch()
+    now = [100.0]
+    probe_calls = 0
+
+    def probe(*_args, **_kwargs):
+        nonlocal probe_calls
+        probe_calls += 1
+        return subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="Vulkan0: NVIDIA RTX 4090 (24564 MiB, 22000 MiB free)",
+            stderr="",
+        )
+
+    environment = {"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)}
+    service = LlamaDeviceService(
+        environment=environment, command_runner=probe, clock=lambda: now[0]
+    )
+    manager = LlamaServerManager(
+        environment=environment,
+        process_factory=lambda args, **_kwargs: FakeProcess(args),
+        device_service=service,
+        health_probe=lambda *_: None,
+    )
+    try:
+        manager.start(model, "first")
+        now[0] += 5
+        manager.start(model, "second")
+        assert probe_calls == 1
     finally:
         manager.stop()
 

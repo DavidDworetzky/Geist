@@ -104,11 +104,31 @@ class LlamaServerCandidate:
     requires_gpu_oom: bool = False
 
 
+def _fit_estimator_path(executable: Path) -> Path:
+    return executable.with_name("llama-fit-params" + executable.suffix)
+
+
+def _auto_gpu_pair(inventory: LlamaDeviceInventory) -> tuple[LlamaDevice, LlamaDevice] | None:
+    singles = [
+        device
+        for device in inventory.devices
+        if device.kind == "discrete" and not device.additional_runtime_ids
+    ]
+    first = next(
+        (device for device in singles if (device.id,) == inventory.recommended_device_ids),
+        None,
+    )
+    if first is None:
+        return None
+    second = recommend_device([device for device in singles if device != first])
+    return (first, second) if second is not None else None
+
+
 def _fits_gpu_memory(
     executable: Path, model: Path, devices: tuple[LlamaDevice, ...], environment: Mapping[str, str]
 ) -> bool | None:
     """Ask the sibling llama.cpp estimator for model, KV and compute allocations per GPU."""
-    estimator = executable.with_name("llama-fit-params" + executable.suffix)
+    estimator = _fit_estimator_path(executable)
     if not estimator.is_file() or any(device.free_memory_mib is None for device in devices):
         return None
     ids = [device.runtime_id for device in devices]
@@ -130,6 +150,7 @@ def _fits_gpu_memory(
             args,
             cwd=executable.parent,
             env=dict(environment),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             errors="replace",
@@ -294,15 +315,10 @@ class LlamaServerManager:
         primary = LlamaServerCandidate(
             "vulkan", executable, inventory.resolve_runtime_ids(ids), ids
         )
-        singles = [
-            device
-            for device in inventory.devices
-            if device.kind == "discrete" and not device.additional_runtime_ids
-        ]
-        first = next((device for device in singles if (device.id,) == ids), None)
-        second = recommend_device([device for device in singles if device != first])
-        if first is None or second is None or "GEIST_LLAMA_GPU_LAYERS" in self.environment:
+        gpu_pair = _auto_gpu_pair(inventory)
+        if gpu_pair is None or "GEIST_LLAMA_GPU_LAYERS" in self.environment:
             return [primary]
+        first, second = gpu_pair
 
         pair = LlamaServerCandidate(
             "vulkan", executable, (first.runtime_id, second.runtime_id), (first.id, second.id)
@@ -311,9 +327,21 @@ class LlamaServerManager:
         first_fits = None
         if inventory.probe_started_at >= placement_started_at:
             first_fits = _fits_gpu_memory(executable, model, (first,), self.environment)
-        pair_first = (
-            first_fits is False
-            and _fits_gpu_memory(executable, model, (first, second), self.environment) is True
+        pair_fits = (
+            _fits_gpu_memory(executable, model, (first, second), self.environment)
+            if first_fits is False
+            else None
+        )
+        pair_first = first_fits is False and pair_fits is True
+        logger.debug(
+            "Auto Vulkan placement for %s: first=%s (%s), pair=%s,%s (%s), pair_first=%s",
+            model.name,
+            first.runtime_id,
+            first_fits,
+            first.runtime_id,
+            second.runtime_id,
+            pair_fits,
+            pair_first,
         )
         candidates = [] if pair_first else [replace(primary, full_offload=True)]
         candidates.append(replace(pair, full_offload=True, requires_gpu_oom=not pair_first))
@@ -365,13 +393,16 @@ class LlamaServerManager:
         else:
             placement_started_at = time.perf_counter()
             executable = root / "vulkan" / filename
+            inventory = self._device_service.inventory()
             if (
-                executable.with_stem("llama-fit-params").is_file()
+                inventory.recommended_backend == "gpu"
+                and inventory.recommended_device_ids
                 and "GEIST_LLAMA_GPU_LAYERS" not in self.environment
+                and _fit_estimator_path(executable).is_file()
+                and _auto_gpu_pair(inventory) is not None
+                and inventory.probe_started_at < placement_started_at
             ):
                 inventory = self._device_service.inventory(refresh=True)
-            else:
-                inventory = self._device_service.inventory()
             if inventory.recommended_backend == "gpu" and inventory.recommended_device_ids:
                 candidates = self._auto_gpu_candidates(
                     inventory, executable, model, allow_system_ram, placement_started_at
