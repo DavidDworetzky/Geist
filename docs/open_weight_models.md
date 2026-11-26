@@ -11,12 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
-Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
-with published weights, their total resident weights make an in-process laptop
-load impractical even when their mixture-of-experts active-parameter count is
-much smaller.
+and OpenRouter's Gemini 4 Hydrogen, GPT-6.1 Terra, Fireworks Ember-1, Claude
+Opus 5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7,
+Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
+server-backed. For models with published weights, their total resident weights
+make an in-process laptop load impractical even when their mixture-of-experts
+active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -65,6 +65,61 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter-hosted Gemini 4 Hydrogen
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`google/gemini-4-hydrogen`. OpenRouter added the stable route on November 12,
+2026. It accepts text, image, file, audio, and video input, returns text, and
+has a 1,048,576-token combined context. OpenRouter's longest-decode endpoints
+advertise up to 943,718 output tokens; other current endpoints cap output at
+65,536 tokens. Geist currently sends text, image, native-tool, and
+structured-output messages through the OpenAI-compatible chat endpoint.
+
+Reasoning is mandatory. OpenRouter's live contract defaults to medium effort
+and also accepts low, high, and xhigh, while Google's first-party product
+documentation describes high as its default. Geist supplies medium when a
+caller does not choose an effort and preserves a caller's explicit reasoning.
+It omits `n`, frequency-penalty, and presence-penalty because the live
+OpenRouter model contract does not advertise those generic fields. Temperature,
+`top_p`, stop, native tools, all tool-choice modes, and JSON-schema structured
+output remain available. The separate `google/gemini-4-hydrogen:batch` route is
+not cataloged because Geist's interactive `OnlineAgent` uses Chat Completions,
+not the asynchronous Batch API.
+
+OpenRouter listed standard pricing of $1.50 per million input tokens, $7.50 per
+million output or reasoning tokens, $0.075 per million cached input tokens, and
+about $0.0833 per million cache writes on November 13. A lower-cost Flex route
+and higher-cost Priority routes are also available. Seven Google AI Studio and
+Vertex routes were live. OpenRouter reported 99.99% three-day reachability and
+99.07% three-day availability; individual endpoint health varied, so retain
+normal retry handling and re-check endpoint health.
+
+Google reports 57% on Terminal-Bench 4.1, 76.1% on AutomationBench-AA, and
+13.5% on SWE-sweep; these are provider-presented results. Independent Vals
+measurements report 68.49% overall, 54.04% on Terminal-Bench 4.0, and 87.8% on
+Vibe Code Bench. Artificial Analysis reports an Intelligence Index of 54 at
+xhigh effort and 51 at high effort. CursorBench 4.0 reports 54.3% at high
+effort. These results support Hydrogen as a faster execution and worker-agent
+option, not as a replacement for Carbon on the hardest long-horizon work.
+Launch-day community reports praise its speed and value but disagree about the
+best reasoning effort; treat them as supporting evidence and qualify effort,
+cost, and reliability on Geist workloads before changing defaults.
+
+OpenRouter lists Google Vertex as no-training and zero-retention, and the exact
+model appears in its ZDR endpoint inventory. The current ZDR records still carry
+a safety-retention flag. Default routing can also select Google AI Studio, which
+OpenRouter lists as no-training with 55-day retention. Enforce OpenRouter ZDR,
+review the safety-retention policy, and re-check the live provider inventory
+before sending confidential or regulated workloads. The Contributor Tier may
+use data for product improvement and training and must not receive sensitive
+information. See the
+[OpenRouter model page](https://openrouter.ai/google/gemini-4-hydrogen),
+[endpoint metadata](https://openrouter.ai/api/v1/models/google/gemini-4-hydrogen-20261112/endpoints),
+[Google model card](https://deepmind.google/models/model-cards/gemini-4-hydrogen/),
+[Vals evaluation](https://www.vals.ai/benchmarks/vals_index),
+[Artificial Analysis evaluation](https://artificialanalysis.ai/models/gemini-4-hydrogen/),
+and [CursorBench](https://cursor.com/cursorbench).
 
 ## OpenRouter-hosted GPT-6.1 Terra
 

@@ -582,6 +582,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Gemini 4 Hydrogen guidance from live OpenRouter catalog data', async () => {
+      const performanceNote = 'Fast Gemini route; enforce ZDR routing.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'google/gemini-4-hydrogen',
+              name: 'Gemini 4 Hydrogen',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 943718,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'gemini',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="google/gemini-4-hydrogen"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Gemini 4 Hydrogen' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows GPT-6.1 Terra guidance from live OpenRouter catalog data', async () => {
       const performanceNote = 'Fast million-token route; do not use for confidential workloads.';
       global.fetch = jest.fn().mockResolvedValue({
