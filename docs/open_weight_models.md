@@ -11,12 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
-Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
-and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
-with published weights, their total resident weights make an in-process laptop
-load impractical even when their mixture-of-experts active-parameter count is
-much smaller.
+and OpenRouter's Inkling 2 Mini, GPT-6.1 Terra, Fireworks Ember-1, Claude Opus
+5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen
+3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed.
+For models with published weights, their total resident weights make an
+in-process laptop load impractical even when their mixture-of-experts
+active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -65,6 +65,37 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter-hosted Inkling 2 Mini
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`thinkingmachines/inkling-2-mini`. OpenRouter added this stable route on
+November 21, 2026. It accepts text and image input, supports streaming,
+optional default-on reasoning, native function calling, and JSON-schema
+structured output, and returns text. The longest live route advertises a
+1,048,576-token context window; the second currently caps context at 262,144
+tokens. Both cap output at 65,536 tokens. Geist preserves caller-selected
+reasoning and filters only the unsupported generic `n` parameter.
+
+As checked November 21, 2026, Prime Intellect listed $0.075 per million input
+tokens, $0.30 per million output tokens, and $0.015 per million cached input
+tokens; io.net listed $0.08, $0.35, and $0.016 respectively. OpenRouter reported
+99.51% three-day availability across the two routes. Thinking Machines
+discloses 26.4 billion total parameters, 3.4 billion unique active parameters,
+and 5.4 billion effective active parameters per token after the repeated looped
+layers are counted.
+
+Independent Vals measured 46.46% on its Index, 77.92% on Vibe Code Bench v1.1,
+and 6.57% on Terminal-Bench 4.0. Artificial Analysis measured an Intelligence
+Index of 20, matching Qwen3.8 27B in that evaluation while using less compute;
+it also found the model unusually verbose. Launch-day hands-on reports are
+mixed on speed and agent-loop stability, so qualify it on Geist workloads
+before broad default use.
+
+OpenRouter lists Prime Intellect and io.net as no-training, zero-retention
+providers, and both exact endpoints appear in its ZDR inventory without safety
+retention. Enforce ZDR routing and re-check endpoint policy and context limits
+before sending confidential or regulated workloads.
 
 ## OpenRouter-hosted GPT-6.1 Terra
 

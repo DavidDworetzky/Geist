@@ -506,6 +506,43 @@ describe('AgentConfigSection', () => {
       expect(screen.getByText(performanceNote)).toBeInTheDocument();
     });
 
+    it('shows Inkling 2 Mini and its route guidance from live catalog data', async () => {
+      const performanceNote = 'Current routes are ZDR-eligible; one route caps context at 262K.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'thinkingmachines/inkling-2-mini',
+              name: 'Inkling 2 Mini',
+              provider: 'openrouter',
+              context_window: 1048576,
+              max_output_tokens: 65536,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'inkling',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="thinkingmachines/inkling-2-mini"
+        />
+      );
+
+      expect(await screen.findByRole('option', { name: 'Inkling 2 Mini' })).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows DeepSeek V4.1 Flash 1017 from live OpenRouter catalog data', async () => {
       const performanceNote = 'October 2026 snapshot; enforce OpenRouter ZDR for confidential workloads.';
       global.fetch = jest.fn().mockResolvedValue({

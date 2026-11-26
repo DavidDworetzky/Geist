@@ -617,6 +617,30 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "thinkingmachines/inkling-2-mini",
+        "Inkling 2 Mini",
+        "inkling",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=65536,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="26.4B",
+        activated_parameters="5.4B",
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Low-cost open-weight looped model with optional default-on reasoning, "
+            "native tools, and structured outputs. The current OpenRouter routes are "
+            "no-training and ZDR-eligible, but one route caps context at 262K; enforce "
+            "ZDR and re-check route policy before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "fireworks/ember-1",
         "Fireworks Ember-1",
         "ember",
