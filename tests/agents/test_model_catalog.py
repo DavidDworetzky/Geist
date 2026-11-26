@@ -244,6 +244,30 @@ def test_google_gemini38_flash_metadata_is_explicit_and_server_backed():
     )
 
 
+def test_openrouter_gemini4_carbon_metadata_is_explicit_and_server_backed():
+    carbon = get_model_spec("google/gemini-4-carbon")
+
+    assert carbon.provider == "openrouter"
+    assert carbon.backend == "openai_compatible"
+    assert carbon.local is False
+    assert carbon.family == "gemini"
+    assert carbon.context_window == 1048576
+    assert carbon.max_output_tokens == 943718
+    assert carbon.parameter_count is None
+    assert carbon.activated_parameters is None
+    assert carbon.supports_vision is True
+    assert carbon.supports_function_calling is True
+    assert carbon.supports_reasoning is True
+    assert carbon.supports_streaming is True
+    assert carbon.recommended is True
+    assert carbon.mandatory_reasoning_effort is None
+    assert carbon.unsupported_parameters == ("n", "frequency_penalty", "presence_penalty")
+    assert carbon.performance_note is not None
+    assert "55-day retention" in carbon.performance_note
+    assert "enforce ZDR" in carbon.performance_note
+    assert get_provider_endpoint(carbon.provider) == "https://openrouter.ai/api/v1"
+
+
 @pytest.mark.parametrize(
     "model_id",
     [
@@ -748,6 +772,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "muse-spark-1.2",
         "muse-spark-1.3",
         "gemini-3.8-flash",
+        "google/gemini-4-carbon",
     ],
 )
 def test_server_model_cannot_be_accidentally_loaded_locally(model_id):
@@ -821,6 +846,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "meta/muse-wonder",
         "meta/muse-spark-open",
         "stealth/union-alpha",
+        "google/gemini-4-carbon",
     ],
 )
 def test_openrouter_model_infers_openrouter_endpoint(model_id):
@@ -967,6 +993,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert "huggingface" not in response.providers
     assert "self-hosted" not in response.providers
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
+    assert any(model.id == "google/gemini-4-carbon" for model in response.providers["openrouter"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(model.id == "x-ai/grok-4.7" for model in response.providers["openrouter"])
     assert any(

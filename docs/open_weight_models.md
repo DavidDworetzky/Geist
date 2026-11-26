@@ -11,7 +11,7 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
+and OpenRouter's Gemini 4 Carbon, GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
 Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
 and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
 with published weights, their total resident weights make an in-process laptop
@@ -65,6 +65,55 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter-hosted Gemini 4 Carbon
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`google/gemini-4-carbon`. OpenRouter added the stable route on November 10,
+2026. It accepts text, image, file, audio, and video input, returns text, and
+has a 1,048,576-token combined context. OpenRouter's longest-decode endpoints
+advertise up to 943,718 output tokens; other current endpoints cap output at
+32,768 or 65,536 tokens. Geist currently sends text, image, native-tool, and
+structured-output messages through the OpenAI-compatible chat endpoint.
+
+Reasoning is optional with low, medium, and high effort. Geist preserves a
+caller's chosen effort, temperature, `top_p`, stop, native tools, all tool-choice
+modes, and JSON-schema structured output. It omits `n`, frequency-penalty, and
+presence-penalty because the live OpenRouter model contract does not advertise
+those generic fields. The separate `google/gemini-4-carbon:batch` route is not
+cataloged because Geist's interactive `OnlineAgent` uses Chat Completions, not
+the asynchronous Batch API.
+
+OpenRouter listed introductory standard pricing of $2 per million input tokens,
+$10 per million output or reasoning tokens, $0.10 per million cached input
+tokens, and $0.1875 per million cache writes on November 11. Lower-cost Flex and
+higher-cost Priority tiers are also available; Google says rates double after
+November 30, 2026. Live endpoint metadata showed seven Google AI Studio and
+Vertex routes. The active standard/flex routes reported 100% 30-minute uptime,
+but several Vertex routes had weak launch-day one-day availability, so retain
+normal retry handling and re-check endpoint health.
+
+Google reports 61.2% on FrontierSWE 2 and 65.2% on Terminal-Bench 4.0; these are
+provider-presented results. Independent Vals measurements report 70.45% overall,
+63.13% on Terminal-Bench 4.0, and 89.06% on Vibe Code Bench. Artificial Analysis
+reports an Intelligence Index of 60 at high effort, with lower scores and cost
+at medium and low effort. Early community reports are mixed: some describe
+strong long-horizon coding and artifact work, while others report very high
+thinking-token use or reliability regressions. Treat those reports as
+supporting evidence and qualify effort/cost on Geist workloads before changing
+defaults.
+
+OpenRouter lists Google Vertex as no-training and zero-retention, and the exact
+model appears in its ZDR endpoint inventory. The current ZDR records still carry
+a safety-retention flag. Default routing can also select Google AI Studio, which
+OpenRouter lists as no-training with 55-day retention. Enforce OpenRouter ZDR,
+review the safety-retention policy, and re-check the live provider inventory
+before sending confidential or regulated workloads. See the
+[OpenRouter model page](https://openrouter.ai/google/gemini-4-carbon),
+[endpoint metadata](https://openrouter.ai/api/v1/models/google/gemini-4-carbon-20261110/endpoints),
+[Google model card](https://deepmind.google/models/model-cards/gemini-4-carbon/),
+[Vals evaluation](https://www.vals.ai/models/google_gemini-4-carbon), and
+[Artificial Analysis evaluation](https://artificialanalysis.ai/models/releases/gemini-4-carbon).
 
 ## OpenRouter-hosted GPT-6.1 Terra
 
