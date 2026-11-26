@@ -284,6 +284,33 @@ workloads to this model. The hosted production model is based on the open-weight
 Qwen3.8-Flash-Next release, but Geist does not assume that their parameter
 metadata is identical.
 
+## OpenRouter-hosted Qwen4 Max
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`qwen/qwen4-max`. OpenRouter added this stable Alibaba route on November 16,
+2026. It accepts text, image, and video input, has a 1,000,000-token context
+window and a 131,072-token output limit, and supports streaming, optional
+default-on reasoning, native function calling, and JSON-schema structured
+outputs. OpenRouter supports `none`, `low`, `high`, and `xhigh` reasoning
+efforts and currently defaults to `high`; Geist preserves an explicit caller
+choice and omits only the unsupported generic `n` parameter.
+
+As checked November 16, 2026, the sole Alibaba endpoint listed $1.50 per
+million input tokens, $4.50 per million output tokens, $0.075 per million
+cached input tokens, and 98.82% one-day availability. Alibaba discloses a
+2.4-trillion-parameter mixture-of-experts model with 71 billion parameters
+activated per token. Independent Vals Index v2.2 measured 63.20% overall,
+48.48% on Terminal-Bench 4.0, and 86.67% on Vibe Code Bench v1.1; Artificial
+Analysis measured an Intelligence Index of 43. These results improve on Qwen
+3.8 Max, but the model remains behind the strongest frontier coding models on
+several evaluations and should be qualified on Geist workloads.
+
+Alibaba states that business data is not used for model training without
+consent, but its standard Model Studio policy retains prompts and responses
+for up to 30 days. OpenRouter lists Alibaba as no-training but
+prompt-retaining, and the exact model is absent from OpenRouter's ZDR endpoint
+inventory. Do not send confidential or regulated workloads to this route.
+
 ## OpenRouter-hosted Tencent Hy4 Preview
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
