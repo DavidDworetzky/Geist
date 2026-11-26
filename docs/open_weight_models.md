@@ -284,6 +284,27 @@ workloads to this model. The hosted production model is based on the open-weight
 Qwen3.8-Flash-Next release, but Geist does not assume that their parameter
 metadata is identical.
 
+## OpenRouter-hosted Tencent Hy4
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`tencent/hy4`. Tencent released this stable route on November 4, 2026. It
+accepts text and image input, has a 1,048,576-token combined context window and
+65,536-token maximum output, and supports optional reasoning, streaming, native
+automatic function calling, and JSON-schema structured outputs. Geist omits the
+unsupported `n`, `top_p`, frequency-penalty, and presence-penalty parameters.
+OpenRouter currently lists a 50% promotional price of $0.417 per million input
+tokens, $1.2505 per million output tokens, and $0.021 per million cached input
+tokens; Tencent's standard prices are twice those amounts.
+
+The stable model's weights and system card were not public at release, so Geist
+does not copy the preview's parameter counts or assume an undisclosed
+architecture. The route currently has one Tencent endpoint, with no provider
+fallback or EU in-region option. OpenRouter identifies Tencent as no-training
+and zero retention, and the exact endpoint appears in OpenRouter's ZDR
+inventory. OpenRouter's ZDR policy still permits in-flight CSAM screening and
+legally required retention of flagged content. Enforce ZDR routing and re-check
+the endpoint policy before sending confidential workloads.
+
 ## OpenRouter-hosted Tencent Hy4 Preview
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
@@ -292,16 +313,15 @@ August 28, 2026. It accepts text input, has a 1,048,576-token context window
 and 64,000-token output limit, and supports optional reasoning, streaming,
 native function calling, and structured outputs. Geist omits the unsupported
 `n`, `top_p`, frequency-penalty, and presence-penalty parameters. OpenRouter
-lists the current price as $0.834 per million input tokens, $2.501 per million
+lists the standard price as $0.834 per million input tokens, $2.501 per million
 output tokens, and $0.042 per million cached input tokens.
 
-Tencent discloses 770B total and 49B activated parameters and publishes the
-weights under Apache-2.0. The OpenRouter route currently has one Tencent FP8
-endpoint, so there is no provider fallback diversity and preview behavior may
-change. As of August 28, 2026, OpenRouter identifies the Tencent endpoint as
-zero retention and not used for training. OpenRouter itself does not retain
-prompt or response content unless logging is explicitly enabled. Enforce ZDR
-routing and re-check the endpoint policy before sending confidential workloads.
+Tencent discloses 770B total and 49B activated parameters for the preview and
+publishes its weights under Apache-2.0. The OpenRouter route currently has one
+Tencent FP8 endpoint, so there is no provider fallback diversity and preview
+behavior may change. OpenRouter identifies the Tencent endpoint as zero
+retention and not used for training. Enforce ZDR routing and re-check the
+endpoint policy before sending confidential workloads.
 
 ## OpenRouter-hosted DeepSeek V4.1 Flash 1017
 
