@@ -469,6 +469,46 @@ describe('AgentConfigSection', () => {
       expect(screen.getByRole('option', { name: 'Muse Spark 1.3' })).toBeInTheDocument();
     });
 
+    it('shows OpenRouter Auto Code routing guidance from live catalog data', async () => {
+      const performanceNote =
+        'Coding-focused router with variable downstream model and price; require ZDR before confidential workloads.';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          providers: {
+            openrouter: [{
+              id: 'openrouter/auto-code',
+              name: 'OpenRouter Auto Code',
+              provider: 'openrouter',
+              context_window: 2000000,
+              max_output_tokens: 65536,
+              supports_vision: true,
+              supports_function_calling: true,
+              supports_reasoning: true,
+              supports_streaming: true,
+              recommended: true,
+              family: 'router',
+              performance_note: performanceNote,
+            }],
+          },
+          last_updated: null,
+        }),
+      });
+
+      render(
+        <AgentConfigSection
+          {...defaultProps}
+          onlineProvider="openrouter"
+          onlineModel="openrouter/auto-code"
+        />
+      );
+
+      expect(
+        await screen.findByRole('option', { name: 'OpenRouter Auto Code' })
+      ).toBeInTheDocument();
+      expect(screen.getByText(performanceNote)).toBeInTheDocument();
+    });
+
     it('shows Qwen3.8 Flash privacy guidance from live catalog data', async () => {
       const performanceNote = 'The current endpoint is not OpenRouter ZDR; do not use it for confidential workloads.';
       global.fetch = jest.fn().mockResolvedValue({

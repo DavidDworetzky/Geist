@@ -11,7 +11,7 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
+and OpenRouter's Auto Code router, GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
 Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
 and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
 with published weights, their total resident weights make an in-process laptop
@@ -65,6 +65,45 @@ unpaid and paid usage. Unpaid-service prompts and responses may be used to
 improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
+
+## OpenRouter Auto Code
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`openrouter/auto-code`. OpenRouter published this stable coding-agent router on
+November 5, 2026 and announced it on November 6. It chooses a downstream model
+and reasoning effort for each turn while using the same model for nearly nine
+out of ten agent turns, according to OpenRouter. The virtual route advertises
+a 2,000,000-token combined context window, 65,536-token output limit, text and
+image input, streaming, optional reasoning controls, native and parallel tool
+calls, tool choice, response formats, and structured output. Geist does not
+expose its additional file, audio, video, or image-output modalities.
+
+`n` is not in Auto Code's advertised request contract, so Geist omits that
+generic parameter while preserving sampling settings, native tools, structured
+output, and caller-supplied reasoning. Auto Code has no fixed per-token price:
+OpenRouter charges the standard price of the model selected for the turn and
+returns that model in the response. Geist does not yet send an explicit router
+session ID or expose Auto Router plugin controls; OpenRouter instead fingerprints
+the message history when no session ID is supplied.
+
+OpenRouter's November 5 provider-run evaluation reports normalized scores of
+8.5 on Deep SWE, 8.7 on SWE Atlas QA, 7.6 on Terminal Bench 4.0, 8.9 on Tau3
+Banking, and 9.7 on MMMU Pro Vision. OpenRouter claims aggregate performance in
+line with Claude Opus 5.5 at 74% lower cost per task, with four times fewer
+invalid tool calls and half as many cut-off responses than its earlier router
+during beta. These are provider claims; no credible independent reproduction
+of this exact router generation was available at review time.
+
+Auto Code honors OpenRouter account and request guardrails, ZDR requirements,
+provider restrictions, BYOK keys, and allowed/excluded model lists. Because the
+selected downstream model, provider, price, retention, and training policy can
+vary, administrators must constrain those settings and require ZDR before using
+confidential workloads. The virtual router itself has no row in OpenRouter's ZDR
+endpoint inventory and is not available through the EU in-region endpoint.
+See the [Auto Code model page](https://openrouter.ai/openrouter/auto-code),
+[router documentation](https://openrouter.ai/docs/guides/routing/routers/auto-code),
+[launch announcement](https://openrouter.ai/blog/announcements/auto-and-auto-code-routers/),
+and [router benchmarks](https://openrouter.ai/benchmarks/routers).
 
 ## OpenRouter-hosted GPT-6.1 Terra
 
