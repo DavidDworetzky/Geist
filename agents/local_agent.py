@@ -104,9 +104,11 @@ class LocalAgent(BaseAgent):
     def runtime_selection(
         self,
     ) -> tuple[Literal["cpu", "gpu"], tuple[str, ...]] | None:
-        """Return the effective managed llama.cpp selection when applicable."""
+        """Return a managed llama.cpp selection suitable for workspace-wide persistence."""
 
         if self.runner_type != "llama_server" or self.runner is None:
+            return None
+        if getattr(self.runner, "model_specific_placement", False) is True:
             return None
         backend = getattr(self.runner, "effective_backend", None)
         if backend not in {"cpu", "gpu"}:
