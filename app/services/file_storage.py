@@ -117,7 +117,7 @@ class FileStorageService:
         file_hash = FileStorageService.calculate_file_hash(file_data)
 
         # Check if file already exists
-        existing_file = get_file_by_hash(file_hash)
+        existing_file = get_file_by_hash(file_hash, user_id)
         if existing_file:
             # File already exists, return reference to existing file
             return {

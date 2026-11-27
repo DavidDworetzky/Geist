@@ -210,11 +210,22 @@ class TestOnlineAgentInitialization:
         "model_id",
         [
             "x-ai/grok-4.6",
+            "x-ai/grok-4.7",
+            "anthropic/claude-opus-5.5",
+            "anthropic/claude-sonnet-5.5",
+            "anthropic/claude-haiku-5.5",
+            "openai/gpt-6.1-terra",
+            "openai/gpt-6.1-terra-20261026",
+            "particle-ai/particle-1",
+            "fireworks/ember-1",
             "qwen/qwen3.8-flash",
+            "deepseek/deepseek-v4.1-flash-1017",
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
             "stealth/union-alpha",
+            "meta/muse-wonder",
+            "meta/muse-spark-open",
         ],
     )
     def test_openrouter_initialization(self, model_id):
@@ -317,7 +328,9 @@ class TestOnlineAgentAPIRequests:
         ("model_id", "reasoning_effort"),
         [
             ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
         ],
     )
     def test_openrouter_models_apply_request_constraints(self, model_id, reasoning_effort):
@@ -340,6 +353,7 @@ class TestOnlineAgentAPIRequests:
                     {
                         "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 2,
                         "frequency_penalty": 0.5,
                         "presence_penalty": 0.5,
                         "stop": "END",
@@ -348,6 +362,10 @@ class TestOnlineAgentAPIRequests:
                 )
 
                 payload = mock_post.call_args.kwargs["json"]
+                if model_id in {"x-ai/grok-4.7", "meta/muse-wonder"}:
+                    assert "n" not in payload
+                else:
+                    assert payload["n"] == 2
                 assert "frequency_penalty" not in payload
                 assert "presence_penalty" not in payload
                 assert "stop" not in payload
@@ -420,6 +438,108 @@ class TestOnlineAgentAPIRequests:
                 assert payload["stop"] == "END"
                 assert payload["reasoning"] == {"effort": "max"}
 
+    @pytest.mark.parametrize(
+        "model_id",
+        ["anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"],
+    )
+    def test_claude_55_filters_sampling_defaults_and_keeps_native_tools(self, model_id: str):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "temperature" not in payload
+                assert "top_p" not in payload
+                assert "frequency_penalty" not in payload
+                assert "presence_penalty" not in payload
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+                assert payload["reasoning"] == {"effort": "high"}
+
+    def test_claude_haiku_55_keeps_optional_reasoning_and_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="anthropic/claude-haiku-5.5",
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": "anthropic/claude-haiku-5.5",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "reasoning": {"effort": "low"},
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "temperature",
+                        "top_p",
+                        "frequency_penalty",
+                        "presence_penalty",
+                    }
+                    & payload.keys()
+                )
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "low"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
     def test_qwen38_flash_omits_unsupported_n_without_forcing_reasoning(self):
         context = create_mock_agent_context()
 
@@ -449,14 +569,14 @@ class TestOnlineAgentAPIRequests:
                 assert "reasoning" not in payload
                 assert payload["tools"][0]["function"]["name"] == "lookup"
 
-    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self):
+    def test_ember1_omits_unsupported_n_and_preserves_native_tools(self):
         context = create_mock_agent_context()
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
             agent = OnlineAgent(
                 agent_context=context,
                 base_url="https://openrouter.ai/api/v1",
-                model="deepseek/deepseek-v4.1-flash",
+                model="fireworks/ember-1",
             )
 
             with patch.object(agent.client, "post") as mock_post:
@@ -466,7 +586,219 @@ class TestOnlineAgentAPIRequests:
 
                 agent._make_request(
                     {
-                        "model": "deepseek/deepseek-v4.1-flash",
+                        "model": "fireworks/ember-1",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert "reasoning" not in payload
+                assert payload["temperature"] == 0.7
+                assert payload["top_p"] == 0.9
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["particle-ai/particle-1", "particle-ai/particle-1-20261027"],
+    )
+    def test_particle1_omits_n_and_preserves_optional_reasoning_and_native_tools(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "reasoning": {"effort": "low"},
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "answer", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 0.7
+                assert payload["top_p"] == 0.9
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "low"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id,reasoning",
+        [
+            ("openai/gpt-6.1-terra", None),
+            ("openai/gpt-6.1-terra-20261026", {"effort": "low"}),
+        ],
+    )
+    def test_gpt61_terra_filters_unsupported_defaults_and_preserves_native_tools(
+        self, model_id, reasoning
+    ):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                request = {
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "Test prompt"}],
+                    "n": 1,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "frequency_penalty": 0.2,
+                    "presence_penalty": 0.1,
+                    "stop": "END",
+                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    "tool_choice": "auto",
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": "result", "schema": {"type": "object"}},
+                    },
+                }
+                if reasoning is not None:
+                    request["reasoning"] = reasoning
+
+                agent._make_request(request)
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "temperature",
+                        "top_p",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "stop",
+                    }
+                    & payload.keys()
+                )
+                if reasoning is None:
+                    assert "reasoning" not in payload
+                else:
+                    assert payload["reasoning"] == reasoning
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    def test_muse_spark_open_applies_reasoning_and_preserves_native_tools(self):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model="meta/muse-spark-open",
+            )
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = OPENAI_RESPONSE
+
+            with patch.object(agent.client, "post", return_value=mock_response) as mock_post:
+                agent._make_request(
+                    {
+                        "model": "meta/muse-spark-open",
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 1,
+                        "temperature": 1.0,
+                        "top_p": 1.0,
+                        "frequency_penalty": 0.2,
+                        "presence_penalty": 0.1,
+                        "stop": "END",
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {"name": "result", "schema": {"type": "object"}},
+                        },
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert "n" not in payload
+                assert payload["temperature"] == 1.0
+                assert payload["top_p"] == 1.0
+                assert payload["frequency_penalty"] == 0.2
+                assert payload["presence_penalty"] == 0.1
+                assert payload["stop"] == "END"
+                assert payload["reasoning"] == {"effort": "medium"}
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"],
+    )
+    def test_deepseek_v41_flash_preserves_tools_and_optional_reasoning(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
                         "messages": [{"role": "user", "content": "Test prompt"}],
                         "n": 1,
                         "temperature": 0.7,
@@ -917,7 +1249,9 @@ class TestOnlineAgentRetryLogic:
         ("model_id", "reasoning_effort"),
         [
             ("x-ai/grok-4.6", "high"),
+            ("x-ai/grok-4.7", "high"),
             ("meta/muse-spark-1.2-contributor", "medium"),
+            ("meta/muse-wonder", "medium"),
         ],
     )
     def test_openrouter_constraints_do_not_leak_to_backup_provider(

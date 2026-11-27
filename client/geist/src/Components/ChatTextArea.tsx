@@ -1,5 +1,6 @@
-import React, { forwardRef, useState } from 'react';
-import { ChatHistory, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
+import React, { forwardRef, memo, useState } from 'react';
+import { useBranding } from '../branding';
+import { ChatHistory, ChatPair, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
 const statusLabel = (status: ToolCallStatus | string): string =>
@@ -19,6 +20,20 @@ const approvalChoices: { decision: ToolApprovalDecision; label: string }[] = [
   { decision: 'deny', label: 'Deny' }
 ];
 
+function shouldShowAgenticPlan(orchestration: ChatPair['orchestration']): boolean {
+  if (!orchestration) {
+    return false;
+  }
+  if (orchestration.tasks.length > 0 || orchestration.decomposition_warning) {
+    return true;
+  }
+  return Boolean(
+    orchestration.goal_status
+      && orchestration.goal_status !== 'active'
+      && orchestration.goal_status !== 'complete',
+  );
+}
+
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
   onToolApproval?: (
@@ -28,8 +43,10 @@ interface ChatTextAreaProps extends ChatHistory {
   ) => void | Promise<void>;
 }
 
-const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
-  const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+const ChatTurn = memo(({ element, onToolApproval }: {
+  element: ChatPair;
+  onToolApproval: ChatTextAreaProps['onToolApproval'];
+}) => {
   const [answeredCallIds, setAnsweredCallIds] = useState<Set<string>>(new Set());
   const [standingGrantUnavailable, setStandingGrantUnavailable] = useState<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
@@ -39,7 +56,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
     setAnsweredCallIds((prev) => new Set(prev).add(key));
     setApprovalErrors((prev) => ({ ...prev, [key]: '' }));
     try {
-      await props.onToolApproval?.(runId, callId, decision);
+      await onToolApproval?.(runId, callId, decision);
     } catch (error) {
       if (error instanceof Error && error.name === 'ApprovalUnavailable') {
         setApprovalErrors((prev) => ({ ...prev, [key]: 'This approval or decision is no longer available. Wait for an updated tool call.' }));
@@ -60,12 +77,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
   };
 
   return (
-    <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
-      {isEmpty && (
-        <div className="chat-empty-state">Start a conversation with Geist.</div>
-      )}
-      {props.chatHistory.map((element, index) => (
-        <div key={element.run_id ?? index} className="chat-turn">
+        <div className="chat-turn">
           <div className="chat-message chat-message-user">
             <span className="chat-speaker">User</span>
             {element.user}
@@ -96,7 +108,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             </div>
           )}
 
-          {element.orchestration && (
+          {shouldShowAgenticPlan(element.orchestration) && element.orchestration && (
             <section className="agentic-progress" aria-label="Agentic progress">
               <div className="agentic-progress-header">
                 <strong>Agentic plan</strong>
@@ -105,13 +117,11 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                     {statusLabel(element.orchestration.goal_status)}
                   </span>
                 )}
-                {typeof element.orchestration.turns_used === 'number'
-                  && typeof element.orchestration.max_turns === 'number'
-                  && (
-                    <span className="input-help">
-                      Model calls {element.orchestration.turns_used}/{element.orchestration.max_turns}
-                    </span>
-                  )}
+                {element.orchestration.tasks.length > 0 && (
+                  <span className="input-help">
+                    Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
+                  </span>
+                )}
               </div>
               {element.orchestration.decomposition_warning && (
                 <div className="input-help">{element.orchestration.decomposition_warning}</div>
@@ -120,7 +130,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 {element.orchestration.tasks.map((task) => (
                   <li key={task.id} className={`agentic-task agentic-task-${task.status}`}>
                     <span aria-hidden="true">
-                      {task.status === 'completed' ? '✓' : task.status === 'blocked' ? '!' : '○'}
+                      {task.status === 'completed' ? '\u2713' : task.status === 'blocked' ? '!' : '\u25cb'}
                     </span>
                     <span>
                       <strong>{task.title}</strong>
@@ -178,7 +188,7 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
                 )}
                 {toolCall.status === 'awaiting_approval'
                   && element.run_id
-                  && props.onToolApproval
+                  && onToolApproval
                   && (
                   <div
                     role="group"
@@ -250,6 +260,20 @@ const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) 
             );
           })}
         </div>
+  );
+});
+ChatTurn.displayName = 'ChatTurn';
+
+const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
+  const { productName } = useBranding();
+  const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
+  return (
+    <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
+      {isEmpty && (
+        <div className="chat-empty-state">Chat with {productName?.trim() || 'Geist'}</div>
+      )}
+      {props.chatHistory.map((element, index) => (
+        <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />
       ))}
       {props.isLoading && (
         <div

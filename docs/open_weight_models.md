@@ -11,10 +11,12 @@ Local reference checkpoints cover Llama, Qwen 2.5/3, Mistral, Phi, SmolLM,
 Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations.
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
-and OpenRouter's GLM 5.3 Flash, Grok 4.6, Qwen 3.8 Flash, and DeepSeek V4.1
-Flash routes are also intentionally server-backed. For models with published
-weights, their total resident weights make an in-process laptop load impractical
-even when their mixture-of-experts active-parameter count is much smaller.
+and OpenRouter's GPT-6.1 Terra, Fireworks Ember-1, Claude Opus 5.5, Claude
+Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8 Flash,
+and DeepSeek V4.1 Flash routes are also intentionally server-backed. For models
+with published weights, their total resident weights make an in-process laptop
+load impractical even when their mixture-of-experts active-parameter count is
+much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -64,6 +66,82 @@ improve Google products and may be processed by human reviewers; do not send
 confidential data through unpaid quota. Paid-service prompts and responses are
 not used for product improvement, though limited safety logging still applies.
 
+## OpenRouter-hosted GPT-6.1 Terra
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`openai/gpt-6.1-terra`. OpenRouter added this stable route on October 26, 2026.
+It accepts text, image, and file input, has a 1,050,000-token context window and
+128,000-token output limit, and supports streaming, native function calling,
+all tool-choice modes, and JSON-schema structured output. Geist's current
+generic message contract uses text, images, and native tools; it does not yet
+send provider-native file inputs.
+
+Reasoning is optional and supports none, low, medium, high, xhigh, and max;
+OpenRouter enables medium by default, so Geist does not force an effort. The
+route omits `n`, temperature, `top_p`, frequency-penalty, presence-penalty, and
+stop from its request contract. Geist filters those generic defaults while
+preserving tools, tool choice, structured output, and caller-supplied reasoning.
+OpenAI's direct API requires the Responses API for tools, while OpenRouter
+advertises and adapts the same native tool contract through its OpenAI-compatible
+chat endpoint.
+
+The standard route costs $1 per million input tokens, $5 per million output
+tokens, $0.05 per million cached input tokens, and $1.25 per million cache
+writes. OpenRouter also lists lower-cost Flex and higher-cost Fast service
+tiers. Prompts above 272,000 tokens use higher tiered rates. The live endpoint
+API reported four routes (OpenAI Flex, standard, and Fast plus Azure) healthy;
+standard, Fast, and Azure had 100% one-day uptime while Flex was about 99.6%.
+
+OpenAI reports a 50.3% Terminal-Bench 4.0 score at max reasoning and materially
+better computer-use, visual-reasoning, and factuality results than GPT-5.6
+Terra; those are provider claims. Independent Artificial Analysis measured a
+48 Intelligence Index and 55.6% Terminal-Bench 4.0 result at max, while
+DualEntry found strong speed but only 78.2% accuracy and 65.3% three-run
+consistency on its accounting benchmark. Terra is therefore a cost-efficient
+everyday agent/coding option, not the preferred model for the hardest coding or
+high-stakes accounting tasks.
+
+OpenRouter's provider directory lists OpenAI as no-training but
+prompt-retaining. The exact Azure Terra endpoint appears in OpenRouter's ZDR
+inventory and Azure is listed as zero retention/no training. Default routing
+can still select a retaining OpenAI endpoint, so confidential or regulated
+workloads must explicitly enforce OpenRouter ZDR and re-check endpoint policy.
+
+## OpenRouter-hosted Particle-1
+
+Set `OPENROUTER_API_KEY` and select `particle-ai/particle-1`. The stable route
+has a 1,048,576-token context window, a 131,072-token output limit, text and
+image input, streaming, optional reasoning, and native tools. Reasoning is high
+by default but may be reduced or disabled. Geist removes only the unsupported
+generic `n` field and preserves sampling controls, tool choice, and
+caller-supplied reasoning.
+
+OpenRouter listed $0.05 per million input tokens, $0.50 per million output
+tokens, and $0.003 per million cached input tokens on November 1, 2026. The
+sole Particle route reported 100% one-day uptime at review time, but it remains
+a young single-provider route without an SLA.
+
+Particle validates JSON-object output. JSON Schema is accepted and guides
+decoding, but Particle explicitly documents schema conformance as best-effort;
+applications must validate the returned object. The exact endpoint appears in
+OpenRouter's ZDR inventory, and Particle documents no persistent prompt/output
+storage or training without affirmative opt-in. Enforce OpenRouter ZDR and
+re-check the endpoint inventory before confidential or regulated use.
+
+Independent evidence is mixed but useful. Plotly's October 31
+DataAnalyticsBench run scored Particle-1 at 40/43, four questions above
+DeepSeek V4.1 Flash and tied with GPT-6.1 Terra, for $0.35. Enclave's October
+29 security-agent run tied DeepSeek at 4/11 verified vulnerable runs but solved
+one fewer task and cost substantially more overall. Particle's claims of
+shorter coding traces remain provider-run evidence.
+
+See the [OpenRouter model page](https://openrouter.ai/particle-ai/particle-1),
+[Particle API documentation](https://docs.particle.ai/),
+[structured-output contract](https://docs.particle.ai/structured-outputs),
+[data-retention policy](https://docs.particle.ai/data-retention),
+[Plotly evaluation](https://plotly.com/blog/particle-1-plotly-data-analytics-bench/),
+and [Enclave evaluation](https://enclave.ai/blog/particle-1-verifies-4-of-11-runs-exploits-cost-1-dollar).
+
 ## OpenRouter-hosted Grok 4.6
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
@@ -76,6 +154,111 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled, but downstream provider policy still applies. Enable
 OpenRouter's Zero Data Retention routing for confidential workloads so the
 request can use only eligible provider endpoints.
+
+## OpenRouter-hosted Grok 4.7
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`x-ai/grok-4.7`. OpenRouter added the stable route on September 21, 2026. It
+accepts text, image, and file input, has a 500,000-token context window and a
+450,000-token output ceiling, and supports streaming, native function calling,
+forced function selection, and JSON-schema structured output. Reasoning is
+always on; Geist sends OpenRouter's documented default `high` effort and omits
+unsupported `n`, frequency-penalty, presence-penalty, and stop parameters.
+
+OpenRouter lists $2 per million input tokens, $6 per million output tokens, and
+$0.50 per million cached input tokens; input and output rates double beyond
+200,000 input tokens. SpaceXAI reports strong gains over Grok 4.6 on long-running
+coding and agent benchmarks, while independent measurements and arena results
+are more mixed. The model is therefore an additional hosted option rather than
+a universal default.
+
+OpenRouter lists xAI's ordinary provider policy as no training with 30-day
+retention, and also exposes several Grok 4.7 endpoints in its ZDR inventory.
+Enforce OpenRouter ZDR routing before sending confidential workloads. OpenRouter
+itself does not retain prompt or response content unless logging is explicitly
+enabled.
+
+## OpenRouter-hosted Claude Opus 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-opus-5.5`. OpenRouter added this stable route on September
+22, 2026. It accepts text and image input, has a 1,000,000-token context window
+and 128,000-token output limit, and supports streaming, native function
+calling, and JSON-schema structured output. Reasoning is always on; Geist sends
+OpenRouter's documented default `high` effort. Geist retains automatic tool
+choice and omits `n`, `temperature`, `top_p`, frequency-penalty, and
+presence-penalty parameters. The aggregate route advertises temperature through
+Azure, but the recommended ZDR endpoints omit it. Forced function selection is
+not supported.
+
+OpenRouter lists $4 per million input tokens, $20 per million output tokens,
+and $0.20 per million cached input tokens. At review time, three Amazon Bedrock
+routes appeared in OpenRouter's ZDR inventory, and the global endpoint reported
+99.80% one-day uptime. Enforce OpenRouter ZDR routing before sending
+confidential workloads; ordinary provider policy and availability can change.
+OpenRouter itself does not retain prompt or response content unless logging is
+explicitly enabled.
+
+## OpenRouter-hosted Claude Haiku 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-haiku-5.5`. OpenRouter added this stable route on October 7,
+2026. It accepts text, image, and file input, has a 1,000,000-token context
+window and 128,000-token output limit, and supports streaming, native function
+calling, automatic tool choice, and JSON-schema structured output. Adaptive
+reasoning is optional and defaults to the provider's medium effort; Geist does
+not force it. Geist retains `stop` while omitting `n`, temperature, `top_p`,
+frequency-penalty, and presence-penalty parameters.
+
+OpenRouter lists $0.10 per million input tokens and $0.50 per million output
+tokens for prompts up to 100,000 tokens. Longer prompts cost $0.50 per million
+input tokens and $2.50 per million output tokens. At review time, the routed
+model reported 99.94% three-day availability and the live endpoint API exposed
+five standard providers, all with status `0` and 100% one-day uptime.
+
+Anthropic reports a 39.2% Terminal-Bench 4.0 and 46.4% FrontierCode 1.1 score.
+Independent evaluations are more mixed but support the high-volume subagent
+role: Artificial Analysis reports a 43.4 Intelligence Index and 32.8%
+Terminal-Bench 4.0, while Vals AI reports 35.4% Terminal-Bench 4.0, 90.4% Vibe
+Code Bench, and 44.6% Code Migration. These results do not make Haiku a
+replacement for Sonnet or Opus on the most complex agentic coding tasks.
+
+The exact model appears in OpenRouter's ZDR inventory. The provider directory
+lists Google Vertex, Amazon Bedrock, and Azure as no-training and
+zero-retention, while Anthropic and Claude Platform on AWS are no-training with
+30-day retention. Default routing can use any of these providers, so enforce
+OpenRouter ZDR routing before sending confidential workloads. OpenRouter itself
+does not retain prompt or response content unless logging is explicitly
+enabled.
+
+## OpenRouter-hosted Claude Sonnet 5.5
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`anthropic/claude-sonnet-5.5`. OpenRouter added this stable route on September
+28, 2026. It accepts text, image, and file input, has a 1,000,000-token context
+window and 128,000-token output limit, and supports streaming, native function
+calling, automatic or forced tool choice, and JSON-schema structured output.
+Reasoning is always on; Geist sends OpenRouter's documented default `high`
+effort. Geist retains stop while omitting `n`, temperature, `top_p`,
+frequency-penalty, and presence-penalty parameters. The aggregate route
+advertises temperature through Azure, but six other upstreams omit it.
+
+OpenRouter lists $2 per million input tokens, $10 per million output tokens,
+$0.20 per million cached input tokens, and $2.50 per million five-minute cache
+writes. Anthropic reports materially faster, more token-efficient routine work
+than Sonnet 5. Independent Vals AI measurements place Sonnet 5.5 near the top
+of its broad suite and first on its code-migration and vibe-coding evaluations;
+hands-on Electricity Bench results are more mixed, supporting its role as a
+high-volume worker rather than a universal replacement for Opus 5.5.
+
+OpenRouter exposed eight live upstream routes at review time. Its provider
+directory lists Google Vertex, Amazon Bedrock, and Azure as no-training and
+zero-retention providers. The exact Sonnet 5.5 route appeared in OpenRouter's
+ZDR endpoint inventory on September 30, 2026, but default routing can still
+reach Anthropic or Claude Platform on AWS, which OpenRouter lists as no-training
+with 30-day retention. Enforce ZDR routing before sending confidential
+workloads. OpenRouter itself does not retain prompt or response content unless
+logging is explicitly enabled.
 
 ## Meta-hosted Muse Spark
 
@@ -91,6 +274,30 @@ Meta describes open weights as future work.
 The Contributor tier remains under provider `openrouter`. Although Meta lists
 the tier, direct Chat Completions availability has not been reliable enough to
 make it a first-party provider option in Geist.
+
+## OpenRouter-hosted Fireworks Ember-1
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`fireworks/ember-1`. The stable route accepts text and image input, has a
+1,048,576-token context window and 943,718-token maximum output, and supports
+optional reasoning, streaming, native function calling, and JSON-schema
+structured outputs. Geist omits the unsupported `n` parameter while preserving
+the route's supported sampling, stop, tool, and response-format parameters.
+OpenRouter lists the current price as $3 per million input tokens, $15 per
+million output tokens, and $0.30 per million cached input tokens.
+
+[Fireworks' September 23, 2026 launch report](https://fireworks.ai/blog/ember-1)
+describes Ember-1 as a Kimi K3 specialization trained to shorten reasoning.
+Its provider-run evaluation reports 82.0% on Terminal-Bench 2.1, 92.2% on
+SWE-bench Verified, 20.0% on SWE-Interact, 75.2% on DeepSWE 1.1, and 66% on
+tau2-bench Airline, with 35–50% fewer reasoning tokens than Kimi K3 across the
+reported evaluations. These are provider claims, not independent measurements;
+qualify the model on Geist workloads before making it a default.
+
+The route currently has one Fireworks endpoint, so there is no provider
+fallback diversity. OpenRouter lists Fireworks as zero retention and not using
+prompts for training as of September 24, 2026. Re-check the live endpoint and
+provider policy before sending confidential or regulated workloads.
 
 ## OpenRouter-hosted Qwen3.8 Flash
 
@@ -131,35 +338,39 @@ zero retention and not used for training. OpenRouter itself does not retain
 prompt or response content unless logging is explicitly enabled. Enforce ZDR
 routing and re-check the endpoint policy before sending confidential workloads.
 
-## OpenRouter-hosted DeepSeek V4.1 Flash
+## OpenRouter-hosted DeepSeek V4.1 Flash 1017
 
 Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
-`deepseek/deepseek-v4.1-flash`. OpenRouter added this stable route on September
-10, 2026. It accepts text and image input, has a 1,048,576-token context window
-and advertised 384,000-token maximum output, and supports optional reasoning,
-streaming, native function calling, and response-format JSON. JSON-schema
-enforcement varies by upstream. Geist omits the unsupported `n` parameter and
-otherwise preserves the route's supported sampling and tool parameters.
+`deepseek/deepseek-v4.1-flash-1017`. The previous
+`deepseek/deepseek-v4.1-flash` ID remains a routing/request alias. OpenRouter
+added the stable snapshot on October 17, 2026. It accepts text and image input,
+has a 1,048,576-token context window and advertised 393,216-token maximum
+output, and supports optional reasoning, streaming, native function calling,
+and response-format JSON. JSON-schema enforcement varies by upstream. Geist
+omits the unsupported `n` parameter and otherwise preserves supported sampling
+and tool parameters.
 
-OpenRouter listed four upstreams at review time. Its routed three-day
-availability was 99.92%, with a 134-token/second best-provider median and a
-1.40-second best-provider median latency. The displayed off-peak prices were
-$0.15 per million input tokens, $0.60 per million output tokens, and $0.003 per
-million cached input tokens; weekday peak windows double those rates.
+OpenRouter listed six routes at review time: InferenceNet, Cloudflare, three
+DeepInfra service tiers, and DeepSeek. Active routes reported 100% 30-minute
+uptime, while the routed model page reported 99.48% 24-hour availability.
+Route-level pricing started at $0.10 per million input tokens, $0.50 per million
+output tokens, and $0.002 per million cached input tokens; the first-party
+DeepSeek route displayed $0.15/$0.60/$0.003 with weekday peak overrides.
 
-DeepSeek's launch results include 90.6 on Terminal-Bench 2.1, 74.2 on DeepSWE
-v1.1, and 54.8 on AutomationBench at maximum reasoning effort. Those are
-provider-run results, even though the model card publishes harness settings and
-reproduction instructions. Independent launch-day benchmarking was not yet
-available, and early hands-on reports were mixed, so qualify the model on your
-own workloads before making it a default.
+DeepSeek reports exact-snapshot gains over the preceding release: 42.3 versus
+31.2 on Terminal-Bench 4.0, 77.0 versus 74.2 on DeepSWE v1.1, 60.5 versus 54.8
+on AutomationBench, and 29.1 versus 20.3 on ProgramBench. These remain
+provider-run results even though the model card names harnesses and publishes
+reproduction details. Artificial Analysis and Vals had evaluated the preceding
+snapshot, but no separate exact-1017 independent rerun was available on release
+day, so qualify it on your own workload before changing defaults.
 
 OpenRouter itself does not retain prompt or response content unless logging is
 explicitly enabled. The first-party DeepSeek endpoint, however, retains prompts
-and may train on them. DeepInfra, Novita, and Venice instances of this exact
-route appeared in OpenRouter's ZDR inventory on September 10, 2026. Enforce
-OpenRouter ZDR routing before sending confidential workloads; default routing
-does not make that guarantee.
+and may train on them. InferenceNet, Cloudflare, and DeepInfra routes are listed
+as no-training/zero-retention, and the exact model appears in OpenRouter's ZDR
+inventory. Enforce OpenRouter ZDR routing before sending confidential or
+regulated workloads; default routing does not make that guarantee.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 
@@ -212,6 +423,45 @@ OpenRouter does not retain prompt or response content unless logging is
 explicitly enabled. The sole upstream Meta endpoint, however, has a documented
 30-day retention policy and is not on OpenRouter's ZDR endpoint list. Do not
 send confidential workloads to this model.
+
+## OpenRouter-hosted Muse Wonder
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-wonder`. The stable October 12, 2026 route has a 1,048,576-token
+context, a 943,718-token maximum output, text/image/file/audio/video input,
+streaming, native tools and tool choice, and JSON-schema structured output.
+Reasoning is mandatory; Geist supplies OpenRouter's documented default
+`medium` effort and omits unsupported `n`, frequency-penalty,
+presence-penalty, and stop parameters. OpenRouter lists pricing at $4/M input,
+$20/M output, and $0.20/M cached input.
+
+Meta does not disclose a parameter count. OpenRouter lists the sole Meta route
+as no-training with 30-day retention, and the exact model is absent from its
+ZDR inventory. Do not send confidential or regulated workloads to this model.
+See the [OpenRouter model page](https://openrouter.ai/meta/muse-wonder),
+[endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-wonder-20261012/endpoints),
+Meta's [October 12 release](https://research.meta.ai/blog/muse-wonder), and the
+[independent Artificial Analysis evaluation](https://artificialanalysis.ai/articles/muse-wonder).
+
+## OpenRouter-hosted Muse Spark Open
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`meta/muse-spark-open`. The stable October 15, 2026 route has a
+1,048,576-token context, a 943,718-token maximum output, and accepts text,
+images, files, audio, and video while returning text. It supports streaming,
+native tools and tool choice, and JSON-schema structured output. Reasoning is
+mandatory; Geist supplies OpenRouter's documented default `medium` effort and
+omits only the unsupported generic `n` parameter. OpenRouter lists pricing at
+$1.25/M input, $4.25/M output, and $0.15/M cached input.
+
+Meta discloses 816B total parameters with 42B active per token. The exact model
+is present in OpenRouter's ZDR inventory. Enforce ZDR routing and re-check
+endpoint policy before confidential workloads because provider availability and
+data policies can change. See the
+[OpenRouter model page](https://openrouter.ai/meta/muse-spark-open),
+[endpoint metadata](https://openrouter.ai/api/v1/models/meta/muse-spark-open-20261015/endpoints),
+[Meta model card](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B),
+and [independent Plotly evaluation](https://plotly.com/blog/meta-muse-spark-open-first-look/).
 
 Any self-hosted llama.cpp, vLLM, SGLang, or Transformers server can be used
 without a provider entry by creating an online agent with its base endpoint and

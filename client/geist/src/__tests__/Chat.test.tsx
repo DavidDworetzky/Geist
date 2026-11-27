@@ -111,15 +111,17 @@ jest.mock('react-router-dom', () => ({
 jest.mock('../Components/LinkList', () => () => null);
 jest.mock('../Components/EnhancedChatInput', () => ({
   __esModule: true,
-  default: ({ value, onChange, onSubmit, disabled, submitLabel }: {
+  default: ({ value, onChange, onSubmit, disabled, submitLabel, secondaryAction }: {
     value: string;
     onChange: (value: string) => void;
     onSubmit: (value: string) => void;
     disabled: boolean;
     submitLabel: string;
+    secondaryAction?: React.ReactNode;
   }) => (
     <div>
       <textarea aria-label="Message" value={value} onChange={e => onChange(e.target.value)} disabled={disabled} />
+      {secondaryAction}
       <button disabled={disabled} onClick={() => onSubmit(value)}>{submitLabel}</button>
     </div>
   ),

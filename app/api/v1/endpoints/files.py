@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.api.utils import get_current_workspace
 from app.models.database.file_upload import (
@@ -12,6 +13,7 @@ from app.models.database.file_upload import (
 from app.services.document_search import DocumentSearchService
 from app.services.file_processor import FileProcessingService
 from app.services.file_storage import FileStorageService
+from app.services.job_queue import enqueue, enqueue_file_processing
 
 
 router = APIRouter()
@@ -27,7 +29,8 @@ async def upload_file(
         file_data = await file.read()
 
         # Store file using the file storage service
-        storage_result = FileStorageService.store_file(
+        storage_result = await run_in_threadpool(
+            FileStorageService.store_file,
             file_data=file_data,
             original_filename=file.filename or "unknown_file",
             user_id=current_workspace.workspace_id,
@@ -36,19 +39,25 @@ async def upload_file(
         if not storage_result["success"]:
             raise HTTPException(status_code=400, detail=storage_result["error"])
 
-        # If file is newly uploaded (not duplicate), process it asynchronously
         file_id = storage_result["file_id"]
-        if not storage_result.get("duplicate", False):
-            # Start processing in background
-            try:
-                processing_result = await FileProcessingService.process_file(file_id)
-                storage_result["processing_status"] = processing_result
-            except Exception as e:
-                # Processing failed, but file is still uploaded
+        needs_processing = True
+        if storage_result.get("duplicate", False):
+            uploaded = await run_in_threadpool(get_file_upload_by_id, file_id)
+            if uploaded is None or uploaded.user_id != current_workspace.workspace_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            needs_processing = not uploaded.is_processed
+            if uploaded.processing_error:
                 storage_result["processing_status"] = {
-                    "success": False,
-                    "error": f"Processing failed: {str(e)}",
+                    "status": "failed",
+                    "error": uploaded.processing_error,
                 }
+        if needs_processing:
+            job = await run_in_threadpool(
+                enqueue_file_processing,
+                file_id,
+                current_workspace.workspace_id,
+            )
+            storage_result["processing_status"] = {"status": "queued", "job_id": job.job_id}
 
         return {
             "success": True,
@@ -67,7 +76,7 @@ async def upload_file(
 
 
 @router.get("/")
-async def list_files(
+def list_files(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: str | None = Query(None),
@@ -116,7 +125,7 @@ async def list_files(
 
 
 @router.get("/{file_id}")
-async def get_file_metadata(
+def get_file_metadata(
     file_id: int, current_workspace=Depends(get_current_workspace)
 ) -> dict[str, Any]:
     """Get file metadata by ID"""
@@ -137,7 +146,7 @@ async def get_file_metadata(
 
 
 @router.get("/{file_id}/download")
-async def download_file(file_id: int, current_workspace=Depends(get_current_workspace)):
+def download_file(file_id: int, current_workspace=Depends(get_current_workspace)):
     """Download the original file"""
     try:
         file_upload = get_file_upload_by_id(file_id)
@@ -166,7 +175,7 @@ async def download_file(file_id: int, current_workspace=Depends(get_current_work
 
 
 @router.get("/{file_id}/content")
-async def get_file_content(
+def get_file_content(
     file_id: int, current_workspace=Depends(get_current_workspace)
 ) -> dict[str, Any]:
     """Get extracted text content"""
@@ -195,9 +204,7 @@ async def get_file_content(
 
 
 @router.delete("/{file_id}")
-async def delete_file(
-    file_id: int, current_workspace=Depends(get_current_workspace)
-) -> dict[str, Any]:
+def delete_file(file_id: int, current_workspace=Depends(get_current_workspace)) -> dict[str, Any]:
     """Delete a file and its metadata"""
     try:
         delete_result = FileStorageService.delete_file(file_id, current_workspace.workspace_id)
@@ -217,7 +224,7 @@ async def delete_file(
 
 
 @router.post("/{file_id}/reprocess")
-async def reprocess_file(
+def reprocess_file(
     file_id: int, force: bool = Query(False), current_workspace=Depends(get_current_workspace)
 ) -> dict[str, Any]:
     """Reprocess a file (useful if processing failed or needs updating)"""
@@ -231,7 +238,18 @@ async def reprocess_file(
             raise HTTPException(status_code=403, detail="Access denied")
 
         # Reprocess the file
-        processing_result = FileProcessingService.reprocess_file(file_id, force=force)
+        job = enqueue(
+            "file.process",
+            payload={
+                "file_id": file_id,
+                "user_id": current_workspace.workspace_id,
+                "reprocess": True,
+                "force": force,
+            },
+            user_id=current_workspace.workspace_id,
+            max_attempts=1,
+        )
+        processing_result = {"status": "queued", "job_id": job.job_id}
 
         return {"success": True, "file_id": file_id, "processing_result": processing_result}
 
@@ -242,7 +260,7 @@ async def reprocess_file(
 
 
 @router.get("/{file_id}/status")
-async def get_processing_status(
+def get_processing_status(
     file_id: int, current_workspace=Depends(get_current_workspace)
 ) -> dict[str, Any]:
     """Get the current processing status of a file"""
@@ -269,7 +287,7 @@ async def get_processing_status(
 
 
 @router.post("/search")
-async def search_files(
+def search_files(
     query: str = Query(..., min_length=1),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),

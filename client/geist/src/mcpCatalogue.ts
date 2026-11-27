@@ -15,6 +15,8 @@ export interface McpCatalogueEntry {
   authentication?: string;
   requirements: string[];
   configurationNote?: string;
+  oauthProvider?: string;
+  oauthLabel?: string;
 }
 
 export const mcpCatalogue: McpCatalogueEntry[] = [
@@ -31,6 +33,8 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
   },
   {
     id: 'github',
+    oauthProvider: 'github',
+    oauthLabel: 'GitHub',
     name: 'GitHub',
     publisher: 'GitHub',
     description: 'Read repositories, issues, pull requests, and other GitHub context.',
@@ -39,7 +43,7 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     transport: 'http',
     url: 'https://api.githubcopilot.com/mcp/',
     authentication: 'GitHub personal access token or OAuth token',
-    requirements: ['Add an Authorization bearer header before testing the connection.'],
+    requirements: ['Connect with GitHub using your operator’s OAuth application, or add a personal access token as an Authorization bearer header.'],
   },
   {
     id: 'playwright',
@@ -55,6 +59,7 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
   },
   {
     id: 'gmail',
+    oauthProvider: 'google',
     name: 'Gmail',
     publisher: 'Google',
     description: 'Search, read, label, and draft mail for a personal Google account.',
@@ -66,12 +71,13 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     authentication: 'Google OAuth 2.0 delegated authorization',
     requirements: [
       'Google Workspace Developer Preview access and Gmail MCP configuration.',
-      'A delegated OAuth access token added as an Authorization bearer header.',
+      'A Google OAuth application configured by your Geist operator; sign in with Google during setup.',
     ],
-    configurationNote: 'Geist does not yet provide the Google OAuth browser flow. The server is saved disabled so you can review and test it before enabling mail tools.',
+    configurationNote: 'Connect with Google to grant mail reading and draft permissions. Geist refreshes authorization automatically. The server stays disabled until you enable it.',
   },
   {
     id: 'google-workspace-mail',
+    oauthProvider: 'google',
     name: 'Google Workspace Mail',
     publisher: 'Google',
     description: 'Use Gmail tools with an administrator-managed Google Workspace account.',
@@ -84,9 +90,9 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     requirements: [
       'Google Workspace Developer Preview access and Gmail MCP configuration.',
       'Workspace administrator approval when organizational policy requires it.',
-      'A delegated OAuth access token added as an Authorization bearer header.',
+      'A Google OAuth application configured by your Geist operator; sign in with Google during setup.',
     ],
-    configurationNote: 'Geist does not yet provide the Google OAuth browser flow. The server is saved disabled so an operator can review the account and permissions first.',
+    configurationNote: 'Connect with Google, review the requested permissions, then test the server before enabling it.',
   },
   {
     id: 'outlook-mail',
@@ -101,7 +107,7 @@ export const mcpCatalogue: McpCatalogueEntry[] = [
     requirements: [
       'A tenant-specific Microsoft 365 Mail MCP endpoint or separately vetted Outlook MCP server.',
       'Tenant administrator consent when organizational policy requires it.',
-      'A delegated access token added as an Authorization bearer header.',
+      'An OAuth provider registration configured by your Geist operator for this exact endpoint, or a manual Authorization bearer header.',
     ],
     configurationNote: 'Microsoft does not publish a universal Outlook MCP endpoint here. Enter the endpoint supplied by your operator and keep the server disabled until it has been reviewed.',
   },

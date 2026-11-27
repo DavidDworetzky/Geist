@@ -1,6 +1,7 @@
 """Adapter from Geist's completion contract to the optional mlx-lm runtime."""
 
 import importlib
+import json
 import logging
 import os
 import re
@@ -8,11 +9,14 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 from agents.architectures.chat_template_tools import (
     ToolResponseStream,
     build_tool_payload,
+    parse_tool_response,
+    strip_inkling_response_markup,
     tokenizer_supports_tools,
 )
 from agents.model_catalog import infer_model_spec
@@ -28,11 +32,62 @@ from agents.models.tool_calling import (
 QWEN3_TOP_K = 20
 DFLASH_MIN_TOKENS = 32
 MAX_RETAINED_PREFIX_TOKENS = 32768
+INKLING2_MODEL_TYPES = frozenset({"inkling2", "inkling2_loop"})
 logger = logging.getLogger(__name__)
 
 
 def _is_qwen3_model(model_id: str) -> bool:
     return re.search(r"(?<![a-z0-9])qwen[-_ ]?3(?:[._]\d+)?(?!\d)", model_id, re.I) is not None
+
+
+def _is_inkling2_model(model_id: str) -> bool:
+    return re.search(r"(?<![a-z0-9])inkling[-_ ]?2(?![0-9])", model_id, re.I) is not None
+
+
+def _read_local_model_type(path_or_id: str) -> str | None:
+    config_path = Path(path_or_id) / "config.json"
+    if not config_path.is_file():
+        return None
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    model_type = data.get("model_type")
+    return model_type if isinstance(model_type, str) else None
+
+
+def _load_model_and_tokenizer(path_or_id: str) -> tuple[Any, Any]:
+    """Load an MLX model and tokenizer, routing local Inkling 2 snapshots to Geist's architecture.
+
+    Inkling 2 detection inspects ``config.json`` inside a local snapshot directory
+    (which ``MLXLlamaRunner`` supplies via ``weights_dir`` from the managed store).
+    """
+    model_type = _read_local_model_type(path_or_id)
+    if model_type in INKLING2_MODEL_TYPES:
+        from mlx_lm.utils import load_model, load_tokenizer
+
+        from agents.architectures.inkling2 import Model as Inkling2Model
+        from agents.architectures.inkling2 import ModelArgs as Inkling2ModelArgs
+
+        def _get_inkling2_classes(config: dict[str, Any]) -> tuple[type[Any], type[Any]]:
+            if config.get("model_type") in INKLING2_MODEL_TYPES:
+                return Inkling2Model, Inkling2ModelArgs
+            from mlx_lm.utils import _get_classes
+
+            return _get_classes(config)
+
+        model_path = Path(path_or_id)
+        model, config = load_model(
+            model_path,
+            lazy=False,
+            get_model_classes=_get_inkling2_classes,
+        )
+        tokenizer = load_tokenizer(model_path, eos_token_ids=config.get("eos_token_id"))
+        return model, tokenizer
+
+    from mlx_lm import load
+
+    return load(path_or_id)
 
 
 def _normalize_stops(stop: str | list[str] | None) -> tuple[str, ...]:
@@ -56,6 +111,112 @@ def _stop_prefix_length(text: str, stops: tuple[str, ...]) -> int:
                 retained = max(retained, length)
                 break
     return retained
+
+
+class _InklingStreamFilter:
+    """Incrementally extract plain text from Inkling 2 control-token streams."""
+
+    _TEXT_MARKERS = (
+        "<|content_text|>",
+        "<|content_tool_error|>",
+        "<|content_invoke_tool_text|>",
+    )
+    _END_MARKERS = (
+        "<|end_message|>",
+        "<|content_model_end_sampling|>",
+    )
+    _ALL_MARKERS = (
+        _TEXT_MARKERS
+        + _END_MARKERS
+        + (
+            "<|message_model|>",
+            "<|content_thinking|>",
+            "<|content_invoke_tool_json|>",
+        )
+    )
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._in_text = False
+        self._saw_markup = False
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        output: list[str] = []
+        while self._buffer:
+            if not self._in_text:
+                text_pos = -1
+                text_marker = ""
+                for marker in self._TEXT_MARKERS:
+                    idx = self._buffer.find(marker)
+                    if idx != -1 and (text_pos == -1 or idx < text_pos):
+                        text_pos = idx
+                        text_marker = marker
+                if text_pos != -1:
+                    if text_pos and not self._saw_markup:
+                        output.append(self._buffer[:text_pos])
+                    self._saw_markup = True
+                    self._in_text = True
+                    self._buffer = self._buffer[text_pos + len(text_marker) :]
+                    continue
+                marker_pos = -1
+                for marker in self._ALL_MARKERS:
+                    idx = self._buffer.find(marker)
+                    if idx != -1 and (marker_pos == -1 or idx < marker_pos):
+                        marker_pos = idx
+                if marker_pos != -1:
+                    if marker_pos and not self._saw_markup:
+                        output.append(self._buffer[:marker_pos])
+                    self._saw_markup = True
+                    retained = _stop_prefix_length(self._buffer, self._TEXT_MARKERS)
+                    self._buffer = self._buffer[len(self._buffer) - retained :] if retained else ""
+                    break
+                if self._saw_markup:
+                    retained = _stop_prefix_length(self._buffer, self._TEXT_MARKERS)
+                    self._buffer = self._buffer[len(self._buffer) - retained :] if retained else ""
+                    break
+                # Wait briefly if the buffer may be a partial leading control tag.
+                if len(self._buffer) < 32 and _stop_prefix_length(
+                    self._buffer, self._ALL_MARKERS
+                ) == len(self._buffer):
+                    break
+                retained = _stop_prefix_length(self._buffer, self._ALL_MARKERS)
+                emit_len = len(self._buffer) - retained
+                if emit_len:
+                    output.append(self._buffer[:emit_len])
+                    self._buffer = self._buffer[emit_len:]
+                break
+
+            end_pos = -1
+            end_marker = ""
+            for marker in self._END_MARKERS:
+                idx = self._buffer.find(marker)
+                if idx != -1 and (end_pos == -1 or idx < end_pos):
+                    end_pos = idx
+                    end_marker = marker
+            if end_pos != -1:
+                if end_pos:
+                    output.append(self._buffer[:end_pos])
+                self._in_text = False
+                self._buffer = self._buffer[end_pos + len(end_marker) :]
+                continue
+            retained = _stop_prefix_length(self._buffer, self._END_MARKERS)
+            emit_len = len(self._buffer) - retained
+            if emit_len:
+                output.append(self._buffer[:emit_len])
+                self._buffer = self._buffer[emit_len:]
+            break
+        return "".join(output)
+
+    def flush(self) -> str:
+        if not self._buffer:
+            return ""
+        if self._in_text or not self._saw_markup:
+            rest = strip_inkling_response_markup(self._buffer)
+            self._buffer = ""
+            return rest
+        self._buffer = ""
+        return ""
 
 
 def _configure_thread_local_generation_stream() -> None:
@@ -95,7 +256,7 @@ class MLXLMBackend:
         chat_template_kwargs: dict[str, Any] | None = None,
     ):
         try:
-            from mlx_lm import load
+            importlib.import_module("mlx_lm")
         except ImportError as exc:
             raise RuntimeError(
                 "The mlx_lm implementation requires the pinned mlx-lm dependency."
@@ -111,7 +272,7 @@ class MLXLMBackend:
         self.model_id = model_id
         self.weights_dir = weights_dir
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
-        self.model, self.tokenizer = load(weights_dir or model_id)
+        self.model, self.tokenizer = _load_model_and_tokenizer(weights_dir or model_id)
         self.last_stats: dict[str, int | float | str | None] = {}
         self.prefill_step_size = _prefill_step_size()
         # Starlette may resume/close a synchronous stream on a different worker.
@@ -193,10 +354,20 @@ class MLXLMBackend:
         finally:
             self.last_stats = {"implementation": "mlx_dflash", **self._dflash.last_stats}
 
+    def _is_inkling2(self) -> bool:
+        model = getattr(self, "model", None)
+        model_id = getattr(self, "model_id", "") or ""
+        return (
+            _is_inkling2_model(model_id)
+            or getattr(model, "model_type", None) in INKLING2_MODEL_TYPES
+        )
+
     def _template_options(self) -> dict[str, Any]:
         template_options = dict(self.chat_template_kwargs)
         if _is_qwen3_model(self.model_id):
             template_options.setdefault("enable_thinking", False)
+        if self._is_inkling2():
+            template_options.setdefault("reasoning_effort", "none")
         return template_options
 
     def _build_prompt(self, system_prompt: str, user_prompt: str) -> str:
@@ -262,10 +433,14 @@ class MLXLMBackend:
         stops = _normalize_stops(self.stop)
         pending_text = ""
         stopped = False
+        inkling_filter = _InklingStreamFilter() if (self._is_inkling2() and not tools) else None
         response_stream = self._stream_prompt(prompt, sampler, logits_processors or None)
         try:
             for segment in response_stream:
-                pending_text += segment
+                chunk = inkling_filter.feed(segment) if inkling_filter is not None else segment
+                if not chunk:
+                    continue
+                pending_text += chunk
                 stop_index = _first_stop_index(pending_text, stops)
                 if stop_index is not None:
                     if stop_index:
@@ -282,6 +457,17 @@ class MLXLMBackend:
             close = getattr(response_stream, "close", None)
             if callable(close):
                 close()
+
+        if inkling_filter is not None and not stopped:
+            tail = inkling_filter.flush()
+            if tail:
+                pending_text += tail
+                stop_index = _first_stop_index(pending_text, stops)
+                if stop_index is not None:
+                    if stop_index:
+                        yield pending_text[:stop_index]
+                    pending_text = ""
+                    stopped = True
 
         if pending_text and not stopped:
             yield pending_text
@@ -401,6 +587,8 @@ class MLXLMBackend:
         messages: list[dict[str, str | None]],
     ) -> list[dict[str, str]]:
         response = "".join(self.stream_messages(messages)).strip()
+        if self._is_inkling2():
+            response = strip_inkling_response_markup(response)
         user_prompt = next(
             (
                 message.get("content") or ""
@@ -423,8 +611,33 @@ class MLXLMBackend:
         if tools and not self.supports_native_tool_calling:
             raise ValueError(f"Model {self.model_id} does not support native tool calling")
         payload = build_tool_payload(messages, tools)
-        parser = ToolResponseStream(payload.provider_to_internal, payload.tools)
         responses = self.stream_messages(payload.messages, payload.tools)
+        if self._is_inkling2():
+            stream_filter = _InklingStreamFilter() if payload.tools else None
+            raw_parts: list[str] = []
+            try:
+                for segment in responses:
+                    raw_parts.append(segment)
+                    text = stream_filter.feed(segment) if stream_filter is not None else segment
+                    if text:
+                        yield ModelEvent.text_delta(text)
+                if stream_filter is not None:
+                    tail = stream_filter.flush()
+                    if tail:
+                        yield ModelEvent.text_delta(tail)
+            finally:
+                close = getattr(responses, "close", None)
+                if callable(close):
+                    close()
+            raw_response = "".join(raw_parts).strip()
+            turn = parse_tool_response(
+                raw_response,
+                provider_to_internal=payload.provider_to_internal,
+                tools=payload.tools,
+            )
+            yield ModelEvent.turn_complete(turn)
+            return
+        parser = ToolResponseStream(payload.provider_to_internal, payload.tools)
         try:
             for segment in responses:
                 text = parser.feed(segment)

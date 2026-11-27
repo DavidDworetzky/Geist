@@ -326,3 +326,45 @@
     grid-template-columns: 1fr;
   }
 }
+
+.mcp-oauth-account,
+.mcp-bridge-setup {
+  padding: 14px 0;
+  border-top: 1px solid var(--geist-color-border);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mcp-oauth-account h4,
+.mcp-bridge-setup h4 {
+  margin: 0 0 10px;
+}
+
+.mcp-oauth-account p,
+.mcp-bridge-setup p,
+.mcp-bridge-setup li {
+  color: var(--geist-color-text-muted);
+  font-size: 0.85rem;
+}
+
+.mcp-bridge-setup ol {
+  display: grid;
+  gap: 10px;
+  padding-left: 22px;
+}
+
+.mcp-oauth-account details {
+  margin: 10px 0;
+}
+
+.mcp-oauth-account summary {
+  cursor: pointer;
+}
+
+.mcp-oauth-account button {
+  margin: 8px 8px 0 0;
+}
+
+.mcp-bridge-setup a {
+  color: var(--geist-color-accent-strong);
+}

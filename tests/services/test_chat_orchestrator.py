@@ -101,6 +101,105 @@ def test_recent_denial_survives_bounded_context_and_trusted_checkpoint():
     assert not ChatMessage.from_dict(checkpoint[1]).preserve_content
 
 
+def test_context_budget_retains_completed_tool_results_without_oversized_reasoning():
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    call = ToolCall.create("read")
+    messages = [
+        ChatMessage(
+            role="assistant",
+            tool_calls=[call],
+            reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+            reasoning_model="anthropic/claude-opus-5.5",
+        ),
+        ChatMessage(role="tool", tool_call_id=call.id, content="result"),
+        ChatMessage(role="assistant", content="Finished"),
+        ChatMessage(role="user", content="Continue"),
+    ]
+    bounded = orchestrator._model_context(messages)
+    assert [message.content for message in bounded] == [None, "result", "Finished", "Continue"]
+    assert not bounded[0].reasoning_details
+    assert bounded[0].reasoning_model is None
+    assert orchestrator._has_complete_tool_sequence(bounded)
+    assert messages[0].reasoning_details[0]["data"] == "x" * 2000
+
+
+def test_completed_history_reasoning_does_not_evict_conversation_or_tool_results():
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    history = []
+    for index in range(2):
+        call = ToolCall.create("read")
+        messages = [
+            ChatMessage(role="user", content=f"Request {index}"),
+            ChatMessage(
+                role="assistant",
+                tool_calls=[call],
+                reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+                reasoning_model="anthropic/claude-opus-5.5",
+                reasoning_endpoint="https://openrouter.ai/api/v1/chat/completions",
+            ),
+            ChatMessage(role="tool", tool_call_id=call.id, content=f"Result {index}"),
+            ChatMessage(role="assistant", content=f"Answer {index}"),
+        ]
+        history.append({"status": "completed", "transcript": [item.to_dict() for item in messages]})
+    original = deepcopy(history)
+    restored = orchestrator._model_context(orchestrator._history_messages(history))
+    assert [item.content for item in restored if item.role == "user"] == ["Request 0", "Request 1"]
+    assert [item.content for item in restored if item.role == "tool"] == ["Result 0", "Result 1"]
+    assert [
+        item.content for item in restored if item.role == "assistant" and not item.tool_calls
+    ] == [
+        "Answer 0",
+        "Answer 1",
+    ]
+    assert all(not item.reasoning_details for item in restored)
+    assert orchestrator._has_complete_tool_sequence(restored)
+    assert len(json.dumps([item.to_dict() for item in restored])) <= 1200
+    assert history == original
+
+
+@pytest.mark.parametrize("answer", ["Short answer", "Long answer " * 500])
+def test_context_budget_retains_plain_answer_without_oversized_reasoning(answer):
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200)
+    message = ChatMessage(
+        role="assistant",
+        content=answer,
+        reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+        reasoning_model="anthropic/claude-opus-5.5",
+        reasoning_endpoint="https://openrouter.ai/api/v1/chat/completions",
+    )
+    bounded = orchestrator._model_context([message, ChatMessage(role="user", content="Continue")])
+    assert len(bounded) == 2
+    assert bounded[0].content.startswith(answer[:12])
+    assert not bounded[0].reasoning_details
+    assert bounded[0].reasoning_model is None
+    assert bounded[0].reasoning_endpoint is None
+    assert len(json.dumps([item.to_dict() for item in bounded])) <= 1200
+    assert message.reasoning_details[0]["data"] == "x" * 2000
+    assert message.content == answer
+
+
+@pytest.mark.parametrize("trailing_instruction", [False, True])
+def test_current_tool_reasoning_over_budget_survives_checkpoint(trailing_instruction):
+    orchestrator = ChatOrchestrator(ToolRegistry(), max_history_chars=1200, max_history_entries=1)
+    call = ToolCall.create("write")
+    messages = [
+        ChatMessage(
+            role="assistant",
+            tool_calls=[call],
+            reasoning_details=[{"type": "reasoning.encrypted", "data": "x" * 2000}],
+            reasoning_model="anthropic/claude-opus-5.5",
+        ),
+        ChatMessage(role="tool", tool_call_id=call.id, content="File written"),
+    ]
+    if trailing_instruction:
+        messages.append(ChatMessage(role="user", content="Continue"))
+    checkpoint = orchestrator._checkpoint_messages(messages)
+    restored = [orchestrator._checkpoint_message(item) for item in checkpoint]
+    bounded = orchestrator._model_context(restored)
+    assert [item.to_dict() for item in bounded] == [item.to_dict() for item in messages]
+    assert orchestrator._has_complete_tool_sequence(bounded)
+
+
 class ScriptedBackend:
     supports_native_tool_calling = True
 
@@ -624,6 +723,58 @@ def test_completed_goal_gives_way_to_new_request_preserving_chat_history():
     assert result.orchestration["tasks"] == []
     assert any(m["content"] == "Useful history" for m in backend.requests[0]["messages"])
     assert all(s["goal_id"] != old.state.goal_id for s in store.updated)
+
+
+def test_goal_checkpoints_and_resumes_oversized_reasoning_tool_turn():
+    store = RecordingGoalStore()
+    runtimes = GoalRuntimeRegistry()
+    orchestrator = ChatOrchestrator(
+        build_default_tool_registry(runtimes),
+        orchestration_runs=runtimes,
+        goal_store=store,
+        max_history_chars=1200,
+        history_loader=lambda _: [],
+        history_writer=lambda **_: SimpleNamespace(chat_session_id=7),
+    )
+    reasoning = [{"type": "reasoning.encrypted", "data": "x" * 2000}]
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[ToolCall.create("agent.goal.wait", {"question": "Which file?"})],
+                reasoning_details=reasoning,
+                reasoning_model="anthropic/claude-opus-5.5",
+                reasoning_endpoint="https://openrouter.ai/api/v1/chat/completions",
+            ),
+            ModelTurn(
+                tool_calls=[ToolCall.create("agent.goal.wait", {"question": "Which format?"})]
+            ),
+        ]
+    )
+    for prompt in ["Write a file", "Use report.txt"]:
+        events = list(
+            orchestrator.stream(
+                backend=backend,
+                prompt=prompt,
+                workspace_id=1,
+                chat_id=7,
+                system_prompt=None,
+                config=ModelRequestConfig(),
+                agentic_mode=True,
+            )
+        )
+        assert not [event for event in events if event.event == "error"]
+        assert store.latest["goal_status"] == "waiting_for_user"
+        if prompt == "Write a file":
+            saved = store.latest["transcript"]
+            assert saved[-2]["reasoning_details"] == reasoning
+            assert saved[-1]["tool_call_id"] == saved[-2]["tool_calls"][0]["id"]
+    resumed = backend.requests[1]["messages"]
+    assistant = next(message for message in resumed if message.get("reasoning_details"))
+    assert assistant["reasoning_details"] == reasoning
+    assert any(
+        message.get("tool_call_id") == assistant["tool_calls"][0]["id"] for message in resumed
+    )
+    assert resumed[-1]["content"] == "Use report.txt"
 
 
 def test_invalid_checkpoint_requests_recovery_without_overwriting_it():
@@ -2449,3 +2600,187 @@ def test_failed_standing_grant_is_reported_as_once_only():
     assert calls == ["a"]
     assert "Approved once" in final.tool_calls[0].result_summary
     assert orchestrator.grants.granted("workspace:1:chat:7") == frozenset()
+
+
+def test_agentic_system_prompt_stays_static_across_fresh_and_resumed_runs():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=55),
+    )
+
+    first_backend = ScriptedBackend([ModelTurn(text="Quiet pond ripples.")])
+    list(
+        orchestrator.stream(
+            backend=first_backend,
+            prompt="Write a haiku",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    second_backend = ScriptedBackend([ModelTurn(text="Autumn wind blows.")])
+    list(
+        orchestrator.stream(
+            backend=second_backend,
+            prompt="Write another haiku",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    first_messages = first_backend.requests[0]["messages"]
+    second_messages = second_backend.requests[0]["messages"]
+    assert first_messages[0] == second_messages[0]
+    assert first_messages[0]["role"] == "system"
+    assert "Current state:" not in first_messages[0]["content"]
+    assert "goal_id" not in first_messages[0]["content"]
+    assert len(first_messages) == 2
+
+    paused = GoalRuntime(objective="Finish migration", tasks=[], max_turns=5)
+    paused.update_plan([{"task_id": "step-1", "title": "Inspect schema", "status": "in_progress"}])
+    paused.state.goal_status = "paused"
+    goal_store.latest = paused.checkpoint([{"role": "user", "content": "Finish migration"}])
+
+    resumed_backend = ScriptedBackend([ModelTurn(text="Continuing migration.")])
+    list(
+        orchestrator.stream(
+            backend=resumed_backend,
+            prompt="Continue",
+            workspace_id=7,
+            chat_id=55,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    resumed_messages = resumed_backend.requests[0]["messages"]
+    assert resumed_messages[0] == first_messages[0]
+    assert any(
+        msg["role"] == "user"
+        and "Current goal state:" in (msg["content"] or "")
+        and "Inspect schema" in (msg["content"] or "")
+        for msg in resumed_messages[1:-1]
+    )
+    assert resumed_messages[-1] == {"role": "user", "content": "Continue"}
+
+
+def test_resumed_goal_state_never_splits_tool_call_and_result_under_trimming():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        max_history_entries=2,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=56),
+    )
+
+    paused = GoalRuntime(objective="Finish migration", tasks=[], max_turns=8)
+    paused.update_plan([{"task_id": "step-1", "title": "Inspect schema", "status": "in_progress"}])
+    paused.state.goal_status = "paused"
+    goal_store.latest = paused.checkpoint(
+        [
+            {"role": "user", "content": "Finish migration"},
+            {"role": "assistant", "content": "Starting schema inspection."},
+            {"role": "user", "content": "Also check indexes"},
+        ]
+    )
+
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_1",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-1",
+                                    "title": "Inspect schema",
+                                    "status": "completed",
+                                    "evidence": "Schema inspected",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_2",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-2",
+                                    "title": "Check indexes",
+                                    "status": "completed",
+                                    "evidence": "Indexes checked",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="complete_1",
+                        name="agent.goal.complete",
+                        arguments={
+                            "summary": "Migration checks complete",
+                            "evidence": ["Schema inspected", "Indexes checked"],
+                        },
+                    )
+                ]
+            ),
+        ]
+    )
+
+    list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Continue",
+            workspace_id=7,
+            chat_id=56,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    assert len(backend.requests) == 3
+    for request in backend.requests:
+        messages = request["messages"]
+        assert messages[0]["role"] == "system"
+        assert "Current state:" not in messages[0]["content"]
+        assert any(
+            msg["role"] == "user" and "Current goal state:" in (msg["content"] or "")
+            for msg in messages[1:]
+        )
+        for index, msg in enumerate(messages):
+            tool_calls = msg.get("tool_calls") or []
+            if msg["role"] == "assistant" and tool_calls:
+                expected_ids = [call["id"] for call in tool_calls]
+                following = messages[index + 1 : index + 1 + len(expected_ids)]
+                assert [item["role"] for item in following] == ["tool"] * len(expected_ids)
+                assert [item["tool_call_id"] for item in following] == expected_ids

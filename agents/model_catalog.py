@@ -171,6 +171,24 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "thinkingmachines/Inkling-2-Mini",
+        "Inkling 2 Mini (Local, MLX)",
+        "inkling",
+        backend="mlx_llama",
+        context_window=1048576,
+        max_output_tokens=16384,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        recommended=True,
+        parameter_count="26.4B",
+        activated_parameters="3.4B",
+        performance_note=(
+            "Looped 24-layer (48-visit) MoE for Apple Silicon (32 GB+ unified memory). "
+            "Runs the official NVFP4/MXFP8 checkpoint or mlx-community/Inkling-2-Mini-4bit "
+            "through Geist's in-repo MLX implementation."
+        ),
+    ),
+    ModelSpec(
         "Qwen/Qwen3-1.7B",
         "Qwen 3 1.7B (Local)",
         "qwen",
@@ -305,6 +323,158 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Hosted through OpenRouter; mandatory reasoning defaults to high. "
             "Enable OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "x-ai/grok-4.7",
+        "Grok 4.7",
+        "grok",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=500000,
+        max_output_tokens=450000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "anthropic/claude-opus-5.5",
+        "Claude Opus 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "anthropic/claude-sonnet-5.5",
+        "Claude Sonnet 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        mandatory_reasoning_effort="high",
+        local=False,
+        performance_note=(
+            "Hosted through OpenRouter with mandatory reasoning and native tools. "
+            "Enforce OpenRouter ZDR routing before sending confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "anthropic/claude-haiku-5.5",
+        "Claude Haiku 5.5",
+        "claude",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1000000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+        ),
+        local=False,
+        performance_note=(
+            "Low-cost, high-throughput Claude route with optional adaptive reasoning "
+            "and native tools. Enforce OpenRouter ZDR routing before sending "
+            "confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "openai/gpt-6.1-terra",
+        "GPT-6.1 Terra",
+        "gpt",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1050000,
+        max_output_tokens=128000,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=(
+            "n",
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+        ),
+        aliases=("openai/gpt-6.1-terra-20261026",),
+        local=False,
+        performance_note=(
+            "Fast million-token OpenRouter route with optional reasoning, native tools, "
+            "and structured output. OpenAI retains prompts, while Azure provides a "
+            "zero-retention route; enforce OpenRouter ZDR before confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "particle-ai/particle-1",
+        "Particle-1",
+        "particle",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n",),
+        aliases=("particle-ai/particle-1-20261027",),
+        local=False,
+        performance_note=(
+            "Low-cost coding and data-analysis specialization with optional reasoning, "
+            "native tools, and best-effort schema-guided output. The current single "
+            "Particle route is ZDR-listed; enforce OpenRouter ZDR and re-check endpoint "
+            "policy before confidential workloads."
         ),
     ),
     # Heavyweight models are deliberately server-backed.
@@ -469,6 +639,27 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note="Hosted alternative to running the 31B Flash checkpoint on your own server.",
     ),
     ModelSpec(
+        "fireworks/ember-1",
+        "Fireworks Ember-1",
+        "ember",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        unsupported_parameters=("n",),
+        local=False,
+        performance_note=(
+            "Fireworks-hosted Kimi K3 specialization with optional reasoning, native "
+            "tools, and shorter reasoning traces. The current Fireworks route is zero "
+            "retention; re-check endpoint policy before confidential workloads."
+        ),
+    ),
+    ModelSpec(
         "qwen/qwen3.8-max",
         "Qwen 3.8 Max",
         "qwen",
@@ -508,13 +699,13 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
-        "deepseek/deepseek-v4.1-flash",
-        "DeepSeek V4.1 Flash",
+        "deepseek/deepseek-v4.1-flash-1017",
+        "DeepSeek V4.1 Flash 1017",
         "deepseek",
         provider="openrouter",
         backend="openai_compatible",
         context_window=1048576,
-        max_output_tokens=384000,
+        max_output_tokens=393216,
         supports_vision=True,
         supports_function_calling=True,
         supports_reasoning=True,
@@ -523,10 +714,12 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         unsupported_parameters=("n",),
         local=False,
         performance_note=(
-            "Stable multimodal OpenRouter route with optional reasoning. Default "
-            "routing can use DeepSeek's retaining/training endpoint; enforce "
-            "OpenRouter ZDR for confidential workloads."
+            "October 2026 stable snapshot with optional reasoning, native tools, "
+            "and stronger coding/agent results. Default routing can use DeepSeek's "
+            "retaining/training endpoint; enforce OpenRouter ZDR for confidential "
+            "workloads."
         ),
+        aliases=("deepseek/deepseek-v4.1-flash",),
     ),
     ModelSpec(
         "tencent/hy4-preview",
@@ -608,6 +801,51 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         performance_note=(
             "Low-cost Meta contributor tier with mandatory reasoning. Meta retains "
             "requests for 30 days; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "meta/muse-wonder",
+        "Muse Wonder",
+        "muse",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n", "frequency_penalty", "presence_penalty", "stop"),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable Meta frontier model hosted through OpenRouter with mandatory "
+            "reasoning and native tools. Meta retains requests for 30 days and the "
+            "route is not ZDR-eligible; do not use for confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "meta/muse-spark-open",
+        "Muse Spark Open",
+        "muse",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=943718,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        recommended=True,
+        parameter_count="816B",
+        activated_parameters="42B",
+        unsupported_parameters=("n",),
+        mandatory_reasoning_effort="medium",
+        local=False,
+        performance_note=(
+            "Stable open-weight coding and agent model hosted through OpenRouter with "
+            "mandatory reasoning, native tools, and multiple zero-retention routes. "
+            "Enforce OpenRouter ZDR routing before confidential workloads."
         ),
     ),
     ModelSpec(
@@ -738,6 +976,7 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         )
     prefix_map = (
         (("qwen/", "qwen", "deepseek-r1-distill-qwen"), "Qwen/Qwen3-4B"),
+        (("thinkingmachines/inkling", "inkling-2", "inkling2"), "thinkingmachines/Inkling-2-Mini"),
         (("mistralai/", "mistral", "mixtral"), "mistralai/Mistral-7B-Instruct-v0.3"),
         (("microsoft/phi", "phi-"), "microsoft/Phi-4-mini-instruct"),
         (("huggingfacetb/smollm", "smollm"), "HuggingFaceTB/SmolLM3-3B"),

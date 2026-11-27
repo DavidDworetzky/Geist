@@ -19,6 +19,7 @@ interface EnhancedChatInputProps {
   sessionId?: number;
   enableVoice?: boolean;
   submitLabel?: string;
+  secondaryAction?: React.ReactNode;
   modelLoading?: boolean;
   onShowModelError?: () => void;
   voiceAgentSettings?: UserSettings | null;
@@ -39,6 +40,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   sessionId = 1,
   enableVoice = true,
   submitLabel = 'Send',
+  secondaryAction,
   modelLoading = false,
   onShowModelError,
   voiceAgentSettings = null,
@@ -132,6 +134,9 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
   };
 
   const internalHandleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Some browsers report the IME confirmation key with keyCode 229.
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+
     if ((isRecording || isProcessing) && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       return;
@@ -260,6 +265,7 @@ const EnhancedChatInput: React.FC<EnhancedChatInputProps> = ({
             </>
           )}
 
+          {secondaryAction}
           {(!enableVoice || voiceSelection.mode === 'dictation') && <button
             type="button"
             onClick={handleSubmit}

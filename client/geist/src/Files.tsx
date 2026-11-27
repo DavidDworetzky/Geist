@@ -168,11 +168,6 @@ const Files: React.FC = () => {
     return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
   };
 
-  const handleUploadComplete = () => {
-    void fetchFiles();
-    setShowUpload(false);
-  };
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     void searchFiles(searchQuery);
@@ -198,7 +193,7 @@ const Files: React.FC = () => {
       {showUpload && (
         <section className="file-upload-panel">
           <FileUpload
-            onUploadComplete={handleUploadComplete}
+            onUploadStored={() => { void fetchFiles(); }}
             onUploadError={(uploadError) => setError(uploadError)}
             multiple={true}
           />

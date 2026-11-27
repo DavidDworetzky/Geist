@@ -10,7 +10,7 @@ import subprocess  # nosec B404 -- runs a fixed flag against a verified managed 
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -79,9 +79,11 @@ class LlamaDevice:
     kind: str
     recommended: bool = False
     compatibility_ids: tuple[str, ...] = ()
+    additional_runtime_ids: tuple[str, ...] = ()
 
     def public_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        value.pop("additional_runtime_ids")
         value.pop("runtime_id")
         value["compatibility_ids"] = list(self.compatibility_ids)
         return value
@@ -100,6 +102,7 @@ class LlamaDeviceInventory:
     cache_policy: Literal["positive", "negative"] = "positive"
     selection_detection_error: str | None = None
     discovery_in_progress: bool = False
+    probe_started_at: float = field(default_factory=time.perf_counter, compare=False, repr=False)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -141,10 +144,7 @@ class LlamaDeviceInventory:
         canonical_ids = tuple(by_id[device_id] for device_id in device_ids)
         if len(canonical_ids) != len(set(canonical_ids)):
             raise ValueError("Selected llama.cpp GPU device IDs must resolve to unique devices")
-        runtime_by_id = {device.id: device.runtime_id for device in self.devices}
-        runtime_ids = tuple(runtime_by_id[device_id] for device_id in canonical_ids)
-        # Parsed inventories are bijective today, but caller-constructed snapshots
-        # must not turn distinct public IDs into duplicate process arguments.
+        runtime_ids = self._expand_runtime_ids(canonical_ids)
         if len(runtime_ids) != len(set(runtime_ids)):
             raise ValueError("Selected llama.cpp GPU device IDs must resolve to unique devices")
         return canonical_ids
@@ -153,8 +153,14 @@ class LlamaDeviceInventory:
         """Resolve accepted public IDs to process-local runtime IDs."""
 
         canonical_ids = self.resolve_device_ids(device_ids)
-        runtime_by_id = {device.id: device.runtime_id for device in self.devices}
-        return tuple(runtime_by_id[device_id] for device_id in canonical_ids)
+        return self._expand_runtime_ids(canonical_ids)
+
+    def _expand_runtime_ids(self, canonical_ids: Sequence[str]) -> tuple[str, ...]:
+        runtime_by_id = {
+            device.id: (device.runtime_id, *device.additional_runtime_ids)
+            for device in self.devices
+        }
+        return tuple(runtime_id for key in canonical_ids for runtime_id in runtime_by_id[key])
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -244,7 +250,9 @@ def _extract_stable_identity(name: str) -> tuple[str, str | None]:
     return display_name or name, stable_identity
 
 
-def parse_device_inventory(output: str) -> tuple[LlamaDevice, ...]:
+def parse_device_inventory(
+    output: str, *, warnings: list[str] | None = None
+) -> tuple[LlamaDevice, ...]:
     parsed: list[_ParsedDevice] = []
     for line in output.splitlines():
         match = DEVICE_LINE.match(line)
@@ -282,19 +290,38 @@ def parse_device_inventory(output: str) -> tuple[LlamaDevice, ...]:
     for device in parsed:
         devices_by_name.setdefault(device.normalized_name, []).append(device)
         devices_by_legacy_name.setdefault(device.legacy_normalized_name, []).append(device)
-    ambiguous_names = sorted(
-        devices[0].name
-        for devices in devices_by_name.values()
-        if len(devices) > 1 and any(device.stable_identity is None for device in devices)
-    )
-    if ambiguous_names:
-        raise AmbiguousLlamaDeviceError(
-            "llama-server reported duplicate GPU names without stable UUID or PCI identities: "
-            + ", ".join(ambiguous_names)
-        )
-
     devices: list[LlamaDevice] = []
     for device in parsed:
+        same_name = devices_by_name[device.normalized_name]
+        if device.stable_identity is None and len(same_name) > 1:
+            members = [member for member in same_name if member.stable_identity is None]
+            # A lone unidentified member of a mixed set has no safe individual ID.
+            if len(members) == 1:
+                message = (
+                    f"One additional {device.name} cannot be selected individually because "
+                    "it shares a name with another GPU and reports no UUID or PCI address."
+                )
+                logger.warning("%s", message)
+                if warnings is not None:
+                    warnings.append(message)
+                continue
+            if device is not members[0]:
+                continue
+            count = len(members)
+            totals = [m.total_memory_mib for m in members if m.total_memory_mib is not None]
+            free = [m.free_memory_mib for m in members if m.free_memory_mib is not None]
+            devices.append(
+                LlamaDevice(
+                    id=_public_device_id(f"group\0{device.normalized_name}\0{count}"),
+                    runtime_id=device.runtime_id,
+                    additional_runtime_ids=tuple(member.runtime_id for member in members[1:]),
+                    name=f"{device.name} (group of {count})",
+                    total_memory_mib=sum(totals) if len(totals) == count else None,
+                    free_memory_mib=sum(free) if len(free) == count else None,
+                    kind=classify_device(device.name),
+                )
+            )
+            continue
         legacy_id = _legacy_name_device_id(device.normalized_name)
         if device.stable_identity is not None:
             device_id = _public_device_id(f"stable\0{device.stable_identity}")
@@ -334,6 +361,7 @@ def recommend_device(devices: Sequence[LlamaDevice]) -> LlamaDevice | None:
     return max(
         suitable,
         key=lambda item: (
+            not item[1].additional_runtime_ids,
             item[1].free_memory_mib if item[1].free_memory_mib is not None else -1,
             item[1].total_memory_mib if item[1].total_memory_mib is not None else -1,
             -item[0],
@@ -533,6 +561,7 @@ class LlamaDeviceService:
 
     def _probe_inventory(self, generation: int) -> None:
         try:
+            probe_started_at = time.perf_counter()
             inventory = self._discover_inventory()
             completed_at = self.clock()
         except BaseException as error:
@@ -558,7 +587,7 @@ class LlamaDeviceService:
                     if inventory.cache_policy == "negative"
                     else self.cache_ttl_seconds
                 )
-                self._cached_inventory = inventory
+                self._cached_inventory = replace(inventory, probe_started_at=probe_started_at)
                 self._cached_inventory_expires_at = completed_at + ttl_seconds
                 self._next_refresh_allowed_at = completed_at + self.minimum_refresh_interval_seconds
             finally:
@@ -713,8 +742,9 @@ class LlamaDeviceService:
                 selection_detection_error=error_message,
             )
 
+        discovery_warnings: list[str] = []
         try:
-            devices = parse_device_inventory(output)
+            devices = parse_device_inventory(output, warnings=discovery_warnings)
         except AmbiguousLlamaDeviceError as error:
             logger.warning("llama.cpp device discovery was ambiguous: %s", error)
             if forced_backend == "gpu":
@@ -743,6 +773,7 @@ class LlamaDeviceService:
             )
         if not devices:
             logger.info("llama.cpp device discovery returned no parsed Vulkan devices")
+        warning_suffix = "".join(f" {message}" for message in discovery_warnings)
         recommended = recommend_device(devices)
         if recommended is None:
             return _cpu_inventory(
@@ -754,7 +785,8 @@ class LlamaDeviceService:
                     "Only integrated or software-rendered GPUs were detected, so CPU is recommended."
                     if devices
                     else "No Vulkan devices were detected, so CPU is recommended."
-                ),
+                )
+                + warning_suffix,
             )
 
         marked_devices = tuple(
@@ -767,7 +799,7 @@ class LlamaDeviceService:
             devices=marked_devices,
             recommended_backend="gpu",
             recommended_device_ids=(recommended.id,),
-            reason=f"{recommended.name} is the recommended discrete GPU.",
+            reason=f"{recommended.name} is recommended." + warning_suffix,
         )
 
     def resolve_runtime_ids(

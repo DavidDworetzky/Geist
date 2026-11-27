@@ -25,7 +25,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -114,6 +114,7 @@ class McpServerConfig:
     cwd: str | None = None
     plugin_root: str | None = None
     plugin_data_dir: str | None = None
+    oauth_workspace_id: int | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -128,6 +129,7 @@ class McpServerConfig:
                 "cwd": self.cwd,
                 "plugin_root": self.plugin_root,
                 "plugin_data_dir": self.plugin_data_dir,
+                "oauth_workspace_id": self.oauth_workspace_id,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -318,6 +320,7 @@ class _HttpTransport:
         ):
             raise McpError(f"MCP server '{config.name}' has an invalid HTTP URL")
         self._url = config.url
+        self._oauth_managed = config.oauth_workspace_id is not None
         self._session = requests.Session()
         configured_headers = {
             name: value
@@ -397,6 +400,12 @@ class _HttpTransport:
             response.close()
             raise McpError("MCP server redirects are not allowed")
         if response.status_code >= 400:
+            if self._oauth_managed:
+                status_code = response.status_code
+                response.close()
+                raise McpError(
+                    f"MCP server returned HTTP {status_code}; check account authorization and provider access"
+                )
             body = self._read_bounded_body(response)[:500]
             response.close()
             raise McpError(f"MCP server returned HTTP {response.status_code}: {body}")
@@ -586,6 +595,26 @@ class McpClientManager:
         deadline: float | None = None,
     ) -> McpConnection:
         deadline = deadline or (time.monotonic() + config.timeout_seconds)
+        if config.oauth_workspace_id is not None:
+            from app.services.mcp_oauth import access_token
+            from app.services.mcp_oauth_providers import OAuthError
+            from app.services.mcp_oauth_store import CredentialStoreError
+
+            try:
+                token = access_token(
+                    config.server_id,
+                    config.oauth_workspace_id,
+                    config.url or "",
+                    timeout_seconds=_remaining_seconds(deadline, "authorization"),
+                )
+            except (OAuthError, CredentialStoreError) as error:
+                raise McpError(str(error)) from error
+            headers = {
+                key: value
+                for key, value in config.headers.items()
+                if key.lower() != "authorization"
+            }
+            config = replace(config, headers={**headers, "Authorization": f"Bearer {token}"})
         while True:
             stale_connection: McpConnection | None = None
             with self._lock:

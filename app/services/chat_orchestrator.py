@@ -309,6 +309,14 @@ class ChatOrchestrator:
                 blocks.append([message])
         selected: list[tuple[int, list[ChatMessage]]] = []
         remaining_chars = self.max_history_chars
+        latest_assistant = next(
+            (
+                index
+                for index in reversed(range(len(blocks)))
+                if blocks[index][0].role == "assistant"
+            ),
+            None,
+        )
         protected = [
             index
             for index, block in enumerate(blocks)
@@ -319,10 +327,23 @@ class ChatOrchestrator:
         )
         for index in indices:
             block = blocks[index]
-            if len(selected) >= self.max_history_entries:
-                break
+            pending_reasoning = bool(
+                index == latest_assistant and block[0].tool_calls and block[0].reasoning_details
+            )
+            if len(selected) >= self.max_history_entries and not pending_reasoning:
+                continue
             size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
-            if size > remaining_chars:
+            # A pending signed tool turn must survive checkpoints and continuation.
+            # This retention budget is soft; the provider enforces its token limit.
+            if size > remaining_chars and not pending_reasoning:
+                block = [
+                    replace(
+                        item, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                    )
+                    for item in block
+                ]
+                size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
+            if size > remaining_chars and not pending_reasoning:
                 if len(block) != 1 or block[0].tool_calls:
                     continue  # Drop the whole protocol block, never orphan a result.
                 if remaining_chars <= 128:
@@ -331,6 +352,9 @@ class ChatOrchestrator:
                     replace(
                         block[0],
                         content=self._bounded_result(block[0].content or "", remaining_chars - 128),
+                        reasoning_details=[],
+                        reasoning_model=None,
+                        reasoning_endpoint=None,
                     )
                 ]
                 size = len(json.dumps([item.to_dict() for item in block], ensure_ascii=False))
@@ -416,7 +440,14 @@ class ChatOrchestrator:
         for entry in reversed(entries):
             if len(selected_blocks) >= self.max_history_entries:
                 break
-            block = self._entry_messages(entry)
+            # Prior chat turns are complete. Resume active tool reasoning from
+            # trusted goal checkpoints, not from ordinary conversation history.
+            block = [
+                replace(
+                    message, reasoning_details=[], reasoning_model=None, reasoning_endpoint=None
+                )
+                for message in self._entry_messages(entry)
+            ]
             if not block:
                 continue
             block_chars = len(
@@ -694,6 +725,8 @@ class ChatOrchestrator:
                 runtime.checkpoint(self._checkpoint_messages(run.model_messages))
             return instructions
 
+        goal_state_prompt: str | None = None
+        goal_state_anchor: ChatMessage | None = None
         try:
             if goal_loop_enabled:
                 saved = (
@@ -749,7 +782,7 @@ class ChatOrchestrator:
                     self.goal_store.attach_chat(runtime.state.goal_id, chat_id)
                 context = replace(context, coding_workspace_id=runtime.state.workspace_id)
                 self.orchestration_runs.start(run.run_id, runtime)
-                orchestration_prompt = runtime.execution_prompt()
+                orchestration_prompt = runtime.static_execution_prompt()
                 if conversation.messages and conversation.messages[0].role == "system":
                     current_prompt = conversation.messages[0].content or ""
                     conversation.messages[
@@ -759,6 +792,14 @@ class ChatOrchestrator:
                     conversation.messages.insert(
                         0, ChatMessage(role="system", content=orchestration_prompt)
                     )
+                goal_state_prompt = runtime.state_context_prompt()
+                if goal_state_prompt is not None:
+                    # Anchor dynamic resumed-goal state to the latest user message
+                    # object so _model_context trimming never places it between an
+                    # assistant tool_calls turn and its tool results.
+                    initial_messages = run.model_messages
+                    if initial_messages and initial_messages[-1].role == "user":
+                        goal_state_anchor = initial_messages[-1]
                 snapshot = runtime.snapshot()
                 yield ChatStreamEvent(
                     "plan",
@@ -813,6 +854,27 @@ class ChatOrchestrator:
                 completed_turn = None
                 with run.persistence_lock:
                     model_messages = self._model_context(run.model_messages)
+                if goal_state_prompt is not None:
+                    insert_at = next(
+                        (
+                            index
+                            for index, message in enumerate(model_messages)
+                            if goal_state_anchor is not None and message is goal_state_anchor
+                        ),
+                        None,
+                    )
+                    if insert_at is None:
+                        insert_at = next(
+                            (
+                                index
+                                for index, message in enumerate(model_messages)
+                                if message.role != "system"
+                            ),
+                            len(model_messages),
+                        )
+                    model_messages.insert(
+                        insert_at, ChatMessage(role="user", content=goal_state_prompt)
+                    )
                 if format_correction:
                     model_messages.append(ChatMessage(role="user", content=format_correction))
                 responses = None
@@ -891,6 +953,9 @@ class ChatOrchestrator:
                     role="assistant",
                     content=completed_turn.text or None,
                     tool_calls=completed_turn.tool_calls,
+                    reasoning_details=completed_turn.reasoning_details,
+                    reasoning_model=completed_turn.reasoning_model,
+                    reasoning_endpoint=completed_turn.reasoning_endpoint,
                 )
                 with run.persistence_lock:
                     if not run.persisted:
