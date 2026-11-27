@@ -11,9 +11,16 @@ import numpy as np
 import torch
 import torchaudio
 
+from adapters.shared_model_cache import SharedModel, get_shared_model
 from app.services.voice_catalog import (
+    DEFAULT_COSYVOICE2_MODEL,
+    DEFAULT_KOKORO_TTS_MODEL,
     DEFAULT_QWEN3_TTS_MODEL,
+    KOKORO_DEFAULT_VOICE,
+    KOKORO_LANG_CODES,
+    KOKORO_PYTORCH_PROVIDER,
     SUPPORTED_TTS_PROVIDERS,
+    allowed_voices_for_tts_model,
 )
 from app.services.voice_catalog import (
     get_supported_tts_providers as get_supported_tts_providers,
@@ -445,12 +452,247 @@ class Qwen3TTSProvider(TTSProvider):
         return self._sample_rate
 
 
+class KokoroPyTorchTTSProvider(TTSProvider):
+    """
+    Kokoro-82M through the pip 'kokoro' runtime (PyTorch, CPU or CUDA).
+
+    Lightweight enough for CPU; streams audio per text segment as the
+    pipeline produces it. The pipeline is shared across sessions.
+    """
+
+    def __init__(
+        self,
+        voice: str = KOKORO_DEFAULT_VOICE,
+        language: str = "en",
+        speed: float = 1.0,
+        device: str | None = None,
+    ):
+        # KPipeline treats voice strings ending in ".pt" as local paths it
+        # torch.loads, and comma-separated strings as blends, so only the
+        # published voice ids may reach it.
+        allowed_voices = allowed_voices_for_tts_model(
+            KOKORO_PYTORCH_PROVIDER, DEFAULT_KOKORO_TTS_MODEL
+        )
+        if voice not in allowed_voices:
+            raise ValueError(
+                f"Voice '{voice}' is not a supported Kokoro voice. "
+                f"Supported voices: {allowed_voices}"
+            )
+        if language.lower() not in KOKORO_LANG_CODES:
+            raise ValueError(
+                f"Language '{language}' is not supported by Kokoro. "
+                f"Supported languages: {sorted(KOKORO_LANG_CODES)}"
+            )
+        if not 0.5 <= speed <= 2.0:
+            raise ValueError("Kokoro speed must be between 0.5 and 2.0")
+        self.voice = voice
+        self.language = language.lower()
+        self.speed = speed
+        self.device = device
+        self._shared: SharedModel | None = None
+        self._sample_rate = 24000
+        self.logger = logging.getLogger(__name__)
+
+    def _load_pipeline(self, lang_code: str) -> Any:
+        try:
+            from kokoro import KPipeline
+        except ImportError as e:
+            raise RuntimeError(
+                f"The {KOKORO_PYTORCH_PROVIDER} TTS provider requires the optional "
+                "'kokoro' package (pip install kokoro==0.9.4). Install it or "
+                "select another tts_provider. "
+                f"Import failed with: {e}"
+            ) from e
+
+        self.logger.info(f"Initializing Kokoro TTS (lang_code={lang_code})")
+        return KPipeline(lang_code=lang_code, repo_id=DEFAULT_KOKORO_TTS_MODEL, device=self.device)
+
+    def _ensure_initialized(self):
+        if self._shared is not None:
+            return
+
+        lang_code = KOKORO_LANG_CODES[self.language]
+        self._shared = get_shared_model(
+            (KOKORO_PYTORCH_PROVIDER, lang_code, self.device),
+            lambda: self._load_pipeline(lang_code),
+        )
+
+    @staticmethod
+    def _segment_audio(item: Any) -> torch.Tensor:
+        audio = getattr(item, "audio", None)
+        if audio is None and isinstance(item, tuple | list) and len(item) >= 3:
+            audio = item[2]
+        if audio is None:
+            raise RuntimeError("Kokoro pipeline returned a segment with no audio")
+        if isinstance(audio, np.ndarray):
+            audio = torch.from_numpy(audio)
+        return cast(torch.Tensor, audio.detach().cpu().float().squeeze())
+
+    def _segments(self, text: str) -> Iterator[torch.Tensor]:
+        self._ensure_initialized()
+        shared = self._shared
+        if shared is None:
+            raise RuntimeError("Kokoro TTS pipeline failed to initialize")
+
+        # Lock per segment so a slow consumer never stalls other sessions.
+        with shared.lock:
+            results = iter(shared.model(text, voice=self.voice, speed=self.speed))
+        while True:
+            with shared.lock:
+                item = next(results, None)
+            if item is None:
+                return
+            yield self._segment_audio(item)
+
+    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        segments = list(self._segments(text))
+        if not segments:
+            return torch.zeros(0)
+        return torch.cat(segments)
+
+    def synthesize_streaming(
+        self, text: str, speaker: int = 0, chunk_size_ms: int = 100
+    ) -> Iterator[bytes]:
+        chunk_samples = int(self._sample_rate * chunk_size_ms / 1000)
+
+        for segment in self._segments(text):
+            audio_np = np.clip(segment.numpy(), -1.0, 1.0)
+            audio_int16 = (audio_np * 32767).astype(np.int16)
+            for i in range(0, len(audio_int16), chunk_samples):
+                yield audio_int16[i : i + chunk_samples].tobytes()
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+
+class CosyVoice2TTSProvider(TTSProvider):
+    """
+    TTS provider using CosyVoice2 with native low-latency streaming.
+
+    Experimental: requires the 'cosyvoice' package from the FunAudioLLM
+    CosyVoice repository, which is intentionally not a declared dependency.
+    CosyVoice2-0.5B is a zero-shot model, so a reference voice is required:
+    set COSYVOICE2_PROMPT_AUDIO (path to a short wav of the target voice)
+    and COSYVOICE2_PROMPT_TEXT (its transcript) on the server. Falls back
+    to pretrained speaker ids when the loaded model ships any.
+    """
+
+    def __init__(
+        self,
+        model: str = DEFAULT_COSYVOICE2_MODEL,
+        voice: str = "default",
+        speed: float = 1.0,
+        sample_rate: int = 24000,
+    ):
+        self.model = model
+        self.voice = voice
+        self.speed = speed
+        self._sample_rate = sample_rate
+        self._shared: SharedModel | None = None
+        self._prompt_speech: torch.Tensor | None = None
+        self._prompt_text: str | None = None
+        self.logger = logging.getLogger(__name__)
+
+    def _ensure_initialized(self):
+        if self._shared is not None:
+            return
+
+        try:
+            from cosyvoice.cli.cosyvoice import CosyVoice2
+        except ImportError as e:
+            raise RuntimeError(
+                "The cosyvoice2 TTS provider requires the optional 'cosyvoice' "
+                "package from the FunAudioLLM/CosyVoice repository and is "
+                "experimental. Install it or select another tts_provider. "
+                f"Import failed with: {e}"
+            ) from e
+
+        from huggingface_hub import snapshot_download
+
+        def load_engine() -> Any:
+            self.logger.info(f"Initializing CosyVoice2 TTS: {self.model}")
+            return CosyVoice2(snapshot_download(self.model))
+
+        self._shared = get_shared_model(("cosyvoice2", self.model), load_engine)
+        self._sample_rate = int(getattr(self._shared.model, "sample_rate", self._sample_rate))
+        self._load_prompt_voice()
+
+    def _load_prompt_voice(self):
+        """Load the operator-configured reference voice for zero-shot synthesis."""
+        import os
+
+        prompt_audio = os.getenv("COSYVOICE2_PROMPT_AUDIO")
+        prompt_text = os.getenv("COSYVOICE2_PROMPT_TEXT")
+        if not prompt_audio or not prompt_text:
+            return
+
+        waveform, source_rate = torchaudio.load(prompt_audio)
+        waveform = torch.mean(waveform, dim=0, keepdim=True)
+        if source_rate != 16000:
+            waveform = torchaudio.functional.resample(waveform, source_rate, 16000)
+        self._prompt_speech = waveform
+        self._prompt_text = prompt_text
+
+    def _stream_outputs(self, text: str, stream: bool) -> Iterator[torch.Tensor]:
+        self._ensure_initialized()
+        shared = self._shared
+        if shared is None:
+            raise RuntimeError("CosyVoice2 engine failed to initialize")
+        engine = shared.model
+
+        if self._prompt_speech is not None and self._prompt_text is not None:
+            outputs = engine.inference_zero_shot(
+                text, self._prompt_text, self._prompt_speech, stream=stream, speed=self.speed
+            )
+        else:
+            available = []
+            if hasattr(engine, "list_available_spks"):
+                available = list(engine.list_available_spks() or [])
+            if not available:
+                raise RuntimeError(
+                    "CosyVoice2-0.5B has no pretrained speakers; configure "
+                    "COSYVOICE2_PROMPT_AUDIO and COSYVOICE2_PROMPT_TEXT with a "
+                    "reference voice sample for zero-shot synthesis."
+                )
+            spk_id = self.voice if self.voice in available else available[0]
+            outputs = engine.inference_sft(text, spk_id, stream=stream, speed=self.speed)
+
+        outputs = iter(outputs)
+        while True:
+            with shared.lock:
+                output = next(outputs, None)
+            if output is None:
+                return
+            speech = output["tts_speech"] if isinstance(output, dict) else output
+            yield speech.detach().cpu().float().squeeze()
+
+    def synthesize(self, text: str, speaker: int = 0) -> torch.Tensor:
+        segments = list(self._stream_outputs(text, stream=False))
+        if not segments:
+            return torch.zeros(0)
+        return torch.cat(segments)
+
+    def synthesize_streaming(
+        self, text: str, speaker: int = 0, chunk_size_ms: int = 100
+    ) -> Iterator[bytes]:
+        for segment in self._stream_outputs(text, stream=True):
+            audio_np = np.clip(segment.numpy(), -1.0, 1.0)
+            audio_int16 = (audio_np * 32767).astype(np.int16)
+            yield audio_int16.tobytes()
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+
 def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
     """
     Factory function to create TTS provider.
 
     Args:
-        provider_type: Type of provider ("sesame", "openai", or "qwen3")
+        provider_type: Type of provider ("sesame", "openai", "qwen3",
+            "kokoro_pytorch", or "cosyvoice2")
         **kwargs: Provider-specific arguments
 
     Returns:
@@ -474,6 +716,25 @@ def create_tts_provider(provider_type: str = "sesame", **kwargs) -> TTSProvider:
             instruct=kwargs.get("instruct"),
             speed=float(kwargs.get("speed", 1.0)),
             device=kwargs.get("device"),
+            sample_rate=int(kwargs.get("sample_rate", 24000)),
+        )
+    elif provider_type.lower() == KOKORO_PYTORCH_PROVIDER:
+        _validate_tts_model(
+            KOKORO_PYTORCH_PROVIDER, kwargs.get("model", DEFAULT_KOKORO_TTS_MODEL)
+        )
+        return KokoroPyTorchTTSProvider(
+            voice=kwargs.get("voice", KOKORO_DEFAULT_VOICE),
+            language=kwargs.get("language", "en"),
+            speed=float(kwargs.get("speed", 1.0)),
+            device=kwargs.get("device"),
+        )
+    elif provider_type.lower() == "cosyvoice2":
+        return CosyVoice2TTSProvider(
+            model=_validate_tts_model(
+                "cosyvoice2", kwargs.get("model", DEFAULT_COSYVOICE2_MODEL)
+            ),
+            voice=kwargs.get("voice", "default"),
+            speed=float(kwargs.get("speed", 1.0)),
             sample_rate=int(kwargs.get("sample_rate", 24000)),
         )
     else:

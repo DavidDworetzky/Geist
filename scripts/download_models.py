@@ -52,6 +52,14 @@ VOICE_MODELS: dict[str, dict] = {
         "description": "Qwen3 TTS 1.7B Custom Voice",
         "downloads": [{"repo_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"}],
     },
+    "kokoro-82m": {
+        "description": "Kokoro 82M text-to-speech",
+        "downloads": [{"repo_id": "hexgrad/Kokoro-82M"}],
+    },
+    "cosyvoice2-0.5b": {
+        "description": "CosyVoice2 0.5B streaming text-to-speech",
+        "downloads": [{"repo_id": "FunAudioLLM/CosyVoice2-0.5B"}],
+    },
     "mms-1b-all": {
         "description": "Meta MMS 1B speech-to-text (adapters/mms_adapter.py)",
         "downloads": [{"repo_id": "facebook/mms-1b-all"}],
