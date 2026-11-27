@@ -224,6 +224,8 @@ class TestOnlineAgentInitialization:
             "deepseek/deepseek-v4.1-flash",
             "tencent/hy4-preview",
             "z-ai/glm-5.3-flash",
+            "z-ai/glm-5.3-flashx",
+            "z-ai/glm-5.3-flashx-20260918",
             "stealth/union-alpha",
             "meta/muse-wonder",
             "meta/muse-spark-open",
@@ -570,6 +572,58 @@ class TestOnlineAgentAPIRequests:
                 assert payload["tools"][0]["function"]["name"] == "lookup"
                 assert payload["tool_choice"] == "auto"
                 assert payload["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["z-ai/glm-5.3-flashx", "z-ai/glm-5.3-flashx-20260918"],
+    )
+    def test_glm53_flashx_applies_reasoning_and_omits_unsupported_parameters(self, model_id):
+        context = create_mock_agent_context()
+
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-openrouter-key"}):
+            agent = OnlineAgent(
+                agent_context=context,
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+            )
+
+            with patch.object(agent.client, "post") as mock_post:
+                mock_response = Mock(status_code=200)
+                mock_response.json.return_value = OPENAI_RESPONSE
+                mock_post.return_value = mock_response
+
+                agent._make_request(
+                    {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": "Test prompt"}],
+                        "n": 2,
+                        "frequency_penalty": 0.5,
+                        "presence_penalty": 0.5,
+                        "stop": "END",
+                        "temperature": 1.0,
+                        "top_p": 0.95,
+                        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                        "tool_choice": "auto",
+                        "response_format": {"type": "json_object"},
+                    }
+                )
+
+                payload = mock_post.call_args.kwargs["json"]
+                assert (
+                    not {
+                        "n",
+                        "frequency_penalty",
+                        "presence_penalty",
+                        "stop",
+                    }
+                    & payload.keys()
+                )
+                assert payload["temperature"] == 1.0
+                assert payload["top_p"] == 0.95
+                assert payload["tools"][0]["function"]["name"] == "lookup"
+                assert payload["tool_choice"] == "auto"
+                assert payload["response_format"] == {"type": "json_object"}
+                assert payload["reasoning"] == {"effort": "max"}
 
     def test_qwen38_flash_omits_unsupported_n_without_forcing_reasoning(self):
         context = create_mock_agent_context()
