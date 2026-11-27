@@ -223,3 +223,20 @@ def test_incomplete_goal_resumes_with_same_identity(status):
     assert resumed.state.goal_id == goal.state.goal_id
     assert resumed.state.objective == goal.state.objective
     assert resumed.state.goal_status == "active"
+
+
+def test_static_execution_prompt_is_invariant_and_state_context_is_deferred():
+    first = GoalRuntime(objective="Write a haiku", tasks=[], max_turns=10)
+    second = GoalRuntime(objective="Refactor database layer", tasks=[], max_turns=10)
+
+    assert first.static_execution_prompt() == second.static_execution_prompt()
+    assert first.state.goal_id not in first.static_execution_prompt()
+    assert "Current state:" not in first.static_execution_prompt()
+    assert first.state_context_prompt() is None
+
+    first.update_plan([{"task_id": "t1", "title": "Draft lines"}])
+    state_context = first.state_context_prompt()
+    assert state_context is not None
+    assert state_context.startswith("Current goal state: ")
+    assert first.state.goal_id in state_context
+    assert "Draft lines" in state_context

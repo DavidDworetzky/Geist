@@ -21,11 +21,12 @@ describe('ChatTextArea loading state', () => {
     render(<ChatTextArea chatHistory={[]} isLoading />);
 
     expect(screen.getByRole('status', { name: 'Geist is responding' })).toBeInTheDocument();
-    expect(screen.queryByText('Start a conversation with Geist.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Chat with Geist')).not.toBeInTheDocument();
   });
 
   it('hides the Geist loading indicator when chat is idle', () => {
     render(<ChatTextArea chatHistory={[]} isLoading={false} />);
+    expect(screen.getByText('Chat with Geist')).toBeInTheDocument();
 
     expect(screen.queryByRole('status', { name: 'Geist is responding' })).not.toBeInTheDocument();
   });
@@ -295,4 +296,26 @@ it('renders readable orchestration task markers', () => {
   } }]} />);
   expect(screen.getByText('\u2713')).toBeInTheDocument();
   expect(screen.getByText('\u25cb')).toBeInTheDocument();
+  expect(screen.getByText('Steps 1/2 completed')).toBeInTheDocument();
+});
+
+it('omits the agentic plan card for direct responses with no plan steps', () => {
+  render(<ChatTextArea chatHistory={[{ user: 'write a haiku', ai: 'Leaves drift down', orchestration: {
+    agentic_mode: true,
+    goal_status: 'complete',
+    tasks: [],
+  } }]} />);
+  expect(screen.getByText('Leaves drift down')).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Agentic progress' })).not.toBeInTheDocument();
+});
+
+it('still shows the agentic progress card when a zero-task goal needs attention', () => {
+  render(<ChatTextArea chatHistory={[{ user: 'deploy', ai: '', orchestration: {
+    agentic_mode: true,
+    goal_status: 'waiting_for_user',
+    tasks: [],
+  } }]} />);
+  const progress = screen.getByRole('region', { name: 'Agentic progress' });
+  expect(progress).toHaveTextContent('waiting for user');
+  expect(progress).not.toHaveTextContent('Steps 0/0');
 });

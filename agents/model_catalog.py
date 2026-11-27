@@ -171,6 +171,24 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         ),
     ),
     ModelSpec(
+        "thinkingmachines/Inkling-2-Mini",
+        "Inkling 2 Mini (Local, MLX)",
+        "inkling",
+        backend="mlx_llama",
+        context_window=1048576,
+        max_output_tokens=16384,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        recommended=True,
+        parameter_count="26.4B",
+        activated_parameters="3.4B",
+        performance_note=(
+            "Looped 24-layer (48-visit) MoE for Apple Silicon (32 GB+ unified memory). "
+            "Runs the official NVFP4/MXFP8 checkpoint or mlx-community/Inkling-2-Mini-4bit "
+            "through Geist's in-repo MLX implementation."
+        ),
+    ),
+    ModelSpec(
         "Qwen/Qwen3-1.7B",
         "Qwen 3 1.7B (Local)",
         "qwen",
@@ -435,6 +453,28 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "Fast million-token OpenRouter route with optional reasoning, native tools, "
             "and structured output. OpenAI retains prompts, while Azure provides a "
             "zero-retention route; enforce OpenRouter ZDR before confidential workloads."
+        ),
+    ),
+    ModelSpec(
+        "particle-ai/particle-1",
+        "Particle-1",
+        "particle",
+        provider="openrouter",
+        backend="openai_compatible",
+        context_window=1048576,
+        max_output_tokens=131072,
+        supports_vision=True,
+        supports_function_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        unsupported_parameters=("n",),
+        aliases=("particle-ai/particle-1-20261027",),
+        local=False,
+        performance_note=(
+            "Low-cost coding and data-analysis specialization with optional reasoning, "
+            "native tools, and best-effort schema-guided output. The current single "
+            "Particle route is ZDR-listed; enforce OpenRouter ZDR and re-check endpoint "
+            "policy before confidential workloads."
         ),
     ),
     # Heavyweight models are deliberately server-backed.
@@ -936,6 +976,7 @@ def infer_model_spec(model_id: str) -> ModelSpec | None:
         )
     prefix_map = (
         (("qwen/", "qwen", "deepseek-r1-distill-qwen"), "Qwen/Qwen3-4B"),
+        (("thinkingmachines/inkling", "inkling-2", "inkling2"), "thinkingmachines/Inkling-2-Mini"),
         (("mistralai/", "mistral", "mixtral"), "mistralai/Mistral-7B-Instruct-v0.3"),
         (("microsoft/phi", "phi-"), "microsoft/Phi-4-mini-instruct"),
         (("huggingfacetb/smollm", "smollm"), "HuggingFaceTB/SmolLM3-3B"),

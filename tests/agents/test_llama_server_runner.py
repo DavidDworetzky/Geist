@@ -116,6 +116,17 @@ def test_load_resolves_managed_artifact_and_starts_private_server(tmp_path):
     assert runner.headers["Authorization"] == "Bearer private-key"
 
 
+def test_model_specific_gpu_placement_does_not_pin_workspace_selection(tmp_path):
+    runner, _client, _model_manager, _server_manager = _loaded_runner(tmp_path)
+    runner.effective_backend = "gpu"
+    runner.effective_device_ids = ("gpu-one", "gpu-two")
+    runner.model_specific_placement = True
+    agent = LocalAgent.__new__(LocalAgent)
+    agent.runner_type = "llama_server"
+    agent.runner = runner
+    assert agent.runtime_selection() is None
+
+
 def test_explicit_server_does_not_report_a_managed_runtime_selection(tmp_path):
     runner, _client, _model_manager, _server_manager = _loaded_runner(
         tmp_path,
@@ -286,8 +297,8 @@ def test_auto_cpu_persistence_follows_internal_selection_signal(
                 0,
                 stdout=(
                     "Available devices:\n"
-                    "  Vulkan0: NVIDIA RTX 4090\n"
-                    "  Vulkan1: NVIDIA RTX 4090\n"
+                    "  Vulkan0: NVIDIA RTX 4090 [PCI=0000:01:00.0]\n"
+                    "  Vulkan1: NVIDIA RTX 4090 [PCI=0000:01:00.0]\n"
                 ),
                 stderr="",
             )
