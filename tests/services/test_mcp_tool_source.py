@@ -31,8 +31,15 @@ def _server_model(server_id: int = 1, name: str = "fake") -> McpServerModel:
         command="fake-command",
         args=[],
         env={},
+        working_directory=None,
         url=None,
         headers={},
+        connector_kind="custom",
+        account_label=None,
+        trusted=False,
+        security_required=False,
+        recipient_allowlist=[],
+        max_writes_per_hour=20,
         enabled=True,
         timeout_seconds=10.0,
         create_date=now,
@@ -52,7 +59,7 @@ class FakeManager:
         return self.tools_by_server.get(config.name, [])
 
     def call_tool(self, config, name, arguments, **kwargs):
-        self.calls.append((config.name, name, arguments))
+        self.calls.append((config.name, name, arguments, kwargs.get("idempotency_key")))
         return f"{name} says: {arguments.get('text', '')}"
 
 
@@ -83,6 +90,13 @@ def test_definitions_namespace_and_schema_passthrough():
     assert "[MCP: fake]" in definition.description
 
 
+def test_model_config_preserves_working_directory():
+    server = _server_model()
+    server.working_directory = "/opt/vetted-mcp"
+
+    assert config_from_model(server).working_directory == "/opt/vetted-mcp"
+
+
 def test_registry_executes_mcp_tool_through_source():
     manager = FakeManager(tools_by_server={"fake": [ECHO_TOOL]})
     source = McpToolSource(manager, servers_loader=lambda workspace_id=None: [_server_model()])
@@ -100,7 +114,8 @@ def test_registry_executes_mcp_tool_through_source():
 
     assert result.status == "succeeded"
     assert result.content == "echo says: hello"
-    assert manager.calls == [("fake", "echo", {"text": "hello"})]
+    assert manager.calls[0][:3] == ("fake", "echo", {"text": "hello"})
+    assert len(manager.calls[0][3]) == 64
 
 
 def test_registry_rejects_missing_required_argument():

@@ -10,8 +10,15 @@ const stdioServer = {
   command: 'npx',
   args: ['-y', '@modelcontextprotocol/server-filesystem'],
   env: {},
+  working_directory: null,
   url: null,
   headers: {},
+  connector_kind: 'custom',
+  account_label: null,
+  trusted: false,
+  security_required: false,
+  recipient_allowlist: [],
+  max_writes_per_hour: 20,
   enabled: true,
   timeout_seconds: 30,
   create_date: '2026-07-28T00:00:00Z',
@@ -171,6 +178,31 @@ describe('McpServersSection', () => {
     });
   });
 
+  it.each(['custom', 'proton'])('edits an existing %s server without changing its connector kind', async (kind) => {
+    let server = { ...stdioServer, connector_kind: kind };
+    const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url.endsWith('/email-connectors/profiles')) return jsonResponse([]);
+      if (options?.method === 'PUT') {
+        const body = JSON.parse(options.body as string);
+        if ('connector_kind' in body) return jsonResponse({ detail: 'Extra inputs are not permitted' }, 422);
+        server = { ...server, ...body };
+        return jsonResponse(server);
+      }
+      return jsonResponse([server]);
+    });
+    global.fetch = fetchMock as any;
+    render(<McpServersSection />);
+    await screen.findByText('filesystem');
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'updated-server' } });
+    fireEvent.click(screen.getByText('Save Server'));
+    expect(await screen.findByText('updated-server')).toBeInTheDocument();
+    const [, options] = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'PUT')!;
+    const payload = JSON.parse(options!.body as string);
+    expect(payload).not.toHaveProperty('connector_kind');
+    expect(payload.name).toBe('updated-server');
+  });
+
   it('requires a command before submitting a stdio server', async () => {
     global.fetch = jest.fn(() => jsonResponse([])) as any;
 
@@ -182,7 +214,51 @@ describe('McpServersSection', () => {
     fireEvent.click(screen.getByText('Add Server'));
 
     expect(await screen.findByText('Local servers require a command')).toBeInTheDocument();
-    expect(global.fetch).toHaveBeenCalledTimes(1); // only the initial list fetch
+    expect(global.fetch).toHaveBeenCalledTimes(2); // servers and connector profiles
+  });
+
+  it('creates a curated email connector disabled by default', async () => {
+    const profile = {
+      kind: 'gmail',
+      label: 'Gmail',
+      account_scope: 'Personal Google Account',
+      authentication: 'OAuth 2.0',
+      requirements: [],
+    };
+    const fetchMock = jest.fn((url: string, options?: RequestInit) => {
+      if (url.endsWith('/email-connectors/profiles')) {
+        return jsonResponse([profile]);
+      }
+      if (url.endsWith('/email-connectors') && options?.method === 'POST') {
+        return jsonResponse({ ...stdioServer, connector_kind: 'gmail', enabled: false }, 201);
+      }
+      return jsonResponse([]);
+    });
+    global.fetch = fetchMock as any;
+
+    render(<McpServersSection />);
+    expect(await screen.findByText('Add Gmail')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Add Gmail'));
+    fireEvent.change(screen.getByLabelText('Account'), {
+      target: { value: 'person@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'mail-mcp' } });
+    fireEvent.click(screen.getByText('Add Server'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/mcp/email-connectors',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+    const [, options] = fetchMock.mock.calls.find(
+      ([url, opts]: [string, RequestInit?]) =>
+        url.endsWith('/email-connectors') && opts?.method === 'POST'
+    )!;
+    expect(JSON.parse((options as RequestInit).body as string)).toMatchObject({
+      connector_kind: 'gmail',
+      account_label: 'person@example.com',
+    });
   });
 
   it('runs a connection test and lists the discovered tools', async () => {
