@@ -12,11 +12,11 @@ Gemma text, Granite, OLMo, GLM 4 9B Chat HF, gpt-oss, and DeepSeek distillations
 Gemini 3.8 Flash is available only as a hosted API model. Kimi K2.5, GLM 4.7
 Flash/5.2, full DeepSeek R1, Llama 70B, Qwen 72B, Mixtral 8x7B, gpt-oss 120B,
 and OpenRouter's GPT-6.1 Terra, Ling 3.1 Flash, Fireworks Ember-1, Claude Opus
-5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3 Flash, Grok 4.6/4.7, Qwen 3.8
-Flash, and DeepSeek V4.1 Flash routes are also intentionally server-backed. For
-models with published weights, their total resident weights make an in-process
-laptop load impractical even when their mixture-of-experts active-parameter
-count is much smaller.
+5.5, Claude Sonnet 5.5, Claude Haiku 5.5, GLM 5.3/5.3 Flash, Grok 4.6/4.7,
+Qwen 3.8 Flash, and DeepSeek V4.1 Flash routes are also intentionally
+server-backed. For models with published weights, their total resident weights
+make an in-process laptop load impractical even when their mixture-of-experts
+active-parameter count is much smaller.
 The retired anonymous `stealth/ox-alpha` preview has been replaced by its
 stable `z-ai/glm-5.3-flash` release.
 Muse Spark 1.2 Contributor is likewise hosted-only, but Meta does not disclose
@@ -409,6 +409,25 @@ and may train on them. InferenceNet, Cloudflare, and DeepInfra routes are listed
 as no-training/zero-retention, and the exact model appears in OpenRouter's ZDR
 inventory. Enforce OpenRouter ZDR routing before sending confidential or
 regulated workloads; default routing does not make that guarantee.
+
+## OpenRouter-hosted GLM 5.3
+
+Set `OPENROUTER_API_KEY` and select provider `openrouter` with model
+`z-ai/glm-5.3`. OpenRouter exposes the stable text-only route with a
+1,310,720-token model context window. Geist uses the conservative 131,072-token
+output limit documented by Z.AI and by OpenRouter's model-page FAQ because
+larger limits in the endpoint API vary by upstream. The model always reasons;
+Geist supplies Z.AI's recommended `max` effort, omits the unsupported `n`
+parameter, and retains streaming, native function calling, and structured
+outputs.
+
+As of September 8, 2026, OpenRouter lists 28 upstream endpoints and reports
+99.77% routed three-day availability. Its lowest displayed price is $1.113 per
+million input tokens, $3.498 per million output tokens, and $0.2067 per million
+cached input tokens. OpenRouter's ZDR inventory includes 23 GLM 5.3 endpoint
+records, but default routing may still choose a retaining provider. Enable Zero
+Data Retention routing for confidential workloads and expect provider-specific
+limits, quantization, tool-choice behavior, and latency.
 
 ## OpenRouter-hosted GLM 5.3 Flash
 
