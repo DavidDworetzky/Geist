@@ -7,20 +7,20 @@ license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.12"
 dependencies = [
     # API server
-    "fastapi==0.115.8",
+    "fastapi==0.162.0",
     "uvicorn==0.34.0",
     "websockets==15.0.1",
-    "python-multipart==0.0.20",
+    "python-multipart==0.0.33",
     # Persistence (SQLite is the default provider; see [project.optional-dependencies] for postgres)
     "sqlalchemy==2.0.38",
     "alembic==1.15.2",
     # Config / models
     "pydantic==2.10.6",
-    "python-dotenv==1.0.1",
+    "python-dotenv==1.2.2",
     # HTTP clients and adapters
-    "requests==2.32.3",
+    "requests==2.34.2",
     "httpx==0.28.1",
-    "aiohttp==3.11.12",
+    "aiohttp==3.14.5",
     "aiohttp-retry==2.9.1",
     "twilio==9.4.5",
     # File/text extraction services
@@ -30,13 +30,14 @@ dependencies = [
     "huggingface-hub==1.5.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "huggingface-hub==0.36.0; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "psutil==6.1.1",
+    "certifi==2026.10.23",
 ]
 
 [project.scripts]
 geist = "app.cli:main"
 
 [build-system]
-requires = ["setuptools==78.1.1"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -57,7 +58,7 @@ local-mlx = [
     "transformers==5.15.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tokenizers==0.22.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "sentencepiece==0.2.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentencepiece==0.2.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "einops==0.8.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "tiktoken==0.9.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx==0.32.2 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
@@ -65,7 +66,7 @@ local-mlx = [
 ]
 local-transformers = [
     # Torch's CPU compiler imports setuptools at runtime.
-    "setuptools==78.1.1",
+    "setuptools==84.2.1",
     "numpy==2.2.3",
     "torch==2.6.0",
     "accelerate==1.14.0",
@@ -74,7 +75,7 @@ local-transformers = [
     "tokenizers==0.22.1",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
-    "sentencepiece==0.2.0",
+    "sentencepiece==0.2.1",
     "einops==0.8.1",
     "tiktoken==0.9.0",
 ]
@@ -92,7 +93,7 @@ voice = [
     "tokenizers==0.22.1",
     "safetensors==0.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "safetensors==0.5.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
-    "sentencepiece==0.2.0",
+    "sentencepiece==0.2.1",
     "einops==0.8.1",
     "tiktoken==0.9.0",
 ]
