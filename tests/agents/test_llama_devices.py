@@ -258,21 +258,63 @@ def test_legacy_name_id_never_aliases_duplicate_stable_devices(tmp_path: Path) -
     assert all("runtime_id" not in device for device in inventory.public_dict()["devices"])
 
 
-def test_identical_devices_without_stable_identities_fail_safe_when_reordered() -> None:
-    outputs = (
-        """Available devices:
-  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)
-  Vulkan1: NVIDIA GeForce RTX 4090 (24564 MiB, 21000 MiB free)
-""",
-        """Available devices:
-  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 21000 MiB free)
-  Vulkan1: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)
-""",
+def test_duplicate_group_and_unique_device_survive_reordering(tmp_path: Path) -> None:
+    runtime = _runtime_tree(tmp_path)
+    name = "NVIDIA RTX 4090"
+    output = (
+        f"Vulkan0: {name} (24564 MiB, 22000 MiB free)\n"
+        f"Vulkan1: {name} (24564 MiB, 21000 MiB free)\n"
+        "Vulkan2: AMD Radeon RX 6800 (16384 MiB, 12000 MiB free)"
     )
 
-    for output in outputs:
-        with pytest.raises(ValueError, match="duplicate GPU names without stable UUID or PCI"):
-            parse_device_inventory(output)
+    def discover():
+        return LlamaDeviceService(
+            environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+            command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+                [], 0, stdout=output, stderr=""
+            ),
+        ).inventory()
+
+    inventory = discover()
+    group, other = inventory.devices
+    assert inventory.recommended_device_ids == (other.id,)
+    assert inventory.error is None
+    assert group.name == f"{name} (group of 2)"
+    assert group.free_memory_mib == 43000
+    assert group.total_memory_mib == 49128
+    assert group.compatibility_ids == ()
+    assert "additional_runtime_ids" not in group.public_dict()
+    assert inventory.resolve_runtime_ids((group.id, other.id)) == ("Vulkan0", "Vulkan1", "Vulkan2")
+    with pytest.raises(ValueError, match="unavailable"):
+        inventory.resolve_device_ids((_pre_stable_id(name),))
+
+    output = f"Vulkan5: AMD Radeon RX 6800\nVulkan3: {name}\nVulkan7: {name}"
+    reordered = discover()
+    assert reordered.resolve_runtime_ids((group.id,)) == ("Vulkan3", "Vulkan7")
+    assert reordered.resolve_runtime_ids((other.id,)) == ("Vulkan5",)
+    assert reordered.devices[1].free_memory_mib is None
+    output = f"Vulkan3: {name}\nVulkan7: {name}"
+    assert discover().recommended_device_ids == (group.id,)
+    output += f"\nVulkan8: {name}"
+    with pytest.raises(ValueError, match="unavailable"):
+        discover().resolve_device_ids((group.id,))
+
+
+def test_mixed_identity_warns_about_unselectable_twin(tmp_path: Path, caplog) -> None:
+    runtime = _runtime_tree(tmp_path)
+    output = "Vulkan0: NVIDIA RTX 4090 [PCI=0000:01:00.0]\nVulkan1: NVIDIA RTX 4090"
+    inventory = LlamaDeviceService(
+        environment={"GEIST_LLAMA_RUNTIME_ROOT": str(runtime)},
+        command_runner=lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=output, stderr=""
+        ),
+    ).inventory()
+
+    assert inventory.error is None
+    assert inventory.resolve_runtime_ids(inventory.recommended_device_ids) == ("Vulkan0",)
+    message = "One additional NVIDIA RTX 4090 cannot be selected individually"
+    assert message in inventory.reason
+    assert message in caplog.text
 
 
 def test_classification_keeps_integrated_and_software_out_of_auto_selection() -> None:
@@ -855,15 +897,15 @@ def test_probe_os_error_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) 
     assert "device discovery failed: Vulkan loader unavailable" in caplog.text
 
 
-def test_duplicate_production_devices_fail_safe_with_vulkan_escape_hatch(
+def test_duplicate_stable_identities_fail_safe_with_vulkan_escape_hatch(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     runtime = _runtime_tree(tmp_path)
     production_output = """ggml_vulkan: Found 2 Vulkan devices:
 Available devices:
-  Vulkan0: NVIDIA GeForce RTX 4090 (24564 MiB, 22000 MiB free)
-  Vulkan1: NVIDIA GeForce RTX 4090 (24564 MiB, 21000 MiB free)
+  Vulkan0: NVIDIA GeForce RTX 4090 [PCI=0000:01:00.0] (24564 MiB, 22000 MiB free)
+  Vulkan1: NVIDIA GeForce RTX 4090 [PCI=0000:01:00.0] (24564 MiB, 21000 MiB free)
 """
     caplog.set_level(logging.WARNING, logger="agents.architectures.llama_devices")
     now = [100.0]

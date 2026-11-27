@@ -145,7 +145,9 @@ def test_completed_history_reasoning_does_not_evict_conversation_or_tool_results
     restored = orchestrator._model_context(orchestrator._history_messages(history))
     assert [item.content for item in restored if item.role == "user"] == ["Request 0", "Request 1"]
     assert [item.content for item in restored if item.role == "tool"] == ["Result 0", "Result 1"]
-    assert [item.content for item in restored if item.role == "assistant" and not item.tool_calls] == [
+    assert [
+        item.content for item in restored if item.role == "assistant" and not item.tool_calls
+    ] == [
         "Answer 0",
         "Answer 1",
     ]
@@ -2598,3 +2600,187 @@ def test_failed_standing_grant_is_reported_as_once_only():
     assert calls == ["a"]
     assert "Approved once" in final.tool_calls[0].result_summary
     assert orchestrator.grants.granted("workspace:1:chat:7") == frozenset()
+
+
+def test_agentic_system_prompt_stays_static_across_fresh_and_resumed_runs():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=55),
+    )
+
+    first_backend = ScriptedBackend([ModelTurn(text="Quiet pond ripples.")])
+    list(
+        orchestrator.stream(
+            backend=first_backend,
+            prompt="Write a haiku",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    second_backend = ScriptedBackend([ModelTurn(text="Autumn wind blows.")])
+    list(
+        orchestrator.stream(
+            backend=second_backend,
+            prompt="Write another haiku",
+            workspace_id=7,
+            chat_id=None,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    first_messages = first_backend.requests[0]["messages"]
+    second_messages = second_backend.requests[0]["messages"]
+    assert first_messages[0] == second_messages[0]
+    assert first_messages[0]["role"] == "system"
+    assert "Current state:" not in first_messages[0]["content"]
+    assert "goal_id" not in first_messages[0]["content"]
+    assert len(first_messages) == 2
+
+    paused = GoalRuntime(objective="Finish migration", tasks=[], max_turns=5)
+    paused.update_plan([{"task_id": "step-1", "title": "Inspect schema", "status": "in_progress"}])
+    paused.state.goal_status = "paused"
+    goal_store.latest = paused.checkpoint([{"role": "user", "content": "Finish migration"}])
+
+    resumed_backend = ScriptedBackend([ModelTurn(text="Continuing migration.")])
+    list(
+        orchestrator.stream(
+            backend=resumed_backend,
+            prompt="Continue",
+            workspace_id=7,
+            chat_id=55,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    resumed_messages = resumed_backend.requests[0]["messages"]
+    assert resumed_messages[0] == first_messages[0]
+    assert any(
+        msg["role"] == "user"
+        and "Current goal state:" in (msg["content"] or "")
+        and "Inspect schema" in (msg["content"] or "")
+        for msg in resumed_messages[1:-1]
+    )
+    assert resumed_messages[-1] == {"role": "user", "content": "Continue"}
+
+
+def test_resumed_goal_state_never_splits_tool_call_and_result_under_trimming():
+    runtime_registry = GoalRuntimeRegistry()
+    goal_store = RecordingGoalStore()
+    registry = build_default_tool_registry(runtime_registry)
+    orchestrator = ChatOrchestrator(
+        registry,
+        orchestration_runs=runtime_registry,
+        goal_store=goal_store,
+        max_history_entries=2,
+        history_writer=lambda **kwargs: SimpleNamespace(chat_session_id=56),
+    )
+
+    paused = GoalRuntime(objective="Finish migration", tasks=[], max_turns=8)
+    paused.update_plan([{"task_id": "step-1", "title": "Inspect schema", "status": "in_progress"}])
+    paused.state.goal_status = "paused"
+    goal_store.latest = paused.checkpoint(
+        [
+            {"role": "user", "content": "Finish migration"},
+            {"role": "assistant", "content": "Starting schema inspection."},
+            {"role": "user", "content": "Also check indexes"},
+        ]
+    )
+
+    backend = ScriptedBackend(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_1",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-1",
+                                    "title": "Inspect schema",
+                                    "status": "completed",
+                                    "evidence": "Schema inspected",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="plan_2",
+                        name="agent.plan.update",
+                        arguments={
+                            "updates": [
+                                {
+                                    "task_id": "step-2",
+                                    "title": "Check indexes",
+                                    "status": "completed",
+                                    "evidence": "Indexes checked",
+                                }
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="complete_1",
+                        name="agent.goal.complete",
+                        arguments={
+                            "summary": "Migration checks complete",
+                            "evidence": ["Schema inspected", "Indexes checked"],
+                        },
+                    )
+                ]
+            ),
+        ]
+    )
+
+    list(
+        orchestrator.stream(
+            backend=backend,
+            prompt="Continue",
+            workspace_id=7,
+            chat_id=56,
+            config=ModelRequestConfig(),
+            system_prompt="You are Geist.",
+            enable_tools=False,
+            agentic_mode=True,
+        )
+    )
+
+    assert len(backend.requests) == 3
+    for request in backend.requests:
+        messages = request["messages"]
+        assert messages[0]["role"] == "system"
+        assert "Current state:" not in messages[0]["content"]
+        assert any(
+            msg["role"] == "user" and "Current goal state:" in (msg["content"] or "")
+            for msg in messages[1:]
+        )
+        for index, msg in enumerate(messages):
+            tool_calls = msg.get("tool_calls") or []
+            if msg["role"] == "assistant" and tool_calls:
+                expected_ids = [call["id"] for call in tool_calls]
+                following = messages[index + 1 : index + 1 + len(expected_ids)]
+                assert [item["role"] for item in following] == ["tool"] * len(expected_ids)
+                assert [item["tool_call_id"] for item in following] == expected_ids

@@ -1,4 +1,5 @@
 import React, { forwardRef, memo, useState } from 'react';
+import { useBranding } from '../branding';
 import { ChatHistory, ChatPair, ToolApprovalDecision, ToolCallStatus } from '../chatTypes';
 
 
@@ -18,6 +19,20 @@ const approvalChoices: { decision: ToolApprovalDecision; label: string }[] = [
   { decision: 'always', label: 'Always allow' },
   { decision: 'deny', label: 'Deny' }
 ];
+
+function shouldShowAgenticPlan(orchestration: ChatPair['orchestration']): boolean {
+  if (!orchestration) {
+    return false;
+  }
+  if (orchestration.tasks.length > 0 || orchestration.decomposition_warning) {
+    return true;
+  }
+  return Boolean(
+    orchestration.goal_status
+      && orchestration.goal_status !== 'active'
+      && orchestration.goal_status !== 'complete',
+  );
+}
 
 interface ChatTextAreaProps extends ChatHistory {
   isLoading?: boolean;
@@ -93,7 +108,7 @@ const ChatTurn = memo(({ element, onToolApproval }: {
             </div>
           )}
 
-          {element.orchestration && (
+          {shouldShowAgenticPlan(element.orchestration) && element.orchestration && (
             <section className="agentic-progress" aria-label="Agentic progress">
               <div className="agentic-progress-header">
                 <strong>Agentic plan</strong>
@@ -102,9 +117,11 @@ const ChatTurn = memo(({ element, onToolApproval }: {
                     {statusLabel(element.orchestration.goal_status)}
                   </span>
                 )}
-                <span className="input-help">
-                  Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
-                </span>
+                {element.orchestration.tasks.length > 0 && (
+                  <span className="input-help">
+                    Steps {element.orchestration.tasks.filter((task) => task.status === 'completed').length}/{element.orchestration.tasks.length} completed
+                  </span>
+                )}
               </div>
               {element.orchestration.decomposition_warning && (
                 <div className="input-help">{element.orchestration.decomposition_warning}</div>
@@ -248,11 +265,12 @@ const ChatTurn = memo(({ element, onToolApproval }: {
 ChatTurn.displayName = 'ChatTurn';
 
 const ChatTextArea = forwardRef<HTMLDivElement, ChatTextAreaProps>((props, ref) => {
+  const { productName } = useBranding();
   const isEmpty = props.chatHistory.length === 0 && !props.isLoading;
   return (
     <div ref={ref} className={`chat-history${isEmpty ? ' chat-history-empty' : ''}`}>
       {isEmpty && (
-        <div className="chat-empty-state">Start a conversation with Geist.</div>
+        <div className="chat-empty-state">Chat with {productName?.trim() || 'Geist'}</div>
       )}
       {props.chatHistory.map((element, index) => (
         <ChatTurn key={element.run_id ?? index} element={element} onToolApproval={props.onToolApproval} />
