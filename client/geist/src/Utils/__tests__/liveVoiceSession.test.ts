@@ -86,6 +86,90 @@ describe('GPT-Live browser session', () => {
     expect(options.onClosed).toHaveBeenCalledTimes(1);
   });
 
+  it('delegates transcript context once and speaks the confirmed result with the same ID', async () => {
+    options.onDelegate = jest.fn(async () => 'Found three matching files.');
+    await session.start();
+    expect(JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body).tools_enabled).toBe(true);
+    const channel = FakePeer.latest.channel;
+    channel.emit({ type: 'session.started' });
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Find the report' });
+    channel.emit({ type: 'session.output_transcript.delta', delta: 'Which project?' });
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Geist, please.' });
+    const event = { type: 'session.delegation.created', delegation: { target: 'client', id: 'task1' } };
+    channel.emit(event);
+    channel.emit(event);
+    await flush();
+    channel.emit({ ...event, delegation: { target: 'client', id: 'task2' } });
+    await flush();
+    expect(options.onDelegate).toHaveBeenCalledTimes(1);
+    expect(options.onDelegate.mock.calls[0][0]).toBe('user: Find the report\nassistant: Which project?\nuser: Geist, please.');
+    expect(channel.send).toHaveBeenCalledWith(JSON.stringify({ type: 'session.commentary.append',
+      delegation_id: 'task1', content: 'Found three matching files.' }));
+  });
+
+  it('requires a user transcript and rejects a second task while work is pending', async () => {
+    options.onDelegate = jest.fn(() => new Promise(() => {}));
+    await session.start();
+    const channel = FakePeer.latest.channel;
+    channel.emit({ type: 'session.started' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'empty' } });
+    expect(options.onDelegate).not.toHaveBeenCalled();
+    channel.emit({ type: 'session.input_transcript.delta', delta: '   ' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'blank' } });
+    expect(options.onDelegate).not.toHaveBeenCalled();
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Find files' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'first' } });
+    channel.emit({ type: 'session.input_transcript.delta', delta: ' and send them' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'second' } });
+    expect(options.onDelegate).toHaveBeenCalledTimes(1);
+    expect(channel.send.mock.calls.at(-1)[0]).toContain('No second task was started');
+  });
+
+  it('aborts tool work as soon as hangup starts and suppresses a late result', async () => {
+    let finish: (value: string) => void = () => {};
+    options.onDelegate = jest.fn(() => new Promise<string>(resolve => { finish = resolve; }));
+    await session.start();
+    const channel = FakePeer.latest.channel;
+    channel.emit({ type: 'session.started' });
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Check the catalog' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'task' } });
+    const signal = options.onDelegate.mock.calls[0][1];
+    session.close();
+    expect(signal.aborted).toBe(true);
+    finish('Late result');
+    await flush();
+    expect(channel.send.mock.calls.some(([data]: [string]) => JSON.parse(data).type === 'session.commentary.append')).toBe(false);
+  });
+
+  it('keeps the call alive on tool failure without exposing internal errors', async () => {
+    options.onDelegate = jest.fn(async () => { throw new Error('private backend detail'); });
+    await session.start();
+    const channel = FakePeer.latest.channel;
+    channel.emit({ type: 'session.started' });
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Check files' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'task' } });
+    await flush();
+    expect(channel.send.mock.calls.at(-1)[0]).toContain('did not finish successfully');
+    expect(JSON.stringify(channel.send.mock.calls)).not.toContain('private backend detail');
+    expect(options.onClosed).not.toHaveBeenCalled();
+  });
+
+  it('bounds Unicode result updates and keeps full details in the UI', async () => {
+    options.onDelegate = jest.fn(async () => '🙂'.repeat(1000));
+    await session.start();
+    const channel = FakePeer.latest.channel;
+    channel.emit({ type: 'session.started' });
+    channel.emit({ type: 'session.input_transcript.delta', delta: 'Check files' });
+    channel.emit({ type: 'session.delegation.created', delegation: { target: 'client', id: 'task' } });
+    await flush();
+    const events = channel.send.mock.calls.map(([data]: [string]) => JSON.parse(data))
+      .filter(event => event.type === 'session.commentary.append');
+    expect(events).toHaveLength(4);
+    for (const event of events) expect(new Blob([event.content]).size).toBeLessThanOrEqual(400);
+    expect(events[0].content).toBe('🙂'.repeat(100));
+    expect(events.at(-1).content).toContain('full result');
+  });
+
   it('stops a late microphone grant after cancellation', async () => {
     let grant: any;
     (navigator.mediaDevices.getUserMedia as jest.Mock).mockReturnValue(new Promise(resolve => { grant = resolve; }));

@@ -6,6 +6,7 @@ interface LiveVoiceOptions {
   onTranscript: (role: 'user' | 'assistant', text: string) => void;
   onError: (message: string) => void;
   onClosed: () => void;
+  onDelegate?: (transcript: string, signal: AbortSignal) => Promise<string>;
 }
 
 async function responseBody(response: Response): Promise<any> {
@@ -29,6 +30,12 @@ export class LiveVoiceSession {
   private audioContext: AudioContext | null = null;
   private analysers: AnalyserNode[] = [];
   private frame: number | null = null;
+  private transcript: { role: 'user' | 'assistant'; text: string }[] = [];
+  private userVersion = 0;
+  private delegatedVersion = 0;
+  private delegationIds = new Set<string>();
+  private taskAbort = new AbortController();
+  private taskRunning = false;
 
   constructor(private options: LiveVoiceOptions) {}
 
@@ -115,7 +122,8 @@ export class LiveVoiceSession {
       const response = await fetch('/api/v1/voice/live/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sdp, model: this.options.model || 'gpt-live-1', voice: this.options.voice || 'marin' }),
+        body: JSON.stringify({ sdp, model: this.options.model || 'gpt-live-1', voice: this.options.voice || 'marin',
+          tools_enabled: Boolean(this.options.onDelegate) }),
         signal: this.abort.signal
       });
       const result = await responseBody(response);
@@ -149,14 +157,74 @@ export class LiveVoiceSession {
       if (typeof event.delta !== 'string' || !event.delta) return;
       const role = event.type === 'session.input_transcript.delta' ? 'user' : 'assistant';
       this.options.onTranscript(role, event.delta);
+      if (role === 'user' && event.delta.trim()) this.userVersion += 1;
+      const last = this.transcript[this.transcript.length - 1];
+      if (last?.role === role) last.text = (last.text + event.delta).slice(-4000);
+      else this.transcript.push({ role, text: event.delta.slice(-4000) });
+      this.transcript = this.transcript.slice(-12);
     } else if (event.type === 'session.delegation.created' && !this.closing && this.ready) {
-      // This mode owns only voice and captions; no text-agent request is started.
       const id = event.delegation?.id;
       if (event.delegation?.target === 'client' && typeof id === 'string' && id) {
-        this.send({ type: 'session.thinking.append', delegation_id: id,
-          content: 'No backend is connected in this voice-only call. Answer conversationally when possible, or explain that this requires the text chat.' });
+        void this.delegate(id);
       }
     }
+  }
+
+  private async delegate(id: string) {
+    if (this.delegationIds.has(id)) return;
+    if (this.delegationIds.size >= 100) {
+      this.send({ type: 'session.thinking.append', delegation_id: id,
+        content: 'The voice task limit was reached. End this call before starting more tasks.' });
+      return;
+    }
+    this.delegationIds.add(id);
+    if (!this.options.onDelegate) {
+      this.send({ type: 'session.thinking.append', delegation_id: id,
+        content: 'No backend is connected in this voice-only call. Use text chat for tools.' });
+      return;
+    }
+    if (this.taskRunning || this.userVersion === this.delegatedVersion) {
+      this.send({ type: 'session.thinking.append', delegation_id: id,
+        content: this.taskRunning ? 'A task is already running. No second task was started. Check the on-screen tool activity.'
+          : 'No new user request has been transcribed. Ask the user to clarify; no tools were run.' });
+      return;
+    }
+    this.delegatedVersion = this.userVersion;
+    this.taskRunning = true;
+    const transcript = this.transcript.map(item => `${item.role}: ${item.text}`).join('\n');
+    this.send({ type: 'session.thinking.append', delegation_id: id,
+      content: 'Geist is processing the request. Any required tool approval will appear on screen. No action is confirmed yet.' });
+    try {
+      const result = await this.options.onDelegate(transcript, this.taskAbort.signal);
+      if (!this.disposed && !this.closing) this.speakResult(id, result);
+    } catch {
+      if (!this.disposed && !this.closing) this.speakResult(id,
+        'The tool task did not finish successfully. Check the on-screen result before retrying; an action may already have run.');
+    } finally {
+      this.taskRunning = false;
+    }
+  }
+
+  private speakResult(id: string, result: string) {
+    // UTF-8 bytes conservatively bound tokens, including non-English results.
+    let chunk = '';
+    let chunkBytes = 0;
+    let totalBytes = 0;
+    for (const character of result) {
+      const bytes = new Blob([character]).size;
+      if (totalBytes + bytes > 1200) break;
+      if (chunkBytes + bytes > 400) {
+        this.send({ type: 'session.commentary.append', delegation_id: id, content: chunk });
+        chunk = '';
+        chunkBytes = 0;
+      }
+      totalBytes += bytes;
+      chunkBytes += bytes;
+      chunk += character;
+    }
+    if (chunk.trim()) this.send({ type: 'session.commentary.append', delegation_id: id, content: chunk });
+    if (new Blob([result]).size > totalBytes) this.send({ type: 'session.commentary.append', delegation_id: id,
+      content: 'The full result is available in the on-screen tool activity.' });
   }
 
   private monitor(stream: MediaStream) {
@@ -184,6 +252,7 @@ export class LiveVoiceSession {
   close() {
     if (this.disposed || this.closing) return;
     this.closing = true;
+    this.taskAbort.abort();
     if (!this.ready || this.channel?.readyState !== 'open') { this.dispose(); return; }
     // Mute capture immediately, keeping the track alive for graceful finalization.
     this.microphone?.getTracks().forEach(track => { track.enabled = false; });
@@ -195,6 +264,7 @@ export class LiveVoiceSession {
     if (this.disposed) return;
     if (!this.closing && this.ready) this.send({ type: 'session.close' });
     this.disposed = true;
+    this.taskAbort.abort();
     this.abort.abort();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     void this.audioContext?.close();

@@ -1202,6 +1202,7 @@ const Chat = () => {
                 handleKeyDown={handleKeyDown}
                 rows={3}
                 sessionId={routeChatId ?? state_chat_id ?? 1}
+                voiceAgentSettings={userSettings}
                 enableVoice={!isLoading}
                 secondaryAction={isLoading && (
                   <button

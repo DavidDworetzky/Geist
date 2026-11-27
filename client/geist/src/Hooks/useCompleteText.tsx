@@ -504,7 +504,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
     userSettings?.default_local_model,
   ]);
 
-  const handleSseEvent = (eventBlock: string, turnPrompt: string): string | null => {
+  const handleSseEvent = (eventBlock: string, turnPrompt: string, onFinal?: (response: CompleteTextResponse) => void): string | null => {
     const parsedEvent = parseSseEventBlock(eventBlock);
     if (!parsedEvent) return null;
 
@@ -533,6 +533,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       dispatch({ type: 'USER_INSTRUCTION', instruction: data as unknown as UserInstruction });
     } else if (event === 'final' && isRecord(data)) {
       const response = data as unknown as CompleteTextResponse;
+      onFinal?.(response);
       if (typeof response.run_id === 'string') {
         activeRunIdRef.current = response.run_id;
       }
@@ -588,11 +589,15 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       memory_mode: 'public' | 'private';
       folder_id: number | null;
     },
+    execution?: { signal?: AbortSignal; agenticMode?: boolean; onFinal?: (response: CompleteTextResponse) => void },
   ) => {
+    if (execution?.signal?.aborted) return;
     clearPendingText();
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const abortFromCaller = () => abortController.abort();
+    execution?.signal?.addEventListener('abort', abortFromCaller, { once: true });
     activeRunIdRef.current = null;
 
     const currentChatId = chat_id === undefined ? state_chat_id : chat_id;
@@ -616,7 +621,8 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt, ...params, ...memorySettings }),
+        body: JSON.stringify({ prompt, ...params, ...memorySettings,
+          ...(execution?.agenticMode === undefined ? {} : { agentic_mode: execution.agenticMode }) }),
         signal: abortController.signal,
       });
 
@@ -634,6 +640,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         dispatch({ type: 'FINAL', prompt, data });
         dispatch({ type: 'DONE', runId: data.run_id, chatId: data.chat_id });
         terminalEventSeen = true;
+        execution?.onFinal?.(data);
         return;
       }
 
@@ -653,7 +660,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
 
         for (const eventBlock of events) {
           if (!ownsStream()) return;
-          const handledEvent = handleSseEvent(eventBlock, prompt);
+          const handledEvent = handleSseEvent(eventBlock, prompt, execution?.onFinal);
           if (handledEvent && ['final', 'error', 'cancelled'].includes(handledEvent)) {
             terminalEventSeen = true;
           }
@@ -664,7 +671,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
       buffer += decoder.decode();
       if (buffer.trim()) {
         if (!ownsStream()) return;
-        const handledEvent = handleSseEvent(buffer, prompt);
+        const handledEvent = handleSseEvent(buffer, prompt, execution?.onFinal);
         if (handledEvent && ['final', 'error', 'cancelled'].includes(handledEvent)) {
           terminalEventSeen = true;
         }
@@ -690,6 +697,7 @@ const useCompleteText = (userSettings: UserSettings | null = null) => {
         });
       }
     } finally {
+      execution?.signal?.removeEventListener('abort', abortFromCaller);
       if (abortControllerRef.current === abortController) {
         abortControllerRef.current = null;
         dispatch({ type: 'STREAM_CLOSED' });
