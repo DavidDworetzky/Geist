@@ -402,6 +402,29 @@ def test_openrouter_ling31_flash_metadata_is_explicit_and_server_backed():
     assert get_provider_endpoint(ling.provider) == "https://openrouter.ai/api/v1"
 
 
+def test_openrouter_solar_mini4_metadata_is_explicit_and_server_backed():
+    solar = get_model_spec("upstage/solar-mini4")
+
+    assert solar.provider == "openrouter"
+    assert solar.backend == "openai_compatible"
+    assert solar.local is False
+    assert solar.family == "solar"
+    assert solar.context_window == 524288
+    assert solar.max_output_tokens == 131072
+    assert solar.parameter_count == "35B"
+    assert solar.activated_parameters == "3B"
+    assert solar.supports_vision is False
+    assert solar.supports_function_calling is True
+    assert solar.supports_reasoning is True
+    assert solar.supports_streaming is True
+    assert solar.recommended is True
+    assert solar.mandatory_reasoning_effort is None
+    assert solar.unsupported_parameters == ("n", "stop")
+    assert solar.performance_note is not None
+    assert "enforce OpenRouter ZDR" in solar.performance_note
+    assert get_provider_endpoint(solar.provider) == "https://openrouter.ai/api/v1"
+
+
 def test_openrouter_deepseek_v41_flash_1017_metadata_is_explicit_and_server_backed():
     flash = get_model_spec("deepseek/deepseek-v4.1-flash-1017")
 
@@ -786,6 +809,7 @@ def test_existing_llama_id_preserves_optimized_runner():
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "upstage/solar-mini4",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -866,6 +890,7 @@ def test_google_gemini_model_infers_compatible_endpoint(model_id):
         "particle-ai/particle-1-20261027",
         "fireworks/ember-1",
         "inclusionai/ling-3.1-flash",
+        "upstage/solar-mini4",
         "qwen/qwen3.8-max",
         "qwen3.8-max",
         "qwen/qwen3.8-flash",
@@ -1025,6 +1050,7 @@ def test_model_routes_serialize_string_backed_providers():
     assert any(model.id == "gemini-3.8-flash" for model in response.providers["google"])
     assert any(model.id == "x-ai/grok-4.6" for model in response.providers["openrouter"])
     assert any(model.id == "x-ai/grok-4.7" for model in response.providers["openrouter"])
+    assert any(model.id == "upstage/solar-mini4" for model in response.providers["openrouter"])
     assert any(
         model.id == "anthropic/claude-opus-5.5" for model in response.providers["openrouter"]
     )
