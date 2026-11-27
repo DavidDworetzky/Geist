@@ -8,9 +8,11 @@ model output cannot approve or reject a change.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -28,6 +30,8 @@ MAX_CLASSIFIER_COMMENT_CHARACTERS = 400
 APPROVAL_MARKER_PREFIX = "<!-- pitchblend-command:"
 APPROVAL_GATE_CONTEXT = "Pitchblend approval gate"
 PITCHBLEND_REVIEW_LOGIN = "pitchblend-ai[bot]"
+CARRIED_PITCHBLEND_SOURCE_PREFIX = "pitchblend-carried:"
+GIT_TIMEOUT_SECONDS = 120
 WRITE_PERMISSIONS = {"admin", "write"}
 MODEL_CATALOG_IMPLEMENTATION_PATHS = frozenset(
     {
@@ -75,6 +79,9 @@ BLOCKED_PATH_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
+
+CARRY_FORWARD_PATH_PATTERN = re.compile(r"^(docs|plans)/", re.IGNORECASE)
+COMMIT_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 TEST_PATH_PATTERN = re.compile(
     r"(^|/)(tests?|__tests__)(/|$)|(^|/)test_[^/]+\.py$|"
@@ -265,21 +272,31 @@ def is_model_catalog_only_change(files: list[dict[str, Any]]) -> bool:
     )
 
 
+def count_changed_lines(files: list[dict[str, Any]]) -> int:
+    return sum(
+        int(file.get("additions", 0)) + int(file.get("deletions", 0)) for file in files
+    )
+
+
 def deterministic_gate(
     pull_request: dict[str, Any],
     files: list[dict[str, Any]],
 ) -> GateResult:
     reasons: list[str] = []
-    changed_lines = sum(
-        int(file.get("additions", 0)) + int(file.get("deletions", 0)) for file in files
-    )
-
     if pull_request.get("base", {}).get("ref") != "main":
         reasons.append("the pull request does not target `main`")
     if pull_request.get("draft"):
         reasons.append("the pull request is still a draft")
     if pull_request.get("mergeable") is not True:
         reasons.append("GitHub does not currently report the pull request as mergeable")
+    reasons.extend(scope_reasons(files))
+    return GateResult(not reasons, tuple(reasons), count_changed_lines(files))
+
+
+def scope_reasons(files: list[dict[str, Any]]) -> list[str]:
+    """Return size, protected-path, and patch-availability failures for a PR diff."""
+    reasons: list[str] = []
+    changed_lines = count_changed_lines(files)
     if len(files) > MAX_CHANGED_FILES:
         reasons.append(f"{len(files)} changed files exceeds the {MAX_CHANGED_FILES}-file limit")
     if changed_lines > MAX_CHANGED_LINES:
@@ -300,8 +317,7 @@ def deterministic_gate(
     ]
     if missing_patches:
         reasons.append("GitHub omitted patch data for: " + ", ".join(missing_patches[:5]))
-
-    return GateResult(not reasons, tuple(reasons), changed_lines)
+    return reasons
 
 
 def classification_pass_rule(
@@ -491,6 +507,117 @@ def comment_marker(comment_id: int) -> str:
     return f"{APPROVAL_MARKER_PREFIX}{comment_id} -->"
 
 
+def run_git(*args: str, allowed_exit_codes: frozenset[int] = frozenset({0})) -> str:
+    environment = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    token = os.environ.get("PITCHBLEND_GITHUB_TOKEN")
+    if token:
+        # Passed through the environment so the token never appears in argv.
+        credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        environment.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraheader",
+                "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {credentials}",
+            }
+        )
+    result = subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        timeout=GIT_TIMEOUT_SECONDS,
+        env=environment,
+        check=False,
+    )
+    if result.returncode not in allowed_exit_codes:
+        raise ReviewError(f"git {args[0]} failed: {result.stderr.strip()[:300]}")
+    return result.stdout
+
+
+def paths_changed_since_approval(
+    owner: str,
+    repo: str,
+    pull_request: dict[str, Any],
+    approved_sha: str,
+) -> list[str]:
+    """Return paths where the head differs from a clean merge of the approval and its base.
+
+    Changes that only come from syncing with or rebasing onto the base branch are
+    absent from the result; conflict resolutions and new author edits are present.
+    PR content is handled purely as git objects and is never checked out or run.
+    """
+    pull_number = int(pull_request["number"])
+    head_sha = str(pull_request["head"]["sha"])
+    base_ref = str(pull_request["base"]["ref"])
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    run_git(
+        "fetch",
+        "--no-tags",
+        "--quiet",
+        f"{server_url}/{owner}/{repo}.git",
+        f"+refs/heads/{base_ref}:refs/pitchblend/base",
+        f"+refs/pull/{pull_number}/head:refs/pitchblend/head",
+        approved_sha,
+    )
+    if run_git("rev-parse", "refs/pitchblend/head").strip() != head_sha:
+        raise ReviewError("the pull request head moved while checking the prior approval")
+    integrated_base = run_git("merge-base", head_sha, "refs/pitchblend/base").strip()
+    # Exit code 1 means the merge conflicted; the conflicted tree is still written
+    # and every conflicted path then differs from the head's resolution.
+    merged_tree = run_git(
+        "merge-tree",
+        "--write-tree",
+        approved_sha,
+        integrated_base,
+        allowed_exit_codes=frozenset({0, 1}),
+    ).splitlines()[0]
+    changed = run_git("diff", "--no-renames", "--name-only", "-z", merged_tree, head_sha)
+    return sorted(path for path in changed.split("\0") if path)
+
+
+def is_carry_forward_safe_path(path: str) -> bool:
+    return bool(
+        CARRY_FORWARD_PATH_PATTERN.search(path) or TEST_PATH_PATTERN.search(path)
+    ) and not blocked_path_reasons([{"filename": path}])
+
+
+def approval_carries_forward(
+    github: JsonHttpClient,
+    owner: str,
+    repo: str,
+    pull_request: dict[str, Any],
+    approved_sha: str,
+) -> bool:
+    """Return whether a Pitchblend approval of an earlier head still covers the PR.
+
+    The approval carries forward only when the current PR still passes the
+    deterministic scope gates and every change since the approved commit is
+    either inherited from the base branch or limited to docs, plans, and tests.
+    """
+    if pull_request.get("base", {}).get("ref") != "main" or not COMMIT_SHA_PATTERN.fullmatch(
+        approved_sha
+    ):
+        return False
+    pull_number = int(pull_request["number"])
+    try:
+        files = github.paginate(f"/repos/{owner}/{repo}/pulls/{pull_number}/files")
+        reasons = scope_reasons(files)
+        if reasons:
+            print(f"Prior Pitchblend approval does not carry forward: {reasons}")
+            return False
+        changed_paths = paths_changed_since_approval(
+            owner, repo, pull_request, approved_sha
+        )
+    except (ReviewError, OSError, subprocess.SubprocessError, IndexError) as error:
+        print(f"Prior Pitchblend approval does not carry forward: {error}")
+        return False
+    unsafe_paths = [path for path in changed_paths if not is_carry_forward_safe_path(path)]
+    print(
+        f"Changes since Pitchblend approval {approved_sha[:12]} beyond the base sync: "
+        f"{changed_paths or 'none'}; outside docs, plans, and tests: {unsafe_paths or 'none'}"
+    )
+    return not unsafe_paths
+
+
 def approval_gate_source(
     github: JsonHttpClient,
     owner: str,
@@ -498,7 +625,12 @@ def approval_gate_source(
     pull_request: dict[str, Any],
     reviews: list[dict[str, Any]],
 ) -> str | None:
-    """Return the current-head app or human approval that satisfies the OR gate."""
+    """Return the app or human approval that satisfies the OR gate.
+
+    Human approvals must be on the current head. A Pitchblend approval of an
+    earlier head is PR-scoped and still counts when `approval_carries_forward`
+    finds no meaningful change since it; dismissing that review revokes it.
+    """
     head_sha = str(pull_request.get("head", {}).get("sha", ""))
     pull_author = str(pull_request.get("user", {}).get("login", ""))
     if not head_sha or not pull_author:
@@ -514,12 +646,14 @@ def approval_gate_source(
             latest_decisive_review[login.casefold()] = review
 
     app_review = latest_decisive_review.get(PITCHBLEND_REVIEW_LOGIN.casefold())
+    app_approved_sha = None
     if (
         app_review
         and str(app_review.get("state", "")).upper() == "APPROVED"
-        and str(app_review.get("commit_id", "")) == head_sha
         and str(app_review.get("user", {}).get("type", "")) == "Bot"
     ):
+        app_approved_sha = str(app_review.get("commit_id", ""))
+    if app_approved_sha == head_sha:
         return "pitchblend"
 
     for review in latest_decisive_review.values():
@@ -540,6 +674,11 @@ def approval_gate_source(
             raise ReviewError("GitHub did not return a reviewer permission")
         if str(permission_response.get("permission", "")).lower() in WRITE_PERMISSIONS:
             return f"human:{login}"
+
+    if app_approved_sha and approval_carries_forward(
+        github, owner, repo, pull_request, app_approved_sha
+    ):
+        return f"{CARRIED_PITCHBLEND_SOURCE_PREFIX}{app_approved_sha}"
     return None
 
 
@@ -555,6 +694,9 @@ def publish_approval_gate(
         raise ReviewError("GitHub did not return the pull request head")
     if source == "pitchblend":
         description = "Approved by Pitchblend"
+    elif source and source.startswith(CARRIED_PITCHBLEND_SOURCE_PREFIX):
+        approved_sha = source.removeprefix(CARRIED_PITCHBLEND_SOURCE_PREFIX)
+        description = f"Pitchblend approval of {approved_sha[:12]} still applies"
     elif source and source.startswith("human:"):
         description = f"Approved by {source.removeprefix('human:')}"
     else:
