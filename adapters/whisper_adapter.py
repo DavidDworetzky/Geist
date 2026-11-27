@@ -1,6 +1,8 @@
-import tempfile
+import io
+import wave
 
 import httpx
+import numpy as np
 
 from adapters.inert_adapter import InertAdapter
 
@@ -20,15 +22,27 @@ class WhisperAdapter(InertAdapter):
         return ["transcribe"]
 
     def transcribe(self, audio_data, language: str | None = None) -> str:
-        # Whisper needs a named file, so stage the audio bytes in a temp file
-        with tempfile.NamedTemporaryFile(suffix=".wav") as temp_file:
-            temp_file.write(audio_data)
-            temp_file.flush()
-            temp_file.seek(0)
+        # The voice service supplies normalized, mono 16 kHz samples.
+        # Preserve encoded files for callers that already provide WAV bytes.
+        if isinstance(audio_data, bytes):
+            encoded_audio = audio_data
+        else:
+            samples = np.asarray(audio_data, dtype=np.float32)
+            if samples.ndim != 1:
+                raise ValueError("Whisper input must be mono audio")
+            pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2")
+            output = io.BytesIO()
+            with wave.open(output, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(pcm.tobytes())
+            encoded_audio = output.getvalue()
+        with io.BytesIO(encoded_audio) as audio_file:
             response = httpx.post(
                 TRANSCRIPTION_URL,
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                files={"file": (temp_file.name, temp_file, "application/octet-stream")},
+                files={"file": ("speech.wav", audio_file, "audio/wav")},
                 data={
                     "model": "whisper-1",
                     "response_format": "text",

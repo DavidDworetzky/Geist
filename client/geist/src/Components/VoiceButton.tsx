@@ -22,8 +22,8 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
   ].filter(Boolean).join(' ');
 
   const getTooltip = () => {
-    if (disabled) return 'Voice chat disabled';
     if (isRecording) return mode === 'live' ? 'End voice call' : 'Finish dictation';
+    if (disabled) return 'Voice chat disabled';
     if (isProcessing) return 'Transcribing...';
     return mode === 'live' ? 'Start voice call' : 'Start dictation';
   };
@@ -32,7 +32,7 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled || (isProcessing && !isRecording)}
+      disabled={!isRecording && (disabled || isProcessing)}
       title={getTooltip()}
       aria-label={getTooltip()}
       className={className}
